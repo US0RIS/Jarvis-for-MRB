@@ -7,6 +7,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     private let synthesizer = AVSpeechSynthesizer()
     private let audioRouteManager: AudioRouteManager
     private var completion: CheckedContinuation<Void, Never>?
+    private var currentUtterance: AVSpeechUtterance?
 
     init(audioRouteManager: AudioRouteManager) {
         self.audioRouteManager = audioRouteManager
@@ -19,8 +20,11 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         guard !cleaned.isEmpty else { return }
 
         if synthesizer.isSpeaking {
+            let interrupted = currentUtterance
             synthesizer.stopSpeaking(at: .immediate)
-            finishPendingSpeech()
+            if let interrupted {
+                finishSpeech(interrupted)
+            }
         }
 
         do {
@@ -35,6 +39,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         utterance.rate = 0.5
         utterance.preUtteranceDelay = 0.04
 
+        currentUtterance = utterance
         isSpeaking = true
         await withCheckedContinuation { continuation in
             completion = continuation
@@ -43,21 +48,24 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     }
 
     func stopSpeaking() {
+        guard let utterance = currentUtterance else { return }
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        finishPendingSpeech()
+        finishSpeech(utterance)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        finishPendingSpeech()
+        finishSpeech(utterance)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        finishPendingSpeech()
+        finishSpeech(utterance)
     }
 
-    private func finishPendingSpeech() {
+    private func finishSpeech(_ utterance: AVSpeechUtterance) {
+        guard currentUtterance === utterance else { return }
+        currentUtterance = nil
         isSpeaking = false
         completion?.resume()
         completion = nil

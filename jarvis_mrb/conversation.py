@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import os
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
+DB_PATH = APP_DIR / "conversation.sqlite3"
+DEFAULT_HISTORY_MESSAGES = 20
+MAX_STORED_MESSAGES_PER_SESSION = 200
+
+
+@dataclass(frozen=True)
+class ConversationMessage:
+    role: str
+    content: str
+
+
+def _connect() -> sqlite3.Connection:
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS conversation_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_session_id_id ON conversation_messages(session_id, id)"
+    )
+    conn.commit()
+    return conn
+
+
+def _clean_session_id(session_id: str | None) -> str:
+    value = (session_id or "default").strip()
+    return value[:128] or "default"
+
+
+def append_message(session_id: str | None, role: str, content: str) -> None:
+    role = role.strip().lower()
+    if role not in {"user", "assistant"}:
+        raise ValueError(f"Unsupported conversation role: {role}")
+    text = content.strip()
+    if not text:
+        return
+    sid = _clean_session_id(session_id)
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO conversation_messages(session_id, role, content, created_at) VALUES(?,?,?,?)",
+            (sid, role, text[:12000], datetime.now().astimezone().isoformat()),
+        )
+        # Keep enough durable history for continuity without letting the database
+        # grow forever. The model only receives the most recent window.
+        conn.execute(
+            """
+            DELETE FROM conversation_messages
+            WHERE session_id=? AND id NOT IN (
+                SELECT id FROM conversation_messages
+                WHERE session_id=? ORDER BY id DESC LIMIT ?
+            )
+            """,
+            (sid, sid, MAX_STORED_MESSAGES_PER_SESSION),
+        )
+        conn.commit()
+
+
+def recent_messages(
+    session_id: str | None,
+    limit: int = DEFAULT_HISTORY_MESSAGES,
+) -> list[ConversationMessage]:
+    sid = _clean_session_id(session_id)
+    safe_limit = max(0, min(int(limit), 100))
+    if safe_limit == 0:
+        return []
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT role, content
+            FROM conversation_messages
+            WHERE session_id=?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (sid, safe_limit),
+        ).fetchall()
+    return [
+        ConversationMessage(role=str(row["role"]), content=str(row["content"]))
+        for row in reversed(rows)
+    ]
+
+
+def clear_session(session_id: str | None) -> None:
+    sid = _clean_session_id(session_id)
+    with _connect() as conn:
+        conn.execute("DELETE FROM conversation_messages WHERE session_id=?", (sid,))
+        conn.commit()

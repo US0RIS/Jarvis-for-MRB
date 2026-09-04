@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 
 import httpx
 
@@ -47,32 +49,55 @@ def _start_service() -> None:
         time.sleep(0.1)
 
 
-def _ask_service(text: str) -> str:
+def _fallback_local(text: str) -> str:
+    history = recent_messages(CLI_SESSION_ID, limit=20)
+    reply = handle_natural_language(text, history=history)
+    append_message(CLI_SESSION_ID, "user", text)
+    if reply.message and reply.message != "__EXIT__":
+        append_message(CLI_SESSION_ID, "assistant", reply.message)
+    return reply.message
+
+
+def _stream_service(text: str) -> Iterator[str]:
     if not _service_ready() and SERVICE_URL.startswith("http://127.0.0.1"):
         _start_service()
+
     try:
-        response = httpx.post(
-            f"{SERVICE_URL}/command",
-            json={"text": text, "session_id": CLI_SESSION_ID},
-            headers=_headers(),
-            timeout=120.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return str(payload.get("message", ""))
-    except (httpx.HTTPError, ValueError):
-        if SERVICE_URL.startswith("http://127.0.0.1"):
-            history = recent_messages(CLI_SESSION_ID, limit=20)
-            reply = handle_natural_language(text, history=history)
-            append_message(CLI_SESSION_ID, "user", text)
-            if reply.message and reply.message != "__EXIT__":
-                append_message(CLI_SESSION_ID, "assistant", reply.message)
-            return reply.message
-        return "Jarvis service is unreachable or rejected authentication."
+        with httpx.Client(timeout=httpx.Timeout(120.0, connect=3.0)) as client:
+            with client.stream(
+                "POST",
+                f"{SERVICE_URL}/command/stream",
+                json={"text": text, "session_id": CLI_SESSION_ID},
+                headers=_headers(),
+            ) as response:
+                response.raise_for_status()
+                emitted = False
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    packet = json.loads(line)
+                    if packet.get("type") == "delta":
+                        piece = str(packet.get("text") or "")
+                        if piece:
+                            emitted = True
+                            yield piece
+                    elif packet.get("type") == "done":
+                        return
+                if emitted:
+                    return
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError):
+        pass
+
+    if SERVICE_URL.startswith("http://127.0.0.1"):
+        fallback = _fallback_local(text)
+        if fallback and fallback != "__EXIT__":
+            yield fallback
+        return
+    yield "Jarvis service is unreachable or rejected authentication."
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 8")
+    print("Jarvis for MRB — milestone 9")
     print("Speak naturally. Type 'help' for examples or 'exit' to quit.")
 
     while True:
@@ -81,9 +106,13 @@ def main() -> None:
             if raw.strip().lower() in {"quit", "exit"}:
                 print("Goodbye.")
                 return
-            response = _ask_service(raw)
-            if response and response != "__EXIT__":
-                print(response)
+
+            wrote = False
+            for piece in _stream_service(raw):
+                print(piece, end="", flush=True)
+                wrote = True
+            if wrote:
+                print()
         except (EOFError, KeyboardInterrupt):
             print("\nGoodbye.")
             return

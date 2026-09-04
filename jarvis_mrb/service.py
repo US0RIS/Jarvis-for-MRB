@@ -1,41 +1,51 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 import jarvis_mrb.agent as agent_module
 import jarvis_mrb.streaming_agent as streaming_agent_module
 from jarvis_mrb.agent import handle_natural_language
-from jarvis_mrb.conversation import append_message, recent_messages
+from jarvis_mrb.conversation import ConversationMessage, append_message, recent_messages
 from jarvis_mrb.email_policy import get_allowed_recipients, set_allowed_recipients
+from jarvis_mrb.environment_state import get_state, update_state
+from jarvis_mrb.event_bus import companion_events
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
-from jarvis_mrb.planner_model import get_planner_model, model_options, set_planner_model
+from jarvis_mrb.memory import memory_context, remember_exchange_async, status as memory_status_data
+from jarvis_mrb.model_router import choose_model
+from jarvis_mrb.planner_model import (
+    FAST_MODEL,
+    get_auto_route,
+    get_planner_model,
+    model_options,
+    planner_settings,
+    set_auto_route,
+    set_planner_model,
+)
 from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.streaming_agent import stream_natural_language
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
+from jarvis_mrb.vision import status as vision_status_data, submit_frame
 
 _CONFIG = load_server_config()
 BIND_HOST = _CONFIG.bind_host
 PORT = _CONFIG.port
 API_TOKEN = _CONFIG.api_token
 
-# agent.py predates runtime model switching and keeps the selected model in a
-# module global. Initialize both the normal and streaming planners from the
-# persisted setting on every service start; the settings endpoint updates both
-# globals immediately, so switching models never requires a Jarvis restart.
 _INITIAL_MODEL = get_planner_model()
 agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
-app = FastAPI(title="Jarvis for MRB", version="0.10.0")
+app = FastAPI(title="Jarvis for MRB", version="0.11.0")
 _scheduler_started = False
 _tts_start_attempted = False
 
@@ -63,11 +73,13 @@ class EmailAllowlistResponse(BaseModel):
 
 
 class PlannerModelRequest(BaseModel):
-    model: str
+    model: str | None = None
+    auto_route: bool | None = None
 
 
 class PlannerModelResponse(BaseModel):
     model: str
+    auto_route: bool
     options: list[str]
 
 
@@ -83,9 +95,21 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid Jarvis API token")
 
 
+def _websocket_authorized(websocket: WebSocket) -> bool:
+    if not API_TOKEN:
+        return True
+    return websocket.headers.get("authorization") == f"Bearer {API_TOKEN}"
+
+
+def _contextual_history(session_id: str, query: str) -> list[ConversationMessage]:
+    history = recent_messages(session_id, limit=20)
+    retrieved = memory_context(query, limit=3)
+    if retrieved:
+        history = [ConversationMessage(role="assistant", content=retrieved), *history]
+    return history
+
+
 def _execute_job(command: str) -> str:
-    # Background jobs are intentionally stateless. They should not absorb or
-    # contaminate the user's live conversational context.
     reply = handle_natural_language(command)
     return reply.message
 
@@ -115,8 +139,6 @@ def _start_tts_in_background() -> None:
 
     def start() -> None:
         try:
-            # Model loading can take a while on first boot; never block the Jarvis
-            # API startup. The iPhone falls back to Apple TTS until local TTS is ready.
             ensure_tts_server(wait_seconds=0.0)
         except Exception:
             pass
@@ -143,12 +165,6 @@ def _installed_ollama_models() -> set[str]:
 
 
 def _warm_selected_model(previous: str, selected: str) -> None:
-    """Best-effort model handoff without delaying the phone settings UI.
-
-    Ollama's empty generate request is its preload/unload mechanism. Releasing the
-    old model matters on a 16 GB RTX 5080: keeping the 27B and 8B planners resident
-    together would waste VRAM and can make the supposedly fast model slower.
-    """
     try:
         with httpx.Client(timeout=120.0) as client:
             if previous and previous != selected:
@@ -178,13 +194,15 @@ def startup() -> None:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
+    settings = planner_settings()
     return {
         "status": "ok",
-        "version": "0.10.0",
+        "version": "0.11.0",
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
-        "planner_model": agent_module.OLLAMA_MODEL,
+        "planner_model": settings["model"],
+        "auto_route": settings["auto_route"],
     }
 
 
@@ -192,11 +210,12 @@ def health() -> dict[str, str]:
 def command(request: CommandRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)
     session_id = request.session_id or "default"
-    history = recent_messages(session_id, limit=20)
+    history = _contextual_history(session_id, request.text)
     reply = handle_natural_language(request.text, history=history)
     append_message(session_id, "user", request.text)
     if reply.message and reply.message != "__EXIT__":
         append_message(session_id, "assistant", reply.message)
+        remember_exchange_async(session_id, request.text, reply.message)
     return CommandResponse(ok=reply.ok, message=reply.message)
 
 
@@ -205,23 +224,28 @@ def command_stream(
     request: CommandRequest,
     authorization: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
-    """Stream Jarvis text as newline-delimited JSON.
-
-    For model-only conversation, the transport begins forwarding Qwen tokens just
-    after the one-line tool decision, rather than waiting for the complete answer.
-    Tool calls remain atomic because Jarvis must know which action to execute before
-    it can truthfully report the result.
-    """
     _check_auth(authorization)
     session_id = request.session_id or "default"
-    history = recent_messages(session_id, limit=20)
+    history = _contextual_history(session_id, request.text)
+    route = choose_model(request.text)
 
     def generate():
         pieces: list[str] = []
         ok = True
         try:
-            yield json.dumps({"type": "start"}) + "\n"
-            for piece in stream_natural_language(request.text, history=history):
+            yield json.dumps(
+                {
+                    "type": "start",
+                    "model": route.model,
+                    "route_reason": route.reason,
+                }
+            ) + "\n"
+            for piece in stream_natural_language(
+                request.text,
+                history=history,
+                model_override=route.model,
+                announce_analysis=route.announce_analysis,
+            ):
                 if not piece:
                     continue
                 pieces.append(piece)
@@ -236,6 +260,7 @@ def command_stream(
             append_message(session_id, "user", request.text)
             if full:
                 append_message(session_id, "assistant", full)
+                remember_exchange_async(session_id, request.text, full)
             yield json.dumps({"type": "done", "ok": ok}, ensure_ascii=False) + "\n"
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
@@ -244,6 +269,8 @@ def command_stream(
 @app.post("/event", response_model=CommandResponse)
 def event(request: EventRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)
+    if request.event == "home_arrival":
+        update_state({"location": "home"})
     result = trigger_event(request.event, _execute_job)
     return CommandResponse(ok=result.ok, message=result.message)
 
@@ -272,7 +299,12 @@ def get_planner_model_setting(
     authorization: Annotated[str | None, Header()] = None,
 ) -> PlannerModelResponse:
     _check_auth(authorization)
-    return PlannerModelResponse(model=agent_module.OLLAMA_MODEL, options=model_options())
+    settings = planner_settings()
+    return PlannerModelResponse(
+        model=str(settings["model"]),
+        auto_route=bool(settings["auto_route"]),
+        options=model_options(),
+    )
 
 
 @app.put("/settings/planner-model", response_model=PlannerModelResponse)
@@ -281,38 +313,44 @@ def put_planner_model_setting(
     authorization: Annotated[str | None, Header()] = None,
 ) -> PlannerModelResponse:
     _check_auth(authorization)
-    requested = request.model.strip()
-    if requested not in model_options():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported planner model. Choose one of: {', '.join(model_options())}",
-        )
-
-    installed = _installed_ollama_models()
-    if requested not in installed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Ollama model {requested} is not installed on the Jarvis PC.",
-        )
-
     previous = agent_module.OLLAMA_MODEL
-    try:
-        selected = set_planner_model(requested)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    selected = previous
 
-    agent_module.OLLAMA_MODEL = selected
-    streaming_agent_module.OLLAMA_MODEL = selected
+    if request.model is not None:
+        requested = request.model.strip()
+        if requested not in model_options():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported planner model. Choose one of: {', '.join(model_options())}",
+            )
+        installed = _installed_ollama_models()
+        if requested not in installed:
+            raise HTTPException(status_code=400, detail=f"Ollama model {requested} is not installed on the Jarvis PC.")
+        try:
+            selected = set_planner_model(requested)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        agent_module.OLLAMA_MODEL = selected
+        streaming_agent_module.OLLAMA_MODEL = selected
 
-    if previous != selected:
+    if request.auto_route is not None:
+        set_auto_route(request.auto_route)
+
+    warm_target = FAST_MODEL if get_auto_route() else selected
+    if previous != warm_target or request.auto_route is not None:
         threading.Thread(
             target=_warm_selected_model,
-            args=(previous, selected),
+            args=(previous, warm_target),
             name="jarvis-planner-warm",
             daemon=True,
         ).start()
 
-    return PlannerModelResponse(model=selected, options=model_options())
+    settings = planner_settings()
+    return PlannerModelResponse(
+        model=str(settings["model"]),
+        auto_route=bool(settings["auto_route"]),
+        options=model_options(),
+    )
 
 
 @app.get("/settings/email-allowlist", response_model=EmailAllowlistResponse)
@@ -332,6 +370,71 @@ def put_email_allowlist(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return EmailAllowlistResponse(addresses=addresses)
+
+
+@app.get("/memory/status")
+def memory_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+    _check_auth(authorization)
+    return memory_status_data()
+
+
+@app.get("/vision/status")
+def vision_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+    _check_auth(authorization)
+    return vision_status_data()
+
+
+@app.get("/state")
+def state(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    _check_auth(authorization)
+    return get_state()
+
+
+@app.websocket("/ws/companion")
+async def companion_socket(websocket: WebSocket) -> None:
+    if not _websocket_authorized(websocket):
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    subscriber_id, event_queue = companion_events.register(loop)
+    update_state({"devices": {"phone_transport": "connected"}})
+
+    async def send_events() -> None:
+        while True:
+            event = await event_queue.get()
+            await websocket.send_text(json.dumps(event, ensure_ascii=False))
+
+    sender = asyncio.create_task(send_events())
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            frame = message.get("bytes")
+            if isinstance(frame, (bytes, bytearray)):
+                submit_frame(bytes(frame))
+                continue
+            text = message.get("text")
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("type") == "environment" and isinstance(payload.get("state"), dict):
+                update_state(dict(payload["state"]))
+            elif payload.get("type") == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        sender.cancel()
+        companion_events.unregister(subscriber_id)
+        update_state({"devices": {"phone_transport": "disconnected"}})
 
 
 def main() -> None:

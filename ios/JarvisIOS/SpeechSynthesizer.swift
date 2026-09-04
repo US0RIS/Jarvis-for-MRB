@@ -50,7 +50,9 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     }
 
     func speak(_ text: String, preferBluetooth: Bool) async {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = Self.respectfulSpeechText(
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         guard !cleaned.isEmpty else { return }
 
         if currentUtterance != nil {
@@ -90,6 +92,22 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             synthesizer.speak(utterance)
             startBargeInListening()
         }
+    }
+
+    private static func respectfulSpeechText(_ text: String) -> String {
+        guard !text.isEmpty else { return text }
+        if text.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            return text
+        }
+        if text == "Yes?" {
+            return "Yes, sir?"
+        }
+        if text == "Ready. Say confirm or cancel." {
+            return "Ready, sir. Say confirm or cancel."
+        }
+        // Backend replies normally include the address already. This fallback also
+        // covers local prompts and any future client-only response paths.
+        return "Sir, " + text.prefix(1).lowercased() + text.dropFirst()
     }
 
     private func preferredJarvisVoice() -> AVSpeechSynthesisVoice? {

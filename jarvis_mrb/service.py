@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from jarvis_mrb.agent import handle_natural_language
 from jarvis_mrb.conversation import append_message, recent_messages
+from jarvis_mrb.email_policy import get_allowed_recipients, set_allowed_recipients
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
 from jarvis_mrb.server_config import load_server_config
 
@@ -18,7 +19,7 @@ BIND_HOST = _CONFIG.bind_host
 PORT = _CONFIG.port
 API_TOKEN = _CONFIG.api_token
 
-app = FastAPI(title="Jarvis for MRB", version="0.7.0")
+app = FastAPI(title="Jarvis for MRB", version="0.8.0")
 _scheduler_started = False
 
 
@@ -34,6 +35,14 @@ class CommandResponse(BaseModel):
 
 class EventRequest(BaseModel):
     event: str
+
+
+class EmailAllowlistRequest(BaseModel):
+    addresses: list[str]
+
+
+class EmailAllowlistResponse(BaseModel):
+    addresses: list[str]
 
 
 def _check_auth(authorization: str | None) -> None:
@@ -75,7 +84,7 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.7.0", "bind": BIND_HOST}
+    return {"status": "ok", "version": "0.8.0", "bind": BIND_HOST}
 
 
 @app.post("/command", response_model=CommandResponse)
@@ -95,6 +104,25 @@ def event(request: EventRequest, authorization: Annotated[str | None, Header()] 
     _check_auth(authorization)
     result = trigger_event(request.event, _execute_job)
     return CommandResponse(ok=result.ok, message=result.message)
+
+
+@app.get("/settings/email-allowlist", response_model=EmailAllowlistResponse)
+def get_email_allowlist(authorization: Annotated[str | None, Header()] = None) -> EmailAllowlistResponse:
+    _check_auth(authorization)
+    return EmailAllowlistResponse(addresses=get_allowed_recipients())
+
+
+@app.put("/settings/email-allowlist", response_model=EmailAllowlistResponse)
+def put_email_allowlist(
+    request: EmailAllowlistRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> EmailAllowlistResponse:
+    _check_auth(authorization)
+    try:
+        addresses = set_allowed_recipients(request.addresses)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return EmailAllowlistResponse(addresses=addresses)
 
 
 def main() -> None:

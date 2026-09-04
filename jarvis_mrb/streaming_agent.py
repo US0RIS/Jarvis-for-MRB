@@ -19,6 +19,7 @@ from jarvis_mrb.agent import (
 )
 from jarvis_mrb.conversation import ConversationMessage
 from jarvis_mrb.personality import full_personality_context
+from jarvis_mrb.planner_model import QUALITY_MODEL, get_auto_route
 
 
 class StreamingAgentError(RuntimeError):
@@ -107,21 +108,28 @@ def stream_natural_language(
 ) -> Iterator[str]:
     """Yield response text as soon as it becomes available.
 
-    The caller may speculatively route a request to 8B or 27B. The tool decision is
-    emitted first by the chosen model; conversational prose then streams token by
-    token. A quality-routed request can emit a short audible status phrase before
-    the heavier model begins so the voice loop never feels frozen.
+    The caller may speculatively route a request to 8B or 27B. Auto-routed 27B
+    requests use keep_alive=0 so the large quality model is released immediately
+    after the turn instead of occupying VRAM and slowing subsequent 8B requests.
     """
     stripped = text.strip()
     if not stripped:
         return
 
     active_model = model_override or OLLAMA_MODEL
+    active_keep_alive = (
+        "0"
+        if active_model == QUALITY_MODEL and get_auto_route()
+        else OLLAMA_KEEP_ALIVE
+    )
+
     normalized = " ".join(stripped.lower().split())
     if normalized in {"quit", "exit"}:
         return
     if normalized in {"model", "what model are you using", "what model are you using?"}:
-        yield _respectful(AgentReply(True, f"Planner model: {active_model}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}")).message
+        yield _respectful(
+            AgentReply(True, f"Planner model: {active_model}; thinking off; keep-alive {active_keep_alive}")
+        ).message
         return
 
     fast = _fast_path(stripped)
@@ -146,7 +154,7 @@ def stream_natural_language(
         "model": active_model,
         "stream": True,
         "think": False,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "keep_alive": active_keep_alive,
         "messages": messages,
         "options": {"temperature": 0},
     }

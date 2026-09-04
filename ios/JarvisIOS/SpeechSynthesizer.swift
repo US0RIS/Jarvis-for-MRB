@@ -23,6 +23,7 @@ enum BargeInBuffer {
 @MainActor
 final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     @Published private(set) var isSpeaking = false
+    @Published private(set) var lastOutputInterrupted = false
 
     private let synthesizer = AVSpeechSynthesizer()
     private let audioRouteManager: AudioRouteManager
@@ -115,6 +116,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             // should not suppress Jarvis's response.
         }
         isSpeaking = true
+        lastOutputInterrupted = false
         spokenTextForEchoFilter = text
         latestBargeInTranscript = ""
         lastBargeInTranscriptChange = Date.distantPast
@@ -156,6 +158,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         bargeInFinalizeTask?.cancel()
         bargeInFinalizeTask = nil
         didBargeIn = false
+        lastOutputInterrupted = false
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -222,6 +225,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
                 guard self.shouldBargeIn(with: heard) else { return }
                 self.didBargeIn = true
+                self.lastOutputInterrupted = true
                 BargeInBuffer.store(self.commandPayload(fromInterruption: heard))
 
                 // Stop only the audio output. Keep this microphone alive until the

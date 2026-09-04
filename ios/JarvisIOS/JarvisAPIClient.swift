@@ -115,7 +115,10 @@ struct JarvisAPIClient {
 
     init(baseURL: String, fallbackBaseURL: String = "", apiToken: String, sessionID: String) {
         self.baseURL = baseURL
-        self.fallbackBaseURL = fallbackBaseURL
+        let explicitFallback = fallbackBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.fallbackBaseURL = explicitFallback.isEmpty
+            ? (UserDefaults.standard.string(forKey: "jarvis.fallbackBaseURL") ?? "")
+            : explicitFallback
         self.apiToken = apiToken
         self.sessionID = sessionID
     }

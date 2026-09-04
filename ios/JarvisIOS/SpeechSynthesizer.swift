@@ -107,7 +107,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         }
         // Backend replies normally include the address already. This fallback also
         // covers local prompts and any future client-only response paths.
-        return "Sir, " + text.prefix(1).lowercased() + text.dropFirst()
+        return "Sir, " + text.prefix(1).lowercased() + String(text.dropFirst())
     }
 
     private func preferredJarvisVoice() -> AVSpeechSynthesisVoice? {

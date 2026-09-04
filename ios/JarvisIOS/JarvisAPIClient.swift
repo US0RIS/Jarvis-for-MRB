@@ -56,10 +56,13 @@ private actor JarvisEndpointResolver {
         }
 
         for (index, candidate) in candidates.enumerated() {
-            let timeout: TimeInterval = index == 0 ? 0.55 : 2.0
+            // A healthy home-LAN Jarvis responds essentially immediately. Fail over
+            // quickly when that address is unreachable, then cache the working path
+            // for 30 seconds so voice turns do not pay a health-probe tax repeatedly.
+            let timeout: TimeInterval = index == 0 ? 0.25 : 1.5
             if await probe(candidate, apiToken: apiToken, timeout: timeout) {
                 cachedURL = candidate
-                cachedUntil = Date().addingTimeInterval(5)
+                cachedUntil = Date().addingTimeInterval(30)
                 return candidate
             }
         }

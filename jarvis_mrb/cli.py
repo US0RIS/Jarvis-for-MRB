@@ -8,9 +8,11 @@ import time
 import httpx
 
 from jarvis_mrb.agent import handle_natural_language
+from jarvis_mrb.server_config import load_server_config
 
+_SERVER_CONFIG = load_server_config()
 SERVICE_URL = os.environ.get("JARVIS_SERVICE_URL", "http://127.0.0.1:8765").rstrip("/")
-API_TOKEN = os.environ.get("JARVIS_API_TOKEN", "").strip()
+API_TOKEN = (os.environ.get("JARVIS_API_TOKEN") or _SERVER_CONFIG.api_token).strip()
 
 
 def _headers() -> dict[str, str]:
@@ -57,14 +59,13 @@ def _ask_service(text: str) -> str:
         payload = response.json()
         return str(payload.get("message", ""))
     except (httpx.HTTPError, ValueError):
-        # Local fallback keeps the terminal useful if the service is unavailable.
         if SERVICE_URL.startswith("http://127.0.0.1"):
             return handle_natural_language(text).message
         return "Jarvis service is unreachable or rejected authentication."
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 5")
+    print("Jarvis for MRB — milestone 6")
     print("Speak naturally. Type 'help' for examples or 'exit' to quit.")
 
     while True:

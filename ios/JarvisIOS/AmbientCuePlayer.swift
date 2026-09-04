@@ -1,0 +1,95 @@
+import AVFoundation
+import Foundation
+
+@MainActor
+final class AmbientCuePlayer {
+    private let audioRouteManager: AudioRouteManager
+    private var player: AVAudioPlayer?
+
+    init(audioRouteManager: AudioRouteManager) {
+        self.audioRouteManager = audioRouteManager
+    }
+
+    func play(_ cue: String, preferBluetooth: Bool) {
+        do {
+            try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
+        } catch {
+            // The currently active route can still play a cue.
+        }
+
+        let notes: [(Double, Double)]
+        switch cue {
+        case "task_complete":
+            notes = [(660, 0.10), (880, 0.13)]
+        case "task_started":
+            notes = [(520, 0.10)]
+        case "warning":
+            notes = [(430, 0.11), (350, 0.14)]
+        case "error":
+            notes = [(300, 0.12), (260, 0.16)]
+        default:
+            notes = [(740, 0.10)]
+        }
+
+        guard let data = Self.makeWAV(notes: notes) else { return }
+        player = try? AVAudioPlayer(data: data)
+        player?.volume = 0.45
+        player?.prepareToPlay()
+        player?.play()
+    }
+
+    private static func makeWAV(notes: [(Double, Double)]) -> Data? {
+        let sampleRate = 22_050
+        let gapSeconds = 0.035
+        var samples: [Int16] = []
+
+        for (noteIndex, note) in notes.enumerated() {
+            let count = max(1, Int(note.1 * Double(sampleRate)))
+            for index in 0..<count {
+                let t = Double(index) / Double(sampleRate)
+                let progress = Double(index) / Double(max(1, count - 1))
+                let envelope = min(1.0, progress * 10.0) * min(1.0, (1.0 - progress) * 8.0)
+                let value = sin(2.0 * Double.pi * note.0 * t) * 6_000.0 * envelope
+                samples.append(Int16(max(-32_000, min(32_000, value))))
+            }
+            if noteIndex < notes.count - 1 {
+                samples.append(contentsOf: repeatElement(0, count: Int(gapSeconds * Double(sampleRate))))
+            }
+        }
+
+        guard !samples.isEmpty else { return nil }
+        let pcmBytes = samples.count * MemoryLayout<Int16>.size
+        var data = Data()
+        data.append("RIFF".data(using: .ascii)!)
+        appendUInt32(UInt32(36 + pcmBytes), to: &data)
+        data.append("WAVEfmt ".data(using: .ascii)!)
+        appendUInt32(16, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt32(UInt32(sampleRate), to: &data)
+        appendUInt32(UInt32(sampleRate * 2), to: &data)
+        appendUInt16(2, to: &data)
+        appendUInt16(16, to: &data)
+        data.append("data".data(using: .ascii)!)
+        appendUInt32(UInt32(pcmBytes), to: &data)
+        for sample in samples {
+            appendInt16(sample, to: &data)
+        }
+        return data
+    }
+
+    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+
+    private static func appendUInt32(_ value: UInt32, to data: inout Data) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+
+    private static func appendInt16(_ value: Int16, to data: inout Data) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    }
+}

@@ -63,8 +63,9 @@ PY
 python docker/scripts/download_model.py --output api/src/models/v1_0
 
 # Stop the old Qwen3-TTS service and any previous Kokoro service on Jarvis's
-# private TTS port. Do not touch the main Jarvis service on 8765.
-pkill -f "qwen3-tts.*api.main" >/dev/null 2>&1 || true
+# private TTS port. The old Qwen process command line is simply `python -m api.main`,
+# so match that exact launcher rather than relying on its working-directory name.
+pkill -f "python -m api.main" >/dev/null 2>&1 || true
 pkill -f "uvicorn api.src.main:app.*8880" >/dev/null 2>&1 || true
 sleep 1
 

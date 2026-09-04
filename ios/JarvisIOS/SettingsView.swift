@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var newAllowedRecipient = ""
     @State private var allowlistStatus = "Loading allowed recipients…"
     @State private var isSavingAllowlist = false
+    @State private var neuralVoiceStatus = "Checking local neural voice…"
 
     private var client: JarvisAPIClient {
         JarvisAPIClient(
@@ -35,7 +36,19 @@ struct SettingsView: View {
                 Section("Voice") {
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
                     Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
-                    Text("When enabled, Jarvis explicitly prefers an available Bluetooth hands-free microphone. Selecting a Bluetooth HFP input also routes Jarvis audio back to that headset on iOS.")
+
+                    HStack {
+                        Text("Neural voice")
+                        Spacer()
+                        Text(neuralVoiceStatus)
+                            .foregroundStyle(neuralVoiceStatus == "Qwen3-TTS ready" ? .green : .secondary)
+                    }
+
+                    Button("Check Neural Voice") {
+                        Task { await checkNeuralVoice() }
+                    }
+
+                    Text("Jarvis prefers the local Qwen3-TTS model running on the PC's RTX GPU. Apple speech is used only as a fallback. The Ray-Ban hands-free route is still used for playback and interruption detection.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -129,13 +142,24 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
-                await loadAllowedRecipients()
+                async let recipients: Void = loadAllowedRecipients()
+                async let voice: Void = checkNeuralVoice()
+                _ = await (recipients, voice)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func checkNeuralVoice() async {
+        do {
+            let status = try await client.ttsStatus()
+            neuralVoiceStatus = status == "ready" ? "Qwen3-TTS ready" : "Starting / unavailable"
+        } catch {
+            neuralVoiceStatus = "Unavailable"
         }
     }
 

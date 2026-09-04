@@ -93,9 +93,13 @@ final class SpeechRecognizer: ObservableObject {
     private let audioRouteManager: AudioRouteManager
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var tapInstalled = false
+    private var interruptionTask: Task<Void, Never>?
+    private var mediaResetTask: Task<Void, Never>?
 
     init(audioRouteManager: AudioRouteManager) {
         self.audioRouteManager = audioRouteManager
+        observeAudioLifecycle()
     }
 
     func requestPermissions() async throws {
@@ -133,10 +137,16 @@ final class SpeechRecognizer: ObservableObject {
 
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.removeTap(onBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            self.request = nil
+            throw NSError(domain: "JarvisSpeech", code: 4, userInfo: [NSLocalizedDescriptionKey: "The selected microphone is not ready yet. Try again in a moment."])
+        }
+
+        removeInputTapIfNeeded()
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             request.append(buffer)
         }
+        tapInstalled = true
 
         audioEngine.prepare()
         do {
@@ -166,7 +176,6 @@ final class SpeechRecognizer: ObservableObject {
     @discardableResult
     func stopListening() -> String {
         let final = transcript
-        request?.endAudio()
         stopAudioOnly(cancelRecognition: true)
         return final
     }
@@ -175,7 +184,7 @@ final class SpeechRecognizer: ObservableObject {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTapIfNeeded()
         request?.endAudio()
         request = nil
         if cancelRecognition {
@@ -184,5 +193,39 @@ final class SpeechRecognizer: ObservableObject {
         task = nil
         isActive = false
         audioRouteManager.refresh()
+    }
+
+    private func removeInputTapIfNeeded() {
+        guard tapInstalled else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        tapInstalled = false
+    }
+
+    /// Interruptions (calls, Siri, another app taking the microphone) can leave
+    /// an AVAudioEngine looking active even though no more buffers arrive. Force
+    /// the current recognition task to finish so Jarvis's outer hands-free loop
+    /// can establish a fresh Ray-Ban route when the interruption is over.
+    private func observeAudioLifecycle() {
+        interruptionTask?.cancel()
+        interruptionTask = Task { [weak self] in
+            for await note in NotificationCenter.default.notifications(named: AVAudioSession.interruptionNotification) {
+                guard !Task.isCancelled, let self else { return }
+                guard let rawType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      let type = AVAudioSession.InterruptionType(rawValue: rawType) else { continue }
+                if type == .began {
+                    self.lastError = "Audio interrupted"
+                    self.stopAudioOnly(cancelRecognition: true)
+                }
+            }
+        }
+
+        mediaResetTask?.cancel()
+        mediaResetTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: AVAudioSession.mediaServicesWereResetNotification) {
+                guard !Task.isCancelled, let self else { return }
+                self.lastError = "Audio system restarted"
+                self.stopAudioOnly(cancelRecognition: true)
+            }
+        }
     }
 }

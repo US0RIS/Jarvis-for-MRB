@@ -9,7 +9,7 @@ struct SettingsView: View {
     @State private var newAllowedRecipient = ""
     @State private var allowlistStatus = "Loading allowed recipients…"
     @State private var isSavingAllowlist = false
-    @State private var neuralVoiceStatus = "Checking local neural voice…"
+    @State private var neuralVoiceStatus = "Not checked"
 
     private var client: JarvisAPIClient {
         JarvisAPIClient(
@@ -142,8 +142,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
-                await checkNeuralVoice()
-                await loadAllowedRecipients()
+                async let voiceCheck: Void = checkNeuralVoice()
+                async let recipientsLoad: Void = loadAllowedRecipients()
+                _ = await (voiceCheck, recipientsLoad)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -154,11 +155,12 @@ struct SettingsView: View {
     }
 
     private func checkNeuralVoice() async {
+        neuralVoiceStatus = "Checking…"
         do {
             let status = try await client.ttsStatus()
             neuralVoiceStatus = status == "ready" ? "Qwen3-TTS ready" : "Starting / unavailable"
         } catch {
-            neuralVoiceStatus = "Unavailable"
+            neuralVoiceStatus = "Jarvis server offline"
         }
     }
 

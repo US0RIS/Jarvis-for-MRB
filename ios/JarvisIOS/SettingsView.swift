@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var isSavingAllowlist = false
     @State private var neuralVoiceStatus = "Not checked"
     @State private var useFastPlanner = false
+    @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
     @State private var isSwitchingPlanner = false
 
@@ -20,6 +21,7 @@ struct SettingsView: View {
     private var client: JarvisAPIClient {
         JarvisAPIClient(
             baseURL: settings.baseURL,
+            fallbackBaseURL: settings.fallbackBaseURL,
             apiToken: settings.apiToken,
             sessionID: settings.conversationSessionID
         )
@@ -29,17 +31,33 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Jarvis Server") {
-                    TextField("Base URL", text: $settings.baseURL)
+                    TextField("Home / LAN URL", text: $settings.baseURL)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    TextField("Tailscale URL", text: $settings.fallbackBaseURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                     SecureField("API token", text: $settings.apiToken)
                         .textInputAutocapitalization(.never)
-                    Text("Example: http://192.168.1.50:8765 or your private Tailscale address.")
+                    Text("Jarvis tries the LAN address first, then automatically falls back to the Tailscale address when you leave home. Example remote URL: http://100.x.x.x:8765. Port 8765 should not be forwarded on your router.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("AI Planner") {
+                    Toggle(
+                        "Automatic model routing",
+                        isOn: Binding(
+                            get: { autoRoutePlanner },
+                            set: { enabled in
+                                let previous = autoRoutePlanner
+                                autoRoutePlanner = enabled
+                                Task { await switchAutoRouting(enabled, previousValue: previous) }
+                            }
+                        )
+                    )
+                    .disabled(isSwitchingPlanner)
+
                     Toggle(
                         "Fast mode (Qwen3 8B)",
                         isOn: Binding(
@@ -51,16 +69,15 @@ struct SettingsView: View {
                             }
                         )
                     )
-                    .disabled(isSwitchingPlanner)
+                    .disabled(isSwitchingPlanner || autoRoutePlanner)
 
                     HStack {
-                        Text("Current model")
+                        Text("Mode")
                         Spacer()
                         if isSwitchingPlanner {
-                            ProgressView()
-                                .controlSize(.small)
+                            ProgressView().controlSize(.small)
                         }
-                        Text(useFastPlanner ? "Qwen3 8B" : "Qwen3.8 27B")
+                        Text(autoRoutePlanner ? "Automatic 8B ↔ 27B" : (useFastPlanner ? "Qwen3 8B" : "Qwen3.8 27B"))
                             .foregroundStyle(.secondary)
                     }
 
@@ -68,13 +85,24 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Text(
-                        useFastPlanner
-                            ? "8B is the low-latency option for normal conversation and routine tool routing. Thinking remains disabled."
-                            : "27B is the more capable planner for harder reasoning and ambiguous requests, but it takes longer to respond. Thinking remains disabled."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text(autoRoutePlanner
+                         ? "Routine conversation and tool routing use 8B. Hard reasoning, architecture, code, math, and long multi-stage requests are dispatched to 27B with a brief spoken status cue. Thinking stays disabled on both."
+                         : (useFastPlanner
+                            ? "8B is the low-latency manual option. Thinking remains disabled."
+                            : "27B is the higher-capability manual option. Thinking remains disabled."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Persistent Presence") {
+                    Toggle("Passive vision", isOn: $settings.passiveVisionEnabled)
+                    Toggle("Ambient audio cues", isOn: $settings.ambientCuesEnabled)
+                    Toggle("Speak proactive alerts", isOn: $settings.proactiveAnnouncements)
+                    TextField("Current project focus", text: $settings.projectFocus)
+
+                    Text("Passive vision samples one low-resolution glasses frame per second and sends it only to your Jarvis PC over the private companion connection. The PC drops frames whenever the local vision worker is busy and only speaks high-confidence useful observations. Conversation and visual summaries are indexed in Jarvis's local episodic memory for long-term recall.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Voice") {
@@ -92,13 +120,13 @@ struct SettingsView: View {
                         Task { await checkNeuralVoice() }
                     }
 
-                    Text("Jarvis uses the local Kokoro-82M voice model on the PC's RTX GPU for low-latency speech. Apple speech is only a fallback. The Ray-Ban hands-free route remains responsible for playback and interruption detection.")
+                    Text("Jarvis uses local Kokoro-82M for low-latency speech. Apple speech is only a fallback. Barge-in remains active while either voice path is speaking.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Email Safety") {
-                    Text("Jarvis can send email only to exact addresses on this list. The backend enforces this after contact-name resolution, so even a speech-to-text error plus an accidental confirmation cannot send to a different address.")
+                    Text("Jarvis can send email only to exact addresses on this list. The PC enforces this after contact-name resolution, so even a speech-to-text error plus an accidental confirmation cannot send to a different address.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -121,8 +149,7 @@ struct SettingsView: View {
                     } else {
                         ForEach(allowedRecipients, id: \.self) { address in
                             HStack {
-                                Text(address)
-                                    .textSelection(.enabled)
+                                Text(address).textSelection(.enabled)
                                 Spacer()
                                 Button(role: .destructive) {
                                     Task { await removeAllowedRecipient(address) }
@@ -159,9 +186,7 @@ struct SettingsView: View {
                             settings.homeLongitude = location.coordinate.longitude
                         }
                     } else {
-                        Button("Get Current Location") {
-                            geofence.requestCurrentLocation()
-                        }
+                        Button("Get Current Location") { geofence.requestCurrentLocation() }
                     }
 
                     Button("Enable Home Arrival Automation") {
@@ -203,11 +228,30 @@ struct SettingsView: View {
         do {
             let response = try await client.plannerModel()
             useFastPlanner = response.model == fastPlannerModel
-            plannerModelStatus = useFastPlanner
-                ? "Fast 8B planner selected."
-                : "27B planner selected."
+            autoRoutePlanner = response.autoRoute
+            plannerModelStatus = autoRoutePlanner
+                ? "Automatic routing is active."
+                : (useFastPlanner ? "Fast 8B planner selected." : "27B planner selected.")
         } catch {
-            plannerModelStatus = "Could not read planner model: \(error.localizedDescription)"
+            plannerModelStatus = "Could not read planner mode: \(error.localizedDescription)"
+        }
+    }
+
+    private func switchAutoRouting(_ enabled: Bool, previousValue: Bool) async {
+        guard !isSwitchingPlanner else { return }
+        isSwitchingPlanner = true
+        plannerModelStatus = enabled ? "Enabling automatic routing…" : "Disabling automatic routing…"
+        defer { isSwitchingPlanner = false }
+        do {
+            let response = try await client.setPlannerModel(autoRoute: enabled)
+            autoRoutePlanner = response.autoRoute
+            useFastPlanner = response.model == fastPlannerModel
+            plannerModelStatus = response.autoRoute
+                ? "Automatic routing enabled; 8B is warming for routine turns."
+                : "Automatic routing disabled."
+        } catch {
+            autoRoutePlanner = previousValue
+            plannerModelStatus = "Routing change failed: \(error.localizedDescription)"
         }
     }
 
@@ -219,8 +263,9 @@ struct SettingsView: View {
 
         let requested = fast ? fastPlannerModel : qualityPlannerModel
         do {
-            let response = try await client.setPlannerModel(requested)
+            let response = try await client.setPlannerModel(model: requested)
             useFastPlanner = response.model == fastPlannerModel
+            autoRoutePlanner = response.autoRoute
             plannerModelStatus = useFastPlanner
                 ? "Fast 8B planner selected. Ollama is warming it in the background."
                 : "27B planner selected. Ollama is warming it in the background."
@@ -259,13 +304,9 @@ struct SettingsView: View {
             .lowercased()
         guard !value.isEmpty else { return }
         var updated = allowedRecipients
-        if !updated.contains(value) {
-            updated.append(value)
-        }
+        if !updated.contains(value) { updated.append(value) }
         await saveAllowedRecipients(updated)
-        if allowedRecipients.contains(value) {
-            newAllowedRecipient = ""
-        }
+        if allowedRecipients.contains(value) { newAllowedRecipient = "" }
     }
 
     private func removeAllowedRecipient(_ address: String) async {

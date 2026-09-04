@@ -50,6 +50,12 @@ TOOL_RISK: dict[str, Risk] = {
     "jobs.create_time": "local_write",
     "jobs.create_event": "local_write",
     "jobs.cancel": "destructive",
+    "background.submit": "local_write",
+    "background.list": "read",
+    "background.status": "read",
+    "background.cancel": "destructive",
+    "state.get": "read",
+    "state.update": "local_write",
 }
 
 @dataclass(frozen=True)

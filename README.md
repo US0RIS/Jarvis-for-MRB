@@ -30,6 +30,8 @@ Native iPhone client:
 - explicit Bluetooth HFP input selection so a connected Ray-Ban microphone is preferred over the iPhone microphone
 - response playback over the matching Bluetooth hands-free route
 - automatic speech-recognition restart when an Apple recognition task ends
+- recovery from audio interruptions and iOS media-service resets
+- natural voice confirmation follow-ups: after a protected action, `confirm` or `cancel` works without saying `Jarvis` again
 - Core Location home geofence that fires `home_arrival`
 - Meta Wearables Device Access Toolkit 0.9+ via Swift Package Manager
 - Meta AI registration and camera permission flows
@@ -175,7 +177,20 @@ Jarvis.
 
 Jarvis replies `Yes?`, then listens for the next utterance as the command.
 
-The voice loop does not reopen the microphone while Jarvis is speaking, preventing Jarvis from hearing its own TTS response as a new command. It also detects a short period of transcript stability as end-of-command and restarts recognition tasks that terminate naturally.
+The voice loop does not reopen the microphone while Jarvis is speaking, preventing Jarvis from hearing its own TTS response as a new command. It detects a short period of transcript stability as end-of-command, restarts recognition tasks that terminate naturally, and tears down/recreates the audio engine after phone-call/Siri/media-service interruptions so a stale microphone session does not leave Jarvis silently deaf.
+
+Protected actions are also conversational. For example:
+
+```text
+Jarvis, email Alex saying I can talk later.
+```
+
+Jarvis reads back the pending action. For the next 15 seconds, either of these works without another wake word:
+
+```text
+confirm
+cancel
+```
 
 This is materially more usable than the original foreground prototype, but it still uses Apple's Speech framework as the wake detector. A dedicated low-power keyword spotter remains desirable for true all-day, system-assistant-like behavior.
 

@@ -72,11 +72,16 @@ final class AudioRouteManager: ObservableObject {
             }
         }
 
-        inputsChangeTask?.cancel()
-        inputsChangeTask = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: AVAudioSession.availableInputsChangeNotification) {
-                guard !Task.isCancelled, let self else { return }
-                self.refresh()
+        // availableInputsChangeNotification was introduced in iOS 26. The app's
+        // deployment target remains iOS 17+, so guard the observer even when the
+        // development phone itself is running a newer iOS beta.
+        if #available(iOS 26.0, *) {
+            inputsChangeTask?.cancel()
+            inputsChangeTask = Task { [weak self] in
+                for await _ in NotificationCenter.default.notifications(named: AVAudioSession.availableInputsChangeNotification) {
+                    guard !Task.isCancelled, let self else { return }
+                    self.refresh()
+                }
             }
         }
     }

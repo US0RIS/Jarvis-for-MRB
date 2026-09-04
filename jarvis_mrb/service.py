@@ -5,15 +5,19 @@ import threading
 import time
 from typing import Annotated
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
+import jarvis_mrb.agent as agent_module
+import jarvis_mrb.streaming_agent as streaming_agent_module
 from jarvis_mrb.agent import handle_natural_language
 from jarvis_mrb.conversation import append_message, recent_messages
 from jarvis_mrb.email_policy import get_allowed_recipients, set_allowed_recipients
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
+from jarvis_mrb.planner_model import get_planner_model, model_options, set_planner_model
 from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.streaming_agent import stream_natural_language
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
@@ -23,7 +27,15 @@ BIND_HOST = _CONFIG.bind_host
 PORT = _CONFIG.port
 API_TOKEN = _CONFIG.api_token
 
-app = FastAPI(title="Jarvis for MRB", version="0.9.0")
+# agent.py predates runtime model switching and keeps the selected model in a
+# module global. Initialize both the normal and streaming planners from the
+# persisted setting on every service start; the settings endpoint updates both
+# globals immediately, so switching models never requires a Jarvis restart.
+_INITIAL_MODEL = get_planner_model()
+agent_module.OLLAMA_MODEL = _INITIAL_MODEL
+streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
+
+app = FastAPI(title="Jarvis for MRB", version="0.10.0")
 _scheduler_started = False
 _tts_start_attempted = False
 
@@ -48,6 +60,15 @@ class EmailAllowlistRequest(BaseModel):
 
 class EmailAllowlistResponse(BaseModel):
     addresses: list[str]
+
+
+class PlannerModelRequest(BaseModel):
+    model: str
+
+
+class PlannerModelResponse(BaseModel):
+    model: str
+    options: list[str]
 
 
 class TTSRequest(BaseModel):
@@ -95,12 +116,59 @@ def _start_tts_in_background() -> None:
     def start() -> None:
         try:
             # Model loading can take a while on first boot; never block the Jarvis
-            # API startup. The iPhone falls back to Apple TTS until Qwen is ready.
+            # API startup. The iPhone falls back to Apple TTS until local TTS is ready.
             ensure_tts_server(wait_seconds=0.0)
         except Exception:
             pass
 
     threading.Thread(target=start, name="jarvis-tts-start", daemon=True).start()
+
+
+def _installed_ollama_models() -> set[str]:
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            response = client.get(f"{agent_module.OLLAMA_URL}/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail=f"Cannot query Ollama models: {exc}") from exc
+
+    result: set[str] = set()
+    for item in payload.get("models", []) if isinstance(payload, dict) else []:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("model") or "").strip()
+            if name:
+                result.add(name)
+    return result
+
+
+def _warm_selected_model(previous: str, selected: str) -> None:
+    """Best-effort model handoff without delaying the phone settings UI.
+
+    Ollama's empty generate request is its preload/unload mechanism. Releasing the
+    old model matters on a 16 GB RTX 5080: keeping the 27B and 8B planners resident
+    together would waste VRAM and can make the supposedly fast model slower.
+    """
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            if previous and previous != selected:
+                try:
+                    client.post(
+                        f"{agent_module.OLLAMA_URL}/api/generate",
+                        json={"model": previous, "prompt": "", "keep_alive": 0},
+                    )
+                except httpx.HTTPError:
+                    pass
+            client.post(
+                f"{agent_module.OLLAMA_URL}/api/generate",
+                json={
+                    "model": selected,
+                    "prompt": "",
+                    "keep_alive": agent_module.OLLAMA_KEEP_ALIVE,
+                },
+            )
+    except httpx.HTTPError:
+        pass
 
 
 @app.on_event("startup")
@@ -113,9 +181,10 @@ def startup() -> None:
 def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "version": "0.9.0",
+        "version": "0.10.0",
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
+        "planner_model": agent_module.OLLAMA_MODEL,
     }
 
 
@@ -194,8 +263,56 @@ def tts(request: TTSRequest, authorization: Annotated[str | None, Header()] = No
     try:
         audio = synthesize_wav(text)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Local Qwen3-TTS is unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=f"Local TTS is unavailable: {exc}") from exc
     return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/settings/planner-model", response_model=PlannerModelResponse)
+def get_planner_model_setting(
+    authorization: Annotated[str | None, Header()] = None,
+) -> PlannerModelResponse:
+    _check_auth(authorization)
+    return PlannerModelResponse(model=agent_module.OLLAMA_MODEL, options=model_options())
+
+
+@app.put("/settings/planner-model", response_model=PlannerModelResponse)
+def put_planner_model_setting(
+    request: PlannerModelRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> PlannerModelResponse:
+    _check_auth(authorization)
+    requested = request.model.strip()
+    if requested not in model_options():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported planner model. Choose one of: {', '.join(model_options())}",
+        )
+
+    installed = _installed_ollama_models()
+    if requested not in installed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ollama model {requested} is not installed on the Jarvis PC.",
+        )
+
+    previous = agent_module.OLLAMA_MODEL
+    try:
+        selected = set_planner_model(requested)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    agent_module.OLLAMA_MODEL = selected
+    streaming_agent_module.OLLAMA_MODEL = selected
+
+    if previous != selected:
+        threading.Thread(
+            target=_warm_selected_model,
+            args=(previous, selected),
+            name="jarvis-planner-warm",
+            daemon=True,
+        ).start()
+
+    return PlannerModelResponse(model=selected, options=model_options())
 
 
 @app.get("/settings/email-allowlist", response_model=EmailAllowlistResponse)

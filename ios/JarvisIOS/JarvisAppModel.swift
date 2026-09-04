@@ -21,6 +21,7 @@ final class JarvisAppModel: ObservableObject {
 
     private var wakeWordTask: Task<Void, Never>?
     private var confirmationFollowUpDeadline: Date?
+    private var conversationalFollowUpDeadline: Date?
 
     private enum VoicePhase {
         case waitingForWake
@@ -45,7 +46,11 @@ final class JarvisAppModel: ObservableObject {
     }
 
     private var client: JarvisAPIClient {
-        JarvisAPIClient(baseURL: settings.baseURL, apiToken: settings.apiToken)
+        JarvisAPIClient(
+            baseURL: settings.baseURL,
+            apiToken: settings.apiToken,
+            sessionID: settings.conversationSessionID
+        )
     }
 
     func checkConnection() async {
@@ -92,12 +97,22 @@ final class JarvisAppModel: ObservableObject {
 
             if fromHandsFree && Self.responseRequestsConfirmation(response.message) {
                 confirmationFollowUpDeadline = Date().addingTimeInterval(15)
+                conversationalFollowUpDeadline = nil
                 voiceStatus = "Say confirm or cancel"
+            } else if fromHandsFree && !response.message.isEmpty {
+                confirmationFollowUpDeadline = nil
+                // Start this window after TTS finishes, not when the server reply
+                // arrives, so the user gets a full five seconds to continue the
+                // conversation without repeating the wake word.
+                conversationalFollowUpDeadline = Date().addingTimeInterval(5)
+                voiceStatus = "Listening for follow-up…"
             } else {
                 confirmationFollowUpDeadline = nil
+                conversationalFollowUpDeadline = nil
             }
         } catch {
             confirmationFollowUpDeadline = nil
+            conversationalFollowUpDeadline = nil
             errorMessage = error.localizedDescription
             if fromHandsFree {
                 voiceStatus = "Command failed"
@@ -172,6 +187,7 @@ final class JarvisAppModel: ObservableObject {
 
         handsFreeEnabled = true
         confirmationFollowUpDeadline = nil
+        conversationalFollowUpDeadline = nil
         voiceStatus = "Listening for “Jarvis”…"
         wakeWordTask = Task { [weak self] in
             guard let self else { return }
@@ -183,6 +199,7 @@ final class JarvisAppModel: ObservableObject {
         wakeWordTask?.cancel()
         wakeWordTask = nil
         confirmationFollowUpDeadline = nil
+        conversationalFollowUpDeadline = nil
         handsFreeEnabled = false
         speechSynthesizer.stopSpeaking()
         if isListening || speechRecognizer.isActive {
@@ -216,7 +233,14 @@ final class JarvisAppModel: ObservableObject {
 
             if let deadline = confirmationFollowUpDeadline, now >= deadline {
                 confirmationFollowUpDeadline = nil
-                if case .waitingForWake = phase {
+                if case .waitingForWake = phase, conversationalFollowUpDeadline == nil {
+                    voiceStatus = "Listening for “Jarvis”…"
+                }
+            }
+
+            if let deadline = conversationalFollowUpDeadline, now >= deadline {
+                conversationalFollowUpDeadline = nil
+                if case .waitingForWake = phase, confirmationFollowUpDeadline == nil {
                     voiceStatus = "Listening for “Jarvis”…"
                 }
             }
@@ -231,6 +255,7 @@ final class JarvisAppModel: ObservableObject {
                    let confirmation = Self.confirmationCommand(from: transcript),
                    silence >= 0.55 || recognitionEnded {
                     confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = nil
                     await submitHandsFreeCommand(confirmation)
                     phase = .waitingForWake
                     lastTranscript = ""
@@ -238,8 +263,19 @@ final class JarvisAppModel: ObservableObject {
                     continue
                 }
 
+                if let deadline = conversationalFollowUpDeadline, now < deadline {
+                    // During the five-second conversational window, any speech is
+                    // a follow-up; no second "Jarvis" is required. Reuse the same
+                    // dictation state machine so long addresses/messages can span
+                    // recognizer restarts and natural pauses.
+                    phase = .awaitingFollowUp(deadline: deadline)
+                    voiceStatus = "Listening for follow-up…"
+                    continue
+                }
+
                 if let command = Self.commandAfterWakeWord(in: transcript) {
                     confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = nil
                     phase = .collectingAfterWake
                     voiceStatus = "Listening for command…"
                     let requiredSilence = Self.commandSilenceWindow(for: command)
@@ -271,6 +307,7 @@ final class JarvisAppModel: ObservableObject {
                     }
                 } else if Self.containsWakeWord(transcript) && (silence >= 0.65 || recognitionEnded) {
                     confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = nil
                     await promptForFollowUp()
                     phase = .awaitingFollowUp(deadline: Date().addingTimeInterval(20))
                     lastTranscript = ""
@@ -334,6 +371,8 @@ final class JarvisAppModel: ObservableObject {
 
                 if !command.isEmpty && silence >= requiredSilence {
                     followUpBuffer = ""
+                    confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = nil
                     await submitHandsFreeCommand(command)
                     phase = .waitingForWake
                     lastTranscript = ""
@@ -351,6 +390,8 @@ final class JarvisAppModel: ObservableObject {
                     }
 
                     followUpBuffer = ""
+                    confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = nil
                     await submitHandsFreeCommand(command)
                     phase = .waitingForWake
                     lastTranscript = ""
@@ -358,8 +399,13 @@ final class JarvisAppModel: ObservableObject {
                     continue
                 }
 
-                if now >= deadline {
+                // The deadline controls when the user must START speaking. Once a
+                // follow-up has started, don't cut it off just because the original
+                // five-second window expires mid-sentence.
+                if now >= deadline && command.isEmpty {
                     followUpBuffer = ""
+                    confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = nil
                     phase = .waitingForWake
                     voiceStatus = "Listening for “Jarvis”…"
                     _ = speechRecognizer.stopListening()
@@ -386,6 +432,7 @@ final class JarvisAppModel: ObservableObject {
     private func promptForFollowUp() async {
         _ = speechRecognizer.stopListening()
         isListening = false
+        conversationalFollowUpDeadline = nil
         voiceStatus = "Listening for command…"
         await speechSynthesizer.speak("Yes?", preferBluetooth: settings.preferBluetoothAudio)
         try? await Task.sleep(for: .milliseconds(180))
@@ -405,6 +452,8 @@ final class JarvisAppModel: ObservableObject {
         try? await Task.sleep(for: .milliseconds(180))
         if confirmationFollowUpDeadline != nil {
             voiceStatus = "Say confirm or cancel"
+        } else if conversationalFollowUpDeadline != nil {
+            voiceStatus = "Listening for follow-up…"
         } else {
             voiceStatus = "Listening for “Jarvis”…"
         }

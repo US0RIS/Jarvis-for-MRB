@@ -1,6 +1,6 @@
 # Jarvis iOS client
 
-`JarvisIOS.xcodeproj` is a native SwiftUI iPhone app. It connects to the Jarvis backend, supports text and hands-free voice conversation, speaks responses, fires a `home_arrival` event from a Core Location geofence, and integrates Meta's Wearables Device Access Toolkit for registration, camera permission, and live Ray-Ban camera preview.
+`JarvisIOS.xcodeproj` is a native SwiftUI iPhone app. It connects to the Jarvis backend, supports text and hands-free voice conversation, plays the local PC-generated Jarvis voice through the Ray-Bans, fires a `home_arrival` event from a Core Location geofence, and integrates Meta's Wearables Device Access Toolkit for registration, camera permission, and live Ray-Ban camera preview.
 
 ## Requirements
 
@@ -10,6 +10,7 @@
 - compatible Meta AI glasses paired to Meta AI
 - Developer Mode enabled for the glasses
 - Apple developer signing team selected in Xcode
+- Jarvis Windows backend reachable from the phone
 
 The Xcode project includes Meta Wearables DAT through Swift Package Manager:
 
@@ -23,30 +24,71 @@ The Xcode project includes Meta Wearables DAT through Swift Package Manager:
 ios/JarvisIOS.xcodeproj
 ```
 
-On first open, allow Xcode to resolve Swift packages. Select the `JarvisIOS` target, choose your Apple development team under **Signing & Capabilities**, connect your iPhone, and run the app on the physical phone.
+Allow Xcode to resolve Swift packages. Select the `JarvisIOS` target, choose the Apple development team under **Signing & Capabilities**, connect the iPhone, and run the physical-device target.
 
-## Connect the phone to the Windows Jarvis service
+## Connect to the Windows service
 
-On the Windows PC, after updating/installing the Python package, run:
+On Windows:
 
 ```powershell
 py -3.14 -m jarvis_mrb.remote_setup
 ```
 
-This creates `%APPDATA%\JarvisForMRB\server.json`, generates a random bearer token, and configures Jarvis to listen on the private network. Restart the Jarvis service afterward.
+In iPhone Settings enter:
 
-In the iPhone app's Settings screen enter:
+- **Base URL:** the PC private URL printed by `remote_setup`
+- **API token:** the generated bearer token
 
-- **Base URL:** one of the private URLs printed by `remote_setup`, such as `http://192.168.1.50:8765`
-- **API token:** the generated token
+Do not expose port `8765` directly to the public Internet. Use a private tunnel such as Tailscale for away-from-home access.
 
-Do not forward port `8765` from the router to the public Internet. For access away from home, use a private tunnel such as Tailscale and point the app at the PC's private tunnel address.
+## Streamed responses and local TTS
+
+Milestone 9 no longer waits for the full language-model answer before updating/responding.
+
+The phone calls:
+
+```text
+POST /command/stream
+```
+
+and receives newline-delimited response deltas. `Last Response` updates while Qwen is still generating. The app collects only enough generated text to form a natural sentence/clause, then calls:
+
+```text
+POST /tts
+```
+
+for a locally generated Qwen3-TTS WAV and immediately plays it through the selected Bluetooth HFP output. Later LLM output continues travelling over the still-open response stream while the early audio is being synthesized and played.
+
+The normal PC runtime is `Qwen3-TTS-12Hz-0.6B-CustomVoice`, speaker `Ryan`, with a restrained personal-aide instruction. Apple `AVSpeechSynthesizer` remains an automatic fallback if the PC TTS service is unavailable.
+
+Tool operations remain atomic: the client cannot truthfully speak a tool result until the backend has performed the action/read. Conversational no-tool responses receive the largest first-response latency improvement.
+
+## Barge-in
+
+Both Qwen WAV playback and Apple fallback speech run with a simultaneous interruption recognizer. If the wearer starts talking over Jarvis, playback stops and the heard interruption is handed to the normal conversation recognizer.
+
+Examples:
+
+```text
+Jarvis: Sir, there are several things to consider—
+You: Actually, just give me the important one.
+```
+
+or simply:
+
+```text
+Stop.
+Wait.
+Hold on.
+```
+
+A text-overlap filter plus iOS `voiceChat` echo cancellation reduces self-interruption from the Ray-Ban speakers.
 
 ## Conversation identity and memory
 
-The iPhone creates a random conversation session ID the first time this build runs and stores it in `UserDefaults`. Every command sends that session ID to the backend. The backend persists the dialogue in SQLite and supplies the most recent 20 user/assistant messages to Qwen when a request needs contextual reasoning.
+The iPhone creates a stable random conversation session ID and sends it with every command. The backend persists the dialogue in SQLite and supplies the most recent 20 user/assistant messages to Qwen when contextual reasoning is required.
 
-That means follow-ups can rely on prior turns:
+That enables:
 
 ```text
 You: What's on my calendar Friday?
@@ -54,28 +96,24 @@ Jarvis: ...
 You: What about Saturday?
 ```
 
-or:
+and:
 
 ```text
 You: Open Spotify.
-Jarvis: Spotify is open.
+Jarvis: ...
 You: Close it.
 ```
 
-The short-term history survives ordinary app and backend restarts as long as the iPhone keeps the same session ID.
-
 ## Hands-free voice
 
-The app has two voice paths:
+The app has:
 
 - **Push to Talk** for explicit one-shot commands
-- **Hands-free Jarvis** for a continuous conversational loop
+- **Hands-free Jarvis** for a continuous conversation loop
 
-The hands-free path configures an iOS `playAndRecord` / `voiceChat` session and explicitly prefers an available Bluetooth HFP microphone. If the Ray-Bans expose an HFP input, Jarvis selects it instead of assuming the system has already chosen the glasses. iOS then routes playback to the matching Bluetooth hands-free output.
+Hands-free mode uses an iOS `playAndRecord` / `voiceChat` session and explicitly prefers an available Bluetooth HFP microphone. With the Ray-Bans exposed as an HFP input, Jarvis selects them and routes playback back to the matching hands-free output.
 
-The main screen shows the actual audio route. With the glasses working as the voice terminal, it should identify the Ray-Ban / Meta Bluetooth route rather than the iPhone microphone.
-
-Start with either form:
+Start with:
 
 ```text
 Jarvis, open Spotify.
@@ -87,73 +125,60 @@ or:
 Jarvis.
 ```
 
-After the second form, Jarvis says `Yes?` and treats the next utterance as the command.
+Jarvis replies `Yes, sir?` and treats the next utterance as the command.
 
-After every normal hands-free response finishes speaking, Jarvis automatically listens for **five seconds**. Speech that starts during that window is accepted as a follow-up without saying `Jarvis` again. Every follow-up response opens a new five-second window, allowing a normal multi-turn conversation. If no one speaks during the window, Jarvis returns to wake-word mode.
+After every normal response, Jarvis listens for five seconds. Speech that *starts* during that window becomes a follow-up without saying `Jarvis` again; it is not cut off merely because the five-second deadline passes after the user has begun talking.
 
-The five-second timer is a *start-speaking* deadline. Once a follow-up begins, Jarvis lets the utterance finish even if it runs past the original deadline.
+Dictation-like commands use longer silence thresholds. Partial text can survive Apple Speech task restarts so email addresses, URLs, spelling, and long bodies are less likely to be truncated. The recognizer biases toward `Jarvis`, `Dubeck`, and `Emmett Dubeck`, and corrects common `Dubek` / `Du Beck` transcriptions to `Dubeck`.
 
-Dictation-like commands use longer silence thresholds, and Jarvis buffers partial text across Apple Speech task restarts so email addresses, URLs, spelling, and long message bodies are less likely to be cut off. The recognizer also biases toward `Jarvis`, `Dubeck`, and `Emmett Dubeck`, and deterministically corrects common `Dubek` / `Du Beck` transcriptions to `Dubeck` before sending text to the agent.
+Protected actions keep the confirmation barrier and get a longer confirmation window so `confirm` or `cancel` can be spoken without another wake word.
 
-Protected actions retain the confirmation barrier. Jarvis gives them a longer follow-up window so `confirm` or `cancel` can be spoken without another wake word.
+## Email safety
 
-The loop stops recognition while Jarvis speaks so TTS cannot trigger itself, automatically restarts Apple Speech recognition when a task ends, and tears down stale recognition after audio interruptions/media-service resets.
-
-The app has the `audio` background mode enabled and keeps its duplex audio session active while hands-free mode is running. Physical-device testing is still required to establish how reliably the Speech-framework implementation survives screen lock, interruptions, and long sessions on the target iPhone/Ray-Ban combination.
-
-This is not yet a dedicated low-power keyword spotter. For truly all-day operation, the next voice-specific upgrade would be a local keyword detector for `Jarvis` rather than continuously transcribing audio with the Speech framework.
+Settings includes an **Email Safety** section. The user manages an exact recipient allowlist there. The list is stored/enforced on the PC backend, after contact-name resolution and immediately before Gmail send. An empty list blocks all outbound email.
 
 ## Home arrival
 
-Set your home latitude, longitude, and radius under Settings, then tap **Enable Home Arrival Automation**. iOS region monitoring posts:
+Set home latitude, longitude, and radius under Settings, then enable Home Arrival Automation. iOS region monitoring posts:
 
 ```json
 {"event":"home_arrival"}
 ```
 
-to the Jarvis backend. This completes commands such as:
-
-```text
-When I get home, make sure Minecraft is running.
-```
-
-For that event to reach the PC while the phone is away from the home LAN, configure a private remote path such as Tailscale; do not expose the Jarvis port directly to the Internet.
+to the backend.
 
 ## Meta Ray-Ban setup
 
-The app configures Meta Wearables DAT with the development `MetaAppID` of `0` and URL scheme `jarvismrb://`.
+The app configures Meta Wearables DAT with development `MetaAppID` `0` and URL scheme `jarvismrb://`.
 
-In the app:
+1. **Register** through Meta AI.
+2. **Camera Access** and approve permission.
+3. Wait for **DAT eligible: Yes**.
+4. **Start Camera** for the live glasses feed.
 
-1. Tap **Register**. Meta AI opens to authorize the integration.
-2. Return to Jarvis after the callback.
-3. Tap **Camera Access** and approve camera permission in Meta AI.
-4. Wait for **DAT eligible: Yes**.
-5. Tap **Start Camera** to create a device session and display the live glasses camera feed.
-
-The app keeps one `AutoDeviceSelector` alive from initialization so device eligibility is populated before camera-session creation. This avoids the `noEligibleDevice` race that occurs when a selector is created immediately before `createSession`. Camera stream listener tokens are retained until the stream is stopped.
+The app keeps one `AutoDeviceSelector` alive from initialization so device eligibility is populated before camera-session creation. Camera listener tokens are retained until the stream stops.
 
 ## Current architecture
 
 ```text
 Ray-Ban Meta
-  - Meta DAT camera
-  - Bluetooth HFP microphone/speakers
+  Meta DAT camera
+  Bluetooth HFP microphone/speakers
         |
         v
-Jarvis iOS client
-  - hands-free conversation / TTS
-  - stable conversation session ID
-  - live camera
-  - home geofence
+Jarvis iPhone client
+  STT / wake / conversation
+  streamed text UI
+  Qwen WAV playback + barge-in
+  geofence / live camera
         |
         v
 Authenticated Jarvis API
         |
-        +-- persistent recent conversation
-        +-- Windows tools
-        +-- Opera tabs
+        +-- streaming Ollama planner
+        +-- Qwen3-TTS service on PC/WSL GPU
+        +-- persistent conversation
+        +-- Windows / Opera tools
         +-- Gmail / Contacts / Calendar
         +-- persistent jobs
-        +-- local Ollama planner
 ```

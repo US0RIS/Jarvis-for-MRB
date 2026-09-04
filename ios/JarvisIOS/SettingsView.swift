@@ -5,6 +5,19 @@ struct SettingsView: View {
     @ObservedObject var geofence: GeofenceManager
     @Environment(\.dismiss) private var dismiss
 
+    @State private var allowedRecipients: [String] = []
+    @State private var newAllowedRecipient = ""
+    @State private var allowlistStatus = "Loading allowed recipients…"
+    @State private var isSavingAllowlist = false
+
+    private var client: JarvisAPIClient {
+        JarvisAPIClient(
+            baseURL: settings.baseURL,
+            apiToken: settings.apiToken,
+            sessionID: settings.conversationSessionID
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -25,6 +38,54 @@ struct SettingsView: View {
                     Text("When enabled, Jarvis explicitly prefers an available Bluetooth hands-free microphone. Selecting a Bluetooth HFP input also routes Jarvis audio back to that headset on iOS.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Email Safety") {
+                    Text("Jarvis can send email only to exact addresses on this list. The backend enforces this after contact-name resolution, so even a speech-to-text error plus an accidental confirmation cannot send to a different address.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        TextField("person@example.com", text: $newAllowedRecipient)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.emailAddress)
+                            .autocorrectionDisabled()
+
+                        Button("Add") {
+                            Task { await addAllowedRecipient() }
+                        }
+                        .disabled(newAllowedRecipient.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingAllowlist)
+                    }
+
+                    if allowedRecipients.isEmpty {
+                        Label("No recipients are allowed. Email sending is blocked.", systemImage: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(allowedRecipients, id: \.self) { address in
+                            HStack {
+                                Text(address)
+                                    .textSelection(.enabled)
+                                Spacer()
+                                Button(role: .destructive) {
+                                    Task { await removeAllowedRecipient(address) }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(isSavingAllowlist)
+                            }
+                        }
+                    }
+
+                    Text(allowlistStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button("Reload Allowed Recipients") {
+                        Task { await loadAllowedRecipients() }
+                    }
+                    .disabled(isSavingAllowlist)
                 }
 
                 Section("Home Geofence") {
@@ -67,11 +128,59 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task {
+                await loadAllowedRecipients()
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func loadAllowedRecipients() async {
+        isSavingAllowlist = true
+        defer { isSavingAllowlist = false }
+        do {
+            allowedRecipients = try await client.emailAllowlist()
+            allowlistStatus = allowedRecipients.isEmpty
+                ? "Sending is currently blocked for every address."
+                : "Allowed-recipient list is enforced by the PC backend."
+        } catch {
+            allowlistStatus = "Could not load allowed recipients: \(error.localizedDescription)"
+        }
+    }
+
+    private func addAllowedRecipient() async {
+        let value = newAllowedRecipient
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !value.isEmpty else { return }
+        var updated = allowedRecipients
+        if !updated.contains(value) {
+            updated.append(value)
+        }
+        await saveAllowedRecipients(updated)
+        if allowedRecipients.contains(value) {
+            newAllowedRecipient = ""
+        }
+    }
+
+    private func removeAllowedRecipient(_ address: String) async {
+        await saveAllowedRecipients(allowedRecipients.filter { $0 != address })
+    }
+
+    private func saveAllowedRecipients(_ addresses: [String]) async {
+        isSavingAllowlist = true
+        defer { isSavingAllowlist = false }
+        do {
+            allowedRecipients = try await client.setEmailAllowlist(addresses)
+            allowlistStatus = allowedRecipients.isEmpty
+                ? "Sending is blocked for every address."
+                : "Saved. Only these exact addresses can receive email from Jarvis."
+        } catch {
+            allowlistStatus = "Could not save allowed recipients: \(error.localizedDescription)"
         }
     }
 }

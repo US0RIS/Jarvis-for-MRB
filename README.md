@@ -1,46 +1,29 @@
 # Jarvis for MRB
 
-A personal agent designed to use Ray-Ban Meta glasses as an always-available voice/vision interface while the actual agent and tools run on trusted devices and services.
+A private, local-first personal agent that uses Ray-Ban Meta glasses as an always-available voice/vision interface while the reasoning models, memory, tools, and automation run on the user's PC.
 
-## Milestone 9
+## Milestone 11 — Persistent Presence
 
-Jarvis now has the complete local glasses/voice loop plus persistent conversation, Gmail/Calendar tooling, recipient safety controls, streamed responses, and a local neural TTS voice.
+Jarvis now goes beyond a request/response voice tool. The current stack includes:
 
-Backend capabilities:
+- Ray-Ban Meta DAT camera access and live stream
+- hands-free `Jarvis` wake/conversation loop with five-second follow-up listening
+- barge-in while Jarvis is speaking
+- streamed LLM responses
+- Kokoro-82M local neural TTS
+- Qwen3 8B and Qwen3.8 27B planner modes, with thinking disabled
+- automatic speculative 8B → 27B routing
+- persistent short-term conversation history plus long-term semantic episodic memory
+- passive glasses-camera sampling and local vision analysis
+- persistent environmental state
+- background worker queue with completion notifications
+- local ambient audio cues
+- Gmail read/send, Google Contacts, Calendar, browser and Windows tools
+- backend-enforced email recipient allowlist and confirmation barriers
+- home geofence and persistent jobs
+- automatic LAN → Tailscale failover for away-from-home access
 
-- local Ollama planner (`qwen3.8:27b` by default), with thinking explicitly disabled
-- streamed non-tool conversational responses from Ollama instead of waiting for the complete answer
-- deterministic fast paths for routine commands
-- persistent per-session conversational history in SQLite
-- the most recent 20 user/assistant messages are supplied to the planner on each non-trivial request
-- contextual follow-ups such as `what about Friday?`, `close it`, or `email him that I'll be late`
-- Windows app/process control
-- Opera/Chromium tab discovery, focus, open, status, and close via CDP
-- Gmail read/search and send
-- exact backend-enforced email-recipient allowlist plus confirmation for outbound mail
-- Google Contacts lookup
-- general Google Calendar queries and event creation
-- persistent scheduled/event-triggered jobs
-- authenticated private-network API
-- local Qwen3-TTS service with Apple TTS only as a fallback
-
-Native iPhone client:
-
-- standard `ios/JarvisIOS.xcodeproj`
-- stable per-install conversation session ID
-- streamed Last Response text
-- sentence-level streaming speech: Jarvis starts speaking complete early clauses/sentences while later model output is still being produced
-- Qwen3-TTS WAV playback through the Ray-Ban Bluetooth route
-- full conversational barge-in: speech can interrupt both Qwen audio and Apple fallback TTS
-- hands-free `Jarvis` interaction loop
-- five-second post-response conversational listening window
-- extended dictation handling for email addresses, URLs, spelling, and long message bodies
-- personal speech vocabulary/correction for `Dubeck`
-- explicit Bluetooth HFP input selection
-- Core Location home geofence
-- Meta Wearables DAT registration, camera access, live Ray-Ban camera streaming, and photo capture
-
-The model never receives unrestricted shell access. It chooses among explicit tools.
+The language model never receives unrestricted shell access. It can only use explicit tools with the configured permission policy.
 
 ## Update the Windows backend
 
@@ -50,134 +33,224 @@ git pull
 py -3.14 -m pip install -e .
 ```
 
-After code updates, stop an old service if one is running:
+Stop an old service if one is running, then start milestone 11:
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty OwningProcess |
   ForEach-Object { Stop-Process -Id $_ -Force }
-```
 
-Then:
-
-```powershell
 py -3.14 -m jarvis_mrb.service
 ```
 
-## Local neural TTS: Qwen3-TTS
+`GET /health` should report version `0.11.0`.
 
-The default runtime voice is:
+## Local models
+
+### Planner
+
+Jarvis supports:
 
 ```text
-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
-speaker: Ryan
+qwen3:8b       low-latency planner
+qwen3.8:27b    higher-capability planner
 ```
 
-The 0.6B checkpoint is deliberate. The target PC has an RTX 5080 but also keeps a much larger Ollama planner warm. The smaller TTS checkpoint leaves substantially more VRAM headroom for simultaneous planner + TTS use while remaining a large quality improvement over iOS `AVSpeechSynthesizer`.
+Both run through Ollama with thinking explicitly disabled.
 
-TTS is isolated in WSL/Python 3.10-3.12 rather than being installed into Jarvis's Windows Python 3.14 environment. Install it once:
+With **Automatic model routing** enabled, Jarvis uses 8B for routine conversation/status/tool-routing turns and sends requests with strong complex-reasoning signals to 27B. A 27B route can emit a brief spoken status such as `Analyzing that now, sir.` before the heavier model finishes loading/generating.
+
+Manual 8B/27B selection remains available in the iPhone Settings screen when automatic routing is disabled.
+
+### Voice
+
+The normal voice is **Kokoro-82M**, running locally in WSL on port `8880`. It replaced Qwen3-TTS because conversational latency matters more than maximum standalone TTS quality for this project.
+
+One-time setup:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-qwen3-tts-wsl.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-kokoro-tts-wsl.ps1
 ```
 
-The setup script:
+Apple speech remains a fallback if the local TTS service is unavailable.
 
-- verifies the NVIDIA GPU is visible inside WSL
-- creates a dedicated virtual environment
-- installs a CUDA 12.8 PyTorch build suitable for RTX 50-series GPUs
-- installs the local OpenAI-compatible Qwen3-TTS server
-- downloads the 0.6B CustomVoice checkpoint ahead of time
-- starts and warms the local service on `127.0.0.1:8880`
+### Episodic memory + passive vision
 
-The normal Jarvis backend attempts to auto-start that WSL TTS service in the future. To run it manually in the foreground:
+Install the small supporting Ollama models once:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start-qwen3-tts-wsl.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-persistent-ai.ps1
 ```
 
-Useful environment overrides:
+This installs/pulls:
 
 ```text
-JARVIS_TTS_URL=http://127.0.0.1:8880
-JARVIS_TTS_VOICE=Ryan
-JARVIS_TTS_SPEED=1.0
-JARVIS_TTS_INSTRUCT=<natural-language delivery instruction>
-JARVIS_TTS_AUTOSTART=1
+nomic-embed-text    semantic episodic-memory embeddings
+moondream           lightweight passive-vision model
 ```
 
-If the local TTS model is temporarily unavailable, the iPhone automatically falls back to Apple's installed voice so Jarvis does not become mute.
+Passive vision defaults to **zero GPU layers** so it does not displace Qwen/Kokoro from the RTX 5080. The iPhone can send one sampled low-resolution JPEG per second, but the server deliberately drops frames while the vision worker is busy instead of building a latency backlog.
 
-## Response streaming
+## Long-term episodic memory
 
-The authenticated API now exposes:
-
-```text
-POST /command/stream
-```
-
-as newline-delimited JSON. For a conversational request, Qwen first emits a compact one-line tool decision. When no tool is needed, the answer immediately continues in the same Ollama stream and is forwarded to the iPhone incrementally.
-
-The iPhone displays those deltas as they arrive. For speech, it accumulates only enough text to reach a natural sentence/clause boundary, asks local Qwen3-TTS for that segment, and starts playback while later language-model output continues arriving over the open HTTP response.
-
-Tool calls intentionally remain atomic: Jarvis must know and execute the action before claiming the result. Fast deterministic actions also remain effectively immediate.
-
-The CLI uses the same streamed endpoint, so longer conversational answers begin printing before generation completes.
-
-## Example commands
-
-```text
-Open Spotify
-Close Spotify
-Is YouTube open?
-List tabs
-
-Read my latest email
-What unread emails do I have?
-Email alex@example.com saying I can talk later and do not use emojis
-confirm
-
-What was the most recent event on my calendar?
-What's on my calendar tomorrow?
-Create a calendar event called Dentist tomorrow at 3 PM
-confirm
-
-At 8 PM open Spotify
-When I get home, make sure Minecraft is running
-List jobs
-```
-
-Conversation context supports sequences such as:
-
-```text
-What's on my calendar Friday?
-What about Saturday?
-Which one is earlier?
-```
-
-or:
-
-```text
-Open Spotify.
-[Jarvis responds]
-Close it.
-```
-
-## Conversation memory
-
-Every `/command` request may include a `session_id`. Jarvis stores conversation turns under that session in:
+Conversation turns are still stored in the short-term session database:
 
 ```text
 %APPDATA%\JarvisForMRB\conversation.sqlite3
 ```
 
-The iPhone creates one stable random session ID and reuses it. The backend retains up to 200 messages per session and sends the most recent 20 messages to Qwen when contextual reasoning is required.
+In addition, completed conversational exchanges and useful visual observations are embedded with `nomic-embed-text` and stored locally in:
 
-Background scheduled jobs do not share the live conversation session.
+```text
+%APPDATA%\JarvisForMRB\episodic_memory.sqlite3
+```
+
+Before a request is planned, Jarvis retrieves the top three semantically relevant past episodes and injects them as context. This makes references to older discussions possible without placing the entire conversation archive into every prompt.
+
+Useful diagnostic:
+
+```text
+GET /memory/status
+```
+
+## Passive vision
+
+Enable **Settings → Persistent Presence → Passive vision** in the iPhone app.
+
+The flow is:
+
+```text
+Ray-Ban DAT camera
+    ↓
+current live frame
+    ↓ 1 low-res JPEG / second
+private companion WebSocket
+    ↓
+Jarvis PC
+    ↓
+Moondream visual worker
+    ↓
+scene state + optional high-confidence proactive alert
+```
+
+The server only produces unsolicited alerts when the local vision model reports something immediately useful with high confidence. Frames are not written to the episodic database; only compact scene summaries may be remembered. Visual text is treated as untrusted content, not agent instructions.
+
+Diagnostic:
+
+```text
+GET /vision/status
+```
+
+## Persistent environmental state
+
+Jarvis stores durable ambient context at:
+
+```text
+%APPDATA%\JarvisForMRB\environment_state.json
+```
+
+Current state can include:
+
+- home/away location state
+- current project focus
+- Ray-Ban/phone transport state
+- passive-vision state
+- user interaction preferences
+- last useful visual scene summary
+
+This compact state is appended to the system context on every model request so routine conversations need less setup.
+
+## Background worker queue
+
+Jarvis can move longer work off the live voice turn. Background tasks are persisted in:
+
+```text
+%APPDATA%\JarvisForMRB\background_tasks.sqlite3
+```
+
+The live assistant can start a task, remain available for conversation, and receive a completion/failure event over the companion WebSocket. The iPhone can play a local cue and optionally speak the result through the glasses.
+
+Examples:
+
+```text
+Work on that analysis in the background and tell me when it's done.
+What are you working on?
+Cancel background task 3.
+```
+
+The worker queue uses explicit Jarvis tools and the 27B planner for heavy work; it is not unrestricted shell execution.
+
+## Ambient audio cues
+
+The iPhone generates small local cues for states such as:
+
+- task started
+- task completed
+- attention/proactive observation
+- warning
+- error
+
+No cloud audio or asset download is required. Cues can be disabled independently in Settings.
+
+## Away-from-home access with Tailscale
+
+Do **not** expose Jarvis directly to the public Internet and do not forward router port `8765`.
+
+Instead, run once on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-tailscale.ps1
+```
+
+The setup uses **Tailscale Serve**, not Funnel. It publishes the local Jarvis service only inside your tailnet over a stable `https://...ts.net` URL. Tailscale Serve automatically terminates HTTPS and proxies to local port 8765.
+
+Install Tailscale on the iPhone and sign into the same tailnet. Then put the HTTPS URL printed by the setup script into:
+
+```text
+Jarvis → Settings → Tailscale URL
+```
+
+Keep the existing home URL, for example:
+
+```text
+http://192.168.1.19:8765
+```
+
+The iPhone now resolves endpoints automatically:
+
+```text
+home LAN reachable?  → use LAN
+otherwise            → use private Tailscale HTTPS
+```
+
+The working endpoint is cached briefly, so leaving/returning home does not require manually changing Settings.
+
+## Response streaming
+
+`POST /command/stream` returns newline-delimited JSON. The chosen planner emits a compact tool decision first; conversational text then streams incrementally.
+
+The iPhone displays text as it arrives and sends complete early clauses/sentences to Kokoro while later model output continues generating. This keeps TTS prosody natural without waiting for the complete LLM answer.
+
+Tool results remain atomic because Jarvis must execute an action before claiming it succeeded.
+
+## Companion WebSocket
+
+The authenticated endpoint:
+
+```text
+/ws/companion
+```
+
+carries persistent low-bandwidth state in both directions:
+
+- iPhone → PC: sampled vision frames and environmental state
+- PC → iPhone: proactive alerts, worker-completion notifications, ambient-cue events
+
+The same bearer token used by the normal Jarvis API is required.
 
 ## Google setup
 
-Jarvis uses Gmail API, People API, and Google Calendar API. Credentials/tokens live outside the repository under:
+Credentials/tokens remain outside the repository under:
 
 ```text
 %APPDATA%\JarvisForMRB
@@ -189,7 +262,7 @@ Authenticate with:
 py -3.14 -m jarvis_mrb.google_auth
 ```
 
-Gmail reading is read-only. Outbound Gmail/Calendar writes are protected actions and require confirmation by default. Gmail send additionally checks the exact recipient against the backend allowlist immediately before the Gmail API call.
+Gmail reading is read-only. Outbound Gmail/Calendar writes require confirmation by default. Gmail sending additionally checks the final resolved email address against the backend allowlist immediately before sending.
 
 ## Opera browser control
 
@@ -199,71 +272,59 @@ Fully quit Opera, then run:
 py -3.14 -m jarvis_mrb.browser_setup
 ```
 
-This starts Opera with Chromium DevTools enabled so Jarvis can work with individual browser tabs rather than killing the whole browser.
+This starts Opera with local Chromium DevTools access so Jarvis can work with individual browser tabs.
 
-## Connect the iPhone
+## iPhone build
 
-Configure a private-network API token on the Windows PC:
-
-```powershell
-py -3.14 -m jarvis_mrb.remote_setup
-```
-
-This writes `%APPDATA%\JarvisForMRB\server.json`, generates a bearer token, and prints possible private LAN URLs for the iPhone.
-
-Do **not** forward port `8765` from the router to the public Internet. For away-from-home access, use a private tunnel such as Tailscale.
-
-Then open on a Mac:
+Open:
 
 ```text
 ios/JarvisIOS.xcodeproj
 ```
 
-Let Xcode resolve the Meta Wearables package, select the Apple development team, connect the iPhone, and run the `JarvisIOS` target. Enter the server URL and token in Settings.
+Let Xcode resolve Meta Wearables DAT, select the Apple development team, connect the iPhone, clean, and run the `JarvisIOS` target.
 
-## Meta Ray-Ban integration
+The Settings screen now includes:
 
-The iOS project links Meta's Wearables Device Access Toolkit components:
+- Home / LAN URL
+- Tailscale URL
+- Automatic model routing
+- manual 8B/27B mode
+- passive vision
+- ambient cues
+- proactive announcements
+- project focus
+- Kokoro status
+- email recipient allowlist
+- home geofence
 
-```text
-MWDATCore
-MWDATCamera
-```
+## Hands-free conversation
 
-The development configuration uses URL scheme `jarvismrb://` and Meta App ID `0` for Developer Mode.
-
-In the app:
-
-1. **Register** through Meta AI.
-2. **Camera Access** and approve permission.
-3. Wait for an eligible DAT device.
-4. **Start Camera** for the live glasses feed.
-
-## Hands-free voice
-
-Enable **Hands-free Jarvis**. The app prefers an available Bluetooth HFP microphone and routes output back to the matching hands-free device.
-
-Start with:
+Enable **Hands-free Jarvis** and say:
 
 ```text
 Jarvis, what's on my calendar Friday?
 ```
 
-or:
+or simply:
 
 ```text
 Jarvis.
 ```
 
-Jarvis replies `Yes, sir?` and listens for the command.
+Jarvis answers `Yes, sir?` and listens for the next utterance. After a normal response, there is a five-second conversational follow-up window in which the wake word is not required.
 
-After every normal response it listens for five seconds without requiring the wake word. If speech begins inside that window, the entire utterance becomes the next turn even if it extends past five seconds.
+Barge-in stays active while Kokoro or Apple fallback speech is playing. Interruptions such as `wait`, `actually...`, or a new sentence stop the current output and become the next conversational turn.
 
-While Jarvis is talking, a second recognizer provides barge-in. Saying `wait`, `stop`, `actually ...`, or simply starting a new sentence causes the active audio playback to stop and hands the interruption into the normal conversation loop. Echo filtering reduces the chance that Jarvis's own speaker output triggers this path.
+## Personality
+
+The system prompt is now designed around a restrained J.A.R.V.I.S.-inspired operating style rather than a generic LLM persona: calm, technically competent, conversational, respectful, dry when appropriate, willing to challenge a weak assumption, and proactive only when confidence and utility justify an interruption.
+
+It does not reproduce copyrighted movie dialogue or scripts; it implements the behavioral characteristics needed for the interaction style.
 
 ## Permission policy
 
-Defaults:
+Defaults remain:
 
 ```text
 read            auto
@@ -272,6 +333,8 @@ external_write  confirm
 destructive     confirm
 security        confirm
 ```
+
+Background-task creation and state updates are local writes. Background cancellation is destructive. Gmail/Calendar writes keep their existing confirmation controls.
 
 ## Architecture
 
@@ -282,28 +345,36 @@ Ray-Ban Meta
         |
         v
 Native Jarvis iPhone app
-  wake/conversation/STT
+  wake + conversation STT
+  LAN/Tailscale endpoint failover
+  companion WebSocket
+  1 fps passive vision sampler
   streamed response text
-  Qwen audio playback + barge-in
-  camera / geofence
+  Kokoro audio playback + barge-in
+  ambient cues / proactive announcements
         |
         v
 Authenticated Jarvis API :8765
         |
-        +-- streamed Qwen planner via Ollama
-        +-- Qwen3-TTS proxy -> WSL :8880 -> RTX 5080
-        +-- persistent conversation history
-        +-- Windows PC / Opera tools
+        +-- speculative router
+        |     +-- Qwen3 8B for routine turns
+        |     +-- Qwen3.8 27B for hard turns
+        |
+        +-- Kokoro-82M TTS -> WSL :8880
+        +-- recent conversation SQLite
+        +-- episodic semantic memory + nomic-embed-text
+        +-- Moondream passive-vision worker
+        +-- environmental state graph
+        +-- background worker queue
+        +-- Windows / Opera tools
         +-- Gmail / Contacts / Calendar
-        +-- persistent jobs
+        +-- scheduled/event jobs
 ```
 
-## Remaining major work
+## Remaining hardening work
 
-1. Tune Qwen3-TTS voice/instruction parameters on the physical Ray-Bans; optionally move from Ryan to a designed/cloned custom Jarvis voice.
-2. Move sentence-level TTS to true PCM audio streaming if first-audio latency still needs to fall further.
-3. Validate screen-locked/background voice behavior for long sessions.
-4. Replace continuous Apple Speech wake detection with a dedicated low-power local keyword spotter if all-day use requires it.
-5. Add vision requests that send camera frames/photos to a multimodal model.
-6. Add Tailscale/private remote connectivity for away-from-home use.
-7. Add longer-term semantic memory beyond the current durable short-term window.
+- validate all-day/background operation under screen lock and iOS power management
+- benchmark passive-vision CPU cadence and optionally dedicate GPU headroom if worthwhile
+- add richer multi-step research/code worker toolchains to the background queue
+- session-scope pending confirmation state for simultaneous clients
+- add PC wake/recovery strategy so remote Jarvis remains available when Windows sleeps

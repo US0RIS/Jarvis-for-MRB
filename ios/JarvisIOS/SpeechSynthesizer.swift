@@ -37,7 +37,10 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     private var bargeInRequest: SFSpeechAudioBufferRecognitionRequest?
     private var bargeInTask: SFSpeechRecognitionTask?
     private var bargeInTapInstalled = false
+    private var bargeInFinalizeTask: Task<Void, Never>?
     private var spokenTextForEchoFilter = ""
+    private var latestBargeInTranscript = ""
+    private var lastBargeInTranscriptChange = Date.distantPast
     private var didBargeIn = false
 
     init(audioRouteManager: AudioRouteManager) {
@@ -50,12 +53,8 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
 
-        if synthesizer.isSpeaking {
-            let interrupted = currentUtterance
-            synthesizer.stopSpeaking(at: .immediate)
-            if let interrupted {
-                finishSpeech(interrupted)
-            }
+        if currentUtterance != nil {
+            stopSpeaking()
         }
 
         do {
@@ -78,6 +77,8 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         currentUtterance = utterance
         isSpeaking = true
         spokenTextForEchoFilter = cleaned
+        latestBargeInTranscript = ""
+        lastBargeInTranscriptChange = Date.distantPast
         didBargeIn = false
         BargeInBuffer.store("")
 
@@ -113,10 +114,15 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
     func stopSpeaking() {
         guard let utterance = currentUtterance else { return }
+        // This is an explicit application stop (for example hands-free mode was
+        // switched off), not a conversational barge-in. Finish immediately.
+        bargeInFinalizeTask?.cancel()
+        bargeInFinalizeTask = nil
+        didBargeIn = false
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
-        finishSpeech(utterance)
+        finalizeSpeechNow(utterance)
     }
 
     private func startBargeInListening() {
@@ -159,16 +165,31 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
         bargeInTask = bargeInRecognizer.recognitionTask(with: request) { [weak self] result, _ in
             Task { @MainActor in
-                guard let self, self.isSpeaking, !self.didBargeIn, let result else { return }
+                guard let self, self.currentUtterance != nil, let result else { return }
                 let heard = result.bestTranscription.formattedString
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard self.shouldBargeIn(with: heard) else { return }
+                guard !heard.isEmpty else { return }
 
+                if heard != self.latestBargeInTranscript {
+                    self.latestBargeInTranscript = heard
+                    self.lastBargeInTranscriptChange = Date()
+                }
+
+                if self.didBargeIn {
+                    // Keep updating the handoff while the user finishes the sentence
+                    // after Jarvis has already gone silent.
+                    BargeInBuffer.store(self.commandPayload(fromInterruption: heard))
+                    return
+                }
+
+                guard self.isSpeaking, self.shouldBargeIn(with: heard) else { return }
                 self.didBargeIn = true
                 BargeInBuffer.store(self.commandPayload(fromInterruption: heard))
-                // Immediate stop is the key behavior: Jarvis yields as soon as the
-                // user starts a distinct utterance instead of finishing its turn.
-                self.stopSpeaking()
+
+                // Stop only the TTS here. Do not tear down the microphone yet: keep
+                // it open briefly so "Actually, close it instead" is captured as a
+                // complete interruption rather than just the first word.
+                self.synthesizer.stopSpeaking(at: .immediate)
             }
         }
     }
@@ -185,11 +206,14 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
         let joined = normalizedHeard.joined(separator: " ")
         let explicit = [
-            "jarvis", "stop", "wait", "hold on", "actually", "no ", "no,",
+            "jarvis", "stop", "wait", "hold on", "actually", "no",
             "but ", "what ", "why ", "how ", "when ", "where ", "who ",
             "which ", "can you", "could you", "don't", "do not"
         ]
-        if explicit.contains(where: { joined == $0.trimmingCharacters(in: .punctuationCharacters) || joined.hasPrefix($0) }) {
+        if explicit.contains(where: {
+            let cue = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            return joined == cue || joined.hasPrefix(cue + " ")
+        }) {
             return true
         }
 
@@ -248,6 +272,24 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             .filter { !$0.isEmpty }
     }
 
+    private func finishBargeInAfterUserPauses(_ utterance: AVSpeechUtterance) async {
+        let started = Date()
+        while !Task.isCancelled {
+            let now = Date()
+            let quietFor = now.timeIntervalSince(lastBargeInTranscriptChange)
+            if quietFor >= 0.9 || now.timeIntervalSince(started) >= 4.0 {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+
+        if !latestBargeInTranscript.isEmpty {
+            BargeInBuffer.store(commandPayload(fromInterruption: latestBargeInTranscript))
+        }
+        bargeInFinalizeTask = nil
+        finalizeSpeechNow(utterance)
+    }
+
     private func stopBargeInListening() {
         if bargeInAudioEngine.isRunning {
             bargeInAudioEngine.stop()
@@ -272,10 +314,31 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
     private func finishSpeech(_ utterance: AVSpeechUtterance) {
         guard currentUtterance === utterance else { return }
+
+        if didBargeIn {
+            isSpeaking = false
+            // Keep the barge-in microphone alive until the user's sentence reaches
+            // a short pause, then resume Jarvis's ordinary five-second follow-up
+            // listener with the captured text already seeded into it.
+            if bargeInFinalizeTask == nil {
+                bargeInFinalizeTask = Task { [weak self] in
+                    guard let self else { return }
+                    await self.finishBargeInAfterUserPauses(utterance)
+                }
+            }
+            return
+        }
+
+        finalizeSpeechNow(utterance)
+    }
+
+    private func finalizeSpeechNow(_ utterance: AVSpeechUtterance) {
+        guard currentUtterance === utterance else { return }
         stopBargeInListening()
         currentUtterance = nil
         isSpeaking = false
         spokenTextForEchoFilter = ""
+        latestBargeInTranscript = ""
         completion?.resume()
         completion = nil
         audioRouteManager.refresh()

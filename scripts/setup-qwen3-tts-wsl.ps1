@@ -58,12 +58,11 @@ print("CUDA available:", torch.cuda.is_available())
 if not torch.cuda.is_available():
     raise SystemExit("PyTorch cannot see CUDA inside WSL.")
 print("CUDA device:", torch.cuda.get_device_name(0))
-cap = torch.cuda.get_device_capability(0)
-print("Compute capability:", cap)
+print("Compute capability:", torch.cuda.get_device_capability(0))
 PY
 
 # Download weights now rather than making the first spoken Jarvis response pay the
-# network/model-download cost. The model file is ~1.8 GB plus tokenizer assets.
+# network/model-download cost.
 python - <<'PY'
 from huggingface_hub import snapshot_download
 snapshot_download("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
@@ -83,15 +82,23 @@ nohup env \
 
 echo "Starting/warming Qwen3-TTS..."
 for i in $(seq 1 240); do
-  if curl -fsS http://127.0.0.1:8880/health >/dev/null 2>&1; then
-    echo "Qwen3-TTS is ready on http://127.0.0.1:8880"
+  if curl -fsS http://127.0.0.1:8880/health 2>/dev/null | python -c '
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+    ready = bool((payload.get("backend") or {}).get("ready"))
+except Exception:
+    ready = False
+raise SystemExit(0 if ready else 1)
+' >/dev/null 2>&1; then
+    echo "Qwen3-TTS model is loaded and ready on http://127.0.0.1:8880"
     exit 0
   fi
   sleep 1
 done
 
-echo "Qwen3-TTS did not become healthy in time. Recent log:" >&2
-tail -n 80 "$HOME/.local/share/jarvis/qwen3-tts.log" >&2 || true
+echo "Qwen3-TTS did not become ready in time. Recent log:" >&2
+tail -n 100 "$HOME/.local/share/jarvis/qwen3-tts.log" >&2 || true
 exit 21
 '@
 

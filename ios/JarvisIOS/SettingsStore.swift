@@ -12,9 +12,12 @@ final class SettingsStore: ObservableObject {
 
     let conversationSessionID: String
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     init() {
+        let defaults = UserDefaults.standard
+        self.defaults = defaults
+
         if let savedSessionID = defaults.string(forKey: "jarvis.conversationSessionID"), !savedSessionID.isEmpty {
             conversationSessionID = savedSessionID
         } else {

@@ -102,7 +102,6 @@ def launch_app(name: str) -> ToolResult:
         if _start_app_via_start_menu(name):
             return ToolResult(True, f"Opened {name} from the Windows Start menu.")
 
-        # Last fallback: Windows app alias / URI / executable association.
         try:
             result = subprocess.run(
                 ["cmd.exe", "/c", "start", "", name],
@@ -124,24 +123,55 @@ def close_app(name: str) -> ToolResult:
     if not matches:
         return ToolResult(True, f"{name} does not appear to be running.")
 
-    closed = 0
+    terminated: list[psutil.Process] = []
+    denied = 0
     for process in matches:
         try:
             process.terminate()
-            closed += 1
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            terminated.append(process)
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.AccessDenied:
+            denied += 1
             continue
 
-    _, alive = psutil.wait_procs(matches, timeout=3)
+    # Never pass inaccessible processes to wait_procs: on Windows, wait() itself
+    # can raise AccessDenied and previously crashed the entire Jarvis request.
+    alive: list[psutil.Process] = []
+    if terminated:
+        try:
+            _, alive = psutil.wait_procs(terminated, timeout=2)
+        except (psutil.AccessDenied, OSError):
+            alive = terminated
+
+    killed = 0
     for process in alive:
         try:
             process.kill()
+            killed += 1
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    if closed:
+    # Give Windows a moment, then verify by re-querying rather than relying on
+    # wait() return codes from protected/sandboxed processes.
+    remaining = _matching_processes(name)
+    if not remaining:
         return ToolResult(True, f"Closed {name}.")
-    return ToolResult(False, f"Jarvis found {name}, but Windows would not allow it to be closed.")
+
+    if terminated or killed:
+        return ToolResult(
+            False,
+            f"Jarvis asked {name} to close, but {len(remaining)} matching process(es) are still running. "
+            "Windows may be protecting one of them.",
+        )
+
+    if denied:
+        return ToolResult(
+            False,
+            f"Jarvis found {name}, but Windows denied permission to close the matching process(es).",
+        )
+
+    return ToolResult(False, f"Jarvis could not close {name}.")
 
 
 def open_url(url: str) -> ToolResult:

@@ -45,18 +45,17 @@ def _ask_service(text: str) -> str:
         response = httpx.post(
             f"{SERVICE_URL}/command",
             json={"text": text},
-            timeout=5.0,
+            timeout=120.0,
         )
         response.raise_for_status()
         payload = response.json()
         return str(payload.get("message", ""))
     except (httpx.HTTPError, ValueError):
-        # Keep the CLI usable even if the local service cannot start.
         return handle_natural_language(text).message
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 2")
+    print("Jarvis for MRB — milestone 4")
     print("Speak naturally. Type 'help' for examples or 'exit' to quit.")
 
     while True:

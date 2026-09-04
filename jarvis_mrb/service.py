@@ -195,7 +195,7 @@ def _warm_fast_model() -> None:
         return
     threading.Thread(
         target=_warm_selected_model,
-        args=("", FAST_MODEL),
+        args=(QUALITY_MODEL, FAST_MODEL),
         name="jarvis-fast-warm",
         daemon=True,
     ).start()
@@ -206,7 +206,8 @@ def startup() -> None:
     _ensure_scheduler()
     _start_tts_in_background()
     # Automatic routing should feel fast on the first ordinary request as well as
-    # later ones. Preload the 8B model without blocking API startup.
+    # later ones. Clear a stale 27B resident model and preload 8B without blocking
+    # API startup.
     _warm_fast_model()
 
 

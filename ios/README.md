@@ -1,6 +1,6 @@
 # Jarvis iOS client
 
-`JarvisIOS.xcodeproj` is a native SwiftUI iPhone app. It connects to the Jarvis backend, supports text and voice commands, speaks responses, fires a `home_arrival` event from a Core Location geofence, and integrates Meta's Wearables Device Access Toolkit for registration, camera permission, and live Ray-Ban camera preview.
+`JarvisIOS.xcodeproj` is a native SwiftUI iPhone app. It connects to the Jarvis backend, supports text and hands-free voice conversation, speaks responses, fires a `home_arrival` event from a Core Location geofence, and integrates Meta's Wearables Device Access Toolkit for registration, camera permission, and live Ray-Ban camera preview.
 
 ## Requirements
 
@@ -42,18 +42,40 @@ In the iPhone app's Settings screen enter:
 
 Do not forward port `8765` from the router to the public Internet. For access away from home, use a private tunnel such as Tailscale and point the app at the PC's private tunnel address.
 
+## Conversation identity and memory
+
+The iPhone creates a random conversation session ID the first time this build runs and stores it in `UserDefaults`. Every command sends that session ID to the backend. The backend persists the dialogue in SQLite and supplies the most recent 20 user/assistant messages to Qwen when a request needs contextual reasoning.
+
+That means follow-ups can rely on prior turns:
+
+```text
+You: What's on my calendar Friday?
+Jarvis: ...
+You: What about Saturday?
+```
+
+or:
+
+```text
+You: Open Spotify.
+Jarvis: Spotify is open.
+You: Close it.
+```
+
+The short-term history survives ordinary app and backend restarts as long as the iPhone keeps the same session ID.
+
 ## Hands-free voice
 
 The app has two voice paths:
 
 - **Push to Talk** for explicit one-shot commands
-- **Hands-free Jarvis** for a continuous `Jarvis` interaction loop
+- **Hands-free Jarvis** for a continuous conversational loop
 
 The hands-free path configures an iOS `playAndRecord` / `voiceChat` session and explicitly prefers an available Bluetooth HFP microphone. If the Ray-Bans expose an HFP input, Jarvis selects it instead of assuming the system has already chosen the glasses. iOS then routes playback to the matching Bluetooth hands-free output.
 
 The main screen shows the actual audio route. With the glasses working as the voice terminal, it should identify the Ray-Ban / Meta Bluetooth route rather than the iPhone microphone.
 
-Try either form:
+Start with either form:
 
 ```text
 Jarvis, open Spotify.
@@ -67,9 +89,17 @@ Jarvis.
 
 After the second form, Jarvis says `Yes?` and treats the next utterance as the command.
 
-The loop waits for a short period of transcript stability before submitting a command, stops recognition while Jarvis speaks so the TTS cannot trigger itself, and automatically restarts an Apple Speech recognition task when it naturally ends.
+After every normal hands-free response finishes speaking, Jarvis automatically listens for **five seconds**. Speech that starts during that window is accepted as a follow-up without saying `Jarvis` again. Every follow-up response opens a new five-second window, allowing a normal multi-turn conversation. If no one speaks during the window, Jarvis returns to wake-word mode.
 
-The app has the `audio` background mode enabled and keeps its duplex audio session active while hands-free mode is running. Physical-device testing is still required to establish how reliably the current Speech-framework implementation survives screen lock, interruptions, and long sessions on the target iPhone/Ray-Ban combination.
+The five-second timer is a *start-speaking* deadline. Once a follow-up begins, Jarvis lets the utterance finish even if it runs past the original deadline.
+
+Dictation-like commands use longer silence thresholds, and Jarvis buffers partial text across Apple Speech task restarts so email addresses, URLs, spelling, and long message bodies are less likely to be cut off. The recognizer also biases toward `Jarvis`, `Dubeck`, and `Emmett Dubeck`, and deterministically corrects common `Dubek` / `Du Beck` transcriptions to `Dubeck` before sending text to the agent.
+
+Protected actions retain the confirmation barrier. Jarvis gives them a longer follow-up window so `confirm` or `cancel` can be spoken without another wake word.
+
+The loop stops recognition while Jarvis speaks so TTS cannot trigger itself, automatically restarts Apple Speech recognition when a task ends, and tears down stale recognition after audio interruptions/media-service resets.
+
+The app has the `audio` background mode enabled and keeps its duplex audio session active while hands-free mode is running. Physical-device testing is still required to establish how reliably the Speech-framework implementation survives screen lock, interruptions, and long sessions on the target iPhone/Ray-Ban combination.
 
 This is not yet a dedicated low-power keyword spotter. For truly all-day operation, the next voice-specific upgrade would be a local keyword detector for `Jarvis` rather than continuously transcribing audio with the Speech framework.
 
@@ -112,13 +142,15 @@ Ray-Ban Meta
         |
         v
 Jarvis iOS client
-  - hands-free speech recognition/TTS
+  - hands-free conversation / TTS
+  - stable conversation session ID
   - live camera
   - home geofence
         |
         v
 Authenticated Jarvis API
         |
+        +-- persistent recent conversation
         +-- Windows tools
         +-- Opera tabs
         +-- Gmail / Contacts / Calendar

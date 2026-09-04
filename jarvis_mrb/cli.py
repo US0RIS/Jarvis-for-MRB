@@ -97,8 +97,8 @@ def _stream_service(text: str) -> Iterator[str]:
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 9")
-    print("Speak naturally. Type 'help' for examples or 'exit' to quit.")
+    print("Jarvis for MRB — milestone 11")
+    print("Persistent presence enabled. Type 'exit' to quit.")
 
     while True:
         try:

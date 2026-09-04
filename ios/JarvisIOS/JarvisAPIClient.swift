@@ -9,6 +9,10 @@ struct EmailAllowlistResponse: Decodable {
     let addresses: [String]
 }
 
+struct TTSStatusResponse: Decodable {
+    let status: String
+}
+
 private struct APIErrorDetail: Decodable {
     let detail: String
 }
@@ -103,6 +107,17 @@ struct JarvisAPIClient {
                 }
             }
         }
+    }
+
+    func ttsStatus() async throws -> String {
+        guard let url = URL(string: baseURL)?.appendingPathComponent("tts/status") else {
+            throw JarvisAPIError.badURL
+        }
+        var request = URLRequest(url: url)
+        addAuthorization(to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(TTSStatusResponse.self, from: data).status
     }
 
     func synthesizeSpeech(_ text: String) async throws -> Data {

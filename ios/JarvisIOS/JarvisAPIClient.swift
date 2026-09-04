@@ -15,7 +15,14 @@ struct TTSStatusResponse: Decodable {
 
 struct PlannerModelResponse: Decodable {
     let model: String
+    let autoRoute: Bool
     let options: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case autoRoute = "auto_route"
+        case options
+    }
 }
 
 private struct APIErrorDetail: Decodable {
@@ -26,6 +33,64 @@ private struct JarvisStreamPacket: Decodable {
     let type: String
     let text: String?
     let ok: Bool?
+}
+
+private actor JarvisEndpointResolver {
+    static let shared = JarvisEndpointResolver()
+
+    private var cachedURL: String?
+    private var cachedUntil = Date.distantPast
+
+    func resolve(primary: String, fallback: String, apiToken: String) async throws -> String {
+        let candidates = [primary, fallback]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { result, item in
+                if !result.contains(item) { result.append(item) }
+            }
+
+        guard !candidates.isEmpty else { throw JarvisAPIError.badURL }
+
+        if let cachedURL, cachedUntil > Date(), candidates.contains(cachedURL) {
+            return cachedURL
+        }
+
+        for (index, candidate) in candidates.enumerated() {
+            let timeout: TimeInterval = index == 0 ? 0.55 : 2.0
+            if await probe(candidate, apiToken: apiToken, timeout: timeout) {
+                cachedURL = candidate
+                cachedUntil = Date().addingTimeInterval(5)
+                return candidate
+            }
+        }
+
+        cachedURL = nil
+        cachedUntil = .distantPast
+        throw URLError(.cannotConnectToHost)
+    }
+
+    func invalidate(_ url: String) {
+        if cachedURL == url {
+            cachedURL = nil
+            cachedUntil = .distantPast
+        }
+    }
+
+    private func probe(_ baseURL: String, apiToken: String, timeout: TimeInterval) async -> Bool {
+        guard let url = URL(string: baseURL)?.appendingPathComponent("health") else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
 }
 
 enum JarvisAPIError: LocalizedError {
@@ -44,29 +109,52 @@ enum JarvisAPIError: LocalizedError {
 
 struct JarvisAPIClient {
     let baseURL: String
+    let fallbackBaseURL: String
     let apiToken: String
     let sessionID: String
 
+    init(baseURL: String, fallbackBaseURL: String = "", apiToken: String, sessionID: String) {
+        self.baseURL = baseURL
+        self.fallbackBaseURL = fallbackBaseURL
+        self.apiToken = apiToken
+        self.sessionID = sessionID
+    }
+
+    func activeBaseURL() async throws -> String {
+        try await JarvisEndpointResolver.shared.resolve(
+            primary: baseURL,
+            fallback: fallbackBaseURL,
+            apiToken: apiToken
+        )
+    }
+
     func health() async throws -> Bool {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("health") else { throw JarvisAPIError.badURL }
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent("health") else { throw JarvisAPIError.badURL }
         var request = URLRequest(url: url)
         request.timeoutInterval = 5
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw JarvisAPIError.badResponse }
-        return (200..<300).contains(http.statusCode)
+        addAuthorization(to: &request)
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw JarvisAPIError.badResponse }
+            return (200..<300).contains(http.statusCode)
+        } catch {
+            await JarvisEndpointResolver.shared.invalidate(base)
+            throw error
+        }
     }
 
     func command(_ text: String) async throws -> JarvisAPIResponse {
         try await post(path: "command", body: ["text": text, "session_id": sessionID])
     }
 
-    /// Streams response text as soon as the backend has made its tool decision.
-    /// The wire format is newline-delimited JSON, but callers only see text deltas.
     func streamCommand(_ text: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
+                var resolvedBase = ""
                 do {
-                    guard let url = URL(string: baseURL)?.appendingPathComponent("command/stream") else {
+                    resolvedBase = try await activeBaseURL()
+                    guard let url = URL(string: resolvedBase)?.appendingPathComponent("command/stream") else {
                         throw JarvisAPIError.badURL
                     }
                     var request = URLRequest(url: url)
@@ -111,6 +199,9 @@ struct JarvisAPIClient {
                     }
                     continuation.finish()
                 } catch {
+                    if !resolvedBase.isEmpty {
+                        await JarvisEndpointResolver.shared.invalidate(resolvedBase)
+                    }
                     continuation.finish(throwing: error)
                 }
             }
@@ -118,47 +209,45 @@ struct JarvisAPIClient {
     }
 
     func ttsStatus() async throws -> String {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("tts/status") else {
-            throw JarvisAPIError.badURL
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        addAuthorization(to: &request)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await get(path: "tts/status", timeout: 5)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(TTSStatusResponse.self, from: data).status
     }
 
     func plannerModel() async throws -> PlannerModelResponse {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("settings/planner-model") else {
-            throw JarvisAPIError.badURL
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        addAuthorization(to: &request)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await get(path: "settings/planner-model", timeout: 10)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PlannerModelResponse.self, from: data)
     }
 
-    func setPlannerModel(_ model: String) async throws -> PlannerModelResponse {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("settings/planner-model") else {
+    func setPlannerModel(model: String? = nil, autoRoute: Bool? = nil) async throws -> PlannerModelResponse {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent("settings/planner-model") else {
             throw JarvisAPIError.badURL
         }
+        var payload: [String: Any] = [:]
+        if let model { payload["model"] = model }
+        if let autoRoute { payload["auto_route"] = autoRoute }
+
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         addAuthorization(to: &request)
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": model])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try JSONDecoder().decode(PlannerModelResponse.self, from: data)
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try JSONDecoder().decode(PlannerModelResponse.self, from: data)
+        } catch {
+            await JarvisEndpointResolver.shared.invalidate(base)
+            throw error
+        }
     }
 
     func synthesizeSpeech(_ text: String) async throws -> Data {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("tts") else {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent("tts") else {
             throw JarvisAPIError.badURL
         }
         var request = URLRequest(url: url)
@@ -169,10 +258,15 @@ struct JarvisAPIClient {
         addAuthorization(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        guard !data.isEmpty else { throw JarvisAPIError.badResponse }
-        return data
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            guard !data.isEmpty else { throw JarvisAPIError.badResponse }
+            return data
+        } catch {
+            await JarvisEndpointResolver.shared.invalidate(base)
+            throw error
+        }
     }
 
     func event(_ name: String) async throws -> JarvisAPIResponse {
@@ -180,20 +274,14 @@ struct JarvisAPIClient {
     }
 
     func emailAllowlist() async throws -> [String] {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("settings/email-allowlist") else {
-            throw JarvisAPIError.badURL
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        addAuthorization(to: &request)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await get(path: "settings/email-allowlist", timeout: 10)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(EmailAllowlistResponse.self, from: data).addresses
     }
 
     func setEmailAllowlist(_ addresses: [String]) async throws -> [String] {
-        guard let url = URL(string: baseURL)?.appendingPathComponent("settings/email-allowlist") else {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent("settings/email-allowlist") else {
             throw JarvisAPIError.badURL
         }
         var request = URLRequest(url: url)
@@ -203,13 +291,33 @@ struct JarvisAPIClient {
         addAuthorization(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: ["addresses": addresses])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try JSONDecoder().decode(EmailAllowlistResponse.self, from: data).addresses
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try JSONDecoder().decode(EmailAllowlistResponse.self, from: data).addresses
+        } catch {
+            await JarvisEndpointResolver.shared.invalidate(base)
+            throw error
+        }
+    }
+
+    private func get(path: String, timeout: TimeInterval) async throws -> (Data, URLResponse) {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent(path) else { throw JarvisAPIError.badURL }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        addAuthorization(to: &request)
+        do {
+            return try await URLSession.shared.data(for: request)
+        } catch {
+            await JarvisEndpointResolver.shared.invalidate(base)
+            throw error
+        }
     }
 
     private func post(path: String, body: [String: String]) async throws -> JarvisAPIResponse {
-        guard let url = URL(string: baseURL)?.appendingPathComponent(path) else { throw JarvisAPIError.badURL }
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent(path) else { throw JarvisAPIError.badURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 120
@@ -217,9 +325,14 @@ struct JarvisAPIClient {
         addAuthorization(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response: response, data: data)
-        return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        } catch {
+            await JarvisEndpointResolver.shared.invalidate(base)
+            throw error
+        }
     }
 
     private func addAuthorization(to request: inout URLRequest) {

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import os
 
 from jarvis_mrb.event_bus import companion_events, emit_cue
 from jarvis_mrb.planner_model import QUALITY_MODEL
@@ -15,6 +15,7 @@ APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 DB_PATH = APP_DIR / "background_tasks.sqlite3"
 _POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jarvis-worker")
 _LOCK = threading.RLock()
+_CANCELLED: set[int] = set()
 
 
 def _connect() -> sqlite3.Connection:
@@ -69,6 +70,15 @@ def submit(prompt: str, session_id: str = "default") -> dict[str, Any]:
     return get_task(task_id)
 
 
+def _cancelled(task_id: int) -> bool:
+    with _LOCK:
+        if task_id in _CANCELLED:
+            return True
+    with _connect() as conn:
+        row = conn.execute("SELECT status FROM background_tasks WHERE id=?", (task_id,)).fetchone()
+    return row is None or str(row["status"]) == "cancelled"
+
+
 def _run(task_id: int) -> None:
     now = datetime.now().astimezone().isoformat()
     with _connect() as conn:
@@ -84,7 +94,6 @@ def _run(task_id: int) -> None:
         session_id = str(row["session_id"])
 
     try:
-        # Import lazily so the worker queue does not create an agent import cycle.
         from jarvis_mrb.conversation import recent_messages
         from jarvis_mrb.memory import memory_context
         from jarvis_mrb.streaming_agent import stream_natural_language
@@ -95,35 +104,52 @@ def _run(task_id: int) -> None:
             from jarvis_mrb.conversation import ConversationMessage
             history = [ConversationMessage(role="assistant", content=memory), *history]
 
-        pieces = list(
-            stream_natural_language(
-                prompt,
-                history=history,
-                model_override=QUALITY_MODEL,
-                allow_background=False,
-                announce_analysis=False,
-            )
-        )
+        pieces: list[str] = []
+        for piece in stream_natural_language(
+            prompt,
+            history=history,
+            model_override=QUALITY_MODEL,
+            allow_background=False,
+            announce_analysis=False,
+        ):
+            if _cancelled(task_id):
+                return
+            pieces.append(piece)
+
+        if _cancelled(task_id):
+            return
+
         result = "".join(pieces).strip() or "Background task completed without a textual result."
         with _connect() as conn:
             conn.execute(
-                "UPDATE background_tasks SET status='completed',result=?,error=NULL,updated_at=? WHERE id=?",
+                "UPDATE background_tasks SET status='completed',result=?,error=NULL,updated_at=? WHERE id=? AND status!='cancelled'",
                 (result[:20000], datetime.now().astimezone().isoformat(), task_id),
             )
             conn.commit()
+        if _cancelled(task_id):
+            return
+
+        # Completion is an interruption cue, not an audiobook. Keep the unsolicited
+        # spoken payload short; the complete result stays in the task database and
+        # can be requested conversationally.
+        concise = result.replace("\n", " ").strip()
+        if len(concise) > 360:
+            concise = concise[:357].rsplit(" ", 1)[0] + "..."
         companion_events.publish(
             {
                 "type": "background_complete",
                 "task_id": task_id,
-                "message": f"Background task {task_id} is complete. {result[:1200]}",
+                "message": f"Background task {task_id} is complete. {concise}",
                 "cue": "task_complete",
             }
         )
     except Exception as exc:
+        if _cancelled(task_id):
+            return
         message = str(exc)[:4000]
         with _connect() as conn:
             conn.execute(
-                "UPDATE background_tasks SET status='failed',error=?,updated_at=? WHERE id=?",
+                "UPDATE background_tasks SET status='failed',error=?,updated_at=? WHERE id=? AND status!='cancelled'",
                 (message, datetime.now().astimezone().isoformat(), task_id),
             )
             conn.commit()
@@ -131,7 +157,7 @@ def _run(task_id: int) -> None:
             {
                 "type": "background_failed",
                 "task_id": task_id,
-                "message": f"Background task {task_id} failed: {message}",
+                "message": f"Background task {task_id} failed: {message[:500]}",
                 "cue": "error",
             }
         )
@@ -155,15 +181,19 @@ def list_tasks(limit: int = 10) -> list[dict[str, Any]]:
 
 
 def cancel(task_id: int) -> dict[str, Any]:
-    with _LOCK, _connect() as conn:
-        row = conn.execute("SELECT status FROM background_tasks WHERE id=?", (int(task_id),)).fetchone()
+    task_id = int(task_id)
+    with _LOCK:
+        _CANCELLED.add(task_id)
+    with _connect() as conn:
+        row = conn.execute("SELECT status FROM background_tasks WHERE id=?", (task_id,)).fetchone()
         if row is None:
+            with _LOCK:
+                _CANCELLED.discard(task_id)
             raise ValueError(f"Background task {task_id} does not exist.")
-        if str(row["status"]) in {"completed", "failed", "cancelled"}:
-            return get_task(task_id)
-        conn.execute(
-            "UPDATE background_tasks SET status='cancelled',updated_at=? WHERE id=?",
-            (datetime.now().astimezone().isoformat(), int(task_id)),
-        )
-        conn.commit()
+        if str(row["status"]) not in {"completed", "failed", "cancelled"}:
+            conn.execute(
+                "UPDATE background_tasks SET status='cancelled',updated_at=? WHERE id=?",
+                (datetime.now().astimezone().isoformat(), task_id),
+            )
+            conn.commit()
     return get_task(task_id)

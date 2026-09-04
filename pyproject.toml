@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-for-mrb"
-version = "0.5.0"
+version = "0.6.0"
 description = "Personal agent backend for Ray-Ban Meta glasses"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,6 +26,7 @@ jarvis-service = "jarvis_mrb.service:main"
 jarvis-install-startup = "jarvis_mrb.startup:main"
 jarvis-google-auth = "jarvis_mrb.google_auth:main"
 jarvis-browser-setup = "jarvis_mrb.browser_setup:main"
+jarvis-remote-setup = "jarvis_mrb.remote_setup:main"
 
 [tool.setuptools.packages.find]
 include = ["jarvis_mrb*"]

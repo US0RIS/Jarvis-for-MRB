@@ -1,8 +1,17 @@
 import SwiftUI
+import MWDATCore
 
 @main
 struct JarvisIOSApp: App {
     @StateObject private var appModel = JarvisAppModel()
+
+    init() {
+        do {
+            try Wearables.configure()
+        } catch {
+            assertionFailure("Failed to configure Meta Wearables SDK: \(error)")
+        }
+    }
 
     var body: some Scene {
         WindowGroup {

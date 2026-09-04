@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import MWDATCore
 
@@ -9,7 +10,11 @@ struct JarvisIOSApp: App {
         do {
             try Wearables.configure()
         } catch {
-            assertionFailure("Failed to configure Meta Wearables SDK: \(error)")
+            // Meta's current sample apps deliberately log configuration failures
+            // instead of trapping. A debug assertion here causes an installed
+            // development build to terminate immediately on launch, which hides
+            // the actual SDK error and makes the rest of Jarvis unusable.
+            NSLog("[Jarvis] Failed to configure Meta Wearables SDK: \(error)")
         }
         _appModel = StateObject(wrappedValue: JarvisAppModel())
     }

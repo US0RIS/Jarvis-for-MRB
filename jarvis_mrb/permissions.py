@@ -41,6 +41,8 @@ TOOL_RISK: dict[str, Risk] = {
     "google.status": "read",
     "contacts.resolve": "read",
     "calendar.list": "read",
+    "calendar.query": "read",
+    "calendar.recent": "read",
     "calendar.create": "external_write",
     "gmail.send": "external_write",
     "jobs.list": "read",
@@ -49,13 +51,11 @@ TOOL_RISK: dict[str, Risk] = {
     "jobs.cancel": "destructive",
 }
 
-
 @dataclass(frozen=True)
 class PermissionDecision:
     allowed: bool
     needs_confirmation: bool
     risk: Risk
-
 
 def _load() -> dict[str, str]:
     APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,17 +71,14 @@ def _load() -> dict[str, str]:
             pass
     return policy
 
-
 def policy_summary() -> str:
     policy = _load()
     return ", ".join(f"{key}={policy[key]}" for key in DEFAULT_POLICY)
-
 
 def decide(tool: str) -> PermissionDecision:
     risk = TOOL_RISK.get(tool, "security")
     mode = _load().get(risk, "confirm")
     return PermissionDecision(allowed=mode != "deny", needs_confirmation=mode == "confirm", risk=risk)
-
 
 def set_policy(risk: str, mode: str) -> str:
     if risk not in DEFAULT_POLICY:

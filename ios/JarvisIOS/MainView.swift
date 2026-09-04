@@ -151,6 +151,7 @@ private struct MetaGlassesCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 LabeledContent("Registration", value: manager.registrationStatus)
                 LabeledContent("Glasses available", value: String(manager.availableDeviceCount))
+                LabeledContent("DAT eligible", value: manager.hasEligibleDevice ? "Yes" : "Waiting")
                 LabeledContent("Camera permission", value: manager.cameraPermissionStatus)
                 LabeledContent("Stream", value: manager.streamState)
 

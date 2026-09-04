@@ -99,6 +99,7 @@ final class SpeechRecognizer: ObservableObject {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var tapInstalled = false
+    private var recognitionPrefix = ""
     private var interruptionTask: Task<Void, Never>?
     private var mediaResetTask: Task<Void, Never>?
 
@@ -123,7 +124,10 @@ final class SpeechRecognizer: ObservableObject {
 
     func startListening(preferBluetooth: Bool) throws {
         stopAudioOnly(cancelRecognition: true)
-        transcript = ""
+        // If the user began speaking over Jarvis, preserve the part already heard
+        // by the barge-in recognizer and continue the same sentence here.
+        recognitionPrefix = BargeInBuffer.take()
+        transcript = recognitionPrefix
         lastError = nil
 
         guard let recognizer, recognizer.isAvailable else {
@@ -148,6 +152,7 @@ final class SpeechRecognizer: ObservableObject {
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             self.request = nil
+            recognitionPrefix = ""
             throw NSError(domain: "JarvisSpeech", code: 4, userInfo: [NSLocalizedDescriptionKey: "The selected microphone is not ready yet. Try again in a moment."])
         }
 
@@ -170,9 +175,10 @@ final class SpeechRecognizer: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if let result {
-                    self.transcript = Self.applyPersonalVocabulary(
+                    let corrected = Self.applyPersonalVocabulary(
                         to: result.bestTranscription.formattedString
                     )
+                    self.transcript = Self.joinPrefix(self.recognitionPrefix, corrected)
                 }
                 if let error {
                     self.lastError = error.localizedDescription
@@ -204,6 +210,23 @@ final class SpeechRecognizer: ObservableObject {
         return corrected
     }
 
+    private static func joinPrefix(_ prefix: String, _ continuation: String) -> String {
+        let a = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        let b = continuation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if a.isEmpty { return b }
+        if b.isEmpty { return a }
+
+        // Recognition may restart quickly enough to hear the last word from the
+        // barge-in pipeline again. Avoid an obvious duplicate at the seam.
+        let aWords = a.split(separator: " ")
+        let bWords = b.split(separator: " ")
+        if let last = aWords.last, let first = bWords.first,
+           last.compare(first, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+            return a + " " + bWords.dropFirst().joined(separator: " ")
+        }
+        return a + " " + b
+    }
+
     private func stopAudioOnly(cancelRecognition: Bool) {
         if audioEngine.isRunning {
             audioEngine.stop()
@@ -216,6 +239,7 @@ final class SpeechRecognizer: ObservableObject {
         }
         task = nil
         isActive = false
+        recognitionPrefix = ""
         audioRouteManager.refresh()
     }
 

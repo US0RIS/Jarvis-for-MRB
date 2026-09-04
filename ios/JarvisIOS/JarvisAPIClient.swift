@@ -13,6 +13,12 @@ private struct APIErrorDetail: Decodable {
     let detail: String
 }
 
+private struct JarvisStreamPacket: Decodable {
+    let type: String
+    let text: String?
+    let ok: Bool?
+}
+
 enum JarvisAPIError: LocalizedError {
     case badURL
     case badResponse
@@ -41,6 +47,79 @@ struct JarvisAPIClient {
 
     func command(_ text: String) async throws -> JarvisAPIResponse {
         try await post(path: "command", body: ["text": text, "session_id": sessionID])
+    }
+
+    /// Streams response text as soon as the backend has made its tool decision.
+    /// The wire format is newline-delimited JSON, but callers only see text deltas.
+    func streamCommand(_ text: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    guard let url = URL(string: baseURL)?.appendingPathComponent("command/stream") else {
+                        throw JarvisAPIError.badURL
+                    }
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+                    addAuthorization(to: &request)
+                    request.httpBody = try JSONSerialization.data(withJSONObject: [
+                        "text": text,
+                        "session_id": sessionID,
+                    ])
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw JarvisAPIError.badResponse
+                    }
+                    guard (200..<300).contains(http.statusCode) else {
+                        var data = Data()
+                        for try await byte in bytes {
+                            data.append(byte)
+                            if data.count > 16_384 { break }
+                        }
+                        try validate(response: response, data: data)
+                        throw JarvisAPIError.badResponse
+                    }
+
+                    for try await line in bytes.lines {
+                        guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
+                        let packet = try JSONDecoder().decode(JarvisStreamPacket.self, from: data)
+                        switch packet.type {
+                        case "delta":
+                            if let text = packet.text, !text.isEmpty {
+                                continuation.yield(text)
+                            }
+                        case "done":
+                            continuation.finish()
+                            return
+                        default:
+                            continue
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    func synthesizeSpeech(_ text: String) async throws -> Data {
+        guard let url = URL(string: baseURL)?.appendingPathComponent("tts") else {
+            throw JarvisAPIError.badURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("audio/wav", forHTTPHeaderField: "Accept")
+        addAuthorization(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        guard !data.isEmpty else { throw JarvisAPIError.badResponse }
+        return data
     }
 
     func event(_ name: String) async throws -> JarvisAPIResponse {

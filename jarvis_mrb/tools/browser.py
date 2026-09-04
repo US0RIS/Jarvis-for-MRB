@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -26,17 +26,29 @@ def _cdp_get(path: str) -> httpx.Response:
         return client.get(f"{CDP_URL}{path}")
 
 
+def _short_title(title: str, url: str = "") -> str:
+    value = " ".join(title.split()).strip()
+    if not value:
+        try:
+            value = urlparse(url).hostname or "Untitled tab"
+        except ValueError:
+            value = "Untitled tab"
+    if len(value) > 72:
+        value = value[:69].rstrip() + "..."
+    return value
+
+
 def browser_status() -> BrowserResult:
     try:
         response = _cdp_get("/json/version")
         response.raise_for_status()
         data = response.json()
         browser = str(data.get("Browser") or "Chromium browser")
-        return BrowserResult(True, f"Browser control is connected to {browser} at {CDP_URL}.", data)
+        return BrowserResult(True, f"Browser control is connected to {browser}.", data)
     except (httpx.HTTPError, ValueError):
         return BrowserResult(
             False,
-            "Browser tab control is not connected yet. Opera must be started with remote debugging enabled on port 9222. "
+            "Browser tab control is not connected yet. Opera must be started with remote debugging enabled. "
             "Run: py -3.14 -m jarvis_mrb.browser_setup",
         )
 
@@ -60,9 +72,25 @@ def list_tabs() -> BrowserResult:
         if str(item.get("type") or "") == "page"
     ]
     if not tabs:
-        return BrowserResult(True, "No browser tabs are currently exposed to Jarvis.", [])
-    preview = "; ".join(f"{tab['title']} — {tab['url']}" for tab in tabs[:12])
-    return BrowserResult(True, f"Open tabs: {preview}", tabs)
+        return BrowserResult(True, "No browser tabs are currently open.", [])
+
+    # URLs stay in structured data for matching and future actions, but are not
+    # dumped into the user-facing response. Reading tracking URLs aloud is both
+    # useless and painfully verbose through the glasses.
+    titles: list[str] = []
+    seen: set[str] = set()
+    for tab in tabs:
+        title = _short_title(tab["title"], tab["url"])
+        key = title.casefold()
+        if key not in seen:
+            seen.add(key)
+            titles.append(title)
+
+    shown = titles[:8]
+    preview = "; ".join(shown)
+    remaining = len(titles) - len(shown)
+    suffix = f"; and {remaining} more" if remaining > 0 else ""
+    return BrowserResult(True, f"You have {len(tabs)} open tabs: {preview}{suffix}.", tabs)
 
 
 def _find_tabs(query: str) -> list[dict[str, str]]:
@@ -95,7 +123,7 @@ def tab_status(query: str) -> BrowserResult:
     if not matches:
         return BrowserResult(True, f"No open browser tab matches {query}.")
     first = matches[0]
-    return BrowserResult(True, f"{query} is open in a browser tab: {first['title']} — {first['url']}", matches)
+    return BrowserResult(True, f"{query} is open in the tab {_short_title(first['title'], first['url'])}.", matches)
 
 
 def close_tab(query: str) -> BrowserResult:
@@ -138,7 +166,7 @@ def focus_tab(query: str) -> BrowserResult:
     try:
         response = _cdp_get(f"/json/activate/{quote(tab_id, safe='')}")
         response.raise_for_status()
-        return BrowserResult(True, f"Focused browser tab: {tab['title']}.")
+        return BrowserResult(True, f"Focused {_short_title(tab['title'], tab['url'])}.")
     except httpx.HTTPError:
         return BrowserResult(False, f"Jarvis found {query}, but the browser would not focus that tab.")
 
@@ -154,24 +182,23 @@ def open_site(query: str) -> BrowserResult:
         "gmail": "https://mail.google.com/",
         "chatgpt": "https://chatgpt.com/",
     }
-    url = aliases.get(query.strip().lower())
+    key = query.strip().lower()
+    url = aliases.get(key)
     if not url:
-        if query.strip().lower().startswith(("http://", "https://")):
+        if key.startswith(("http://", "https://")):
             url = query.strip()
         elif "." in query and " " not in query:
             url = "https://" + query.strip()
         else:
             return BrowserResult(False, f"Jarvis does not know which website to open for {query}.")
 
-    # Creating tabs through the DevTools endpoint varies by Chromium build.
-    # Use the user's default browser for the actual navigation while CDP handles
-    # discovery/focus/close of existing tabs.
     if sys.platform == "win32":
         try:
             os.startfile(url)  # type: ignore[attr-defined]
-            return BrowserResult(True, f"Opened {url} in the default browser.")
+            friendly = query.strip() if key in aliases else (urlparse(url).hostname or "the requested site")
+            return BrowserResult(True, f"Opened {friendly} in the browser.")
         except OSError as exc:
-            return BrowserResult(False, f"Could not open {url}: {exc}")
+            return BrowserResult(False, f"Could not open the requested site: {exc}")
     return BrowserResult(False, "Opening a new browser tab is currently implemented for Windows only.")
 
 
@@ -201,5 +228,5 @@ def launch_opera_debug() -> BrowserResult:
         return BrowserResult(False, f"Could not start Opera with browser control enabled: {exc}")
     return BrowserResult(
         True,
-        "Started Opera with remote debugging requested on port 9222. If Opera was already running, fully exit Opera and run this setup command again so the flag takes effect.",
+        "Started Opera with browser control enabled. If Opera was already running, fully exit it and run this setup command again.",
     )

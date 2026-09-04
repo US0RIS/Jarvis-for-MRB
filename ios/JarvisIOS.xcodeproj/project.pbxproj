@@ -18,6 +18,9 @@
 		200000000000000000000009 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* MainView.swift */; };
 		20000000000000000000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000A /* SettingsView.swift */; };
 		20000000000000000000000B /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000C /* KeychainStore.swift */; };
+		20000000000000000000000C /* AmbientCuePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000D /* AmbientCuePlayer.swift */; };
+		20000000000000000000000D /* CompanionConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000E /* CompanionConnection.swift */; };
+		20000000000000000000000E /* PersistentPresenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000F /* PersistentPresenceController.swift */; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
 		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
 /* End PBXBuildFile section */
@@ -49,6 +52,9 @@
 		10000000000000000000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		10000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		10000000000000000000000C /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		10000000000000000000000D /* AmbientCuePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCuePlayer.swift; sourceTree = "<group>"; };
+		10000000000000000000000E /* CompanionConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionConnection.swift; sourceTree = "<group>"; };
+		10000000000000000000000F /* PersistentPresenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistentPresenceController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,6 +91,9 @@
 			children = (
 				100000000000000000000001 /* JarvisIOSApp.swift */,
 				100000000000000000000004 /* JarvisAppModel.swift */,
+				10000000000000000000000F /* PersistentPresenceController.swift */,
+				10000000000000000000000E /* CompanionConnection.swift */,
+				10000000000000000000000D /* AmbientCuePlayer.swift */,
 				100000000000000000000009 /* MainView.swift */,
 				10000000000000000000000A /* SettingsView.swift */,
 				100000000000000000000002 /* SettingsStore.swift */,
@@ -186,6 +195,9 @@
 				200000000000000000000009 /* MainView.swift in Sources */,
 				20000000000000000000000A /* SettingsView.swift in Sources */,
 				20000000000000000000000B /* KeychainStore.swift in Sources */,
+				20000000000000000000000C /* AmbientCuePlayer.swift in Sources */,
+				20000000000000000000000D /* CompanionConnection.swift in Sources */,
+				20000000000000000000000E /* PersistentPresenceController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

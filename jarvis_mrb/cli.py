@@ -1,52 +1,72 @@
 from __future__ import annotations
 
-import shlex
+import subprocess
+import sys
+import time
 
-from jarvis_mrb.tools.pc import launch_minecraft, minecraft_status
+import httpx
 
-
-HELP = """Commands:
-  open minecraft      Launch Minecraft if it is not already running.
-  status minecraft    Check whether Minecraft appears to be running.
-  help                Show this help.
-  quit / exit         Exit Jarvis.
-"""
+from jarvis_mrb.agent import handle_natural_language
 
 
-def handle_command(raw: str) -> str:
-    text = raw.strip()
-    if not text:
-        return ""
+SERVICE_URL = "http://127.0.0.1:8765"
 
+
+def _service_ready() -> bool:
     try:
-        parts = [part.lower() for part in shlex.split(text)]
-    except ValueError as exc:
-        return f"Could not parse command: {exc}"
+        response = httpx.get(f"{SERVICE_URL}/health", timeout=0.4)
+        return response.status_code == 200
+    except httpx.HTTPError:
+        return False
 
-    if parts in (["quit"], ["exit"]):
-        raise EOFError
 
-    if parts == ["help"]:
-        return HELP.rstrip()
+def _start_service() -> None:
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+    subprocess.Popen(
+        [sys.executable, "-m", "jarvis_mrb.service"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        creationflags=creationflags,
+        close_fds=True,
+    )
+    for _ in range(20):
+        if _service_ready():
+            return
+        time.sleep(0.1)
 
-    if parts in (["open", "minecraft"], ["launch", "minecraft"], ["start", "minecraft"]):
-        return launch_minecraft().message
 
-    if parts in (["status", "minecraft"], ["is", "minecraft", "running"]):
-        return minecraft_status().message
-
-    return "I don't have a tool for that yet. Type 'help' to see the current milestone commands."
+def _ask_service(text: str) -> str:
+    if not _service_ready():
+        _start_service()
+    try:
+        response = httpx.post(
+            f"{SERVICE_URL}/command",
+            json={"text": text},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return str(payload.get("message", ""))
+    except (httpx.HTTPError, ValueError):
+        # Keep the CLI usable even if the local service cannot start.
+        return handle_natural_language(text).message
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 1")
-    print("Type 'help' for commands.")
+    print("Jarvis for MRB — milestone 2")
+    print("Speak naturally. Type 'help' for examples or 'exit' to quit.")
 
     while True:
         try:
             raw = input("jarvis> ")
-            response = handle_command(raw)
-            if response:
+            if raw.strip().lower() in {"quit", "exit"}:
+                print("Goodbye.")
+                return
+            response = _ask_service(raw)
+            if response and response != "__EXIT__":
                 print(response)
         except (EOFError, KeyboardInterrupt):
             print("\nGoodbye.")

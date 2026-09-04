@@ -49,19 +49,16 @@ def _load_credentials(interactive: bool = False) -> Credentials | None:
             creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
         except Exception:
             creds = None
-
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
             TOKEN_PATH.write_text(creds.to_json(), encoding="utf-8")
         except Exception:
             creds = None
-
     if _has_required_scopes(creds):
         return creds
     if not interactive:
         return None
-
     path = credentials_path()
     if not path.exists():
         return None
@@ -76,7 +73,6 @@ def authenticate_google() -> GoogleResult:
     if not path.exists():
         return GoogleResult(False, f"Google OAuth credentials are missing. Put a Desktop OAuth client JSON at {path} or set JARVIS_GOOGLE_CREDENTIALS.")
     try:
-        # Force a fresh consent when an older token lacks newly-added Calendar scopes.
         if TOKEN_PATH.exists():
             try:
                 old = Credentials.from_authorized_user_file(str(TOKEN_PATH))
@@ -159,35 +155,80 @@ def send_email(recipient: str, body: str, subject: str | None = None) -> GoogleR
     return GoogleResult(True, f"Sent email to {email_address}.", {"message_id": sent.get("id", ""), "email": email_address})
 
 
-def list_calendar_events(days: int = 7, limit: int = 10) -> GoogleResult:
-    creds = _load_credentials(interactive=False)
-    if not creds:
-        return google_status()
-    now = datetime.now().astimezone()
-    end = now + timedelta(days=max(1, min(days, 90)))
-    try:
-        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-        response = service.events().list(
-            calendarId="primary",
-            timeMin=now.isoformat(),
-            timeMax=end.isoformat(),
-            maxResults=max(1, min(limit, 50)),
-            singleEvents=True,
-            orderBy="startTime",
-        ).execute()
-    except Exception as exc:
-        return GoogleResult(False, f"Calendar read failed: {exc}")
-    events = response.get("items", [])
+def _format_events(events: list[dict[str, Any]], prefix: str) -> GoogleResult:
     if not events:
-        return GoogleResult(True, f"No calendar events in the next {days} day(s).", {"events": []})
+        return GoogleResult(True, f"{prefix}: none found.", {"events": []})
     summaries: list[str] = []
     compact: list[dict[str, str]] = []
     for event in events:
         start = event.get("start", {}).get("dateTime") or event.get("start", {}).get("date") or ""
+        end = event.get("end", {}).get("dateTime") or event.get("end", {}).get("date") or ""
         summary = event.get("summary") or "(untitled)"
-        summaries.append(f"{start}: {summary}")
-        compact.append({"id": event.get("id", ""), "summary": summary, "start": start})
-    return GoogleResult(True, "Upcoming events: " + "; ".join(summaries), {"events": compact})
+        location = event.get("location") or ""
+        summaries.append(f"{start}: {summary}" + (f" @ {location}" if location else ""))
+        compact.append({"id": event.get("id", ""), "summary": summary, "start": start, "end": end, "location": location})
+    return GoogleResult(True, prefix + ": " + "; ".join(summaries), {"events": compact})
+
+
+def query_calendar_events(
+    *,
+    direction: str = "future",
+    days: int = 7,
+    limit: int = 10,
+    query: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> GoogleResult:
+    creds = _load_credentials(interactive=False)
+    if not creds:
+        return google_status()
+    now = datetime.now().astimezone()
+    limit = max(1, min(int(limit), 50))
+    days = max(1, min(int(days), 3650))
+    try:
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        kwargs: dict[str, Any] = {
+            "calendarId": "primary",
+            "maxResults": limit,
+            "singleEvents": True,
+        }
+        if query:
+            kwargs["q"] = query
+        if start or end:
+            if start:
+                kwargs["timeMin"] = start
+            if end:
+                kwargs["timeMax"] = end
+            kwargs["orderBy"] = "startTime"
+            response = service.events().list(**kwargs).execute()
+            return _format_events(response.get("items", []), "Calendar events")
+        if direction == "past":
+            kwargs["timeMin"] = (now - timedelta(days=days)).isoformat()
+            kwargs["timeMax"] = now.isoformat()
+            kwargs["orderBy"] = "startTime"
+            response = service.events().list(**kwargs).execute()
+            events = response.get("items", [])
+            events.reverse()
+            return _format_events(events[:limit], "Past events")
+        kwargs["timeMin"] = now.isoformat()
+        kwargs["timeMax"] = (now + timedelta(days=days)).isoformat()
+        kwargs["orderBy"] = "startTime"
+        response = service.events().list(**kwargs).execute()
+        return _format_events(response.get("items", []), "Upcoming events")
+    except Exception as exc:
+        return GoogleResult(False, f"Calendar read failed: {exc}")
+
+
+def list_calendar_events(days: int = 7, limit: int = 10) -> GoogleResult:
+    return query_calendar_events(direction="future", days=days, limit=limit)
+
+
+def most_recent_calendar_event(days_back: int = 3650) -> GoogleResult:
+    result = query_calendar_events(direction="past", days=days_back, limit=1)
+    if result.ok and result.data and result.data.get("events"):
+        event = result.data["events"][0]
+        return GoogleResult(True, f"Most recent event: {event['start']}: {event['summary']}.", {"events": [event]})
+    return GoogleResult(True, f"No calendar events found in the last {days_back} day(s).", {"events": []})
 
 
 def create_calendar_event(summary: str, start: str, end: str, description: str | None = None) -> GoogleResult:
@@ -196,11 +237,7 @@ def create_calendar_event(summary: str, start: str, end: str, description: str |
         return google_status()
     if not summary.strip() or not start.strip() or not end.strip():
         return GoogleResult(False, "Calendar event requires summary, start, and end.")
-    body: dict[str, Any] = {
-        "summary": summary.strip(),
-        "start": {"dateTime": start.strip()},
-        "end": {"dateTime": end.strip()},
-    }
+    body: dict[str, Any] = {"summary": summary.strip(), "start": {"dateTime": start.strip()}, "end": {"dateTime": end.strip()}}
     if description:
         body["description"] = description
     try:

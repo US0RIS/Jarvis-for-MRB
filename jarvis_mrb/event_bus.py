@@ -57,6 +57,15 @@ def emit_cue(cue: str, *, message: str | None = None) -> None:
     companion_events.publish(event)
 
 
+def emit_thinking(active: bool) -> None:
+    companion_events.publish(
+        {
+            "type": "thinking_start" if active else "thinking_stop",
+            "cue": "thinking",
+        }
+    )
+
+
 def emit_proactive(message: str, *, cue: str = "attention", severity: str = "info") -> None:
     companion_events.publish(
         {

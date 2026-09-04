@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,60 +119,72 @@ def launch_app(name: str) -> ToolResult:
     return ToolResult(False, f"Jarvis could not find an application named {name}.")
 
 
+def _taskkill_pid(pid: int) -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        result = subprocess.run(
+            ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def close_app(name: str) -> ToolResult:
     matches = _matching_processes(name)
     if not matches:
         return ToolResult(True, f"{name} does not appear to be running.")
 
-    terminated: list[psutil.Process] = []
-    denied = 0
+    # First try a normal terminate so apps get a chance to shut down cleanly.
     for process in matches:
         try:
             process.terminate()
-            terminated.append(process)
-        except psutil.NoSuchProcess:
-            continue
-        except psutil.AccessDenied:
-            denied += 1
-            continue
-
-    # Never pass inaccessible processes to wait_procs: on Windows, wait() itself
-    # can raise AccessDenied and previously crashed the entire Jarvis request.
-    alive: list[psutil.Process] = []
-    if terminated:
-        try:
-            _, alive = psutil.wait_procs(terminated, timeout=2)
-        except (psutil.AccessDenied, OSError):
-            alive = terminated
-
-    killed = 0
-    for process in alive:
-        try:
-            process.kill()
-            killed += 1
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    # Give Windows a moment, then verify by re-querying rather than relying on
-    # wait() return codes from protected/sandboxed processes.
+    time.sleep(0.5)
     remaining = _matching_processes(name)
     if not remaining:
         return ToolResult(True, f"Closed {name}.")
 
-    if terminated or killed:
-        return ToolResult(
-            False,
-            f"Jarvis asked {name} to close, but {len(remaining)} matching process(es) are still running. "
-            "Windows may be protecting one of them.",
-        )
+    # On Windows, psutil can receive AccessDenied from OpenProcess even for apps
+    # that taskkill can terminate. Fall back to taskkill by PID and include the
+    # process tree so multi-process desktop apps (Spotify, browsers, etc.) close
+    # as one application.
+    taskkill_succeeded = False
+    if sys.platform == "win32":
+        for process in remaining:
+            try:
+                pid = int(process.pid)
+            except (TypeError, ValueError):
+                continue
+            taskkill_succeeded = _taskkill_pid(pid) or taskkill_succeeded
 
-    if denied:
-        return ToolResult(
-            False,
-            f"Jarvis found {name}, but Windows denied permission to close the matching process(es).",
-        )
+    time.sleep(0.5)
+    remaining = _matching_processes(name)
+    if not remaining:
+        return ToolResult(True, f"Closed {name}.")
 
-    return ToolResult(False, f"Jarvis could not close {name}.")
+    names: list[str] = []
+    for process in remaining[:5]:
+        try:
+            names.append(f"{process.info.get('name') or name} (PID {process.pid})")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    detail = ", ".join(names) if names else f"{len(remaining)} matching process(es)"
+    if taskkill_succeeded:
+        return ToolResult(False, f"Jarvis closed part of {name}, but {detail} are still running.")
+    return ToolResult(
+        False,
+        f"Windows denied permission to close {name}. Still running: {detail}. "
+        "If this app is elevated, Jarvis must also be run elevated to control it.",
+    )
 
 
 def open_url(url: str) -> ToolResult:

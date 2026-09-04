@@ -4,21 +4,25 @@ A personal agent designed to use Ray-Ban Meta glasses as an always-available voi
 
 ## Current milestone
 
-The first milestone deliberately does **not** depend on the glasses. It proves the action layer first:
+Milestone 2 is now implemented. Jarvis can:
 
-- run Jarvis from a terminal
-- check whether Minecraft is running on Windows
+- accept ordinary-language commands
+- check whether Minecraft is running
 - launch Minecraft
-- keep tool execution explicit and inspectable
+- ensure Minecraft is running
+- expose the agent through a persistent local HTTP service
+- automatically start that local service from the terminal client
+- optionally register the service to start when you log into Windows
 
-Once this works, the planned progression is:
+Examples:
 
-1. Add model-driven tool selection.
-2. Add Gmail/Calendar and other service tools.
-3. Add persistent/conditional commands such as “make sure Minecraft is open when I get home.”
-4. Add an iPhone client.
-5. Integrate Ray-Ban Meta through Meta's Wearables Device Access Toolkit.
-6. Add a local `Jarvis` wake word.
+```text
+Open Minecraft.
+Is Minecraft running?
+Make sure Minecraft is running.
+```
+
+The current natural-language router is deliberately deterministic. The execution boundary is already separated from the planner, so a model-based planner can be added without giving the model unrestricted shell access.
 
 ## Architecture
 
@@ -35,7 +39,7 @@ Jarvis agent/gateway ---- Gmail / Calendar / Web / other services
 Windows PC agent ---- apps / files / local automation
 ```
 
-The PC is a tool Jarvis can control, not the single point of failure for the entire assistant.
+For the current milestone, the Jarvis service is bound only to `127.0.0.1:8765`, so it is not exposed to the LAN or Internet.
 
 ## Safety model
 
@@ -46,38 +50,84 @@ Jarvis uses explicit tools rather than handing an LLM unrestricted shell access.
 - Windows 10/11 for the PC-control milestone
 - Python 3.12+
 
-## Quick start
+## Install or update
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e .
-jarvis
+From the repository directory:
+
+```cmd
+git pull
+py -3.14 -m pip install -e .
 ```
 
-Then try:
+Python 3.12+ is supported. If `py -3.14` is unavailable, use your installed Python 3.12+ executable instead.
+
+## Run Jarvis without relying on PATH
+
+```cmd
+py -3.14 -m jarvis_mrb.cli
+```
+
+Or double-click/run:
+
+```cmd
+run_jarvis.cmd
+```
+
+Then type commands naturally:
 
 ```text
-jarvis> status minecraft
-jarvis> open minecraft
-jarvis> quit
+jarvis> Open Minecraft
+jarvis> Is Minecraft running?
+jarvis> Make sure Minecraft is running
 ```
 
-`open minecraft` attempts several normal Windows launch paths, including the `minecraft:` URI and the Microsoft Store app launcher.
+The terminal automatically starts the background Jarvis service if it is not already running.
+
+## Start Jarvis automatically with Windows
+
+Run once:
+
+```cmd
+py -3.14 -m jarvis_mrb.startup
+```
+
+That registers a Windows Scheduled Task named `JarvisForMRB` which starts the local Jarvis service at logon.
+
+## Local API
+
+Health check:
+
+```text
+GET http://127.0.0.1:8765/health
+```
+
+Natural-language command:
+
+```text
+POST http://127.0.0.1:8765/command
+Content-Type: application/json
+
+{"text":"Open Minecraft"}
+```
 
 ## Repository layout
 
 ```text
 jarvis_mrb/
-  cli.py          interactive terminal
+  agent.py        natural-language planner/router
+  cli.py          terminal client
+  service.py      persistent local API service
+  startup.py      Windows startup registration
   tools/
     pc.py         controlled Windows actions
+run_jarvis.cmd    PATH-independent Windows launcher
 ```
 
-## Near-term goal
+## Next milestones
 
-The next functional checkpoint is:
-
-> “Jarvis, open Minecraft.”
-
-Jarvis should translate that request into one explicit tool invocation, execute it on the PC, and report success or failure. The glasses are integrated only after this path is reliable.
+1. Add model-driven tool selection over the existing explicit tool boundary.
+2. Add Gmail and Contacts tools with configurable confirmation policy.
+3. Add persistent/conditional jobs such as “make sure Minecraft is open when I get home.”
+4. Add an iPhone client and secure remote transport.
+5. Integrate Ray-Ban Meta through Meta's Wearables Device Access Toolkit.
+6. Add a local `Jarvis` wake word.

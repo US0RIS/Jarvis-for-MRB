@@ -40,6 +40,7 @@ TOOL_RISK: dict[str, Risk] = {
     "pc.ensure_minecraft_running": "local_write",
     "google.status": "read",
     "contacts.resolve": "read",
+    "gmail.query": "read",
     "calendar.list": "read",
     "calendar.query": "read",
     "calendar.recent": "read",

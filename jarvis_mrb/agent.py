@@ -5,10 +5,11 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Sequence
 
 import httpx
 
+from jarvis_mrb.conversation import ConversationMessage
 from jarvis_mrb.jobs import cancel_job, create_event_job, create_time_job, list_jobs
 from jarvis_mrb.permissions import decide, policy_summary, set_policy
 from jarvis_mrb.tools.browser import browser_status, close_tab, focus_tab, list_tabs, open_site, tab_status
@@ -28,25 +29,31 @@ OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
 OLLAMA_KEEP_ALIVE = os.environ.get("JARVIS_OLLAMA_KEEP_ALIVE", "30m")
 _PENDING_ACTION: dict[str, Any] | None = None
 
+
 @dataclass(frozen=True)
 class AgentReply:
     ok: bool
     message: str
 
+
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip()).lower()
 
+
 def _result(reply: Any) -> AgentReply:
     return AgentReply(bool(reply.ok), str(reply.message))
+
 
 def _matching_tab_exists(name: str) -> bool:
     tab = tab_status(name)
     return bool(tab.ok and isinstance(tab.data, list) and tab.data)
 
+
 def _smart_status(name: str) -> AgentReply:
     if browser_status().ok and _matching_tab_exists(name):
         return _result(tab_status(name))
     return _result(app_status(name))
+
 
 def _smart_open(name: str) -> AgentReply:
     if browser_status().ok:
@@ -57,10 +64,12 @@ def _smart_open(name: str) -> AgentReply:
             return _result(web)
     return _result(launch_app(name))
 
+
 def _smart_close(name: str) -> AgentReply:
     if browser_status().ok and _matching_tab_exists(name):
         return _result(close_tab(name))
     return _result(close_app(name))
+
 
 def _describe_action(tool: str, args: dict[str, Any]) -> str:
     if tool == "gmail.send":
@@ -73,6 +82,7 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
     if tool == "jobs.cancel":
         return f"cancel job {args.get('job_id')}"
     return f"run {tool} with {args}"
+
 
 def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "smart.status": return _smart_status(str(args.get("name") or ""))
@@ -123,6 +133,7 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "jobs.cancel": return _result(cancel_job(int(args.get("job_id") or 0)))
     return AgentReply(False, f"The planner requested an unknown tool: {tool}")
 
+
 def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool = False) -> AgentReply:
     global _PENDING_ACTION
     decision = decide(tool)
@@ -133,6 +144,7 @@ def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool =
         return AgentReply(True, f"Ready to {_describe_action(tool, args)}. Say 'confirm' to proceed or 'cancel'.")
     return _execute_unchecked(tool, args)
 
+
 def _confirm_pending() -> AgentReply:
     global _PENDING_ACTION
     if not _PENDING_ACTION:
@@ -141,12 +153,14 @@ def _confirm_pending() -> AgentReply:
     _PENDING_ACTION = None
     return execute_tool(str(pending["tool"]), dict(pending["args"]), bypass_confirmation=True)
 
+
 def _cancel_pending() -> AgentReply:
     global _PENDING_ACTION
     if not _PENDING_ACTION:
         return AgentReply(False, "There is nothing waiting for confirmation.")
     _PENDING_ACTION = None
     return AgentReply(True, "Cancelled.")
+
 
 def _extract_json(content: str) -> dict[str, Any] | None:
     content = content.strip()
@@ -162,6 +176,13 @@ def _extract_json(content: str) -> dict[str, Any] | None:
             return value if isinstance(value, dict) else None
         except json.JSONDecodeError:
             return None
+
+
+def _is_contextual_reference(value: str) -> bool:
+    return _normalize(value) in {
+        "it", "that", "this", "them", "those", "these", "him", "her", "that one", "the same one"
+    }
+
 
 def _fast_path(text: str) -> AgentReply | None:
     n = _normalize(text)
@@ -182,22 +203,34 @@ def _fast_path(text: str) -> AgentReply | None:
     m = re.fullmatch(r"when i (?:get|arrive) home,? (.+)", n)
     if m: return execute_tool("jobs.create_event", {"event": "home_arrival", "command": m.group(1)})
     m = re.fullmatch(r"(?:is|check if|check whether) (.+?) (?:running|open)\??", n)
-    if m: return execute_tool("smart.status", {"name": m.group(1)})
+    if m:
+        target = m.group(1)
+        if _is_contextual_reference(target): return None
+        return execute_tool("smart.status", {"name": target})
     m = re.fullmatch(r"(?:close|quit|stop|kill) (.+?)[?.!]?", n)
-    if m: return execute_tool("smart.close", {"name": m.group(1)})
+    if m:
+        target = m.group(1)
+        if _is_contextual_reference(target): return None
+        return execute_tool("smart.close", {"name": target})
     m = re.fullmatch(r"(?:open|launch|start|run) (.+?)(?: for me)?[?.!]?", n)
     if m:
         target = m.group(1).strip()
+        if _is_contextual_reference(target): return None
         if target.startswith(("http://", "https://", "www.")) or ("." in target and " " not in target): return execute_tool("pc.open_url", {"url": target})
         if re.match(r"^[a-z]:\\", target) or target.startswith(("~", ".\\", "\\\\")): return execute_tool("pc.open_path", {"path": target})
         return execute_tool("smart.open", {"name": target})
     return None
 
-def _ollama_plan(text: str) -> tuple[dict[str, Any] | None, str]:
+
+def _ollama_plan(
+    text: str,
+    history: Sequence[ConversationMessage] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
     now = datetime.now().astimezone().isoformat()
-    system = f"""You are the tool router for Jarvis, a local personal assistant. Current local date/time: {now}.
-Thinking is disabled because latency matters. Choose exactly one listed tool. Do not invent tools. Preserve user constraints exactly.
-Prefer smart.open/smart.close/smart.status for ordinary app/site names.
+    system = f"""You are Jarvis, a local personal assistant and tool router. Current local date/time: {now}.
+Thinking is disabled because latency matters. Use the recent conversation to resolve pronouns, omitted subjects, follow-up questions, names, recipients, and references such as 'it', 'him', 'that one', 'the same thing', or 'what about tomorrow'. Preserve user constraints exactly.
+
+When the user wants an action or private-data lookup, choose exactly one listed tool. Do not invent tools. Prefer smart.open/smart.close/smart.status for ordinary app/site names. When no tool is needed, set tool to null and give a concise natural conversational response. Never claim an action happened unless a tool was actually selected.
 
 Tools:
 smart.status {{name}}; smart.open {{name}}; smart.close {{name}};
@@ -214,10 +247,12 @@ Calendar routing:
 - Future/upcoming questions -> calendar.query direction='future'.
 - If the user names an event/person/term, put that text in calendar.query.query.
 - If exact date/range can be inferred, use timezone-aware ISO 8601 start/end.
+- Resolve follow-ups from conversation. Example: after asking about Friday, 'what about Saturday?' means query Saturday.
 
 Email routing:
 - For any request to email/send/tell someone by email, use gmail.send.
 - recipient can be an email address or a contact name; Contacts will resolve names.
+- Resolve recipients and message references from recent conversation when unambiguous. Example: after discussing Alex, 'email him that I'll be late' means Alex.
 - body must contain the requested meaning only. Do not add emojis, greetings, signatures, promises, or facts unless requested.
 - subject should be null unless requested or clearly useful.
 - gmail.send is protected by confirmation; do not avoid the tool just because sending is consequential.
@@ -226,10 +261,24 @@ Other rules:
 - calendar.create start/end must be timezone-aware ISO 8601 strings. Infer one hour only when a start is clear and no duration/end is given.
 - For 'at 8pm open Spotify', use jobs.create_time and preserve the action as a short natural-language command.
 - For 'when I get home ...', use jobs.create_event with event='home_arrival'.
-- Never claim an action happened unless a tool is selected.
+- Recent assistant messages may be tool results or conversational answers. Treat them as real context, but do not infer that an action happened unless the assistant message explicitly says it did.
 Return one JSON object only: {{"tool":"name or null","arguments":{{}},"response":"..."}}.
 """
-    payload = {"model": OLLAMA_MODEL, "stream": False, "format": "json", "think": False, "keep_alive": OLLAMA_KEEP_ALIVE, "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}], "options": {"temperature": 0}}
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    for item in history or ():
+        if item.role in {"user", "assistant"} and item.content.strip():
+            messages.append({"role": item.role, "content": item.content})
+    messages.append({"role": "user", "content": text})
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "format": "json",
+        "think": False,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "messages": messages,
+        "options": {"temperature": 0},
+    }
     try:
         with httpx.Client(timeout=120.0) as client:
             response = client.post(f"{OLLAMA_URL}/api/chat", json=payload)
@@ -244,17 +293,21 @@ Return one JSON object only: {{"tool":"name or null","arguments":{{}},"response"
     except (httpx.HTTPError, TypeError, ValueError) as exc:
         return None, f"Ollama planner error: {exc}"
 
-def handle_natural_language(text: str) -> AgentReply:
+
+def handle_natural_language(
+    text: str,
+    history: Sequence[ConversationMessage] | None = None,
+) -> AgentReply:
     n = _normalize(text)
     if not n: return AgentReply(True, "")
     if n in {"quit", "exit"}: return AgentReply(True, "__EXIT__")
     if n in {"model", "what model are you using", "what model are you using?"}: return AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}")
     fast = _fast_path(text)
     if fast is not None: return fast
-    plan, error = _ollama_plan(text)
+    plan, error = _ollama_plan(text, history=history)
     if plan is None: return AgentReply(False, error)
     tool = plan.get("tool")
     args = plan.get("arguments") or {}
     if tool:
         return execute_tool(str(tool), args if isinstance(args, dict) else {})
-    return AgentReply(False, str(plan.get("response") or "I do not have a tool for that yet."))
+    return AgentReply(True, str(plan.get("response") or "I'm listening."))

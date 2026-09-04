@@ -41,7 +41,7 @@ struct SettingsView: View {
                         Text("Neural voice")
                         Spacer()
                         Text(neuralVoiceStatus)
-                            .foregroundStyle(neuralVoiceStatus == "Qwen3-TTS ready" ? .green : .secondary)
+                            .foregroundStyle(neuralVoiceStatus == "Qwen3-TTS ready" ? Color.green : Color.secondary)
                     }
 
                     Button("Check Neural Voice") {
@@ -142,9 +142,8 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
-                async let recipients: Void = loadAllowedRecipients()
-                async let voice: Void = checkNeuralVoice()
-                _ = await (recipients, voice)
+                await checkNeuralVoice()
+                await loadAllowedRecipients()
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

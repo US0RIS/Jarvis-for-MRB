@@ -24,6 +24,7 @@ from jarvis_mrb.memory import memory_context, remember_exchange_async, status as
 from jarvis_mrb.model_router import choose_model
 from jarvis_mrb.planner_model import (
     FAST_MODEL,
+    QUALITY_MODEL,
     get_auto_route,
     get_planner_model,
     model_options,
@@ -45,7 +46,7 @@ _INITIAL_MODEL = get_planner_model()
 agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
-app = FastAPI(title="Jarvis for MRB", version="0.11.0")
+app = FastAPI(title="Jarvis for MRB", version="0.11.1")
 _scheduler_started = False
 _tts_start_attempted = False
 
@@ -101,8 +102,10 @@ def _websocket_authorized(websocket: WebSocket) -> bool:
     return websocket.headers.get("authorization") == f"Bearer {API_TOKEN}"
 
 
-def _contextual_history(session_id: str, query: str) -> list[ConversationMessage]:
-    history = recent_messages(session_id, limit=20)
+def _contextual_history(session_id: str, query: str, *, limit: int = 20) -> list[ConversationMessage]:
+    history = recent_messages(session_id, limit=limit)
+    # memory_context is latency-aware: it performs a vector lookup only when the
+    # wording actually suggests older episodic context is needed.
     retrieved = memory_context(query, limit=3)
     if retrieved:
         history = [ConversationMessage(role="assistant", content=retrieved), *history]
@@ -187,10 +190,24 @@ def _warm_selected_model(previous: str, selected: str) -> None:
         pass
 
 
+def _warm_fast_model() -> None:
+    if not get_auto_route():
+        return
+    threading.Thread(
+        target=_warm_selected_model,
+        args=("", FAST_MODEL),
+        name="jarvis-fast-warm",
+        daemon=True,
+    ).start()
+
+
 @app.on_event("startup")
 def startup() -> None:
     _ensure_scheduler()
     _start_tts_in_background()
+    # Automatic routing should feel fast on the first ordinary request as well as
+    # later ones. Preload the 8B model without blocking API startup.
+    _warm_fast_model()
 
 
 @app.get("/health")
@@ -198,7 +215,7 @@ def health() -> dict[str, Any]:
     settings = planner_settings()
     return {
         "status": "ok",
-        "version": "0.11.0",
+        "version": "0.11.1",
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
         "planner_model": settings["model"],
@@ -210,7 +227,7 @@ def health() -> dict[str, Any]:
 def command(request: CommandRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)
     session_id = request.session_id or "default"
-    history = _contextual_history(session_id, request.text)
+    history = _contextual_history(session_id, request.text, limit=12)
     reply = handle_natural_language(request.text, history=history)
     append_message(session_id, "user", request.text)
     if reply.message and reply.message != "__EXIT__":
@@ -226,8 +243,12 @@ def command_stream(
 ) -> StreamingResponse:
     _check_auth(authorization)
     session_id = request.session_id or "default"
-    history = _contextual_history(session_id, request.text)
     route = choose_model(request.text)
+    # The 8B model does not need 20 full turns for routine voice interactions.
+    # A smaller prompt reduces prefill time substantially while the 27B path keeps
+    # the wider history window for harder reasoning.
+    history_limit = 8 if route.model == FAST_MODEL else 20
+    history = _contextual_history(session_id, request.text, limit=history_limit)
 
     def generate():
         pieces: list[str] = []
@@ -261,6 +282,18 @@ def command_stream(
             if full:
                 append_message(session_id, "assistant", full)
                 remember_exchange_async(session_id, request.text, full)
+
+            # Auto-routed 27B turns are deliberately temporary. streaming_agent
+            # asks Ollama to unload 27B when generation finishes; immediately warm
+            # 8B again so the next conversational turn does not pay a cold-load cost.
+            if get_auto_route() and route.model == QUALITY_MODEL:
+                threading.Thread(
+                    target=_warm_selected_model,
+                    args=(QUALITY_MODEL, FAST_MODEL),
+                    name="jarvis-fast-rewarm",
+                    daemon=True,
+                ).start()
+
             yield json.dumps({"type": "done", "ok": ok}, ensure_ascii=False) + "\n"
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")

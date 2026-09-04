@@ -1,6 +1,6 @@
 # Jarvis iOS client
 
-`JarvisIOS.xcodeproj` is a native SwiftUI iPhone app. It connects to the Jarvis backend, supports text and voice commands, speaks responses over the active iOS audio route, fires a `home_arrival` event from a Core Location geofence, and integrates Meta's Wearables Device Access Toolkit for registration, camera permission, and live Ray-Ban camera preview.
+`JarvisIOS.xcodeproj` is a native SwiftUI iPhone app. It connects to the Jarvis backend, supports text and voice commands, speaks responses, fires a `home_arrival` event from a Core Location geofence, and integrates Meta's Wearables Device Access Toolkit for registration, camera permission, and live Ray-Ban camera preview.
 
 ## Requirements
 
@@ -42,13 +42,36 @@ In the iPhone app's Settings screen enter:
 
 Do not forward port `8765` from the router to the public Internet. For access away from home, use a private tunnel such as Tailscale and point the app at the PC's private tunnel address.
 
-## Voice
+## Hands-free voice
 
-**Push to Talk** records a command and sends it to Jarvis. **Jarvis wake** is an initial foreground prototype: while enabled and the app remains active, speech recognition listens for the word `Jarvis` followed by a command.
+The app has two voice paths:
 
-Audio uses iOS's active route. When the Ray-Bans are selected as the Bluetooth audio device, speech input/output can route through the glasses microphone and speakers.
+- **Push to Talk** for explicit one-shot commands
+- **Hands-free Jarvis** for a continuous `Jarvis` interaction loop
 
-The foreground speech recognizer is not the final low-power always-on wake-word implementation. A dedicated local keyword spotter is a later step.
+The hands-free path configures an iOS `playAndRecord` / `voiceChat` session and explicitly prefers an available Bluetooth HFP microphone. If the Ray-Bans expose an HFP input, Jarvis selects it instead of assuming the system has already chosen the glasses. iOS then routes playback to the matching Bluetooth hands-free output.
+
+The main screen shows the actual audio route. With the glasses working as the voice terminal, it should identify the Ray-Ban / Meta Bluetooth route rather than the iPhone microphone.
+
+Try either form:
+
+```text
+Jarvis, open Spotify.
+```
+
+or:
+
+```text
+Jarvis.
+```
+
+After the second form, Jarvis says `Yes?` and treats the next utterance as the command.
+
+The loop waits for a short period of transcript stability before submitting a command, stops recognition while Jarvis speaks so the TTS cannot trigger itself, and automatically restarts an Apple Speech recognition task when it naturally ends.
+
+The app has the `audio` background mode enabled and keeps its duplex audio session active while hands-free mode is running. Physical-device testing is still required to establish how reliably the current Speech-framework implementation survives screen lock, interruptions, and long sessions on the target iPhone/Ray-Ban combination.
+
+This is not yet a dedicated low-power keyword spotter. For truly all-day operation, the next voice-specific upgrade would be a local keyword detector for `Jarvis` rather than continuously transcribing audio with the Speech framework.
 
 ## Home arrival
 
@@ -64,6 +87,8 @@ to the Jarvis backend. This completes commands such as:
 When I get home, make sure Minecraft is running.
 ```
 
+For that event to reach the PC while the phone is away from the home LAN, configure a private remote path such as Tailscale; do not expose the Jarvis port directly to the Internet.
+
 ## Meta Ray-Ban setup
 
 The app configures Meta Wearables DAT with the development `MetaAppID` of `0` and URL scheme `jarvismrb://`.
@@ -73,20 +98,22 @@ In the app:
 1. Tap **Register**. Meta AI opens to authorize the integration.
 2. Return to Jarvis after the callback.
 3. Tap **Camera Access** and approve camera permission in Meta AI.
-4. Tap **Start Camera** to create a device session and display the live glasses camera feed.
+4. Wait for **DAT eligible: Yes**.
+5. Tap **Start Camera** to create a device session and display the live glasses camera feed.
 
-The app uses Meta's documented `Wearables`, `AutoDeviceSelector`, `DeviceSession`, and `MWDATCamera` APIs.
+The app keeps one `AutoDeviceSelector` alive from initialization so device eligibility is populated before camera-session creation. This avoids the `noEligibleDevice` race that occurs when a selector is created immediately before `createSession`. Camera stream listener tokens are retained until the stream is stopped.
 
 ## Current architecture
 
 ```text
-Ray-Ban Meta camera/audio
+Ray-Ban Meta
+  - Meta DAT camera
+  - Bluetooth HFP microphone/speakers
         |
         v
 Jarvis iOS client
-  - Meta DAT camera
-  - iOS Bluetooth audio
-  - speech recognition/TTS
+  - hands-free speech recognition/TTS
+  - live camera
   - home geofence
         |
         v

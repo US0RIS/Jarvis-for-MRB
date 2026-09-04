@@ -46,6 +46,8 @@ TOOL_RISK: dict[str, Risk] = {
     "calendar.recent": "read",
     "calendar.create": "external_write",
     "gmail.send": "external_write",
+    "web.status": "read",
+    "web.search": "read",
     "jobs.list": "read",
     "jobs.create_time": "local_write",
     "jobs.create_event": "local_write",

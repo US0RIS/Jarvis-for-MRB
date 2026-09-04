@@ -77,33 +77,108 @@ final class JarvisAppModel: ObservableObject {
     private func performCommand(_ text: String, fromHandsFree: Bool) async {
         guard !isSending else { return }
         isSending = true
+        lastResponse = ""
         if fromHandsFree {
             voiceStatus = "Thinking…"
         }
         defer { isSending = false }
 
+        var fullResponse = ""
+        var speechBuffer = ""
+        var appleFallbackBuffer = ""
+        var qwenTTSAvailable = true
+        var confirmationSpoken = false
+        var interrupted = false
+
         do {
-            let response = try await client.command(text)
-            lastResponse = response.message
-            if settings.speakResponses && !response.message.isEmpty {
-                if fromHandsFree {
-                    voiceStatus = "Speaking…"
+            for try await delta in client.streamCommand(text) {
+                fullResponse += delta
+                lastResponse = fullResponse
+
+                guard settings.speakResponses && !interrupted else { continue }
+
+                // Protected tool calls arrive as one atomic tool-result delta. Do
+                // not start reading the recipient/body before noticing that this is
+                // a confirmation prompt; keep the spoken version deliberately short.
+                if Self.responseRequestsConfirmation(fullResponse) {
+                    if !confirmationSpoken {
+                        speechBuffer = ""
+                        appleFallbackBuffer = ""
+                        confirmationSpoken = true
+                        if fromHandsFree { voiceStatus = "Speaking…" }
+                        let prompt = Self.spokenResponse(for: fullResponse)
+                        if !(await speakQwenChunk(prompt)) {
+                            await speechSynthesizer.speak(
+                                prompt,
+                                preferBluetooth: settings.preferBluetoothAudio
+                            )
+                        }
+                        interrupted = speechSynthesizer.lastOutputInterrupted
+                    }
+                    continue
                 }
-                await speechSynthesizer.speak(
-                    Self.spokenResponse(for: response.message),
-                    preferBluetooth: settings.preferBluetoothAudio
-                )
+
+                if qwenTTSAvailable {
+                    speechBuffer += delta
+                    while let segment = Self.takeSpeechSegment(from: &speechBuffer, flush: false) {
+                        if fromHandsFree { voiceStatus = "Speaking…" }
+                        let success = await speakQwenChunk(segment)
+                        if speechSynthesizer.lastOutputInterrupted {
+                            interrupted = true
+                            break
+                        }
+                        if !success {
+                            qwenTTSAvailable = false
+                            appleFallbackBuffer = Self.joinCommandParts(segment, speechBuffer)
+                            speechBuffer = ""
+                            break
+                        }
+                    }
+                } else {
+                    appleFallbackBuffer += delta
+                }
+
+                if interrupted {
+                    break
+                }
             }
 
-            if fromHandsFree && Self.responseRequestsConfirmation(response.message) {
+            if settings.speakResponses && !interrupted && !confirmationSpoken {
+                if qwenTTSAvailable {
+                    if let tail = Self.takeSpeechSegment(from: &speechBuffer, flush: true), !tail.isEmpty {
+                        if fromHandsFree { voiceStatus = "Speaking…" }
+                        let success = await speakQwenChunk(tail)
+                        interrupted = speechSynthesizer.lastOutputInterrupted
+                        if !success && !interrupted {
+                            await speechSynthesizer.speak(
+                                tail,
+                                preferBluetooth: settings.preferBluetoothAudio
+                            )
+                        }
+                    }
+                } else {
+                    let fallback = Self.joinCommandParts(appleFallbackBuffer, speechBuffer)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !fallback.isEmpty {
+                        if fromHandsFree { voiceStatus = "Speaking…" }
+                        await speechSynthesizer.speak(
+                            fallback,
+                            preferBluetooth: settings.preferBluetoothAudio
+                        )
+                        interrupted = speechSynthesizer.lastOutputInterrupted
+                    }
+                }
+            }
+
+            if fromHandsFree && Self.responseRequestsConfirmation(fullResponse) {
                 confirmationFollowUpDeadline = Date().addingTimeInterval(15)
                 conversationalFollowUpDeadline = nil
                 voiceStatus = "Say confirm or cancel"
-            } else if fromHandsFree && !response.message.isEmpty {
+            } else if fromHandsFree && !fullResponse.isEmpty {
                 confirmationFollowUpDeadline = nil
-                // Start this window after TTS finishes, not when the server reply
-                // arrives, so the user gets a full five seconds to continue the
-                // conversation without repeating the wake word.
+                // Start this after the final audio chunk finishes. If the user
+                // barged in, their captured speech is already waiting in the
+                // BargeInBuffer and this window lets it become the next turn.
                 conversationalFollowUpDeadline = Date().addingTimeInterval(5)
                 voiceStatus = "Listening for follow-up…"
             } else {
@@ -111,12 +186,58 @@ final class JarvisAppModel: ObservableObject {
                 conversationalFollowUpDeadline = nil
             }
         } catch {
-            confirmationFollowUpDeadline = nil
-            conversationalFollowUpDeadline = nil
-            errorMessage = error.localizedDescription
-            if fromHandsFree {
-                voiceStatus = "Command failed"
+            // A pre-0.9 backend or transient stream failure still gets a complete
+            // response through the proven non-streaming endpoint.
+            do {
+                let response = try await client.command(text)
+                fullResponse = response.message
+                lastResponse = response.message
+                if settings.speakResponses && !response.message.isEmpty {
+                    if fromHandsFree { voiceStatus = "Speaking…" }
+                    await speakOneResponse(Self.spokenResponse(for: response.message))
+                }
+                if fromHandsFree && Self.responseRequestsConfirmation(response.message) {
+                    confirmationFollowUpDeadline = Date().addingTimeInterval(15)
+                    conversationalFollowUpDeadline = nil
+                    voiceStatus = "Say confirm or cancel"
+                } else if fromHandsFree && !response.message.isEmpty {
+                    confirmationFollowUpDeadline = nil
+                    conversationalFollowUpDeadline = Date().addingTimeInterval(5)
+                    voiceStatus = "Listening for follow-up…"
+                }
+            } catch {
+                confirmationFollowUpDeadline = nil
+                conversationalFollowUpDeadline = nil
+                errorMessage = error.localizedDescription
+                if fromHandsFree {
+                    voiceStatus = "Command failed"
+                }
             }
+        }
+    }
+
+    private func speakQwenChunk(_ text: String) async -> Bool {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return true }
+        do {
+            let audio = try await client.synthesizeSpeech(cleaned)
+            try await speechSynthesizer.speakRemoteAudio(
+                audio,
+                text: cleaned,
+                preferBluetooth: settings.preferBluetoothAudio
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func speakOneResponse(_ text: String) async {
+        if !(await speakQwenChunk(text)) {
+            await speechSynthesizer.speak(
+                text,
+                preferBluetooth: settings.preferBluetoothAudio
+            )
         }
     }
 
@@ -125,10 +246,7 @@ final class JarvisAppModel: ObservableObject {
             let response = try await client.event(name)
             lastResponse = response.message
             if settings.speakResponses && !response.message.isEmpty {
-                await speechSynthesizer.speak(
-                    response.message,
-                    preferBluetooth: settings.preferBluetoothAudio
-                )
+                await speakOneResponse(response.message)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -264,10 +382,6 @@ final class JarvisAppModel: ObservableObject {
                 }
 
                 if let deadline = conversationalFollowUpDeadline, now < deadline {
-                    // During the five-second conversational window, any speech is
-                    // a follow-up; no second "Jarvis" is required. Reuse the same
-                    // dictation state machine so long addresses/messages can span
-                    // recognizer restarts and natural pauses.
                     phase = .awaitingFollowUp(deadline: deadline)
                     voiceStatus = "Listening for follow-up…"
                     continue
@@ -314,8 +428,6 @@ final class JarvisAppModel: ObservableObject {
                     lastTranscriptChange = Date()
                     continue
                 } else if !transcript.isEmpty && silence >= 1.2 {
-                    // Clear unrelated speech instead of allowing one recognition
-                    // request to accumulate minutes of ambient conversation.
                     _ = speechRecognizer.stopListening()
                     isListening = false
                     _ = await restartVoiceRecognition()
@@ -329,8 +441,6 @@ final class JarvisAppModel: ObservableObject {
                 if commandBuffer.isEmpty {
                     segment = Self.commandAfterWakeWord(in: transcript) ?? ""
                 } else {
-                    // If Apple finalized a long utterance at a pause, recognition
-                    // was restarted and this transcript is the continuation only.
                     segment = transcript
                 }
 
@@ -399,9 +509,6 @@ final class JarvisAppModel: ObservableObject {
                     continue
                 }
 
-                // The deadline controls when the user must START speaking. Once a
-                // follow-up has started, don't cut it off just because the original
-                // five-second window expires mid-sentence.
                 if now >= deadline && command.isEmpty {
                     followUpBuffer = ""
                     confirmationFollowUpDeadline = nil
@@ -434,7 +541,7 @@ final class JarvisAppModel: ObservableObject {
         isListening = false
         conversationalFollowUpDeadline = nil
         voiceStatus = "Listening for command…"
-        await speechSynthesizer.speak("Yes?", preferBluetooth: settings.preferBluetoothAudio)
+        await speakOneResponse("Yes, sir?")
         try? await Task.sleep(for: .milliseconds(180))
         _ = await restartVoiceRecognition()
     }
@@ -501,9 +608,54 @@ final class JarvisAppModel: ObservableObject {
         return "\(a) \(b)"
     }
 
-    /// Ordinary commands should still feel quick. Dictation-like requests need a
-    /// much longer pause window because people naturally hesitate while spelling
-    /// names, email addresses, URLs, and message bodies.
+    /// Pull one voice-sized segment out of a growing streamed answer. Normally a
+    /// sentence boundary wins. Very long punctuation-free output is cut at a word
+    /// boundary so TTS can start rather than waiting for an entire paragraph.
+    private static func takeSpeechSegment(from buffer: inout String, flush: Bool) -> String? {
+        let trimmedLeading = buffer.drop(while: { $0.isWhitespace })
+        if trimmedLeading.count != buffer.count {
+            buffer = String(trimmedLeading)
+        }
+        guard !buffer.isEmpty else { return nil }
+
+        let chars = Array(buffer)
+        for index in chars.indices {
+            let character = chars[index]
+            let isSentenceEnd = character == "." || character == "!" || character == "?" || character == "\n"
+            guard isSentenceEnd else { continue }
+            let nextIsBoundary = index == chars.index(before: chars.endIndex)
+                || chars[chars.index(after: index)].isWhitespace
+            if nextIsBoundary && index >= 18 {
+                let end = chars.index(after: index)
+                let segment = String(chars[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+                buffer = String(chars[end...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                return segment
+            }
+        }
+
+        if chars.count >= 220 {
+            let upper = min(chars.count - 1, 190)
+            let lower = min(110, upper)
+            if lower <= upper {
+                for index in stride(from: upper, through: lower, by: -1) {
+                    if chars[index].isWhitespace || chars[index] == "," || chars[index] == ";" || chars[index] == ":" {
+                        let end = chars.index(after: index)
+                        let segment = String(chars[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        buffer = String(chars[end...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        return segment
+                    }
+                }
+            }
+        }
+
+        if flush {
+            let segment = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            buffer = ""
+            return segment.isEmpty ? nil : segment
+        }
+        return nil
+    }
+
     static func commandSilenceWindow(for command: String) -> TimeInterval {
         if needsExtendedDictation(command) {
             return 3.0
@@ -549,10 +701,7 @@ final class JarvisAppModel: ObservableObject {
 
     static func spokenResponse(for response: String) -> String {
         if responseRequestsConfirmation(response) {
-            // The full consequential action remains visible on screen. Speaking
-            // the entire recipient/body back through the glasses is tedious; the
-            // confirmation barrier itself remains unchanged.
-            return "Ready. Say confirm or cancel."
+            return "Ready, sir. Say confirm or cancel."
         }
         return response
     }

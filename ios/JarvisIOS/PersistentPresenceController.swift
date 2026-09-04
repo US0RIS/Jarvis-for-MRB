@@ -195,8 +195,6 @@ final class PersistentPresenceController: ObservableObject {
         defer { announcing = false }
 
         while !pendingAnnouncements.isEmpty {
-            // Avoid speaking over a command the user is currently dictating or over
-            // Jarvis's current answer. Background completion can wait a moment.
             if appModel.isSending || appModel.speechSynthesizer.isSpeaking {
                 try? await Task.sleep(for: .milliseconds(500))
                 continue
@@ -227,16 +225,25 @@ final class PersistentPresenceController: ObservableObject {
     }
 
     private func speakProactive(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let spoken: String
+        if trimmed.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+            spoken = trimmed
+        } else {
+            spoken = "Sir, " + trimmed.prefix(1).lowercased() + String(trimmed.dropFirst())
+        }
+
         do {
-            let audio = try await client.synthesizeSpeech(text)
+            let audio = try await client.synthesizeSpeech(spoken)
             try await appModel.speechSynthesizer.speakRemoteAudio(
                 audio,
-                text: text,
+                text: spoken,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         } catch {
             await appModel.speechSynthesizer.speak(
-                text,
+                spoken,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         }

@@ -4,25 +4,31 @@ A personal agent designed to use Ray-Ban Meta glasses as an always-available voi
 
 ## Current milestone
 
-Milestone 2 is now implemented. Jarvis can:
+Jarvis now uses the local Ollama model `qwen3.8:27b` as a planner with thinking disabled. Obvious low-risk commands bypass the model for low latency.
 
-- accept ordinary-language commands
-- check whether Minecraft is running
-- launch Minecraft
-- ensure Minecraft is running
-- expose the agent through a persistent local HTTP service
-- automatically start that local service from the terminal client
-- optionally register the service to start when you log into Windows
+Current tools include:
+
+- launch arbitrary Windows applications
+- close applications
+- check whether an application/process is running
+- list running processes
+- open URLs
+- open local files/folders
+- Minecraft-specific status/launch/ensure helpers
+- Google Contacts lookup
+- Gmail send preparation with explicit confirmation before sending
 
 Examples:
 
 ```text
-Open Minecraft.
-Is Minecraft running?
-Make sure Minecraft is running.
+Open Spotify.
+Is Discord running?
+Close Spotify.
+Open https://youtube.com
+Email alex@example.com saying I can talk later. Do not use emojis.
 ```
 
-The current natural-language router is deliberately deterministic. The execution boundary is already separated from the planner, so a model-based planner can be added without giving the model unrestricted shell access.
+For email, Jarvis prepares the message and asks for `confirm` before sending.
 
 ## Architecture
 
@@ -33,101 +39,100 @@ Ray-Ban Meta
 iPhone client
     |
     v
-Jarvis agent/gateway ---- Gmail / Calendar / Web / other services
+Jarvis agent/gateway ---- Gmail / Contacts / Calendar / Web
     |
     v
 Windows PC agent ---- apps / files / local automation
 ```
 
-For the current milestone, the Jarvis service is bound only to `127.0.0.1:8765`, so it is not exposed to the LAN or Internet.
+The current Jarvis service is bound only to `127.0.0.1:8765`, so it is not exposed to the LAN or Internet.
 
 ## Safety model
 
-Jarvis uses explicit tools rather than handing an LLM unrestricted shell access. Tool permissions will be configurable. Destructive, security-sensitive, financial, and other high-impact operations should require stronger confirmation by default.
+Jarvis uses explicit tools rather than unrestricted shell access. Outbound email requires confirmation. More consequential actions will use stronger confirmation policies as additional tools are added.
 
 ## Requirements
 
-- Windows 10/11 for the PC-control milestone
+- Windows 10/11
 - Python 3.12+
+- Ollama with `qwen3.8:27b` installed (or another model selected with `JARVIS_MODEL`)
 
 ## Install or update
 
-From the repository directory:
-
-```cmd
+```powershell
+cd C:\Users\emmet\Jarvis-for-MRB
 git pull
 py -3.14 -m pip install -e .
 ```
 
-Python 3.12+ is supported. If `py -3.14` is unavailable, use your installed Python 3.12+ executable instead.
+Restart the old background service after pulling code changes:
 
-## Run Jarvis without relying on PATH
+```powershell
+Get-NetTCPConnection -LocalPort 8765 -State Listen |
+  Select-Object -ExpandProperty OwningProcess |
+  ForEach-Object { Stop-Process -Id $_ -Force }
+```
 
-```cmd
+Then run:
+
+```powershell
 py -3.14 -m jarvis_mrb.cli
 ```
 
-Or double-click/run:
+## Model configuration
 
-```cmd
-run_jarvis.cmd
-```
-
-Then type commands naturally:
+Default planner:
 
 ```text
-jarvis> Open Minecraft
-jarvis> Is Minecraft running?
-jarvis> Make sure Minecraft is running
+qwen3.8:27b
 ```
 
-The terminal automatically starts the background Jarvis service if it is not already running.
+Thinking is explicitly disabled for latency. The model is kept warm for 30 minutes by default.
 
-## Start Jarvis automatically with Windows
+To use another Ollama model:
 
-Run once:
+```powershell
+$env:JARVIS_MODEL="qwen3:32b"
+```
 
-```cmd
+## Gmail and Google Contacts setup
+
+Jarvis uses Google's official OAuth APIs. Create a Google Cloud **Desktop OAuth client**, enable the **Gmail API** and **People API**, then save the downloaded OAuth client JSON here:
+
+```text
+%APPDATA%\JarvisForMRB\google_credentials.json
+```
+
+Alternatively set `JARVIS_GOOGLE_CREDENTIALS` to another JSON path.
+
+Then run:
+
+```powershell
+py -3.14 -m jarvis_mrb.google_auth
+```
+
+A browser window will ask you to authorize Gmail send access and read-only Contacts access. The resulting token is stored under `%APPDATA%\JarvisForMRB`, outside the repository.
+
+Test with:
+
+```text
+jarvis> gmail status
+jarvis> Email alex@example.com saying I can talk later and do not use emojis
+jarvis> confirm
+```
+
+## Windows startup
+
+```powershell
 py -3.14 -m jarvis_mrb.startup
 ```
 
-That registers a Windows Scheduled Task named `JarvisForMRB` which starts the local Jarvis service at logon.
-
-## Local API
-
-Health check:
-
-```text
-GET http://127.0.0.1:8765/health
-```
-
-Natural-language command:
-
-```text
-POST http://127.0.0.1:8765/command
-Content-Type: application/json
-
-{"text":"Open Minecraft"}
-```
-
-## Repository layout
-
-```text
-jarvis_mrb/
-  agent.py        natural-language planner/router
-  cli.py          terminal client
-  service.py      persistent local API service
-  startup.py      Windows startup registration
-  tools/
-    pc.py         controlled Windows actions
-run_jarvis.cmd    PATH-independent Windows launcher
-```
+That registers a Windows Scheduled Task named `JarvisForMRB` which starts the local service at logon.
 
 ## Next milestones
 
-1. Add model-driven tool selection over the existing explicit tool boundary.
-2. Add Gmail and Contacts tools with configurable confirmation policy.
-3. Add persistent/conditional jobs such as “make sure Minecraft is open when I get home.”
-4. Add an iPhone client and secure remote transport.
-5. Integrate Ray-Ban Meta through Meta's Wearables Device Access Toolkit.
-6. Add a local `Jarvis` wake word.
+1. Persistent/conditional jobs such as “make sure Minecraft is open when I get home.”
+2. Calendar and broader service integrations.
+3. iPhone client and secure remote transport.
+4. Ray-Ban Meta integration through Meta's Wearables Device Access Toolkit.
+5. Local `Jarvis` wake word.

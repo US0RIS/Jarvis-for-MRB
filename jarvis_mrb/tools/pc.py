@@ -99,20 +99,22 @@ def launch_app(name: str) -> ToolResult:
             pass
 
     if sys.platform == "win32":
+        if _start_app_via_start_menu(name):
+            return ToolResult(True, f"Opened {name} from the Windows Start menu.")
+
+        # Last fallback: Windows app alias / URI / executable association.
         try:
-            subprocess.Popen(
+            result = subprocess.run(
                 ["cmd.exe", "/c", "start", "", name],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
             )
-            # `start` can return successfully even for a bad target, so prefer the
-            # Start-menu resolver when possible. This attempt still handles URI/app aliases.
-            return ToolResult(True, f"Launch request sent for {name}.")
-        except OSError:
+            if result.returncode == 0:
+                return ToolResult(True, f"Launch request sent for {name}.")
+        except (OSError, subprocess.TimeoutExpired):
             pass
-
-        if _start_app_via_start_menu(name):
-            return ToolResult(True, f"Opened {name} from the Windows Start menu.")
 
     return ToolResult(False, f"Jarvis could not find an application named {name}.")
 
@@ -130,7 +132,7 @@ def close_app(name: str) -> ToolResult:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    gone, alive = psutil.wait_procs(matches, timeout=3)
+    _, alive = psutil.wait_procs(matches, timeout=3)
     for process in alive:
         try:
             process.kill()

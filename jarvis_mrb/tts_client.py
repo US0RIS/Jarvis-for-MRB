@@ -22,15 +22,16 @@ TTS_INSTRUCT = os.environ.get(
 def tts_health() -> bool:
     """Return true only when the server process *and model* are ready."""
     try:
-        response = httpx.get(f"{TTS_URL}/health", timeout=1.0)
+        # This function is also consulted by Jarvis's own /health endpoint. Keep
+        # the localhost probe shorter than the CLI's service-health timeout so an
+        # absent TTS process can never make the main Jarvis service look dead.
+        response = httpx.get(f"{TTS_URL}/health", timeout=0.20)
         if response.status_code >= 400:
             return False
         payload = response.json()
         backend = payload.get("backend") if isinstance(payload, dict) else None
         if isinstance(backend, dict) and "ready" in backend:
             return bool(backend.get("ready"))
-        # Backward-compatible fallback for a server build that only exposes a
-        # textual health status.
         status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
         return status in {"healthy", "ready", "ok"}
     except (httpx.HTTPError, ValueError):

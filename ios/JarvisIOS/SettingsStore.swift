@@ -10,9 +10,19 @@ final class SettingsStore: ObservableObject {
     @Published var speakResponses: Bool { didSet { defaults.set(speakResponses, forKey: "jarvis.speakResponses") } }
     @Published var preferBluetoothAudio: Bool { didSet { defaults.set(preferBluetoothAudio, forKey: "jarvis.preferBluetoothAudio") } }
 
+    let conversationSessionID: String
+
     private let defaults = UserDefaults.standard
 
     init() {
+        if let savedSessionID = defaults.string(forKey: "jarvis.conversationSessionID"), !savedSessionID.isEmpty {
+            conversationSessionID = savedSessionID
+        } else {
+            let newSessionID = UUID().uuidString
+            defaults.set(newSessionID, forKey: "jarvis.conversationSessionID")
+            conversationSessionID = newSessionID
+        }
+
         baseURL = defaults.string(forKey: "jarvis.baseURL") ?? "http://127.0.0.1:8765"
         apiToken = KeychainStore.read("jarvis.apiToken") ?? ""
         homeLatitude = defaults.object(forKey: "jarvis.homeLatitude") as? Double ?? 0

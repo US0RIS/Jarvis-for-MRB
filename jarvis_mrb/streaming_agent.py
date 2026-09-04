@@ -71,6 +71,15 @@ def _parse_plan(line: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _lower_first_alpha(text: str) -> str:
+    chars = list(text)
+    for index, character in enumerate(chars):
+        if character.isalpha():
+            chars[index] = character.lower()
+            break
+    return "".join(chars)
+
+
 def _fallback(text: str, history: Sequence[ConversationMessage] | None) -> Iterator[str]:
     reply = handle_natural_language(text, history=history)
     if reply.message and reply.message != "__EXIT__":
@@ -127,6 +136,7 @@ def stream_natural_language(
     plan: dict[str, Any] | None = None
     body_started = False
     emitted_body = False
+    first_body_chunk = True
 
     try:
         with httpx.Client(timeout=httpx.Timeout(120.0, connect=3.0)) as client:
@@ -170,12 +180,17 @@ def stream_natural_language(
                         body_started = True
                         if remainder:
                             emitted_body = True
-                            yield remainder
+                            first_body_chunk = False
+                            yield _lower_first_alpha(remainder)
                         continue
 
                     if body_started:
                         emitted_body = True
-                        yield chunk
+                        if first_body_chunk:
+                            first_body_chunk = False
+                            yield _lower_first_alpha(chunk)
+                        else:
+                            yield chunk
 
                 if plan is not None and not plan.get("tool") and body_started:
                     if not emitted_body:

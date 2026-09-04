@@ -152,10 +152,30 @@ private struct MetaGlassesCard: View {
                 LabeledContent("Registration", value: manager.registrationStatus)
                 LabeledContent("Glasses available", value: String(manager.availableDeviceCount))
                 LabeledContent("Camera permission", value: manager.cameraPermissionStatus)
+                LabeledContent("Stream", value: manager.streamState)
+
+                if let frame = manager.currentFrame {
+                    Image(uiImage: frame)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
 
                 HStack {
                     Button("Register") { Task { await manager.startRegistration() } }
                     Button("Camera Access") { Task { await manager.requestCameraPermission() } }
+                }
+                .buttonStyle(.bordered)
+
+                HStack {
+                    if manager.streamState == "Stopped" {
+                        Button("Start Camera") { Task { await manager.startStream() } }
+                    } else {
+                        Button("Stop Camera", role: .destructive) { manager.stopStream() }
+                    }
+                    Button("Photo") { manager.capturePhoto() }
+                        .disabled(manager.streamState == "Stopped")
                 }
                 .buttonStyle(.bordered)
 

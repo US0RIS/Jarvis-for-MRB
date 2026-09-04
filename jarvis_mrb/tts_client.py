@@ -20,10 +20,20 @@ TTS_INSTRUCT = os.environ.get(
 
 
 def tts_health() -> bool:
+    """Return true only when the server process *and model* are ready."""
     try:
         response = httpx.get(f"{TTS_URL}/health", timeout=1.0)
-        return response.status_code < 400
-    except httpx.HTTPError:
+        if response.status_code >= 400:
+            return False
+        payload = response.json()
+        backend = payload.get("backend") if isinstance(payload, dict) else None
+        if isinstance(backend, dict) and "ready" in backend:
+            return bool(backend.get("ready"))
+        # Backward-compatible fallback for a server build that only exposes a
+        # textual health status.
+        status = str(payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+        return status in {"healthy", "ready", "ok"}
+    except (httpx.HTTPError, ValueError):
         return False
 
 
@@ -37,6 +47,8 @@ def _wsl_start_command() -> list[str] | None:
 set -e
 ROOT="$HOME/.local/share/jarvis/qwen3-tts"
 if [ ! -x "$ROOT/.venv/bin/python" ]; then exit 2; fi
+# If a server process is already answering, do not launch a duplicate. Its model
+# may still be warming; the Windows client polls backend.ready separately.
 if curl -fsS http://127.0.0.1:8880/health >/dev/null 2>&1; then exit 0; fi
 cd "$ROOT"
 . .venv/bin/activate
@@ -84,7 +96,7 @@ def synthesize_wav(text: str) -> bytes:
     if not cleaned:
         raise ValueError("TTS text is empty")
     if not tts_health() and not ensure_tts_server(wait_seconds=1.0):
-        raise RuntimeError("Local Qwen3-TTS service is not available")
+        raise RuntimeError("Local Qwen3-TTS model is not ready")
 
     # This server exposes Qwen's native style control as `instruct` rather than
     # OpenAI's `instructions` spelling. Ryan is the English male CustomVoice; the

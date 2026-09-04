@@ -22,6 +22,7 @@ enum JarvisAPIError: LocalizedError {
 struct JarvisAPIClient {
     let baseURL: String
     let apiToken: String
+    let sessionID: String
 
     func health() async throws -> Bool {
         guard let url = URL(string: baseURL)?.appendingPathComponent("health") else { throw JarvisAPIError.badURL }
@@ -31,7 +32,7 @@ struct JarvisAPIClient {
     }
 
     func command(_ text: String) async throws -> JarvisAPIResponse {
-        try await post(path: "command", body: ["text": text])
+        try await post(path: "command", body: ["text": text, "session_id": sessionID])
     }
 
     func event(_ name: String) async throws -> JarvisAPIResponse {

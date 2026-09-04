@@ -18,19 +18,28 @@ fi
 echo "GPU visible to WSL:"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
+# Do not depend on the distro's default Python. Rolling/new WSL distributions can
+# already ship Python 3.14, while the current Qwen3-TTS/Transformers stack is much
+# safer on 3.12. Install only the system libraries here; uv manages a private 3.12
+# runtime for Jarvis below.
 sudo apt-get update
-sudo apt-get install -y git python3 python3-venv python3-pip curl libsndfile1 ffmpeg
+sudo apt-get install -y git curl ca-certificates libsndfile1 ffmpeg sox build-essential
 
-PY=python3
-"$PY" - <<'PY'
-import sys
-if not ((3, 10) <= sys.version_info[:2] <= (3, 13)):
-    raise SystemExit(
-        f"Jarvis Qwen3-TTS setup expects Python 3.10-3.13; WSL python3 is {sys.version.split()[0]}. "
-        "Install Python 3.12 in WSL and rerun using that interpreter."
-    )
-print("Using Python", sys.version.split()[0])
-PY
+UV="$HOME/.local/bin/uv"
+if [ ! -x "$UV" ]; then
+  echo "Installing uv to manage Jarvis's private Python 3.12 runtime..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+if [ ! -x "$UV" ]; then
+  echo "ERROR: uv installation did not create $UV" >&2
+  exit 22
+fi
+
+# uv downloads a standalone CPython 3.12 build without replacing WSL's system
+# Python. Recreate only Jarvis's TTS venv so reruns are deterministic even if a
+# previous attempt used a different interpreter.
+echo "Installing private Python 3.12 for Qwen3-TTS..."
+"$UV" python install 3.12
 
 mkdir -p "$(dirname "$ROOT")"
 if [ -d "$ROOT/.git" ]; then
@@ -39,8 +48,17 @@ else
   git clone "$REPO" "$ROOT"
 fi
 
-"$PY" -m venv "$ROOT/.venv"
+rm -rf "$ROOT/.venv"
+"$UV" venv --python 3.12 --seed "$ROOT/.venv"
 . "$ROOT/.venv/bin/activate"
+
+python - <<'PY'
+import sys
+print("Jarvis TTS Python:", sys.version.split()[0])
+if sys.version_info[:2] != (3, 12):
+    raise SystemExit(f"Expected private Python 3.12, got {sys.version.split()[0]}")
+PY
+
 python -m pip install --upgrade pip setuptools wheel
 
 # Blackwell (RTX 50-series) support requires a recent CUDA/PyTorch wheel. Install
@@ -104,8 +122,8 @@ exit 21
 
 # Git commonly checks .ps1 files out with CRLF on Windows. PowerShell here-strings
 # preserve those CR characters, and Base64 correctly preserves them too; Bash then
-# sees tokens such as `do\r` and reports `unexpected token $'do\r'`. Normalize the
-# embedded Bash program to Unix LF *before* encoding it for transport into WSL.
+# sees tokens such as `do\r`. Normalize the embedded Bash program to Unix LF before
+# transporting it into WSL.
 $bash = $bash.Replace("`r`n", "`n").Replace("`r", "`n")
 
 # Do not pass the multiline Bash program directly as the `bash -lc` argument.

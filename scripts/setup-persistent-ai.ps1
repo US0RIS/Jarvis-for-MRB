@@ -22,8 +22,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "Persistent AI models are ready."
-Write-Host "- Episodic memory embeddings: nomic-embed-text"
-Write-Host "- Passive vision: moondream"
+Write-Host "- Episodic memory embeddings: nomic-embed-text (CPU by default so it cannot evict the planner)"
+Write-Host "- Passive vision: moondream (Ollama automatic GPU offload)"
 Write-Host ""
-Write-Host "Jarvis runs passive vision with zero GPU layers by default so the RTX 5080 remains available for Qwen and Kokoro."
-Write-Host "If you later want to benchmark GPU vision, set JARVIS_VISION_NUM_GPU before starting Jarvis."
+Write-Host "Moondream is small enough to coexist with Qwen3 8B on the target RTX 5080, so passive vision now uses normal Ollama GPU acceleration by default."
+Write-Host "Set JARVIS_VISION_NUM_GPU=0 before starting Jarvis only if you explicitly want to force vision back to CPU."

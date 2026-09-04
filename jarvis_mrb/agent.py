@@ -13,6 +13,7 @@ from jarvis_mrb.tools.pc import launch_minecraft, minecraft_status
 
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
+OLLAMA_KEEP_ALIVE = os.environ.get("JARVIS_OLLAMA_KEEP_ALIVE", "30m")
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,51 @@ def _extract_json(content: str) -> dict[str, Any] | None:
         return None
 
 
+def _fast_path(text: str) -> AgentReply | None:
+    """Handle obvious, low-risk commands without invoking the LLM.
+
+    Jarvis should not spend seconds asking a 27B model to decide that
+    'is Minecraft running?' maps to the Minecraft status tool. Ambiguous
+    requests still go to the model.
+    """
+    normalized = _normalize(text)
+
+    status_exact = {
+        "is minecraft running",
+        "is minecraft running?",
+        "is minecraft open",
+        "is minecraft open?",
+        "minecraft status",
+        "check minecraft",
+        "check if minecraft is running",
+        "check whether minecraft is running",
+    }
+    if normalized in status_exact:
+        return _execute_tool("pc.minecraft_status", {})
+
+    launch_exact = {
+        "open minecraft",
+        "launch minecraft",
+        "start minecraft",
+        "run minecraft",
+        "can you open minecraft for me?",
+        "can you open minecraft for me",
+    }
+    if normalized in launch_exact:
+        return _execute_tool("pc.launch_minecraft", {})
+
+    ensure_exact = {
+        "make sure minecraft is running",
+        "make sure minecraft is open",
+        "ensure minecraft is running",
+        "ensure minecraft is open",
+    }
+    if normalized in ensure_exact:
+        return _execute_tool("pc.ensure_minecraft_running", {})
+
+    return None
+
+
 def _ollama_plan(text: str) -> tuple[dict[str, Any] | None, str]:
     system = """You are the tool router for Jarvis, a local personal computer assistant.
 Choose exactly one listed tool when it can satisfy the user's request. Do not invent tools.
@@ -83,6 +129,7 @@ Return one JSON object only, with keys tool, arguments, response. Never wrap it 
         "stream": False,
         "format": "json",
         "think": False,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": text},
@@ -129,7 +176,14 @@ def handle_natural_language(text: str) -> AgentReply:
     if normalized in {"quit", "exit"}:
         return AgentReply(True, "__EXIT__")
     if normalized in {"model", "what model are you using", "what model are you using?"}:
-        return AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}")
+        return AgentReply(
+            True,
+            f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}",
+        )
+
+    fast = _fast_path(text)
+    if fast is not None:
+        return fast
 
     plan, error = _ollama_plan(text)
     if plan is not None:

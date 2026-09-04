@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 import math
 import os
+import re
 import sqlite3
 import struct
 import threading
@@ -17,9 +17,41 @@ APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 DB_PATH = APP_DIR / "episodic_memory.sqlite3"
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 EMBED_MODEL = os.environ.get("JARVIS_EMBED_MODEL", "nomic-embed-text")
+EMBED_KEEP_ALIVE = os.environ.get("JARVIS_EMBED_KEEP_ALIVE", "5m")
+EMBED_NUM_GPU = int(os.environ.get("JARVIS_EMBED_NUM_GPU", "0"))
 MAX_EPISODES = int(os.environ.get("JARVIS_MAX_EPISODES", "10000"))
 _POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jarvis-memory")
 _INIT_LOCK = threading.RLock()
+
+# Long-term semantic retrieval is intentionally on-demand. Running an embedding
+# model synchronously before *every* voice turn added noticeable latency and even
+# penalized deterministic fast-path commands. Recent conversation is always supplied
+# separately; the vector store is only needed when the wording indicates older
+# context may matter.
+_RECALL_PATTERNS = (
+    r"\bremember\b",
+    r"\brecall\b",
+    r"\bearlier\b",
+    r"\bprevious(?:ly)?\b",
+    r"\blast time\b",
+    r"\blast (?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    r"\byesterday\b",
+    r"\b(?:days?|weeks?|months?) ago\b",
+    r"\bwe (?:talked|discussed|looked|worked)\b",
+    r"\byou (?:said|told|recommended|found)\b",
+    r"\bi (?:said|told|mentioned)\b",
+    r"\bwhat (?:was|were|did)\b.*\b(?:we|you|i)\b",
+    r"\bwhich (?:one|model|part|option) (?:was|did)\b",
+    r"\bpart number\b",
+    r"\bfrom (?:before|earlier|last time)\b",
+)
+
+
+def should_retrieve_memory(query: str) -> bool:
+    normalized = " ".join(query.lower().split())
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in _RECALL_PATTERNS)
 
 
 def _connect() -> sqlite3.Connection:
@@ -49,16 +81,26 @@ def _embed(text: str) -> list[float] | None:
     cleaned = " ".join(text.strip().split())
     if not cleaned:
         return None
+    options = {"num_gpu": EMBED_NUM_GPU}
     try:
         with httpx.Client(timeout=httpx.Timeout(20.0, connect=2.0)) as client:
             response = client.post(
                 f"{OLLAMA_URL}/api/embed",
-                json={"model": EMBED_MODEL, "input": cleaned[:8000], "keep_alive": "30m"},
+                json={
+                    "model": EMBED_MODEL,
+                    "input": cleaned[:8000],
+                    "keep_alive": EMBED_KEEP_ALIVE,
+                    "options": options,
+                },
             )
             if response.status_code == 404:
                 response = client.post(
                     f"{OLLAMA_URL}/api/embeddings",
-                    json={"model": EMBED_MODEL, "prompt": cleaned[:8000]},
+                    json={
+                        "model": EMBED_MODEL,
+                        "prompt": cleaned[:8000],
+                        "options": options,
+                    },
                 )
                 response.raise_for_status()
                 payload = response.json()
@@ -126,6 +168,8 @@ def remember_exchange_async(session_id: str, user_text: str, assistant_text: str
     content = f"User: {user_text.strip()}\nJarvis: {assistant_text.strip()}".strip()
     if not content:
         return
+    # Embedding runs off the voice thread and defaults to CPU, so it cannot evict
+    # the resident 8B planner from the RTX GPU during the user's next utterance.
     _POOL.submit(remember_text, content, session_id=session_id, kind="conversation")
 
 
@@ -160,6 +204,8 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
 
 
 def memory_context(query: str, limit: int = 3) -> str:
+    if not should_retrieve_memory(query):
+        return ""
     items = retrieve(query, limit=limit)
     if not items:
         return ""
@@ -170,4 +216,10 @@ def status() -> dict[str, object]:
     with _connect() as conn:
         count = int(conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0])
         embedded = int(conn.execute("SELECT COUNT(*) FROM episodes WHERE dimensions>0").fetchone()[0])
-    return {"episodes": count, "embedded": embedded, "embedding_model": EMBED_MODEL}
+    return {
+        "episodes": count,
+        "embedded": embedded,
+        "embedding_model": EMBED_MODEL,
+        "embedding_gpu_layers": EMBED_NUM_GPU,
+        "retrieval_mode": "on-demand",
+    }

@@ -119,6 +119,41 @@ def launch_app(name: str) -> ToolResult:
     return ToolResult(False, f"Jarvis could not find an application named {name}.")
 
 
+def _post_close_to_windows(pids: set[int]) -> int:
+    """Ask top-level windows owned by the target PIDs to close normally.
+
+    This uses WM_CLOSE and often works for desktop/packaged apps even when
+    OpenProcess/TerminateProcess is denied. It is intentionally attempted
+    before forceful termination.
+    """
+    if sys.platform != "win32" or not pids:
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        WM_CLOSE = 0x0010
+        posted = 0
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        @WNDENUMPROC
+        def callback(hwnd, lparam):
+            nonlocal posted
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if int(pid.value) in pids and user32.IsWindowVisible(hwnd):
+                if user32.PostMessageW(hwnd, WM_CLOSE, 0, 0):
+                    posted += 1
+            return True
+
+        user32.EnumWindows(callback, 0)
+        return posted
+    except Exception:
+        return 0
+
+
 def _taskkill_pid(pid: int) -> bool:
     if sys.platform != "win32":
         return False
@@ -140,8 +175,18 @@ def close_app(name: str) -> ToolResult:
     if not matches:
         return ToolResult(True, f"{name} does not appear to be running.")
 
-    # First try a normal terminate so apps get a chance to shut down cleanly.
-    for process in matches:
+    # Prefer the same semantic action as clicking the window's X. This avoids
+    # requiring process-handle termination rights for many Windows apps.
+    target_pids = {int(process.pid) for process in matches}
+    posted = _post_close_to_windows(target_pids)
+    if posted:
+        for _ in range(10):
+            time.sleep(0.2)
+            if not _matching_processes(name):
+                return ToolResult(True, f"Closed {name}.")
+
+    # Then try normal process termination.
+    for process in _matching_processes(name):
         try:
             process.terminate()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -152,10 +197,7 @@ def close_app(name: str) -> ToolResult:
     if not remaining:
         return ToolResult(True, f"Closed {name}.")
 
-    # On Windows, psutil can receive AccessDenied from OpenProcess even for apps
-    # that taskkill can terminate. Fall back to taskkill by PID and include the
-    # process tree so multi-process desktop apps (Spotify, browsers, etc.) close
-    # as one application.
+    # Finally try taskkill for process trees. This may still require elevation.
     taskkill_succeeded = False
     if sys.platform == "win32":
         for process in remaining:
@@ -182,8 +224,8 @@ def close_app(name: str) -> ToolResult:
         return ToolResult(False, f"Jarvis closed part of {name}, but {detail} are still running.")
     return ToolResult(
         False,
-        f"Windows denied permission to close {name}. Still running: {detail}. "
-        "If this app is elevated, Jarvis must also be run elevated to control it.",
+        f"Windows denied permission to force-close {name}. Still running: {detail}. "
+        "Jarvis also tried a normal window-close request first. If the remaining process is elevated or protected, an elevated Jarvis process may be required.",
     )
 
 

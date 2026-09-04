@@ -85,7 +85,7 @@ final class JarvisAppModel: ObservableObject {
                     voiceStatus = "Speaking…"
                 }
                 await speechSynthesizer.speak(
-                    response.message,
+                    Self.spokenResponse(for: response.message),
                     preferBluetooth: settings.preferBluetoothAudio
                 )
             }
@@ -196,6 +196,8 @@ final class JarvisAppModel: ObservableObject {
         var phase: VoicePhase = .waitingForWake
         var lastTranscript = ""
         var lastTranscriptChange = Date()
+        var commandBuffer = ""
+        var followUpBuffer = ""
 
         guard await restartVoiceRecognition() else { return }
 
@@ -221,6 +223,9 @@ final class JarvisAppModel: ObservableObject {
 
             switch phase {
             case .waitingForWake:
+                commandBuffer = ""
+                followUpBuffer = ""
+
                 if let deadline = confirmationFollowUpDeadline,
                    now < deadline,
                    let confirmation = Self.confirmationCommand(from: transcript),
@@ -237,17 +242,37 @@ final class JarvisAppModel: ObservableObject {
                     confirmationFollowUpDeadline = nil
                     phase = .collectingAfterWake
                     voiceStatus = "Listening for command…"
-                    if (silence >= 0.9 || recognitionEnded), !command.isEmpty {
+                    let requiredSilence = Self.commandSilenceWindow(for: command)
+
+                    if !command.isEmpty && silence >= requiredSilence {
                         await submitHandsFreeCommand(command)
                         phase = .waitingForWake
                         lastTranscript = ""
                         lastTranscriptChange = Date()
                         continue
                     }
+
+                    if recognitionEnded {
+                        if Self.needsExtendedDictation(command) {
+                            commandBuffer = command
+                            _ = await restartVoiceRecognition()
+                            lastTranscript = ""
+                            lastTranscriptChange = Date()
+                            continue
+                        }
+
+                        if !command.isEmpty {
+                            await submitHandsFreeCommand(command)
+                            phase = .waitingForWake
+                            lastTranscript = ""
+                            lastTranscriptChange = Date()
+                            continue
+                        }
+                    }
                 } else if Self.containsWakeWord(transcript) && (silence >= 0.65 || recognitionEnded) {
                     confirmationFollowUpDeadline = nil
                     await promptForFollowUp()
-                    phase = .awaitingFollowUp(deadline: Date().addingTimeInterval(8))
+                    phase = .awaitingFollowUp(deadline: Date().addingTimeInterval(20))
                     lastTranscript = ""
                     lastTranscriptChange = Date()
                     continue
@@ -263,8 +288,20 @@ final class JarvisAppModel: ObservableObject {
                 }
 
             case .collectingAfterWake:
-                let command = Self.commandAfterWakeWord(in: transcript) ?? ""
-                if !command.isEmpty && (silence >= 0.9 || recognitionEnded) {
+                let segment: String
+                if commandBuffer.isEmpty {
+                    segment = Self.commandAfterWakeWord(in: transcript) ?? ""
+                } else {
+                    // If Apple finalized a long utterance at a pause, recognition
+                    // was restarted and this transcript is the continuation only.
+                    segment = transcript
+                }
+
+                let command = Self.joinCommandParts(commandBuffer, segment)
+                let requiredSilence = Self.commandSilenceWindow(for: command)
+
+                if !command.isEmpty && silence >= requiredSilence {
+                    commandBuffer = ""
                     await submitHandsFreeCommand(command)
                     phase = .waitingForWake
                     lastTranscript = ""
@@ -272,15 +309,57 @@ final class JarvisAppModel: ObservableObject {
                     continue
                 }
 
+                if recognitionEnded {
+                    if Self.needsExtendedDictation(command) {
+                        commandBuffer = command
+                        _ = await restartVoiceRecognition()
+                        lastTranscript = ""
+                        lastTranscriptChange = Date()
+                        continue
+                    }
+
+                    if !command.isEmpty {
+                        commandBuffer = ""
+                        await submitHandsFreeCommand(command)
+                        phase = .waitingForWake
+                        lastTranscript = ""
+                        lastTranscriptChange = Date()
+                        continue
+                    }
+                }
+
             case .awaitingFollowUp(let deadline):
-                if !transcript.isEmpty && (silence >= 0.9 || recognitionEnded) {
-                    await submitHandsFreeCommand(transcript)
+                let command = Self.joinCommandParts(followUpBuffer, transcript)
+                let requiredSilence = Self.commandSilenceWindow(for: command)
+
+                if !command.isEmpty && silence >= requiredSilence {
+                    followUpBuffer = ""
+                    await submitHandsFreeCommand(command)
                     phase = .waitingForWake
                     lastTranscript = ""
                     lastTranscriptChange = Date()
                     continue
                 }
+
+                if recognitionEnded && !command.isEmpty {
+                    if Self.needsExtendedDictation(command) {
+                        followUpBuffer = command
+                        _ = await restartVoiceRecognition()
+                        lastTranscript = ""
+                        lastTranscriptChange = Date()
+                        continue
+                    }
+
+                    followUpBuffer = ""
+                    await submitHandsFreeCommand(command)
+                    phase = .waitingForWake
+                    lastTranscript = ""
+                    lastTranscriptChange = Date()
+                    continue
+                }
+
                 if now >= deadline {
+                    followUpBuffer = ""
                     phase = .waitingForWake
                     voiceStatus = "Listening for “Jarvis”…"
                     _ = speechRecognizer.stopListening()
@@ -365,6 +444,37 @@ final class JarvisAppModel: ObservableObject {
         return suffix.isEmpty ? nil : suffix
     }
 
+    private static func joinCommandParts(_ first: String, _ second: String) -> String {
+        let a = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        let b = second.trimmingCharacters(in: .whitespacesAndNewlines)
+        if a.isEmpty { return b }
+        if b.isEmpty { return a }
+        return "\(a) \(b)"
+    }
+
+    /// Ordinary commands should still feel quick. Dictation-like requests need a
+    /// much longer pause window because people naturally hesitate while spelling
+    /// names, email addresses, URLs, and message bodies.
+    static func commandSilenceWindow(for command: String) -> TimeInterval {
+        if needsExtendedDictation(command) {
+            return 3.0
+        }
+        if command.count > 100 {
+            return 1.65
+        }
+        return 1.15
+    }
+
+    static func needsExtendedDictation(_ command: String) -> Bool {
+        let lower = command.lowercased()
+        let cues = [
+            "email", "e-mail", "email address", "address is", "my address",
+            "gmail", "icloud", "outlook", "dot com", "dot net", "dot org",
+            " at ", " underscore ", "spell", "spelling", "url", "website"
+        ]
+        return cues.contains(where: { lower.contains($0) })
+    }
+
     static func confirmationCommand(from transcript: String) -> String? {
         let normalized = transcript
             .lowercased()
@@ -386,5 +496,15 @@ final class JarvisAppModel: ObservableObject {
             || lower.contains("say “confirm”")
             || lower.contains("say confirm")
             || (lower.contains("confirm") && lower.contains("cancel"))
+    }
+
+    static func spokenResponse(for response: String) -> String {
+        if responseRequestsConfirmation(response) {
+            // The full consequential action remains visible on screen. Speaking
+            // the entire recipient/body back through the glasses is tedious; the
+            // confirmation barrier itself remains unchanged.
+            return "Ready. Say confirm or cancel."
+        }
+        return response
     }
 }

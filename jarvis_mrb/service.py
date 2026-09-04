@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from jarvis_mrb.agent import handle_natural_language
+from jarvis_mrb.conversation import append_message, recent_messages
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
 from jarvis_mrb.server_config import load_server_config
 
@@ -17,12 +18,13 @@ BIND_HOST = _CONFIG.bind_host
 PORT = _CONFIG.port
 API_TOKEN = _CONFIG.api_token
 
-app = FastAPI(title="Jarvis for MRB", version="0.6.0")
+app = FastAPI(title="Jarvis for MRB", version="0.7.0")
 _scheduler_started = False
 
 
 class CommandRequest(BaseModel):
     text: str
+    session_id: str | None = None
 
 
 class CommandResponse(BaseModel):
@@ -43,6 +45,8 @@ def _check_auth(authorization: str | None) -> None:
 
 
 def _execute_job(command: str) -> str:
+    # Background jobs are intentionally stateless. They should not absorb or
+    # contaminate the user's live conversational context.
     reply = handle_natural_language(command)
     return reply.message
 
@@ -71,13 +75,18 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.6.0", "bind": BIND_HOST}
+    return {"status": "ok", "version": "0.7.0", "bind": BIND_HOST}
 
 
 @app.post("/command", response_model=CommandResponse)
 def command(request: CommandRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)
-    reply = handle_natural_language(request.text)
+    session_id = request.session_id or "default"
+    history = recent_messages(session_id, limit=20)
+    reply = handle_natural_language(request.text, history=history)
+    append_message(session_id, "user", request.text)
+    if reply.message and reply.message != "__EXIT__":
+        append_message(session_id, "assistant", reply.message)
     return CommandResponse(ok=reply.ok, message=reply.message)
 
 

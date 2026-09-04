@@ -6,6 +6,7 @@ final class PersistentPresenceController: ObservableObject {
     @Published private(set) var companionStatus = "Stopped"
     @Published private(set) var activeServerURL = ""
     @Published private(set) var visionStatus = "Off"
+    @Published private(set) var lastVisionScene = ""
     @Published private(set) var lastProactiveMessage = ""
 
     private unowned let appModel: JarvisAppModel
@@ -129,7 +130,9 @@ final class PersistentPresenceController: ObservableObject {
                let jpeg = Self.sampledJPEG(from: frame) {
                 do {
                     try await companion.sendFrame(jpeg)
-                    visionStatus = "Sampling at 1 fps"
+                    if visionStatus == "Starting glasses camera" || visionStatus == "Waiting for frame" {
+                        visionStatus = "Frame sent to PC"
+                    }
                 } catch {
                     visionStatus = "Reconnect pending"
                     companion.disconnect()
@@ -172,11 +175,39 @@ final class PersistentPresenceController: ObservableObject {
         let cue = String(describing: event["cue"] ?? "attention")
         let message = String(describing: event["message"] ?? "")
 
-        if appModel.settings.ambientCuesEnabled, type != "pong" {
+        // Vision-state telemetry can arrive multiple times per analysis. Never play
+        // an ambient sound for telemetry; cues are reserved for actual attention,
+        // completion, and error events.
+        if appModel.settings.ambientCuesEnabled,
+           ["cue", "proactive_alert", "background_complete", "background_failed"].contains(type) {
             cuePlayer.play(cue, preferBluetooth: appModel.settings.preferBluetoothAudio)
         }
 
         switch type {
+        case "vision_state":
+            let state = String(describing: event["state"] ?? "")
+            switch state {
+            case "received":
+                visionStatus = "Frame received by PC"
+            case "analyzing":
+                visionStatus = "Analyzing on PC…"
+            case "ready":
+                if let scene = event["scene"] as? String, !scene.isEmpty {
+                    lastVisionScene = scene
+                }
+                if let milliseconds = event["analysis_ms"] as? Int {
+                    visionStatus = "Active • \(milliseconds) ms analysis"
+                } else if let number = event["analysis_ms"] as? NSNumber {
+                    visionStatus = "Active • \(number.intValue) ms analysis"
+                } else {
+                    visionStatus = "Active"
+                }
+            case "error":
+                visionStatus = message.isEmpty ? "Vision model error" : "Vision error: \(message)"
+            default:
+                break
+            }
+
         case "proactive_alert", "background_complete", "background_failed":
             guard !message.isEmpty else { return }
             lastProactiveMessage = message

@@ -10,7 +10,7 @@ final class GeofenceManager: NSObject, ObservableObject, CLLocationManagerDelega
     var onHomeArrival: (() -> Void)?
 
     private let manager = CLLocationManager()
-    private let homeIdentifier = "jarvis.home"
+    private static let homeIdentifier = "jarvis.home"
 
     override init() {
         super.init()
@@ -41,7 +41,7 @@ final class GeofenceManager: NSObject, ObservableObject, CLLocationManagerDelega
             manager.requestAlwaysAuthorization()
         }
 
-        for region in manager.monitoredRegions where region.identifier == homeIdentifier {
+        for region in manager.monitoredRegions where region.identifier == Self.homeIdentifier {
             manager.stopMonitoring(for: region)
         }
 
@@ -50,7 +50,7 @@ final class GeofenceManager: NSObject, ObservableObject, CLLocationManagerDelega
         let region = CLCircularRegion(
             center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
             radius: boundedRadius,
-            identifier: homeIdentifier
+            identifier: Self.homeIdentifier
         )
         region.notifyOnEntry = true
         region.notifyOnExit = false
@@ -61,7 +61,7 @@ final class GeofenceManager: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func stopMonitoringHome() {
-        for region in manager.monitoredRegions where region.identifier == homeIdentifier {
+        for region in manager.monitoredRegions where region.identifier == Self.homeIdentifier {
             manager.stopMonitoring(for: region)
         }
         isMonitoringHome = false
@@ -75,7 +75,7 @@ final class GeofenceManager: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
-        guard region.identifier == homeIdentifier else { return }
+        guard region.identifier == "jarvis.home" else { return }
         Task { @MainActor in
             statusMessage = "Home arrival detected"
             onHomeArrival?()
@@ -83,7 +83,7 @@ final class GeofenceManager: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
-        guard region.identifier == homeIdentifier else { return }
+        guard region.identifier == "jarvis.home" else { return }
         Task { @MainActor in
             statusMessage = state == .inside ? "Currently inside home geofence" : "Home geofence active"
         }

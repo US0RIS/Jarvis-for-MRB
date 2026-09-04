@@ -11,11 +11,11 @@ TTS_URL = os.environ.get("JARVIS_TTS_URL", "http://127.0.0.1:8880").rstrip("/")
 TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "qwen3-tts")
 TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "Ryan")
 TTS_SPEED = float(os.environ.get("JARVIS_TTS_SPEED", "1.0"))
-TTS_INSTRUCTIONS = os.environ.get(
-    "JARVIS_TTS_INSTRUCTIONS",
+TTS_INSTRUCT = os.environ.get(
+    "JARVIS_TTS_INSTRUCT",
     "A composed adult male personal aide. Refined and understated. Calm, precise, warm but restrained, "
-    "crisp diction, measured pacing, authoritative without sounding theatrical. A subtle British-international "
-    "quality is welcome, but keep the delivery natural and conversational.",
+    "crisp diction, measured pacing, authoritative without sounding theatrical. Keep the delivery natural "
+    "and conversational; avoid exaggerated emotion or announcer-style delivery.",
 )
 
 
@@ -86,23 +86,21 @@ def synthesize_wav(text: str) -> bytes:
     if not tts_health() and not ensure_tts_server(wait_seconds=1.0):
         raise RuntimeError("Local Qwen3-TTS service is not available")
 
+    # This server exposes Qwen's native style control as `instruct` rather than
+    # OpenAI's `instructions` spelling. Ryan is the English male CustomVoice; the
+    # instruction keeps him restrained enough for an always-on personal aide.
     payload = {
         "model": TTS_MODEL,
         "voice": TTS_VOICE,
         "input": cleaned,
+        "language": "English",
         "response_format": "wav",
         "speed": TTS_SPEED,
-        "instructions": TTS_INSTRUCTIONS,
+        "instruct": TTS_INSTRUCT,
     }
     timeout = httpx.Timeout(90.0, connect=2.0)
     with httpx.Client(timeout=timeout) as client:
         response = client.post(f"{TTS_URL}/v1/audio/speech", json=payload)
-        # Some OpenAI-compatible wrappers accept the Qwen instruction control
-        # under a different schema. If this particular server build rejects the
-        # extra field, retry once without it rather than losing speech entirely.
-        if response.status_code == 422:
-            payload.pop("instructions", None)
-            response = client.post(f"{TTS_URL}/v1/audio/speech", json=payload)
         response.raise_for_status()
         data = response.content
     if len(data) < 44:

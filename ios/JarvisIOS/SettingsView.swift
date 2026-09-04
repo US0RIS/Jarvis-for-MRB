@@ -10,6 +10,12 @@ struct SettingsView: View {
     @State private var allowlistStatus = "Loading allowed recipients…"
     @State private var isSavingAllowlist = false
     @State private var neuralVoiceStatus = "Not checked"
+    @State private var useFastPlanner = false
+    @State private var plannerModelStatus = "Loading planner model…"
+    @State private var isSwitchingPlanner = false
+
+    private let fastPlannerModel = "qwen3:8b"
+    private let qualityPlannerModel = "qwen3.8:27b"
 
     private var client: JarvisAPIClient {
         JarvisAPIClient(
@@ -31,6 +37,44 @@ struct SettingsView: View {
                     Text("Example: http://192.168.1.50:8765 or your private Tailscale address.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("AI Planner") {
+                    Toggle(
+                        "Fast mode (Qwen3 8B)",
+                        isOn: Binding(
+                            get: { useFastPlanner },
+                            set: { enabled in
+                                let previous = useFastPlanner
+                                useFastPlanner = enabled
+                                Task { await switchPlannerModel(fast: enabled, previousFastValue: previous) }
+                            }
+                        )
+                    )
+                    .disabled(isSwitchingPlanner)
+
+                    HStack {
+                        Text("Current model")
+                        Spacer()
+                        if isSwitchingPlanner {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(useFastPlanner ? "Qwen3 8B" : "Qwen3.8 27B")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(plannerModelStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(
+                        useFastPlanner
+                            ? "8B is the low-latency option for normal conversation and routine tool routing. Thinking remains disabled."
+                            : "27B is the more capable planner for harder reasoning and ambiguous requests, but it takes longer to respond. Thinking remains disabled."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 Section("Voice") {
@@ -142,15 +186,47 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
+                async let plannerLoad: Void = loadPlannerModel()
                 async let voiceCheck: Void = checkNeuralVoice()
                 async let recipientsLoad: Void = loadAllowedRecipients()
-                _ = await (voiceCheck, recipientsLoad)
+                _ = await (plannerLoad, voiceCheck, recipientsLoad)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func loadPlannerModel() async {
+        do {
+            let response = try await client.plannerModel()
+            useFastPlanner = response.model == fastPlannerModel
+            plannerModelStatus = useFastPlanner
+                ? "Fast 8B planner selected."
+                : "27B planner selected."
+        } catch {
+            plannerModelStatus = "Could not read planner model: \(error.localizedDescription)"
+        }
+    }
+
+    private func switchPlannerModel(fast: Bool, previousFastValue: Bool) async {
+        guard !isSwitchingPlanner else { return }
+        isSwitchingPlanner = true
+        plannerModelStatus = fast ? "Switching to Qwen3 8B…" : "Switching to Qwen3.8 27B…"
+        defer { isSwitchingPlanner = false }
+
+        let requested = fast ? fastPlannerModel : qualityPlannerModel
+        do {
+            let response = try await client.setPlannerModel(requested)
+            useFastPlanner = response.model == fastPlannerModel
+            plannerModelStatus = useFastPlanner
+                ? "Fast 8B planner selected. Ollama is warming it in the background."
+                : "27B planner selected. Ollama is warming it in the background."
+        } catch {
+            useFastPlanner = previousFastValue
+            plannerModelStatus = "Model switch failed: \(error.localizedDescription)"
         }
     }
 

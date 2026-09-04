@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -147,10 +148,6 @@ def send_email(recipient: str, body: str, subject: str | None = None) -> GoogleR
         return resolved
     email_address = str(resolved.data["email"]).strip().lower()
 
-    # This check is deliberately after contact resolution and immediately before
-    # the Gmail API call. A speech-recognition mistake can therefore neither name
-    # nor resolve to an address outside the explicit allowlist, even if the user
-    # accidentally confirms the pending send.
     if not recipient_is_allowed(email_address):
         return GoogleResult(False, blocked_recipient_message(email_address), {"email": email_address})
 
@@ -209,6 +206,75 @@ def _gmail_headers(payload: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _sender_label(raw_sender: str) -> str:
+    name, address = parseaddr(raw_sender)
+    value = (name or address or raw_sender).strip().strip('"')
+    return value or "Unknown sender"
+
+
+def _human_email_date(raw_date: str) -> str:
+    if not raw_date:
+        return ""
+    try:
+        value = parsedate_to_datetime(raw_date)
+        if value.tzinfo is not None:
+            value = value.astimezone()
+        today = datetime.now().astimezone().date()
+        if value.date() == today:
+            prefix = "today"
+        elif value.date() == today - timedelta(days=1):
+            prefix = "yesterday"
+        else:
+            prefix = f"{value.strftime('%A, %B')} {value.day}"
+        clock = value.strftime("%I:%M %p").lstrip("0")
+        return f"{prefix} at {clock}"
+    except (TypeError, ValueError, OverflowError):
+        return raw_date
+
+
+def _strip_urls(text: str) -> str:
+    value = re.sub(r"<https?://[^>]+>", " ", text, flags=re.IGNORECASE)
+    value = re.sub(r"https?://\S+", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bwww\.\S+", " ", value, flags=re.IGNORECASE)
+    return value
+
+
+def _clean_email_text(raw_body: str, snippet: str) -> str:
+    def clean(value: str) -> str:
+        value = html.unescape(value or "")
+        value = _strip_urls(value)
+        value = re.sub(r"\(\s*\)", " ", value)
+        value = re.sub(r"\[\s*\]", " ", value)
+        value = re.sub(r"\b([A-Za-z][A-Za-z0-9'_-]{1,30})(?:\s+\1){2,}\b", r"\1", value, flags=re.IGNORECASE)
+        value = re.sub(r"\s+", " ", value).strip(" -|•\t\r\n")
+        return value
+
+    body = clean(raw_body)
+    snippet_text = clean(snippet)
+
+    # Cut common newsletter/legal footers. Keep the full cleaned text in structured
+    # data only up to a reasonable size; the spoken/display message should contain
+    # the useful content, not unsubscribe boilerplate or tracking machinery.
+    lower = body.lower()
+    footer_positions = [
+        lower.find(cue)
+        for cue in (" unsubscribe", " manage preferences", " privacy policy", " view in browser")
+        if lower.find(cue) >= 100
+    ]
+    if footer_positions:
+        body = body[: min(footer_positions)].rstrip(" -|•")
+
+    # Gmail's snippet is often a much better concise representation of newsletters
+    # and long quoted threads than the raw MIME body.
+    if (len(body) > 650 or raw_body.lower().count("http") >= 2) and len(snippet_text) >= 30:
+        body = snippet_text
+    if not body:
+        body = snippet_text
+    if len(body) > 520:
+        body = body[:517].rsplit(" ", 1)[0].rstrip() + "..."
+    return body
+
+
 def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
     creds = _load_credentials(interactive=False)
     if not creds:
@@ -227,7 +293,7 @@ def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
 
         emails: list[dict[str, Any]] = []
         rendered: list[str] = []
-        for index, ref in enumerate(refs, start=1):
+        for ref in refs:
             message_id = str(ref.get("id") or "")
             if not message_id:
                 continue
@@ -238,40 +304,77 @@ def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
             ).execute()
             payload = message.get("payload") or {}
             headers = _gmail_headers(payload)
-            sender = headers.get("from", "Unknown sender")
-            subject = headers.get("subject", "(no subject)")
-            date = headers.get("date", "")
-            body = _plain_text_from_payload(payload).strip()
-            if not body:
-                body = str(message.get("snippet") or "").strip()
-            body = re.sub(r"\s+", " ", body)
-            if len(body) > 1400:
-                body = body[:1397].rstrip() + "..."
+            sender_raw = headers.get("from", "Unknown sender")
+            sender = _sender_label(sender_raw)
+            subject = re.sub(r"\s+", " ", headers.get("subject", "(no subject)")).strip()
+            if len(subject) > 120:
+                subject = subject[:117].rstrip() + "..."
+            date_raw = headers.get("date", "")
+            date = _human_email_date(date_raw)
+            raw_body = _plain_text_from_payload(payload).strip()
+            snippet = str(message.get("snippet") or "").strip()
+            body = _clean_email_text(raw_body, snippet)
             unread = "UNREAD" in set(message.get("labelIds") or [])
 
             emails.append({
                 "id": message_id,
-                "from": sender,
+                "from": sender_raw,
+                "sender": sender,
                 "subject": subject,
-                "date": date,
+                "date": date_raw,
                 "body": body,
                 "unread": unread,
             })
-            status = "unread" if unread else "read"
-            rendered.append(
-                f"{index}. {status} email from {sender}; subject {subject!r}; date {date}; "
-                f"message: {body or '(empty message)'}"
-            )
+
+        for index, email in enumerate(emails, start=1):
+            excerpt = str(email["body"] or "").strip()
+            if len(emails) > 1 and len(excerpt) > 190:
+                excerpt = excerpt[:187].rsplit(" ", 1)[0].rstrip() + "..."
+            status = "unread" if email["unread"] else "read"
+            item = f"{index}) {email['sender']}, {status}, subject “{email['subject']}”"
+            if excerpt:
+                item += f". {excerpt}"
+            rendered.append(item)
     except Exception as exc:
         return GoogleResult(False, f"Gmail read failed: {exc}")
 
-    if not rendered:
-        return GoogleResult(True, f"No emails matched {gmail_query!r}.", {"emails": []})
-    return GoogleResult(
-        True,
-        f"Emails matching {gmail_query!r}: " + " | ".join(rendered),
-        {"emails": emails, "query": gmail_query},
-    )
+    if not emails:
+        return GoogleResult(True, "No matching emails found.", {"emails": [], "query": gmail_query})
+
+    if len(emails) == 1:
+        email = emails[0]
+        when = _human_email_date(str(email["date"]))
+        timing = f", received {when}" if when else ""
+        message = f"The email is from {email['sender']}, subject “{email['subject']}”{timing}."
+        if email["body"]:
+            message += f" It says: {email['body']}"
+    else:
+        message = f"I found {len(emails)} matching emails. " + " ".join(rendered)
+
+    return GoogleResult(True, message, {"emails": emails, "query": gmail_query})
+
+
+def _human_event_time(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        is_all_day = "T" not in value
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone()
+        today = datetime.now().astimezone().date()
+        if parsed.date() == today:
+            date_label = "today"
+        elif parsed.date() == today + timedelta(days=1):
+            date_label = "tomorrow"
+        else:
+            date_label = f"{parsed.strftime('%A, %B')} {parsed.day}"
+        if is_all_day:
+            return f"{date_label}, all day"
+        clock = parsed.strftime("%I:%M %p").lstrip("0")
+        return f"{date_label} at {clock}"
+    except (TypeError, ValueError, OverflowError):
+        return value
 
 
 def _format_events(events: list[dict[str, Any]], prefix: str) -> GoogleResult:
@@ -284,9 +387,15 @@ def _format_events(events: list[dict[str, Any]], prefix: str) -> GoogleResult:
         end = event.get("end", {}).get("dateTime") or event.get("end", {}).get("date") or ""
         summary = event.get("summary") or "(untitled)"
         location = event.get("location") or ""
-        summaries.append(f"{start}: {summary}" + (f" @ {location}" if location else ""))
+        summaries.append(f"{_human_event_time(start)} — {summary}" + (f" at {location}" if location else ""))
         compact.append({"id": event.get("id", ""), "summary": summary, "start": start, "end": end, "location": location})
-    return GoogleResult(True, prefix + ": " + "; ".join(summaries), {"events": compact})
+
+    shown = summaries[:6]
+    remaining = len(summaries) - len(shown)
+    message = prefix + ": " + "; ".join(shown)
+    if remaining > 0:
+        message += f"; plus {remaining} more"
+    return GoogleResult(True, message + ".", {"events": compact})
 
 
 def query_calendar_events(
@@ -346,7 +455,11 @@ def most_recent_calendar_event(days_back: int = 3650) -> GoogleResult:
     result = query_calendar_events(direction="past", days=days_back, limit=1)
     if result.ok and result.data and result.data.get("events"):
         event = result.data["events"][0]
-        return GoogleResult(True, f"Most recent event: {event['start']}: {event['summary']}.", {"events": [event]})
+        return GoogleResult(
+            True,
+            f"Most recent event: {_human_event_time(event['start'])} — {event['summary']}.",
+            {"events": [event]},
+        )
     return GoogleResult(True, f"No calendar events found in the last {days_back} day(s).", {"events": []})
 
 

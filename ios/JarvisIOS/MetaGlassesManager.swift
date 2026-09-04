@@ -18,7 +18,7 @@ final class MetaGlassesManager: ObservableObject {
     private var deviceTask: Task<Void, Never>?
     private var deviceSession: DeviceSession?
     private var camera: Camera?
-    private var stream: Stream?
+    private var stream: MWDATCamera.Stream?
 
     init() {
         observeRegistration()

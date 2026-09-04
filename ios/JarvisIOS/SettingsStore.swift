@@ -8,6 +8,7 @@ final class SettingsStore: ObservableObject {
     @Published var homeLongitude: Double { didSet { defaults.set(homeLongitude, forKey: "jarvis.homeLongitude") } }
     @Published var homeRadius: Double { didSet { defaults.set(homeRadius, forKey: "jarvis.homeRadius") } }
     @Published var speakResponses: Bool { didSet { defaults.set(speakResponses, forKey: "jarvis.speakResponses") } }
+    @Published var preferBluetoothAudio: Bool { didSet { defaults.set(preferBluetoothAudio, forKey: "jarvis.preferBluetoothAudio") } }
 
     private let defaults = UserDefaults.standard
 
@@ -18,5 +19,6 @@ final class SettingsStore: ObservableObject {
         homeLongitude = defaults.object(forKey: "jarvis.homeLongitude") as? Double ?? 0
         homeRadius = defaults.object(forKey: "jarvis.homeRadius") as? Double ?? 150
         speakResponses = defaults.object(forKey: "jarvis.speakResponses") as? Bool ?? true
+        preferBluetoothAudio = defaults.object(forKey: "jarvis.preferBluetoothAudio") as? Bool ?? true
     }
 }

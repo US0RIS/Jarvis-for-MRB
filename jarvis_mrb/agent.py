@@ -29,112 +29,119 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> AgentReply:
     if name == "pc.minecraft_status":
         result = minecraft_status()
         return AgentReply(result.ok, result.message)
-
     if name == "pc.launch_minecraft":
         result = launch_minecraft()
         return AgentReply(result.ok, result.message)
-
     if name == "pc.ensure_minecraft_running":
         status = minecraft_status()
         if "does not appear" not in status.message.lower():
             return AgentReply(True, "Minecraft is already running.")
         result = launch_minecraft()
         return AgentReply(result.ok, result.message)
-
     return AgentReply(False, f"The planner requested an unknown tool: {name}")
 
 
-def _ollama_plan(text: str) -> dict[str, Any] | None:
-    system = """You are Jarvis, a local personal computer assistant.
-Choose exactly one of the available tools when a tool can satisfy the user's request.
-Do not invent tools. Do not claim an action happened unless a tool is selected.
+def _extract_json(content: str) -> dict[str, Any] | None:
+    content = content.strip()
+    if not content:
+        return None
+    try:
+        value = json.loads(content)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", content, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        value = json.loads(match.group(0))
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        return None
 
-Available tools:
-- pc.minecraft_status: Check whether Minecraft is currently running.
-- pc.launch_minecraft: Launch Minecraft if it is not already running.
-- pc.ensure_minecraft_running: Ensure Minecraft is running, launching it if necessary.
 
-Return ONLY valid JSON in this exact shape:
-{"tool": "tool.name or null", "arguments": {}, "response": "brief response if no tool is needed"}
+def _ollama_plan(text: str) -> tuple[dict[str, Any] | None, str]:
+    system = """You are the tool router for Jarvis, a local personal computer assistant.
+Choose exactly one listed tool when it can satisfy the user's request. Do not invent tools.
 
-If the request cannot be completed with the listed tools, set tool to null and explain that briefly in response.
-"""
+Tools:
+- pc.minecraft_status: check whether Minecraft is running
+- pc.launch_minecraft: launch Minecraft if it is not running
+- pc.ensure_minecraft_running: make sure Minecraft is running, launching it if needed
 
+Examples:
+User: Could you check whether I forgot to leave Minecraft running?
+Assistant: {\"tool\":\"pc.minecraft_status\",\"arguments\":{},\"response\":\"\"}
+User: Get Minecraft ready for me.
+Assistant: {\"tool\":\"pc.ensure_minecraft_running\",\"arguments\":{},\"response\":\"\"}
+User: Close Minecraft.
+Assistant: {\"tool\":null,\"arguments\":{},\"response\":\"I don't have a tool to close Minecraft yet.\"}
+
+Return one JSON object only, with keys tool, arguments, response. Never wrap it in markdown."""
     payload = {
         "model": OLLAMA_MODEL,
         "stream": False,
         "format": "json",
+        "think": False,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": text},
         ],
         "options": {"temperature": 0},
     }
-
     try:
-        with httpx.Client(timeout=90.0) as client:
+        with httpx.Client(timeout=120.0) as client:
             response = client.post(f"{OLLAMA_URL}/api/chat", json=payload)
             response.raise_for_status()
             data = response.json()
-        content = data.get("message", {}).get("content", "")
-        parsed = json.loads(content)
-        if isinstance(parsed, dict):
-            return parsed
-    except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError):
-        return None
-    return None
+        content = str(data.get("message", {}).get("content", ""))
+        parsed = _extract_json(content)
+        if parsed is None:
+            return None, "Ollama responded, but Jarvis could not parse its tool plan."
+        return parsed, ""
+    except httpx.ConnectError:
+        return None, f"Cannot connect to Ollama at {OLLAMA_URL}. Is Ollama running?"
+    except httpx.TimeoutException:
+        return None, f"Ollama model {OLLAMA_MODEL} timed out while planning."
+    except (httpx.HTTPError, TypeError, ValueError) as exc:
+        return None, f"Ollama planner error: {exc}"
 
 
-def _deterministic_fallback(text: str) -> AgentReply:
+def _deterministic_fallback(text: str) -> AgentReply | None:
     normalized = _normalize(text)
-    if not normalized:
-        return AgentReply(True, "")
-
-    if normalized in {"quit", "exit"}:
-        return AgentReply(True, "__EXIT__")
-
     if "minecraft" in normalized and any(
-        phrase in normalized
-        for phrase in ("is running", "is open", "running?", "open?", "status")
+        phrase in normalized for phrase in ("is running", "is open", "running?", "open?", "status")
     ):
         return _execute_tool("pc.minecraft_status", {})
-
-    if "minecraft" in normalized and any(
-        phrase in normalized
-        for phrase in ("make sure", "ensure")
-    ):
+    if "minecraft" in normalized and any(phrase in normalized for phrase in ("make sure", "ensure")):
         return _execute_tool("pc.ensure_minecraft_running", {})
-
     if "minecraft" in normalized and any(
-        re.search(rf"\b{verb}\b", normalized)
-        for verb in ("open", "launch", "start", "run")
+        re.search(rf"\b{verb}\b", normalized) for verb in ("open", "launch", "start", "run")
     ):
         return _execute_tool("pc.launch_minecraft", {})
-
-    return AgentReply(
-        False,
-        "The local model is unavailable or returned an invalid plan, and no deterministic fallback matched.",
-    )
+    return None
 
 
 def handle_natural_language(text: str) -> AgentReply:
     normalized = _normalize(text)
     if not normalized:
         return AgentReply(True, "")
-
     if normalized in {"quit", "exit"}:
         return AgentReply(True, "__EXIT__")
+    if normalized in {"model", "what model are you using", "what model are you using?"}:
+        return AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}")
 
-    plan = _ollama_plan(text)
-    if plan is None:
-        return _deterministic_fallback(text)
+    plan, error = _ollama_plan(text)
+    if plan is not None:
+        tool = plan.get("tool")
+        arguments = plan.get("arguments") or {}
+        if tool:
+            if not isinstance(arguments, dict):
+                arguments = {}
+            return _execute_tool(str(tool), arguments)
+        return AgentReply(False, str(plan.get("response") or "I do not have a tool for that yet."))
 
-    tool = plan.get("tool")
-    arguments = plan.get("arguments") or {}
-    if tool:
-        if not isinstance(arguments, dict):
-            arguments = {}
-        return _execute_tool(str(tool), arguments)
-
-    response = str(plan.get("response") or "I do not have a tool for that yet.")
-    return AgentReply(False, response)
+    fallback = _deterministic_fallback(text)
+    if fallback is not None:
+        return AgentReply(fallback.ok, f"{fallback.message} [planner fallback: {error}]")
+    return AgentReply(False, error)

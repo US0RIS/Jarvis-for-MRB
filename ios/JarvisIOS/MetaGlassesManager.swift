@@ -6,6 +6,7 @@ import MWDATCamera
 @MainActor
 final class MetaGlassesManager: ObservableObject {
     @Published private(set) var registrationStatus = "Unknown"
+    @Published private(set) var isRegistered = false
     @Published private(set) var cameraPermissionStatus = "Unknown"
     @Published private(set) var availableDeviceCount = 0
     @Published private(set) var streamState = "Stopped"
@@ -26,6 +27,11 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     func startRegistration() async {
+        guard !isRegistered else {
+            errorMessage = nil
+            return
+        }
+        errorMessage = nil
         do {
             try await wearables.startRegistration()
         } catch {
@@ -35,6 +41,7 @@ final class MetaGlassesManager: ObservableObject {
 
     func unregister() async {
         stopStream()
+        errorMessage = nil
         do {
             try await wearables.startUnregistration()
         } catch {
@@ -43,6 +50,7 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     func handleURL(_ url: URL) async {
+        errorMessage = nil
         do {
             _ = try await wearables.handleUrl(url)
             await refreshCameraPermission()
@@ -52,6 +60,10 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     func refreshCameraPermission() async {
+        guard isRegistered else {
+            cameraPermissionStatus = "Unavailable"
+            return
+        }
         do {
             let status = try await wearables.checkPermissionStatus(.camera)
             cameraPermissionStatus = String(describing: status)
@@ -61,6 +73,11 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     func requestCameraPermission() async {
+        guard isRegistered else {
+            errorMessage = "Register Jarvis with Meta AI before requesting camera access."
+            return
+        }
+        errorMessage = nil
         do {
             let status = try await wearables.requestPermission(.camera)
             cameraPermissionStatus = String(describing: status)
@@ -70,6 +87,10 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     func startStream() async {
+        guard isRegistered else {
+            errorMessage = "Register Jarvis with Meta AI before starting the camera."
+            return
+        }
         guard stream == nil else { return }
         errorMessage = nil
         streamState = "Connecting"
@@ -136,8 +157,23 @@ final class MetaGlassesManager: ObservableObject {
         registrationTask?.cancel()
         registrationTask = Task { [weak self] in
             for await state in wearables.registrationStateStream() {
-                guard !Task.isCancelled else { return }
-                self?.registrationStatus = String(describing: state)
+                guard !Task.isCancelled, let self else { return }
+                switch state {
+                case .unavailable:
+                    registrationStatus = "Unavailable"
+                    isRegistered = false
+                case .available:
+                    registrationStatus = "Ready to register"
+                    isRegistered = false
+                case .registering:
+                    registrationStatus = "Registering…"
+                    isRegistered = false
+                case .registered:
+                    registrationStatus = "Registered"
+                    isRegistered = true
+                    errorMessage = nil
+                    await refreshCameraPermission()
+                }
             }
         }
     }

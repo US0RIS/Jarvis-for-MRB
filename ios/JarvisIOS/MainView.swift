@@ -163,14 +163,22 @@ private struct MetaGlassesCard: View {
                 }
 
                 HStack {
-                    Button("Register") { Task { await manager.startRegistration() } }
+                    if manager.isRegistered {
+                        Label("Registered", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Button("Register") { Task { await manager.startRegistration() } }
+                    }
+
                     Button("Camera Access") { Task { await manager.requestCameraPermission() } }
+                        .disabled(!manager.isRegistered)
                 }
                 .buttonStyle(.bordered)
 
                 HStack {
                     if manager.streamState == "Stopped" {
                         Button("Start Camera") { Task { await manager.startStream() } }
+                            .disabled(!manager.isRegistered || manager.availableDeviceCount == 0)
                     } else {
                         Button("Stop Camera", role: .destructive) { manager.stopStream() }
                     }

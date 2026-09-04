@@ -17,6 +17,7 @@
 		200000000000000000000008 /* MetaGlassesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000008 /* MetaGlassesManager.swift */; };
 		200000000000000000000009 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* MainView.swift */; };
 		20000000000000000000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000A /* SettingsView.swift */; };
+		20000000000000000000000B /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000C /* KeychainStore.swift */; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
 		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
 /* End PBXBuildFile section */
@@ -34,6 +35,7 @@
 		100000000000000000000009 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		10000000000000000000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		10000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		10000000000000000000000C /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +75,7 @@
 				100000000000000000000009 /* MainView.swift */,
 				10000000000000000000000A /* SettingsView.swift */,
 				100000000000000000000002 /* SettingsStore.swift */,
+				10000000000000000000000C /* KeychainStore.swift */,
 				100000000000000000000003 /* JarvisAPIClient.swift */,
 				100000000000000000000005 /* SpeechRecognizer.swift */,
 				100000000000000000000006 /* SpeechSynthesizer.swift */,
@@ -168,6 +171,7 @@
 				200000000000000000000008 /* MetaGlassesManager.swift in Sources */,
 				200000000000000000000009 /* MainView.swift in Sources */,
 				20000000000000000000000A /* SettingsView.swift in Sources */,
+				20000000000000000000000B /* KeychainStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

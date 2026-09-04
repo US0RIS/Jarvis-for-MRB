@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import threading
 import time
 from typing import Annotated
@@ -11,12 +10,14 @@ from pydantic import BaseModel
 
 from jarvis_mrb.agent import handle_natural_language
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
+from jarvis_mrb.server_config import load_server_config
 
-BIND_HOST = os.environ.get("JARVIS_BIND_HOST", "127.0.0.1")
-PORT = int(os.environ.get("JARVIS_PORT", "8765"))
-API_TOKEN = os.environ.get("JARVIS_API_TOKEN", "").strip()
+_CONFIG = load_server_config()
+BIND_HOST = _CONFIG.bind_host
+PORT = _CONFIG.port
+API_TOKEN = _CONFIG.api_token
 
-app = FastAPI(title="Jarvis for MRB", version="0.5.0")
+app = FastAPI(title="Jarvis for MRB", version="0.6.0")
 _scheduler_started = False
 
 
@@ -51,7 +52,6 @@ def _scheduler_loop() -> None:
         try:
             run_due_jobs(_execute_job)
         except Exception:
-            # A scheduler failure must not kill the Jarvis service.
             pass
         time.sleep(1.0)
 
@@ -71,7 +71,7 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.5.0", "bind": BIND_HOST}
+    return {"status": "ok", "version": "0.6.0", "bind": BIND_HOST}
 
 
 @app.post("/command", response_model=CommandResponse)
@@ -90,7 +90,7 @@ def event(request: EventRequest, authorization: Annotated[str | None, Header()] 
 
 def main() -> None:
     if BIND_HOST not in {"127.0.0.1", "localhost", "::1"} and not API_TOKEN:
-        raise SystemExit("Refusing to expose Jarvis beyond localhost without JARVIS_API_TOKEN.")
+        raise SystemExit("Refusing to expose Jarvis beyond localhost without an API token.")
     uvicorn.run(app, host=BIND_HOST, port=PORT, log_level="warning")
 
 

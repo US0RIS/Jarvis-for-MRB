@@ -135,6 +135,10 @@ final class SpeechRecognizer: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
+        // Bias Apple's recognizer toward the words this personal assistant uses
+        // frequently. This does not force a result, but materially improves names
+        // and the wake word on the target user's device.
+        request.contextualStrings = ["Jarvis", "Dubeck", "Emmett Dubeck"]
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
@@ -166,7 +170,9 @@ final class SpeechRecognizer: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if let result {
-                    self.transcript = result.bestTranscription.formattedString
+                    self.transcript = Self.applyPersonalVocabulary(
+                        to: result.bestTranscription.formattedString
+                    )
                 }
                 if let error {
                     self.lastError = error.localizedDescription
@@ -183,6 +189,19 @@ final class SpeechRecognizer: ObservableObject {
         let final = transcript
         stopAudioOnly(cancelRecognition: true)
         return final
+    }
+
+    private static func applyPersonalVocabulary(to text: String) -> String {
+        var corrected = text
+        // Apple Speech commonly renders the family name phonetically as "Dubek"
+        // (and occasionally as two words). Jarvis is a personal assistant, so use
+        // the known spelling before the transcript ever reaches the agent.
+        corrected = corrected.replacingOccurrences(
+            of: "\\b(?:dubek|du beck)\\b",
+            with: "Dubeck",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        return corrected
     }
 
     private func stopAudioOnly(cancelRecognition: Bool) {

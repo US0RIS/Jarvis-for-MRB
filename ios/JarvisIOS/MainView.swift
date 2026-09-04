@@ -160,6 +160,11 @@ struct MainView: View {
                     "Remote path",
                     value: persistentPresence.companionStatus
                 )
+                if !persistentPresence.lastVisionScene.isEmpty {
+                    Text("Seeing: \(persistentPresence.lastVisionScene)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if !persistentPresence.lastProactiveMessage.isEmpty {
                     Text("Last proactive observation: \(persistentPresence.lastProactiveMessage)")
                         .font(.caption)

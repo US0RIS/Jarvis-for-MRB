@@ -2,9 +2,9 @@
 
 A personal agent designed to use Ray-Ban Meta glasses as an always-available voice/vision interface while the actual agent and tools run on trusted devices and services.
 
-## Milestone 6
+## Milestone 7
 
-The backend and first native iPhone/glasses client now exist in the repository.
+The backend, native iPhone client, Meta camera path, and first complete hands-free voice loop now exist in the repository.
 
 Backend capabilities:
 
@@ -25,8 +25,11 @@ Native iPhone client:
 - standard `ios/JarvisIOS.xcodeproj`
 - SwiftUI text command interface
 - push-to-talk speech recognition
-- spoken responses over the active iOS audio route
-- foreground `Jarvis` wake-word prototype
+- spoken responses
+- hands-free `Jarvis` interaction loop with silence-based end-of-command detection
+- explicit Bluetooth HFP input selection so a connected Ray-Ban microphone is preferred over the iPhone microphone
+- response playback over the matching Bluetooth hands-free route
+- automatic speech-recognition restart when an Apple recognition task ends
 - Core Location home geofence that fires `home_arrival`
 - Meta Wearables Device Access Toolkit 0.9+ via Swift Package Manager
 - Meta AI registration and camera permission flows
@@ -152,7 +155,29 @@ In the app:
 2. Tap **Camera Access** to grant camera permission.
 3. Tap **Start Camera** to begin a Ray-Ban device session and show the live camera feed.
 
-Speech input/output uses iOS Bluetooth audio. When the Ray-Bans are the active audio route, Jarvis can use the glasses microphone and speakers.
+The device selector is kept alive from app initialization so it can learn the active DAT device before a session is created. Stream listener tokens are retained for the lifetime of the stream.
+
+## Hands-free voice
+
+Enable the switch in **Voice & Commands**. Jarvis will keep a voice-recognition session active and prefer a connected Bluetooth HFP microphone. On an iPhone with the Ray-Bans available as an HFP device, that explicitly selects the glasses microphone; iOS routes output to the matching HFP output as well.
+
+Two interaction styles work:
+
+```text
+Jarvis, open Spotify.
+```
+
+or:
+
+```text
+Jarvis.
+```
+
+Jarvis replies `Yes?`, then listens for the next utterance as the command.
+
+The voice loop does not reopen the microphone while Jarvis is speaking, preventing Jarvis from hearing its own TTS response as a new command. It also detects a short period of transcript stability as end-of-command and restarts recognition tasks that terminate naturally.
+
+This is materially more usable than the original foreground prototype, but it still uses Apple's Speech framework as the wake detector. A dedicated low-power keyword spotter remains desirable for true all-day, system-assistant-like behavior.
 
 ## Home arrival automation
 
@@ -189,11 +214,11 @@ set destructive actions to deny
 ```text
 Ray-Ban Meta
   camera via Meta DAT
-  microphone/speakers via iOS Bluetooth
+  microphone/speakers via Bluetooth HFP
         |
         v
 Native Jarvis iPhone app
-  voice / wake prototype / geofence
+  hands-free voice / TTS / camera / geofence
         |
         v
 Authenticated Jarvis API
@@ -207,8 +232,8 @@ Authenticated Jarvis API
 
 ## Remaining major work
 
-1. Build/sign/test the Xcode project on a physical iPhone and fix any device-specific SDK issues.
-2. Replace foreground speech-recognition wake detection with a low-latency local keyword spotter for `Jarvis`.
+1. Validate and tune the hands-free voice loop on the physical Ray-Bans, including screen-locked/background behavior and noisy-room thresholds.
+2. Replace Speech-framework wake detection with a dedicated low-power local keyword spotter for `Jarvis` if all-day operation requires it.
 3. Add vision requests so camera frames/photos can be sent to a multimodal model when a command needs visual context.
-4. Add Tailscale/private remote connectivity for away-from-home use.
+4. Add Tailscale/private remote connectivity for away-from-home use so voice and geofence events can reach the PC outside the LAN.
 5. Add durable conversational memory/context and reliability hardening for all-day use.

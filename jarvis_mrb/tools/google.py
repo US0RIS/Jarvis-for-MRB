@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import html
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -13,8 +15,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from jarvis_mrb.email_policy import blocked_recipient_message, recipient_is_allowed
+
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -83,7 +88,7 @@ def authenticate_google() -> GoogleResult:
         creds = _load_credentials(interactive=True)
         if not creds:
             return GoogleResult(False, "Google authentication did not complete.")
-        return GoogleResult(True, "Google Gmail, Contacts, and Calendar authentication completed.")
+        return GoogleResult(True, "Google Gmail read/send, Contacts, and Calendar authentication completed.")
     except Exception as exc:
         return GoogleResult(False, f"Google authentication failed: {exc}")
 
@@ -91,7 +96,7 @@ def authenticate_google() -> GoogleResult:
 def google_status() -> GoogleResult:
     creds = _load_credentials(interactive=False)
     if creds and creds.valid:
-        return GoogleResult(True, "Google Gmail, Contacts, and Calendar are connected.")
+        return GoogleResult(True, "Google Gmail read/send, Contacts, and Calendar are connected.")
     return GoogleResult(False, "Google is not connected with all required scopes. Run: py -3.14 -m jarvis_mrb.google_auth")
 
 
@@ -140,7 +145,15 @@ def send_email(recipient: str, body: str, subject: str | None = None) -> GoogleR
     resolved = resolve_contact(recipient)
     if not resolved.ok or not resolved.data:
         return resolved
-    email_address = str(resolved.data["email"])
+    email_address = str(resolved.data["email"]).strip().lower()
+
+    # This check is deliberately after contact resolution and immediately before
+    # the Gmail API call. A speech-recognition mistake can therefore neither name
+    # nor resolve to an address outside the explicit allowlist, even if the user
+    # accidentally confirms the pending send.
+    if not recipient_is_allowed(email_address):
+        return GoogleResult(False, blocked_recipient_message(email_address), {"email": email_address})
+
     message = EmailMessage()
     message["To"] = email_address
     if subject:
@@ -153,6 +166,112 @@ def send_email(recipient: str, body: str, subject: str | None = None) -> GoogleR
     except Exception as exc:
         return GoogleResult(False, f"Gmail send failed: {exc}")
     return GoogleResult(True, f"Sent email to {email_address}.", {"message_id": sent.get("id", ""), "email": email_address})
+
+
+def _decode_gmail_data(data: str | None) -> str:
+    if not data:
+        return ""
+    try:
+        padded = data + "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _plain_text_from_payload(payload: dict[str, Any]) -> str:
+    mime_type = str(payload.get("mimeType") or "").lower()
+    body = _decode_gmail_data((payload.get("body") or {}).get("data"))
+    if mime_type == "text/plain" and body:
+        return body
+
+    parts = payload.get("parts") or []
+    for part in parts:
+        if isinstance(part, dict):
+            text = _plain_text_from_payload(part)
+            if text:
+                return text
+
+    if mime_type == "text/html" and body:
+        without_tags = re.sub(r"<[^>]+>", " ", body)
+        return html.unescape(re.sub(r"\s+", " ", without_tags)).strip()
+    return ""
+
+
+def _gmail_headers(payload: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in payload.get("headers") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip().lower()
+        value = str(item.get("value") or "").strip()
+        if name and value:
+            result[name] = value
+    return result
+
+
+def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
+    creds = _load_credentials(interactive=False)
+    if not creds:
+        return google_status()
+    safe_limit = max(1, min(int(limit), 10))
+    gmail_query = (query or "in:inbox").strip() or "in:inbox"
+
+    try:
+        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        listing = service.users().messages().list(
+            userId="me",
+            q=gmail_query,
+            maxResults=safe_limit,
+        ).execute()
+        refs = listing.get("messages", [])
+
+        emails: list[dict[str, Any]] = []
+        rendered: list[str] = []
+        for index, ref in enumerate(refs, start=1):
+            message_id = str(ref.get("id") or "")
+            if not message_id:
+                continue
+            message = service.users().messages().get(
+                userId="me",
+                id=message_id,
+                format="full",
+            ).execute()
+            payload = message.get("payload") or {}
+            headers = _gmail_headers(payload)
+            sender = headers.get("from", "Unknown sender")
+            subject = headers.get("subject", "(no subject)")
+            date = headers.get("date", "")
+            body = _plain_text_from_payload(payload).strip()
+            if not body:
+                body = str(message.get("snippet") or "").strip()
+            body = re.sub(r"\s+", " ", body)
+            if len(body) > 1400:
+                body = body[:1397].rstrip() + "..."
+            unread = "UNREAD" in set(message.get("labelIds") or [])
+
+            emails.append({
+                "id": message_id,
+                "from": sender,
+                "subject": subject,
+                "date": date,
+                "body": body,
+                "unread": unread,
+            })
+            status = "unread" if unread else "read"
+            rendered.append(
+                f"{index}. {status} email from {sender}; subject {subject!r}; date {date}; "
+                f"message: {body or '(empty message)'}"
+            )
+    except Exception as exc:
+        return GoogleResult(False, f"Gmail read failed: {exc}")
+
+    if not rendered:
+        return GoogleResult(True, f"No emails matched {gmail_query!r}.", {"emails": []})
+    return GoogleResult(
+        True,
+        f"Emails matching {gmail_query!r}: " + " | ".join(rendered),
+        {"emails": emails, "query": gmail_query},
+    )
 
 
 def _format_events(events: list[dict[str, Any]], prefix: str) -> GoogleResult:

@@ -5,3 +5,9 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+*.log
+
+# Never commit local OAuth credentials/tokens
+jarvis_google_credentials.json
+google_credentials.json
+google_token.json

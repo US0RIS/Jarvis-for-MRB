@@ -3,7 +3,6 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
     @State private var showingSettings = false
-    @State private var wakeMode = false
 
     var body: some View {
         NavigationStack {
@@ -66,8 +65,8 @@ struct MainView: View {
     }
 
     private var commandCard: some View {
-        GroupBox("Command") {
-            VStack(spacing: 12) {
+        GroupBox("Voice & Commands") {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     TextField("Ask Jarvis to do something…", text: $appModel.commandText, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
@@ -87,26 +86,45 @@ struct MainView: View {
                     Button {
                         Task { await appModel.togglePushToTalk() }
                     } label: {
-                        Label(appModel.isListening && !wakeMode ? "Stop & Send" : "Push to Talk", systemImage: appModel.isListening && !wakeMode ? "stop.circle.fill" : "mic.circle.fill")
+                        Label(appModel.isListening && !appModel.handsFreeEnabled ? "Stop & Send" : "Push to Talk", systemImage: appModel.isListening && !appModel.handsFreeEnabled ? "stop.circle.fill" : "mic.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(appModel.handsFreeEnabled)
 
-                    Toggle("Jarvis wake", isOn: $wakeMode)
-                        .labelsHidden()
-                        .onChange(of: wakeMode) { _, enabled in
-                            Task {
-                                if enabled {
-                                    await appModel.startWakeWordMode()
-                                } else {
-                                    appModel.stopWakeWordMode()
-                                }
-                            }
+                    Toggle("Hands-free Jarvis", isOn: Binding(
+                        get: { appModel.handsFreeEnabled },
+                        set: { enabled in
+                            Task { await appModel.setHandsFreeEnabled(enabled) }
                         }
+                    ))
+                    .labelsHidden()
+                }
+
+                HStack(spacing: 8) {
+                    Image(systemName: appModel.handsFreeEnabled ? "waveform.circle.fill" : "waveform.circle")
+                    Text(appModel.voiceStatus)
+                        .font(.callout)
+                }
+
+                LabeledContent("Audio route", value: appModel.audioRouteManager.routeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if appModel.settings.preferBluetoothAudio && !appModel.audioRouteManager.hasBluetoothHFP && appModel.handsFreeEnabled {
+                    Text("No Bluetooth hands-free microphone is currently available, so Jarvis is using the iPhone audio route.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
 
                 if appModel.isListening {
-                    SpeechTranscriptView(recognizer: appModel.speechRecognizer, wakeMode: wakeMode)
+                    SpeechTranscriptView(recognizer: appModel.speechRecognizer, wakeMode: appModel.handsFreeEnabled)
+                }
+
+                if !appModel.lastHeardCommand.isEmpty {
+                    Text("Last heard: \(appModel.lastHeardCommand)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -129,7 +147,7 @@ private struct SpeechTranscriptView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 ProgressView()
-                Text(wakeMode ? "Listening for “Jarvis …”" : "Listening")
+                Text(wakeMode ? "Microphone active" : "Listening")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -179,7 +197,7 @@ private struct MetaGlassesCard: View {
                 HStack {
                     if manager.streamState == "Stopped" {
                         Button("Start Camera") { Task { await manager.startStream() } }
-                            .disabled(!manager.isRegistered || manager.availableDeviceCount == 0)
+                            .disabled(!manager.isRegistered || !manager.hasEligibleDevice)
                     } else {
                         Button("Stop Camera", role: .destructive) { manager.stopStream() }
                     }

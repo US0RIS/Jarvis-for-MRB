@@ -35,9 +35,14 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         }
 
         let utterance = AVSpeechUtterance(string: cleaned)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = 0.5
-        utterance.preUtteranceDelay = 0.04
+        utterance.voice = preferredJarvisVoice()
+        // Slightly slower and lower than the generic iOS default. The aim is a
+        // calm assistant voice rather than the bright accessibility-style default.
+        utterance.rate = 0.46
+        utterance.pitchMultiplier = 0.88
+        utterance.volume = 0.92
+        utterance.preUtteranceDelay = 0.03
+        utterance.postUtteranceDelay = 0.03
 
         currentUtterance = utterance
         isSpeaking = true
@@ -45,6 +50,28 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             completion = continuation
             synthesizer.speak(utterance)
         }
+    }
+
+    private func preferredJarvisVoice() -> AVSpeechSynthesisVoice? {
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+
+        // Daniel is Apple's long-standing British English male voice and gives
+        // Jarvis a substantially less grating default. Prefer it when installed;
+        // otherwise pick another British English voice before falling back to the
+        // platform default.
+        let preferredNames = ["Daniel", "Arthur", "Oliver"]
+        for name in preferredNames {
+            if let voice = voices.first(where: {
+                $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }) {
+                return voice
+            }
+        }
+
+        if let britishEnglish = voices.first(where: { $0.language.lowercased().hasPrefix("en-gb") }) {
+            return britishEnglish
+        }
+        return AVSpeechSynthesisVoice(language: "en-US")
     }
 
     func stopSpeaking() {

@@ -5,24 +5,30 @@ import MWDATCore
 @main
 struct JarvisIOSApp: App {
     @StateObject private var appModel: JarvisAppModel
+    @StateObject private var persistentPresence: PersistentPresenceController
 
     init() {
         do {
             try Wearables.configure()
         } catch {
-            // Meta's current sample apps deliberately log configuration failures
-            // instead of trapping. A debug assertion here causes an installed
-            // development build to terminate immediately on launch, which hides
-            // the actual SDK error and makes the rest of Jarvis unusable.
             NSLog("[Jarvis] Failed to configure Meta Wearables SDK: \(error)")
         }
-        _appModel = StateObject(wrappedValue: JarvisAppModel())
+
+        let model = JarvisAppModel()
+        _appModel = StateObject(wrappedValue: model)
+        _persistentPresence = StateObject(
+            wrappedValue: PersistentPresenceController(appModel: model)
+        )
     }
 
     var body: some Scene {
         WindowGroup {
             MainView()
                 .environmentObject(appModel)
+                .environmentObject(persistentPresence)
+                .task {
+                    await persistentPresence.start()
+                }
         }
     }
 }

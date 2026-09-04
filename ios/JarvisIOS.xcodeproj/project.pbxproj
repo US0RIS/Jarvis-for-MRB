@@ -1,0 +1,299 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		200000000000000000000001 /* JarvisIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000001 /* JarvisIOSApp.swift */; };
+		200000000000000000000002 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000002 /* SettingsStore.swift */; };
+		200000000000000000000003 /* JarvisAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000003 /* JarvisAPIClient.swift */; };
+		200000000000000000000004 /* JarvisAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000004 /* JarvisAppModel.swift */; };
+		200000000000000000000005 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000005 /* SpeechRecognizer.swift */; };
+		200000000000000000000006 /* SpeechSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000006 /* SpeechSynthesizer.swift */; };
+		200000000000000000000007 /* GeofenceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000007 /* GeofenceManager.swift */; };
+		200000000000000000000008 /* MetaGlassesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000008 /* MetaGlassesManager.swift */; };
+		200000000000000000000009 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* MainView.swift */; };
+		20000000000000000000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000A /* SettingsView.swift */; };
+		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
+		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		006000000000000000000001 /* JarvisIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000001 /* JarvisIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisIOSApp.swift; sourceTree = "<group>"; };
+		100000000000000000000002 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		100000000000000000000003 /* JarvisAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAPIClient.swift; sourceTree = "<group>"; };
+		100000000000000000000004 /* JarvisAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAppModel.swift; sourceTree = "<group>"; };
+		100000000000000000000005 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
+		100000000000000000000006 /* SpeechSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSynthesizer.swift; sourceTree = "<group>"; };
+		100000000000000000000007 /* GeofenceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofenceManager.swift; sourceTree = "<group>"; };
+		100000000000000000000008 /* MetaGlassesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetaGlassesManager.swift; sourceTree = "<group>"; };
+		100000000000000000000009 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		10000000000000000000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		10000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		401000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				303000000000000000000001 /* MWDATCore in Frameworks */,
+				303000000000000000000002 /* MWDATCamera in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		002000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				004000000000000000000001 /* JarvisIOS */,
+				003000000000000000000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		003000000000000000000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				006000000000000000000001 /* JarvisIOS.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		004000000000000000000001 /* JarvisIOS */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000001 /* JarvisIOSApp.swift */,
+				100000000000000000000004 /* JarvisAppModel.swift */,
+				100000000000000000000009 /* MainView.swift */,
+				10000000000000000000000A /* SettingsView.swift */,
+				100000000000000000000002 /* SettingsStore.swift */,
+				100000000000000000000003 /* JarvisAPIClient.swift */,
+				100000000000000000000005 /* SpeechRecognizer.swift */,
+				100000000000000000000006 /* SpeechSynthesizer.swift */,
+				100000000000000000000007 /* GeofenceManager.swift */,
+				100000000000000000000008 /* MetaGlassesManager.swift */,
+				10000000000000000000000B /* Info.plist */,
+			);
+			path = JarvisIOS;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		005000000000000000000001 /* JarvisIOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 502000000000000000000001 /* Build configuration list for PBXNativeTarget "JarvisIOS" */;
+			buildPhases = (
+				400000000000000000000001 /* Sources */,
+				401000000000000000000001 /* Frameworks */,
+				402000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = JarvisIOS;
+			packageProductDependencies = (
+				301000000000000000000001 /* MWDATCore */,
+				302000000000000000000001 /* MWDATCamera */,
+			);
+			productName = JarvisIOS;
+			productReference = 006000000000000000000001 /* JarvisIOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		001000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					005000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 501000000000000000000001 /* Build configuration list for PBXProject "JarvisIOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 002000000000000000000001;
+			packageReferences = (
+				300000000000000000000001 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */,
+			);
+			productRefGroup = 003000000000000000000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				005000000000000000000001 /* JarvisIOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		402000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		400000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				200000000000000000000001 /* JarvisIOSApp.swift in Sources */,
+				200000000000000000000002 /* SettingsStore.swift in Sources */,
+				200000000000000000000003 /* JarvisAPIClient.swift in Sources */,
+				200000000000000000000004 /* JarvisAppModel.swift in Sources */,
+				200000000000000000000005 /* SpeechRecognizer.swift in Sources */,
+				200000000000000000000006 /* SpeechSynthesizer.swift in Sources */,
+				200000000000000000000007 /* GeofenceManager.swift in Sources */,
+				200000000000000000000008 /* MetaGlassesManager.swift in Sources */,
+				200000000000000000000009 /* MainView.swift in Sources */,
+				20000000000000000000000A /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		500000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		500000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		500000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JarvisIOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.us0ris.JarvisMRB;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		500000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JarvisIOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.us0ris.JarvisMRB;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		501000000000000000000001 /* Build configuration list for PBXProject "JarvisIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				500000000000000000000001 /* Debug */,
+				500000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		502000000000000000000001 /* Build configuration list for PBXNativeTarget "JarvisIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				500000000000000000000003 /* Debug */,
+				500000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		300000000000000000000001 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		301000000000000000000001 /* MWDATCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 300000000000000000000001 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATCore;
+		};
+		302000000000000000000001 /* MWDATCamera */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 300000000000000000000001 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATCamera;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 001000000000000000000001 /* Project object */;
+}

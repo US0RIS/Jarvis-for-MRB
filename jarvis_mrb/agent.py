@@ -19,6 +19,7 @@ from jarvis_mrb.tools.google import (
     list_calendar_events,
     most_recent_calendar_event,
     query_calendar_events,
+    query_emails,
     resolve_contact,
     send_email,
 )
@@ -107,6 +108,9 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "pc.open_path": return _result(open_path(str(args.get("path") or "")))
     if tool == "google.status": return _result(google_status())
     if tool == "contacts.resolve": return _result(resolve_contact(str(args.get("query") or "")))
+    if tool == "gmail.query":
+        query = str(args.get("query") or "").strip() or None
+        return _result(query_emails(query=query, limit=int(args.get("limit") or 5)))
     if tool == "gmail.send":
         recipient = str(args.get("recipient") or "").strip()
         body = str(args.get("body") or "").strip()
@@ -194,6 +198,10 @@ def _fast_path(text: str) -> AgentReply | None:
     if n in {"browser status", "opera status", "is browser control connected", "is browser control connected?"}: return execute_tool("browser.status", {})
     if n in {"list tabs", "show tabs", "what tabs are open", "what tabs are open?"}: return execute_tool("browser.list_tabs", {})
     if n in {"google status", "gmail status", "calendar status", "is gmail connected", "is gmail connected?"}: return execute_tool("google.status", {})
+    if n in {"read my latest email", "read my latest email?", "what is my latest email", "what's my latest email", "what's my latest email?"}:
+        return execute_tool("gmail.query", {"query": "in:inbox", "limit": 1})
+    if n in {"read my unread emails", "what unread emails do i have", "what unread emails do i have?"}:
+        return execute_tool("gmail.query", {"query": "is:unread in:inbox", "limit": 5})
     if n in {"what is running", "what's running", "list running apps", "list running processes"}: return execute_tool("pc.list_running_apps", {})
     if n in {"list jobs", "show jobs", "what jobs are scheduled", "what jobs are scheduled?"}: return execute_tool("jobs.list", {})
     if n in {"what was the most recent event on my calendar?", "what was the most recent event on my calendar", "what was my last calendar event?", "what was my last calendar event"}:
@@ -227,8 +235,10 @@ def _ollama_plan(
     history: Sequence[ConversationMessage] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     now = datetime.now().astimezone().isoformat()
-    system = f"""You are Jarvis, a local personal assistant and tool router. Current local date/time: {now}.
-Thinking is disabled because latency matters. Use the recent conversation to resolve pronouns, omitted subjects, follow-up questions, names, recipients, and references such as 'it', 'him', 'that one', 'the same thing', or 'what about tomorrow'. Preserve user constraints exactly.
+    system = f"""You are Jarvis, a composed, highly capable personal aide and tool router. Current local date/time: {now}.
+Address the user as 'sir' naturally. Be consistently respectful, calm, concise, and precise, with the understated manner of a first-rate butler/technical aide. Do not flatter, gush, or become theatrical. Thinking is disabled because latency matters.
+
+Use the recent conversation to resolve pronouns, omitted subjects, follow-up questions, names, recipients, and references such as 'it', 'him', 'that one', 'the same thing', or 'what about tomorrow'. Preserve user constraints exactly.
 
 When the user wants an action or private-data lookup, choose exactly one listed tool. Do not invent tools. Prefer smart.open/smart.close/smart.status for ordinary app/site names. When no tool is needed, set tool to null and give a concise natural conversational response. Never claim an action happened unless a tool was actually selected.
 
@@ -237,9 +247,24 @@ smart.status {{name}}; smart.open {{name}}; smart.close {{name}};
 browser.status {{}}; browser.list_tabs {{}}; browser.tab_status {{query}}; browser.close_tab {{query}}; browser.focus_tab {{query}}; browser.open_site {{query}};
 pc.app_status {{name}}; pc.launch_app {{name}}; pc.close_app {{name}}; pc.list_running_apps {{limit}}; pc.open_url {{url}}; pc.open_path {{path}};
 pc.minecraft_status {{}}; pc.launch_minecraft {{}}; pc.ensure_minecraft_running {{}};
-google.status {{}}; contacts.resolve {{query}}; gmail.send {{recipient,body,subject}};
+google.status {{}}; contacts.resolve {{query}}; gmail.query {{query,limit}}; gmail.send {{recipient,body,subject}};
 calendar.list {{days,limit}}; calendar.recent {{days_back}}; calendar.query {{direction,days,limit,query,start,end}}; calendar.create {{summary,start,end,description}};
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}}.
+
+Gmail reading routing:
+- Requests to read, check, find, review, search, or tell the user about received email -> gmail.query.
+- query uses normal Gmail search syntax. Recent inbox: 'in:inbox'. Unread: 'is:unread in:inbox'. From a person: 'from:NAME'. Subject: 'subject:WORDS'. Combine criteria when useful.
+- 'latest email' -> query='in:inbox', limit=1. A few recent emails -> limit 3-5. Never request more than 10.
+- gmail.query returns sender, subject, date, unread state, and message text, so it can answer content questions in one tool call.
+- Reading email is a read-only action and does not require confirmation.
+
+Email sending routing:
+- For any request to email/send/tell someone by email, use gmail.send.
+- recipient can be an email address or a contact name; Contacts will resolve names.
+- Resolve recipients and message references from recent conversation when unambiguous. Example: after discussing Alex, 'email him that I'll be late' means Alex.
+- body must contain the requested meaning only. Do not add emojis, greetings, signatures, promises, or facts unless requested.
+- subject should be null unless requested or clearly useful.
+- gmail.send is protected by confirmation AND an exact recipient allowlist enforced by the backend. Never try to bypass either protection.
 
 Calendar routing:
 - 'most recent/last calendar event' -> calendar.recent.
@@ -248,14 +273,6 @@ Calendar routing:
 - If the user names an event/person/term, put that text in calendar.query.query.
 - If exact date/range can be inferred, use timezone-aware ISO 8601 start/end.
 - Resolve follow-ups from conversation. Example: after asking about Friday, 'what about Saturday?' means query Saturday.
-
-Email routing:
-- For any request to email/send/tell someone by email, use gmail.send.
-- recipient can be an email address or a contact name; Contacts will resolve names.
-- Resolve recipients and message references from recent conversation when unambiguous. Example: after discussing Alex, 'email him that I'll be late' means Alex.
-- body must contain the requested meaning only. Do not add emojis, greetings, signatures, promises, or facts unless requested.
-- subject should be null unless requested or clearly useful.
-- gmail.send is protected by confirmation; do not avoid the tool just because sending is consequential.
 
 Other rules:
 - calendar.create start/end must be timezone-aware ISO 8601 strings. Infer one hour only when a start is clear and no duration/end is given.
@@ -294,6 +311,19 @@ Return one JSON object only: {{"tool":"name or null","arguments":{{}},"response"
         return None, f"Ollama planner error: {exc}"
 
 
+def _respectful(reply: AgentReply) -> AgentReply:
+    message = reply.message.strip()
+    if not message or message == "__EXIT__" or re.search(r"\bsir\b", message, flags=re.IGNORECASE):
+        return reply
+    if not reply.ok:
+        return AgentReply(reply.ok, f"I'm sorry, sir. {message}")
+    if message.startswith("Ready to "):
+        return AgentReply(reply.ok, f"Certainly, sir. {message}")
+    if message == "Cancelled.":
+        return AgentReply(reply.ok, "Of course, sir. Cancelled.")
+    return AgentReply(reply.ok, "Sir, " + message[0].lower() + message[1:])
+
+
 def handle_natural_language(
     text: str,
     history: Sequence[ConversationMessage] | None = None,
@@ -301,13 +331,16 @@ def handle_natural_language(
     n = _normalize(text)
     if not n: return AgentReply(True, "")
     if n in {"quit", "exit"}: return AgentReply(True, "__EXIT__")
-    if n in {"model", "what model are you using", "what model are you using?"}: return AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}")
+    if n in {"model", "what model are you using", "what model are you using?"}:
+        return _respectful(AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}"))
     fast = _fast_path(text)
-    if fast is not None: return fast
+    if fast is not None:
+        return _respectful(fast)
     plan, error = _ollama_plan(text, history=history)
-    if plan is None: return AgentReply(False, error)
+    if plan is None:
+        return _respectful(AgentReply(False, error))
     tool = plan.get("tool")
     args = plan.get("arguments") or {}
     if tool:
-        return execute_tool(str(tool), args if isinstance(args, dict) else {})
-    return AgentReply(True, str(plan.get("response") or "I'm listening."))
+        return _respectful(execute_tool(str(tool), args if isinstance(args, dict) else {}))
+    return _respectful(AgentReply(True, str(plan.get("response") or "I'm listening.")))

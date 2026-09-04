@@ -20,6 +20,7 @@ final class JarvisAppModel: ObservableObject {
     let metaGlasses: MetaGlassesManager
 
     private var wakeWordTask: Task<Void, Never>?
+    private var confirmationFollowUpDeadline: Date?
 
     private enum VoicePhase {
         case waitingForWake
@@ -88,7 +89,15 @@ final class JarvisAppModel: ObservableObject {
                     preferBluetooth: settings.preferBluetoothAudio
                 )
             }
+
+            if fromHandsFree && Self.responseRequestsConfirmation(response.message) {
+                confirmationFollowUpDeadline = Date().addingTimeInterval(15)
+                voiceStatus = "Say confirm or cancel"
+            } else {
+                confirmationFollowUpDeadline = nil
+            }
         } catch {
+            confirmationFollowUpDeadline = nil
             errorMessage = error.localizedDescription
             if fromHandsFree {
                 voiceStatus = "Command failed"
@@ -162,6 +171,7 @@ final class JarvisAppModel: ObservableObject {
         }
 
         handsFreeEnabled = true
+        confirmationFollowUpDeadline = nil
         voiceStatus = "Listening for “Jarvis”…"
         wakeWordTask = Task { [weak self] in
             guard let self else { return }
@@ -172,6 +182,7 @@ final class JarvisAppModel: ObservableObject {
     func stopWakeWordMode() {
         wakeWordTask?.cancel()
         wakeWordTask = nil
+        confirmationFollowUpDeadline = nil
         handsFreeEnabled = false
         speechSynthesizer.stopSpeaking()
         if isListening || speechRecognizer.isActive {
@@ -201,9 +212,29 @@ final class JarvisAppModel: ObservableObject {
             let silence = now.timeIntervalSince(lastTranscriptChange)
             let recognitionEnded = !speechRecognizer.isActive
 
+            if let deadline = confirmationFollowUpDeadline, now >= deadline {
+                confirmationFollowUpDeadline = nil
+                if case .waitingForWake = phase {
+                    voiceStatus = "Listening for “Jarvis”…"
+                }
+            }
+
             switch phase {
             case .waitingForWake:
+                if let deadline = confirmationFollowUpDeadline,
+                   now < deadline,
+                   let confirmation = Self.confirmationCommand(from: transcript),
+                   silence >= 0.55 || recognitionEnded {
+                    confirmationFollowUpDeadline = nil
+                    await submitHandsFreeCommand(confirmation)
+                    phase = .waitingForWake
+                    lastTranscript = ""
+                    lastTranscriptChange = Date()
+                    continue
+                }
+
                 if let command = Self.commandAfterWakeWord(in: transcript) {
+                    confirmationFollowUpDeadline = nil
                     phase = .collectingAfterWake
                     voiceStatus = "Listening for command…"
                     if (silence >= 0.9 || recognitionEnded), !command.isEmpty {
@@ -214,6 +245,7 @@ final class JarvisAppModel: ObservableObject {
                         continue
                     }
                 } else if Self.containsWakeWord(transcript) && (silence >= 0.65 || recognitionEnded) {
+                    confirmationFollowUpDeadline = nil
                     await promptForFollowUp()
                     phase = .awaitingFollowUp(deadline: Date().addingTimeInterval(8))
                     lastTranscript = ""
@@ -292,7 +324,11 @@ final class JarvisAppModel: ObservableObject {
 
         guard handsFreeEnabled && !Task.isCancelled else { return }
         try? await Task.sleep(for: .milliseconds(180))
-        voiceStatus = "Listening for “Jarvis”…"
+        if confirmationFollowUpDeadline != nil {
+            voiceStatus = "Say confirm or cancel"
+        } else {
+            voiceStatus = "Listening for “Jarvis”…"
+        }
         _ = await restartVoiceRecognition()
     }
 
@@ -327,5 +363,28 @@ final class JarvisAppModel: ObservableObject {
         let suffix = transcript[range.upperBound...]
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
         return suffix.isEmpty ? nil : suffix
+    }
+
+    static func confirmationCommand(from transcript: String) -> String? {
+        let normalized = transcript
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !normalized.isEmpty else { return nil }
+
+        if normalized == "confirm" || normalized == "yes confirm" || normalized == "confirm it" || normalized == "yes" {
+            return "confirm"
+        }
+        if normalized == "cancel" || normalized == "no cancel" || normalized == "cancel it" || normalized == "no" {
+            return "cancel"
+        }
+        return nil
+    }
+
+    static func responseRequestsConfirmation(_ response: String) -> Bool {
+        let lower = response.lowercased()
+        return lower.contains("say 'confirm'")
+            || lower.contains("say “confirm”")
+            || lower.contains("say confirm")
+            || (lower.contains("confirm") && lower.contains("cancel"))
     }
 }

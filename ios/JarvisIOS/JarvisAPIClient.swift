@@ -13,6 +13,11 @@ struct TTSStatusResponse: Decodable {
     let status: String
 }
 
+struct PlannerModelResponse: Decodable {
+    let model: String
+    let options: [String]
+}
+
 private struct APIErrorDetail: Decodable {
     let detail: String
 }
@@ -122,6 +127,34 @@ struct JarvisAPIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(TTSStatusResponse.self, from: data).status
+    }
+
+    func plannerModel() async throws -> PlannerModelResponse {
+        guard let url = URL(string: baseURL)?.appendingPathComponent("settings/planner-model") else {
+            throw JarvisAPIError.badURL
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        addAuthorization(to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(PlannerModelResponse.self, from: data)
+    }
+
+    func setPlannerModel(_ model: String) async throws -> PlannerModelResponse {
+        guard let url = URL(string: baseURL)?.appendingPathComponent("settings/planner-model") else {
+            throw JarvisAPIError.badURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthorization(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["model": model])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(PlannerModelResponse.self, from: data)
     }
 
     func synthesizeSpeech(_ text: String) async throws -> Data {

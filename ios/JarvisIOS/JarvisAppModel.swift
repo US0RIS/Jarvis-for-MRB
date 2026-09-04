@@ -219,6 +219,15 @@ final class JarvisAppModel: ObservableObject {
                     lastTranscript = ""
                     lastTranscriptChange = Date()
                     continue
+                } else if !transcript.isEmpty && silence >= 1.2 {
+                    // Clear unrelated speech instead of allowing one recognition
+                    // request to accumulate minutes of ambient conversation.
+                    _ = speechRecognizer.stopListening()
+                    isListening = false
+                    _ = await restartVoiceRecognition()
+                    lastTranscript = ""
+                    lastTranscriptChange = Date()
+                    continue
                 }
 
             case .collectingAfterWake:
@@ -268,6 +277,7 @@ final class JarvisAppModel: ObservableObject {
         isListening = false
         voiceStatus = "Listening for command…"
         await speechSynthesizer.speak("Yes?", preferBluetooth: settings.preferBluetoothAudio)
+        try? await Task.sleep(for: .milliseconds(180))
         _ = await restartVoiceRecognition()
     }
 
@@ -281,6 +291,7 @@ final class JarvisAppModel: ObservableObject {
         await performCommand(command, fromHandsFree: true)
 
         guard handsFreeEnabled && !Task.isCancelled else { return }
+        try? await Task.sleep(for: .milliseconds(180))
         voiceStatus = "Listening for “Jarvis”…"
         _ = await restartVoiceRecognition()
     }

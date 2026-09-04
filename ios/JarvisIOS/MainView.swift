@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
+    @EnvironmentObject private var persistentPresence: PersistentPresenceController
     @State private var showingSettings = false
 
     var body: some View {
@@ -11,6 +12,7 @@ struct MainView: View {
                     connectionCard
                     commandCard
                     responseCard
+                    persistentPresenceCard
                     MetaGlassesCard(manager: appModel.metaGlasses)
                     GeofenceCard(manager: appModel.geofenceManager)
                 }
@@ -45,20 +47,29 @@ struct MainView: View {
 
     private var connectionCard: some View {
         GroupBox("Jarvis Server") {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appModel.connectionStatus)
-                        .font(.headline)
-                    Text(appModel.settings.baseURL)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(appModel.connectionStatus)
+                            .font(.headline)
+                        Text(
+                            persistentPresence.activeServerURL.isEmpty
+                                ? appModel.settings.baseURL
+                                : persistentPresence.activeServerURL
+                        )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    }
+                    Spacer()
+                    Button("Check") {
+                        Task { await appModel.checkConnection() }
+                    }
+                    .buttonStyle(.bordered)
                 }
-                Spacer()
-                Button("Check") {
-                    Task { await appModel.checkConnection() }
-                }
-                .buttonStyle(.bordered)
+                LabeledContent("Companion", value: persistentPresence.companionStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         }
@@ -135,6 +146,27 @@ struct MainView: View {
             Text(appModel.lastResponse.isEmpty ? "No response yet." : appModel.lastResponse)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
+        }
+    }
+
+    private var persistentPresenceCard: some View {
+        GroupBox("Persistent Presence") {
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent(
+                    "Passive vision",
+                    value: appModel.settings.passiveVisionEnabled ? persistentPresence.visionStatus : "Off"
+                )
+                LabeledContent(
+                    "Remote path",
+                    value: persistentPresence.companionStatus
+                )
+                if !persistentPresence.lastProactiveMessage.isEmpty {
+                    Text("Last proactive observation: \(persistentPresence.lastProactiveMessage)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -225,7 +257,7 @@ private struct GeofenceCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(manager.statusMessage)
                     .font(.callout)
-                Text("When iOS detects home arrival, the app posts the `home_arrival` event to Jarvis.")
+                Text("When iOS detects home arrival, the app posts the `home_arrival` event to Jarvis and updates its environmental state.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

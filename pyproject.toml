@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-for-mrb"
+version = "0.1.0"
+description = "Personal agent backend for Ray-Ban Meta glasses"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "psutil>=6.0.0",
+]
+
+[project.scripts]
+jarvis = "jarvis_mrb.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jarvis_mrb*"]

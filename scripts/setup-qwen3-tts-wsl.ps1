@@ -102,13 +102,17 @@ tail -n 100 "$HOME/.local/share/jarvis/qwen3-tts.log" >&2 || true
 exit 21
 '@
 
+# Git commonly checks .ps1 files out with CRLF on Windows. PowerShell here-strings
+# preserve those CR characters, and Base64 correctly preserves them too; Bash then
+# sees tokens such as `do\r` and reports `unexpected token $'do\r'`. Normalize the
+# embedded Bash program to Unix LF *before* encoding it for transport into WSL.
+$bash = $bash.Replace("`r`n", "`n").Replace("`r", "`n")
+
 # Do not pass the multiline Bash program directly as the `bash -lc` argument.
 # Windows PowerShell/native-command quoting can flatten or reinterpret multiline
-# here-documents on the way through wsl.exe, which makes Python heredoc bodies get
-# parsed as Bash (the failure looked like: syntax error near unexpected token `(`).
-# Base64 gives WSL one simple single-line command, then Bash parses the original
-# script bytes exactly as authored. `bash -n` catches any real shell syntax error
-# before the installer changes the machine.
+# here-documents on the way through wsl.exe. Base64 gives WSL one simple single-line
+# command, then Bash parses the original normalized script bytes. `bash -n` catches
+# any real shell syntax error before the installer changes the machine.
 $bashBytes = [System.Text.Encoding]::UTF8.GetBytes($bash)
 $bashBase64 = [System.Convert]::ToBase64String($bashBytes)
 $runner = "printf '%s' '$bashBase64' | base64 -d > /tmp/jarvis-qwen3-tts-setup.sh && bash -n /tmp/jarvis-qwen3-tts-setup.sh && bash /tmp/jarvis-qwen3-tts-setup.sh"

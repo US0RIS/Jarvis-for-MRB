@@ -21,7 +21,8 @@ struct SettingsView: View {
 
                 Section("Voice") {
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
-                    Text("If your Ray-Bans are the active Bluetooth audio route, speech input/output will use their microphone and speakers through iOS.")
+                    Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
+                    Text("When enabled, Jarvis explicitly prefers an available Bluetooth hands-free microphone. Selecting a Bluetooth HFP input also routes Jarvis audio back to that headset on iOS.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

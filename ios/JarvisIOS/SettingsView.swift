@@ -41,14 +41,14 @@ struct SettingsView: View {
                         Text("Neural voice")
                         Spacer()
                         Text(neuralVoiceStatus)
-                            .foregroundStyle(neuralVoiceStatus == "Qwen3-TTS ready" ? Color.green : Color.secondary)
+                            .foregroundStyle(neuralVoiceStatus == "Kokoro ready" ? Color.green : Color.secondary)
                     }
 
                     Button("Check Neural Voice") {
                         Task { await checkNeuralVoice() }
                     }
 
-                    Text("Jarvis prefers the local Qwen3-TTS model running on the PC's RTX GPU. Apple speech is used only as a fallback. The Ray-Ban hands-free route is still used for playback and interruption detection.")
+                    Text("Jarvis uses the local Kokoro-82M voice model on the PC's RTX GPU for low-latency speech. Apple speech is only a fallback. The Ray-Ban hands-free route remains responsible for playback and interruption detection.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -158,7 +158,7 @@ struct SettingsView: View {
         neuralVoiceStatus = "Checking…"
         do {
             let status = try await client.ttsStatus()
-            neuralVoiceStatus = status == "ready" ? "Qwen3-TTS ready" : "Starting / unavailable"
+            neuralVoiceStatus = status == "ready" ? "Kokoro ready" : "Starting / unavailable"
         } catch {
             neuralVoiceStatus = "Jarvis server offline"
         }

@@ -164,7 +164,8 @@ final class JarvisAppModel: ObservableObject {
         handsFreeEnabled = true
         voiceStatus = "Listening for “Jarvis”…"
         wakeWordTask = Task { [weak self] in
-            await self?.runHandsFreeLoop()
+            guard let self else { return }
+            await self.runHandsFreeLoop()
         }
     }
 
@@ -212,7 +213,7 @@ final class JarvisAppModel: ObservableObject {
                         lastTranscriptChange = Date()
                         continue
                     }
-                } else if Self.containsWakeWord(transcript), silence >= 0.65 || (Self.containsWakeWord(transcript) && recognitionEnded) {
+                } else if Self.containsWakeWord(transcript) && (silence >= 0.65 || recognitionEnded) {
                     await promptForFollowUp()
                     phase = .awaitingFollowUp(deadline: Date().addingTimeInterval(8))
                     lastTranscript = ""

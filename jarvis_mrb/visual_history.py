@@ -129,12 +129,19 @@ def _is_current_view_question(prompt: str) -> bool:
         "what do you see",
         "what am i seeing",
         "what i'm seeing",
+        "what i am seeing",
+        "what i was seeing",
         "what is in front of me",
         "what's in front of me",
         "what are you seeing",
         "can you see what i",
+        "could you see what i",
+        "do you see what i",
+        "are you able to see what i",
         "see what i'm seeing",
         "see what i am seeing",
+        "see what i was seeing",
+        "see in real life",
         "right now",
         "currently seeing",
     )
@@ -197,8 +204,6 @@ def _synthesize_observations(question: str, observations: list[str]) -> str:
     except (httpx.HTTPError, ValueError, TypeError):
         pass
 
-    # Synthesis is an optimization, not a requirement. If 8B is unavailable,
-    # return the strongest single-frame observation rather than exposing an error.
     meaningful = [item for item in observations if not _not_visible(item)]
     return (meaningful[-1] if meaningful else observations[-1])[:2200]
 
@@ -206,8 +211,8 @@ def _synthesize_observations(question: str, observations: list[str]) -> str:
 def query_recent(prompt: str, *, seconds: float = 30.0, max_frames: int = 6) -> str:
     question = prompt.strip() or "What is visible?"
 
-    # For a present-tense question, use the freshest frame only. It is both more
-    # accurate and much faster than re-analyzing the whole rolling history.
+    # Present-tense/live-view questions should use only the freshest frame. That
+    # keeps latency low and avoids feeding Moondream a multi-image request.
     if _is_current_view_question(question):
         frames = recent_frames(seconds=min(seconds, 5.0), max_frames=1)
         if not frames:
@@ -241,8 +246,6 @@ def query_recent(prompt: str, *, seconds: float = 30.0, max_frames: int = 6) -> 
         try:
             observations.append(_vision_on_one_frame(frame_prompt, frame))
         except ValueError as exc:
-            # A bad/unsupported frame should not make the entire 30-second recall
-            # operation fail if other frames remain usable.
             observations.append(f"NOT VISIBLE ({str(exc)[:220]})")
 
     usable = [item for item in observations if not _not_visible(item)]

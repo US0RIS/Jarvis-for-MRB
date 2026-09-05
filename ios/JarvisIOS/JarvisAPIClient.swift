@@ -176,7 +176,8 @@ struct JarvisAPIClient {
     }
 
     func command(_ text: String) async throws -> JarvisAPIResponse {
-        try await post(path: "command", body: ["text": text, "session_id": sessionID])
+        let response = try await post(path: "command", body: ["text": text, "session_id": sessionID])
+        return JarvisAPIResponse(ok: response.ok, message: Self.collapseRepeatedSir(response.message))
     }
 
     func streamCommandEvents(_ text: String) -> AsyncThrowingStream<JarvisStreamEvent, Error> {
@@ -215,6 +216,7 @@ struct JarvisAPIClient {
 
                     var sawTextDelta = false
                     var reachedDonePacket = false
+                    var emittedTextTail = ""
 
                     for try await line in bytes.lines {
                         guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
@@ -224,9 +226,13 @@ struct JarvisAPIClient {
                             continuation.yield(.start(model: packet.model, routeReason: packet.routeReason))
 
                         case "delta":
-                            if let text = packet.text, !text.isEmpty {
-                                sawTextDelta = true
-                                continuation.yield(.delta(text))
+                            if let raw = packet.text, !raw.isEmpty {
+                                let cleaned = Self.normalizeStreamText(raw, previousTail: emittedTextTail)
+                                if !cleaned.isEmpty {
+                                    sawTextDelta = true
+                                    continuation.yield(.delta(cleaned))
+                                    emittedTextTail = String((emittedTextTail + cleaned).suffix(64))
+                                }
                             }
 
                         case "done":
@@ -244,22 +250,17 @@ struct JarvisAPIClient {
                             return
 
                         default:
-                            // Be tolerant of a deployed backend using a different
-                            // packet label while still supplying textual content.
-                            // This keeps frontend-only updates compatible with an
-                            // older PC that cannot be upgraded immediately.
-                            if let text = packet.text, !text.isEmpty {
-                                sawTextDelta = true
-                                continuation.yield(.delta(text))
+                            if let raw = packet.text, !raw.isEmpty {
+                                let cleaned = Self.normalizeStreamText(raw, previousTail: emittedTextTail)
+                                if !cleaned.isEmpty {
+                                    sawTextDelta = true
+                                    continuation.yield(.delta(cleaned))
+                                    emittedTextTail = String((emittedTextTail + cleaned).suffix(64))
+                                }
                             }
                         }
                     }
 
-                    // A clean HTTP 200/EOF with no textual delta used to be treated
-                    // as a successful turn. That produced the exact failure mode
-                    // where the UI flashed “Thinking…” and immediately returned to
-                    // “Listening for Jarvis…” without ever answering. Never allow a
-                    // command to disappear silently again.
                     if !sawTextDelta && !reachedDonePacket {
                         try await recoverFromEmptyStream(
                             originalText: text,
@@ -305,15 +306,42 @@ struct JarvisAPIClient {
         continuation.yield(.done(ok: false))
     }
 
+    private static func normalizeStreamText(_ raw: String, previousTail: String) -> String {
+        var value = collapseRepeatedSir(raw)
+
+        // The backend intentionally emits its transport-level “Sir, ” as one
+        // streamed delta. If the model itself begins the next delta with another
+        // “sir”, suppress that second address before the frontend ever displays or
+        // speaks it. This makes the invariant hold even across packet boundaries.
+        let tail = previousTail.lowercased().trimmingCharacters(in: .newlines)
+        let tailEndsInSir = tail.range(
+            of: #"sir\s*[,;:!.-]?\s*$"#,
+            options: .regularExpression
+        ) != nil
+        if tailEndsInSir {
+            value = value.replacingOccurrences(
+                of: #"(?i)^\s*sir\b[\s,;:!\.\-–—]*"#,
+                with: "",
+                options: .regularExpression
+            )
+        }
+        return collapseRepeatedSir(value)
+    }
+
+    private static func collapseRepeatedSir(_ raw: String) -> String {
+        raw.replacingOccurrences(
+            of: #"(?i)\b(sir)\b(?:[\s,;:!\.\-–—]*\bsir\b)+"#,
+            with: "$1",
+            options: .regularExpression
+        )
+    }
+
     private static func safeToRetryAsReadOnlyRequest(_ raw: String) -> Bool {
         let normalized = " " + raw.lowercased()
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines) + " "
 
-        // Never replay something that plausibly changes external/local state.
-        // An empty streaming response is ambiguous: the first attempt may have
-        // performed its action but lost the textual acknowledgement.
         let mutationMarkers = [
             " send ", " reply ", " forward ", " create ", " schedule ", " remind ",
             " cancel ", " delete ", " remove ", " open ", " close ", " launch ",
@@ -435,7 +463,8 @@ struct JarvisAPIClient {
     func finishMeeting(meetingID: Int) async throws -> JarvisAPIResponse {
         let (data, response) = try await postData(path: "meeting/finish", body: ["meeting_id": meetingID])
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        let decoded = try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        return JarvisAPIResponse(ok: decoded.ok, message: Self.collapseRepeatedSir(decoded.message))
     }
 
     func emailAllowlist() async throws -> [String] {
@@ -483,7 +512,8 @@ struct JarvisAPIClient {
     private func post(path: String, body: [String: String]) async throws -> JarvisAPIResponse {
         let (data, response) = try await postData(path: path, body: body)
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        let decoded = try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        return JarvisAPIResponse(ok: decoded.ok, message: Self.collapseRepeatedSir(decoded.message))
     }
 
     private func postData(path: String, body: [String: Any]) async throws -> (Data, URLResponse) {
@@ -517,7 +547,7 @@ struct JarvisAPIClient {
                 throw JarvisAPIError.server(detail)
             }
             if let jarvis = try? JSONDecoder().decode(JarvisAPIResponse.self, from: data) {
-                throw JarvisAPIError.server(jarvis.message)
+                throw JarvisAPIError.server(Self.collapseRepeatedSir(jarvis.message))
             }
             throw JarvisAPIError.server("Jarvis returned HTTP \(http.statusCode).")
         }

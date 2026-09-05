@@ -26,7 +26,7 @@ from jarvis_mrb.tools.google import (
     send_email,
 )
 from jarvis_mrb.tools.pc import app_status, close_app, launch_app, launch_minecraft, list_running_apps, minecraft_status, open_path, open_url
-from jarvis_mrb.tools.web import web_search, web_status
+from jarvis_mrb.tools.web import web_answer, web_status
 
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
@@ -138,7 +138,10 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
         return _result(create_calendar_event(str(args.get("summary") or ""), str(args.get("start") or ""), str(args.get("end") or ""), str(args.get("description") or "").strip() or None))
     if tool == "web.status": return _result(web_status())
     if tool == "web.search":
-        return _result(web_search(str(args.get("query") or ""), num=int(args.get("num") or 5)))
+        # Search results are evidence, not the spoken response. A fast local 8B
+        # synthesis pass answers the user's actual question so Jarvis never reads
+        # result titles/snippets/URLs one after another through the glasses.
+        return _result(web_answer(str(args.get("query") or ""), num=int(args.get("num") or 5)))
     if tool == "jobs.list": return _result(list_jobs())
     if tool == "jobs.create_time": return _result(create_time_job(str(args.get("when") or ""), str(args.get("command") or "")))
     if tool == "jobs.create_event": return _result(create_event_job(str(args.get("event") or ""), str(args.get("command") or "")))
@@ -312,7 +315,8 @@ state.get {{}}; state.update {{key,value}}.
 Web routing:
 - Use web.search for current/recent/public information, news, facts likely to have changed, or when the user explicitly asks to search/look something up online.
 - Make the query specific and self-contained. num should normally be 5 and never exceed 10.
-- web.search is read-only and uses Serper on the Jarvis PC. Do not use browser.open_site just to answer an information question.
+- web.search is read-only and uses Serper on the Jarvis PC. Its result is synthesized into a short direct answer; never expect or request a raw list of search snippets for normal voice use.
+- Do not use browser.open_site just to answer an information question.
 
 Gmail reading routing:
 - Requests to read, check, find, review, search, or tell the user about received email -> gmail.query.

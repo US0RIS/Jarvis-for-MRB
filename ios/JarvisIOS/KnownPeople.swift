@@ -84,13 +84,6 @@ final class KnownPeopleController: ObservableObject {
             return await previousHandler?(command)
         }
 
-        appModel.frontendContextProvider = { [weak self, weak appModel] _ in
-            guard let self, let appModel,
-                  appModel.settings.knownPeopleRecognitionEnabled,
-                  appModel.settings.knownPeopleContextInjectionEnabled else { return nil }
-            return self.backendContext(conversationLog: appModel.conversationLog)
-        }
-
         loopTask = Task { [weak self] in
             guard let self else { return }
             await self.runLoop()
@@ -185,15 +178,13 @@ final class KnownPeopleController: ObservableObject {
         status = "Creating private face profile…"
         do {
             let bounded = Array(imageData.prefix(6))
-            let packed: [Data] = try await Task.detached(priority: .userInitiated) {
-                var results: [Data] = []
-                for data in bounded {
-                    if let packed = try? Self.faceFeatureArchive(from: data) {
-                        results.append(packed)
-                    }
+            var packed: [Data] = []
+            for data in bounded {
+                if let observation = try? Self.faceFeatureArchive(from: data) {
+                    packed.append(observation)
                 }
-                return results
-            }.value
+                await Task.yield()
+            }
 
             guard packed.count >= 2 else {
                 status = "Enrollment failed"
@@ -250,10 +241,9 @@ final class KnownPeopleController: ObservableObject {
         lastRecognitionAttempt = Date()
 
         do {
-            let query = try await Task.detached(priority: .userInitiated) {
-                try Self.faceFeature(from: jpeg)
-            }.value
+            let query = try Self.faceFeature(from: jpeg)
             lastFaceCount = query.faceCount
+            await Task.yield()
 
             let ranked = try Self.rank(query: query.observation, people: people, toleranceMultiplier: toleranceMultiplier)
             guard let best = ranked.first, best.accepted else {
@@ -644,7 +634,7 @@ struct KnownPeopleView: View {
             }
 
             Section("Privacy & limitations") {
-                Text("Feature prints and your labels/notes are stored in this device's Keychain using a this-device-only accessibility class. Raw enrollment photos are not retained by this feature. Recognition remains probabilistic: an uncertain match stays unknown, and the backend is told not to use a face match alone for consequential actions.")
+                Text("Feature prints and your labels/notes are stored in this device's Keychain using a this-device-only accessibility class. Raw enrollment photos are not retained by this feature. Recognition remains probabilistic: an uncertain match stays unknown, and Jarvis phrases matches as estimates rather than certain identity.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("This frontend-only version can retrieve your private note and recent conversation turns stored by the iPhone app that mention the recognized person's name. Full filtered retrieval across the PC's long-term Gmail/calendar/vector memory still requires a later backend update.")

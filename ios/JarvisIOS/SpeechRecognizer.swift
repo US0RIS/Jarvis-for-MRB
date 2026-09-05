@@ -1,6 +1,11 @@
 import AVFoundation
 import Speech
 
+@MainActor
+enum JarvisAudioEnvironment {
+    static var noiseFloorDBFS: Double = -55.0
+}
+
 private func jarvisAverageDBFS(_ buffer: AVAudioPCMBuffer) -> Double {
     guard let channels = buffer.floatChannelData,
           buffer.frameLength > 0 else { return -80.0 }
@@ -168,11 +173,9 @@ final class SpeechRecognizer: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.ambientLevelDBFS = (self.ambientLevelDBFS * 0.82) + (db * 0.18)
-                // While no speech has been transcribed, this is a useful estimate
-                // of the room's noise floor. Once the wearer starts speaking we
-                // freeze the estimate so their own voice does not disable whisper mode.
                 if self.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.ambientNoiseFloorDBFS = (self.ambientNoiseFloorDBFS * 0.94) + (db * 0.06)
+                    JarvisAudioEnvironment.noiseFloorDBFS = self.ambientNoiseFloorDBFS
                 }
             }
         }

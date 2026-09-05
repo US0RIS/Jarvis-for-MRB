@@ -11,6 +11,8 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var handsFreeEnabled = false
     @Published private(set) var voiceStatus = "Hands-free Jarvis is off"
     @Published private(set) var lastHeardCommand = ""
+    @Published private(set) var conversationLog: [FrontendConversationTurn] = FrontendConversationStore.load()
+    @Published private(set) var lastLatency = JarvisLatencySnapshot()
 
     let settings: SettingsStore
     let audioRouteManager: AudioRouteManager
@@ -19,9 +21,14 @@ final class JarvisAppModel: ObservableObject {
     let geofenceManager: GeofenceManager
     let metaGlasses: MetaGlassesManager
 
+    var frontendCommandHandler: ((String) async -> String?)?
+    var offlineQueueHandler: ((String) -> Void)?
+
     private var wakeWordTask: Task<Void, Never>?
     private var confirmationFollowUpDeadline: Date?
     private var conversationalFollowUpDeadline: Date?
+    private var currentCommandStartedAt: Date?
+    private var currentFirstAudioAt: Date?
 
     private enum VoicePhase {
         case waitingForWake
@@ -48,6 +55,7 @@ final class JarvisAppModel: ObservableObject {
     private var client: JarvisAPIClient {
         JarvisAPIClient(
             baseURL: settings.baseURL,
+            fallbackBaseURL: settings.fallbackBaseURL,
             apiToken: settings.apiToken,
             sessionID: settings.conversationSessionID
         )
@@ -74,14 +82,74 @@ final class JarvisAppModel: ObservableObject {
         await performCommand(text, fromHandsFree: false)
     }
 
-    private func performCommand(_ text: String, fromHandsFree: Bool) async {
+    func speakFrontendResponseIfEnabled(_ text: String) async {
+        guard settings.speakResponses, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        await speakOneResponse(text)
+    }
+
+    func clearFrontendConversationHistory() {
+        conversationLog.removeAll()
+        FrontendConversationStore.clear()
+    }
+
+    private func recordTurn(role: String, text: String, model: String? = nil) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        conversationLog.append(FrontendConversationTurn(role: role, text: cleaned, model: model))
+        if conversationLog.count > 120 { conversationLog.removeFirst(conversationLog.count - 120) }
+        FrontendConversationStore.save(conversationLog)
+    }
+
+    private func performCommand(_ rawText: String, fromHandsFree: Bool) async {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        if let frontendCommandHandler,
+           let localResponse = await frontendCommandHandler(text) {
+            lastResponse = localResponse
+            recordTurn(role: "user", text: text)
+            recordTurn(role: "assistant", text: localResponse, model: "iPhone")
+            lastLatency = JarvisLatencySnapshot(model: "iPhone", routeReason: "frontend-only command", firstResponseMS: 0, firstAudioReadyMS: nil, totalTurnMS: 0)
+            if settings.speakResponses && !localResponse.isEmpty {
+                if fromHandsFree { voiceStatus = "Speaking…" }
+                await speakOneResponse(localResponse)
+            }
+            if fromHandsFree {
+                confirmationFollowUpDeadline = nil
+                conversationalFollowUpDeadline = Date().addingTimeInterval(5)
+                voiceStatus = "Listening for follow-up…"
+            }
+            return
+        }
+
         guard !isSending else { return }
         isSending = true
         lastResponse = ""
+        recordTurn(role: "user", text: text)
         if fromHandsFree {
             voiceStatus = "Thinking…"
         }
-        defer { isSending = false }
+
+        let startedAt = Date()
+        currentCommandStartedAt = startedAt
+        currentFirstAudioAt = nil
+        var firstResponseAt: Date?
+        var modelLabel = "—"
+        var routeReason = ""
+        var assistantRecorded = false
+        defer {
+            isSending = false
+            let end = Date()
+            lastLatency = JarvisLatencySnapshot(
+                model: modelLabel,
+                routeReason: routeReason,
+                firstResponseMS: firstResponseAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1000)) },
+                firstAudioReadyMS: currentFirstAudioAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1000)) },
+                totalTurnMS: max(0, Int(end.timeIntervalSince(startedAt) * 1000))
+            )
+            currentCommandStartedAt = nil
+            currentFirstAudioAt = nil
+        }
 
         var fullResponse = ""
         var speechBuffer = ""
@@ -91,55 +159,61 @@ final class JarvisAppModel: ObservableObject {
         var interrupted = false
 
         do {
-            for try await delta in client.streamCommand(text) {
-                fullResponse += delta
-                lastResponse = fullResponse
-
-                guard settings.speakResponses && !interrupted else { continue }
-
-                // Protected tool calls arrive as one atomic tool-result delta. Do
-                // not start reading the recipient/body before noticing that this is
-                // a confirmation prompt; keep the spoken version deliberately short.
-                if Self.responseRequestsConfirmation(fullResponse) {
-                    if !confirmationSpoken {
-                        speechBuffer = ""
-                        appleFallbackBuffer = ""
-                        confirmationSpoken = true
-                        if fromHandsFree { voiceStatus = "Speaking…" }
-                        let prompt = Self.spokenResponse(for: fullResponse)
-                        if !(await speakQwenChunk(prompt)) {
-                            await speechSynthesizer.speak(
-                                prompt,
-                                preferBluetooth: settings.preferBluetoothAudio
-                            )
-                        }
-                        interrupted = speechSynthesizer.lastOutputInterrupted
-                    }
+            for try await event in client.streamCommandEvents(text) {
+                switch event {
+                case .start(let model, let reason):
+                    modelLabel = model ?? "backend"
+                    routeReason = reason ?? ""
                     continue
-                }
+                case .done:
+                    continue
+                case .delta(let delta):
+                    if firstResponseAt == nil { firstResponseAt = Date() }
+                    fullResponse += delta
+                    lastResponse = fullResponse
 
-                if qwenTTSAvailable {
-                    speechBuffer += delta
-                    while let segment = Self.takeSpeechSegment(from: &speechBuffer, flush: false) {
-                        if fromHandsFree { voiceStatus = "Speaking…" }
-                        let success = await speakQwenChunk(segment)
-                        if speechSynthesizer.lastOutputInterrupted {
-                            interrupted = true
-                            break
-                        }
-                        if !success {
-                            qwenTTSAvailable = false
-                            appleFallbackBuffer = Self.joinCommandParts(segment, speechBuffer)
+                    guard settings.speakResponses && !interrupted else { continue }
+
+                    if Self.responseRequestsConfirmation(fullResponse) {
+                        if !confirmationSpoken {
                             speechBuffer = ""
-                            break
+                            appleFallbackBuffer = ""
+                            confirmationSpoken = true
+                            if fromHandsFree { voiceStatus = "Speaking…" }
+                            let prompt = Self.spokenResponse(for: fullResponse)
+                            if !(await speakQwenChunk(prompt)) {
+                                if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
+                                await speechSynthesizer.speak(
+                                    prompt,
+                                    preferBluetooth: settings.preferBluetoothAudio
+                                )
+                            }
+                            interrupted = speechSynthesizer.lastOutputInterrupted
                         }
+                        continue
                     }
-                } else {
-                    appleFallbackBuffer += delta
-                }
 
-                if interrupted {
-                    break
+                    if qwenTTSAvailable {
+                        speechBuffer += delta
+                        while let segment = Self.takeSpeechSegment(from: &speechBuffer, flush: false) {
+                            if fromHandsFree { voiceStatus = "Speaking…" }
+                            let success = await speakQwenChunk(segment)
+                            if speechSynthesizer.lastOutputInterrupted {
+                                interrupted = true
+                                break
+                            }
+                            if !success {
+                                qwenTTSAvailable = false
+                                appleFallbackBuffer = Self.joinCommandParts(segment, speechBuffer)
+                                speechBuffer = ""
+                                break
+                            }
+                        }
+                    } else {
+                        appleFallbackBuffer += delta
+                    }
+
+                    if interrupted { break }
                 }
             }
 
@@ -150,6 +224,7 @@ final class JarvisAppModel: ObservableObject {
                         let success = await speakQwenChunk(tail)
                         interrupted = speechSynthesizer.lastOutputInterrupted
                         if !success && !interrupted {
+                            if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
                             await speechSynthesizer.speak(
                                 tail,
                                 preferBluetooth: settings.preferBluetoothAudio
@@ -161,6 +236,7 @@ final class JarvisAppModel: ObservableObject {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     if !fallback.isEmpty {
                         if fromHandsFree { voiceStatus = "Speaking…" }
+                        if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
                         await speechSynthesizer.speak(
                             fallback,
                             preferBluetooth: settings.preferBluetoothAudio
@@ -170,15 +246,17 @@ final class JarvisAppModel: ObservableObject {
                 }
             }
 
+            if !fullResponse.isEmpty {
+                recordTurn(role: "assistant", text: fullResponse, model: modelLabel == "—" ? nil : modelLabel)
+                assistantRecorded = true
+            }
+
             if fromHandsFree && Self.responseRequestsConfirmation(fullResponse) {
                 confirmationFollowUpDeadline = Date().addingTimeInterval(15)
                 conversationalFollowUpDeadline = nil
                 voiceStatus = "Say confirm or cancel"
             } else if fromHandsFree && !fullResponse.isEmpty {
                 confirmationFollowUpDeadline = nil
-                // Start this after the final audio chunk finishes. If the user
-                // barged in, their captured speech is already waiting in the
-                // BargeInBuffer and this window lets it become the next turn.
                 conversationalFollowUpDeadline = Date().addingTimeInterval(5)
                 voiceStatus = "Listening for follow-up…"
             } else {
@@ -186,15 +264,19 @@ final class JarvisAppModel: ObservableObject {
                 conversationalFollowUpDeadline = nil
             }
         } catch {
-            // A pre-0.9 backend or transient stream failure still gets a complete
-            // response through the proven non-streaming endpoint.
             do {
                 let response = try await client.command(text)
+                if firstResponseAt == nil { firstResponseAt = Date() }
+                if modelLabel == "—" { modelLabel = "backend" }
                 fullResponse = response.message
                 lastResponse = response.message
                 if settings.speakResponses && !response.message.isEmpty {
                     if fromHandsFree { voiceStatus = "Speaking…" }
                     await speakOneResponse(Self.spokenResponse(for: response.message))
+                }
+                if !assistantRecorded && !response.message.isEmpty {
+                    recordTurn(role: "assistant", text: response.message, model: modelLabel)
+                    assistantRecorded = true
                 }
                 if fromHandsFree && Self.responseRequestsConfirmation(response.message) {
                     confirmationFollowUpDeadline = Date().addingTimeInterval(15)
@@ -208,12 +290,28 @@ final class JarvisAppModel: ObservableObject {
             } catch {
                 confirmationFollowUpDeadline = nil
                 conversationalFollowUpDeadline = nil
-                errorMessage = error.localizedDescription
-                if fromHandsFree {
-                    voiceStatus = "Command failed"
+                if settings.offlineQueueEnabled && Self.isConnectivityError(error) {
+                    offlineQueueHandler?(text)
+                    let message = "The Jarvis server is unreachable, so I staged that command on this iPhone instead of losing it. Nothing will execute until you explicitly send the queued command."
+                    lastResponse = message
+                    recordTurn(role: "assistant", text: message, model: "iPhone")
+                    modelLabel = "iPhone queue"
+                    if fromHandsFree {
+                        voiceStatus = "Queued offline"
+                        if settings.speakResponses { await speakOneResponse(message) }
+                    }
+                } else {
+                    errorMessage = error.localizedDescription
+                    if fromHandsFree { voiceStatus = "Command failed" }
                 }
             }
         }
+    }
+
+    private static func isConnectivityError(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain
     }
 
     private func speakQwenChunk(_ text: String) async -> Bool {
@@ -221,6 +319,7 @@ final class JarvisAppModel: ObservableObject {
         guard !cleaned.isEmpty else { return true }
         do {
             let audio = try await client.synthesizeSpeech(cleaned)
+            if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
             try await speechSynthesizer.speakRemoteAudio(
                 audio,
                 text: cleaned,
@@ -234,6 +333,7 @@ final class JarvisAppModel: ObservableObject {
 
     private func speakOneResponse(_ text: String) async {
         if !(await speakQwenChunk(text)) {
+            if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
             await speechSynthesizer.speak(
                 text,
                 preferBluetooth: settings.preferBluetoothAudio
@@ -608,9 +708,6 @@ final class JarvisAppModel: ObservableObject {
         return "\(a) \(b)"
     }
 
-    /// Pull one voice-sized segment out of a growing streamed answer. Normally a
-    /// sentence boundary wins. Very long punctuation-free output is cut at a word
-    /// boundary so TTS can start rather than waiting for an entire paragraph.
     private static func takeSpeechSegment(from buffer: inout String, flush: Bool) -> String? {
         let trimmedLeading = buffer.drop(while: { $0.isWhitespace })
         if trimmedLeading.count != buffer.count {

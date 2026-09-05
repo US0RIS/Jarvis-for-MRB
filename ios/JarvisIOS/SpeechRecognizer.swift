@@ -1,6 +1,21 @@
 import AVFoundation
 import Speech
 
+private func jarvisAverageDBFS(_ buffer: AVAudioPCMBuffer) -> Double {
+    guard let channels = buffer.floatChannelData,
+          buffer.frameLength > 0 else { return -80.0 }
+    let samples = channels[0]
+    let count = Int(buffer.frameLength)
+    var sum: Double = 0
+    for index in 0..<count {
+        let value = Double(samples[index])
+        sum += value * value
+    }
+    let rms = sqrt(sum / Double(count))
+    guard rms > 0.00001 else { return -80.0 }
+    return max(-80.0, min(0.0, 20.0 * log10(rms)))
+}
+
 @MainActor
 final class AudioRouteManager: ObservableObject {
     @Published private(set) var currentInputName = "No input"
@@ -23,10 +38,6 @@ final class AudioRouteManager: ObservableObject {
         return "\(currentInputName) → \(currentOutputName)"
     }
 
-    /// Configures one full-duplex voice session. When a Bluetooth HFP microphone
-    /// is available, explicitly selecting it also moves output to the matching
-    /// Bluetooth HFP route on iOS. This prevents Jarvis from silently listening
-    /// through the phone microphone while the Ray-Bans are connected.
     func prepareForVoice(preferBluetooth: Bool) throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
@@ -72,9 +83,6 @@ final class AudioRouteManager: ObservableObject {
             }
         }
 
-        // availableInputsChangeNotification was introduced in iOS 26. The app's
-        // deployment target remains iOS 17+, so guard the observer even when the
-        // development phone itself is running a newer iOS beta.
         if #available(iOS 26.0, *) {
             inputsChangeTask?.cancel()
             inputsChangeTask = Task { [weak self] in
@@ -92,6 +100,7 @@ final class SpeechRecognizer: ObservableObject {
     @Published private(set) var transcript = ""
     @Published private(set) var isActive = false
     @Published private(set) var lastError: String?
+    @Published private(set) var ambientLevelDBFS: Double = -80.0
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
@@ -124,8 +133,6 @@ final class SpeechRecognizer: ObservableObject {
 
     func startListening(preferBluetooth: Bool) throws {
         stopAudioOnly(cancelRecognition: true)
-        // If the user began speaking over Jarvis, preserve the part already heard
-        // by the barge-in recognizer and continue the same sentence here.
         recognitionPrefix = BargeInBuffer.take()
         transcript = recognitionPrefix
         lastError = nil
@@ -139,9 +146,6 @@ final class SpeechRecognizer: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
-        // Bias Apple's recognizer toward the words this personal assistant uses
-        // frequently. This does not force a result, but materially improves names
-        // and the wake word on the target user's device.
         request.contextualStrings = ["Jarvis", "Dubeck", "Emmett Dubeck"]
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
@@ -157,8 +161,15 @@ final class SpeechRecognizer: ObservableObject {
         }
 
         removeInputTapIfNeeded()
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             request.append(buffer)
+            let db = jarvisAverageDBFS(buffer)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Smooth the meter enough that a single consonant or click does not
+                // make whisper mode flicker between states.
+                self.ambientLevelDBFS = (self.ambientLevelDBFS * 0.82) + (db * 0.18)
+            }
         }
         tapInstalled = true
 
@@ -199,9 +210,6 @@ final class SpeechRecognizer: ObservableObject {
 
     private static func applyPersonalVocabulary(to text: String) -> String {
         var corrected = text
-        // Apple Speech commonly renders the family name phonetically as "Dubek"
-        // (and occasionally as two words). Jarvis is a personal assistant, so use
-        // the known spelling before the transcript ever reaches the agent.
         corrected = corrected.replacingOccurrences(
             of: "\\b(?:dubek|du beck)\\b",
             with: "Dubeck",
@@ -216,8 +224,6 @@ final class SpeechRecognizer: ObservableObject {
         if a.isEmpty { return b }
         if b.isEmpty { return a }
 
-        // Recognition may restart quickly enough to hear the last word from the
-        // barge-in pipeline again. Avoid an obvious duplicate at the seam.
         let aWords = a.split(separator: " ")
         let bWords = b.split(separator: " ")
         if let last = aWords.last, let first = bWords.first,
@@ -249,10 +255,6 @@ final class SpeechRecognizer: ObservableObject {
         tapInstalled = false
     }
 
-    /// Interruptions (calls, Siri, another app taking the microphone) can leave
-    /// an AVAudioEngine looking active even though no more buffers arrive. Force
-    /// the current recognition task to finish so Jarvis's outer hands-free loop
-    /// can establish a fresh Ray-Ban route when the interruption is over.
     private func observeAudioLifecycle() {
         interruptionTask?.cancel()
         interruptionTask = Task { [weak self] in

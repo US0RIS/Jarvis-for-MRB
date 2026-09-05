@@ -125,6 +125,11 @@ struct SettingsView: View {
                     } label: {
                         Label("Power Features", systemImage: "bolt.shield.fill")
                     }
+                    NavigationLink {
+                        LocalProductivityView()
+                    } label: {
+                        Label("Local Executive", systemImage: "list.bullet.clipboard.fill")
+                    }
 
                     Toggle("30-second on-device visual cache", isOn: $settings.localVisualHistoryEnabled)
                     Toggle("Continuous on-device fast perception", isOn: $settings.localFastPerceptionEnabled)
@@ -178,7 +183,7 @@ struct SettingsView: View {
                     Toggle("Speak contextual local reminders", isOn: $settings.speakContextualRemindersEnabled)
                     Toggle("Automatically recover frontend camera/voice", isOn: $settings.frontendAutoRecoveryEnabled)
 
-                    Text("Known People remains closed-set and opt-in: the iPhone only compares visible faces with profiles you explicitly enroll. Feature prints stay in this device's Keychain; raw enrollment photos are discarded.")
+                    Text("Known People remains closed-set and opt-in: the iPhone only compares visible faces with profiles you explicitly enroll. Feature prints stay private on this device; raw enrollment photos are discarded.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -195,10 +200,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     Text("Offline staging never executes commands automatically when connectivity returns. A queued command must be sent explicitly from the app or by asking Jarvis to send the queued command.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text("Jarvis App Shortcuts include Talk, Visual Scan, Read Visible Text, vision/speech toggles, Meeting Notes, privacy/driving modes, encrypted incident capture and text handoff to Jarvis.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

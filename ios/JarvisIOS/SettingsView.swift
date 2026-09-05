@@ -128,6 +128,27 @@ struct SettingsView: View {
                     Toggle("Frontend diagnostics", isOn: $settings.frontendDiagnosticsEnabled)
                     Toggle("Allow offline meeting capture", isOn: $settings.offlineMeetingCaptureEnabled)
 
+                    Divider()
+
+                    Toggle("Recognize explicitly enrolled people", isOn: $settings.knownPeopleRecognitionEnabled)
+                    NavigationLink("Manage Known People") {
+                        KnownPeopleView()
+                    }
+                    if settings.knownPeopleRecognitionEnabled {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Known-person match tolerance: \(String(format: "%.2f", settings.knownPeopleTolerance))×")
+                                .font(.caption)
+                            Slider(value: $settings.knownPeopleTolerance, in: 1.15 ... 2.2, step: 0.05)
+                            Text("Lower is stricter. Keep this near the default unless a deliberately enrolled person is consistently missed.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text("Known People is closed-set and opt-in: the iPhone only compares visible faces with profiles you explicitly enroll. Enrollment feature prints stay in this device's Keychain; raw enrollment photos are discarded. Commands such as 'who is this?' and 'what do I know about this person?' can use your private note and recent iPhone-stored Jarvis conversation context.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Text("On-device fast perception uses Apple's Vision framework on the iPhone for OCR, QR/barcode decoding, human/face counts without identity, rectangle detection and visual saliency. It does not replace Moondream for general scene understanding.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -164,7 +164,7 @@ final class SpeechRecognizer: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
-        request.contextualStrings = ["Jarvis", "Dubeck", "Emmett Dubeck"]
+        request.contextualStrings = Array(Set(["Jarvis", "Dubeck", "Emmett Dubeck"] + PersonalVocabularyStore.values()))
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
@@ -182,8 +182,10 @@ final class SpeechRecognizer: ObservableObject {
         // Bluetooth HFP can renegotiate its format asynchronously. A nil tap
         // format binds to the node's live native format and avoids iOS 27's
         // uncaught "Failed to create tap due to format mismatch" exception.
-        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, when in
             request.append(buffer)
+            LocalAudioRingBuffer.shared.append(buffer)
+            LocalSoundClassifier.shared.analyze(buffer, at: when.sampleTime)
             let db = jarvisAverageDBFS(buffer)
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -220,6 +222,7 @@ final class SpeechRecognizer: ObservableObject {
                     }
                     self.lastResultWasFinal = result.isFinal
                     self.lastRecognitionUpdate = Date()
+                    LocalSpeechHistoryStore.shared.record(self.transcript, confidence: self.transcriptionConfidence)
                 }
                 if let error {
                     self.lastError = error.localizedDescription

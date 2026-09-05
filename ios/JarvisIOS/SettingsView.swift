@@ -90,8 +90,11 @@ struct SettingsView: View {
 
                 Section("Persistent Presence") {
                     Toggle("Passive vision", isOn: $settings.passiveVisionEnabled)
+                    Toggle("Adaptive remote vision bandwidth", isOn: $settings.adaptiveBandwidthEnabled)
                     Toggle("Ambient audio HUD cues", isOn: $settings.ambientCuesEnabled)
                     Toggle("Speak proactive alerts", isOn: $settings.proactiveAnnouncements)
+                    Toggle("Smart PC audio damping", isOn: $settings.smartAudioDampingEnabled)
+                    Toggle("Automatic local daily journal", isOn: $settings.dailyJournalEnabled)
 
                     Picker("Interrupt me at", selection: $settings.proactiveThreshold) {
                         Text("Info or higher").tag("info")
@@ -103,7 +106,11 @@ struct SettingsView: View {
                     Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
                     TextField("Current project focus", text: $settings.projectFocus)
 
-                    Text("Passive vision samples the glasses camera and now also records conservative last-seen locations for visible portable objects. The proactive threshold controls unsolicited spoken interruptions; background-task completions still report normally.")
+                    Text("Passive vision keeps a 30-second RAM-only rolling frame history on the PC for questions about things that just passed out of view. Away from home, adaptive bandwidth reduces image resolution and sampling frequency automatically over the Tailscale path.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Smart audio damping temporarily lowers PC output while you are actively conversing with Jarvis and restores the previous volume afterward. Daily journaling writes a concise local Markdown entry under the Jarvis AppData folder near the end of the day.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 

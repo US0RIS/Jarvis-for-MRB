@@ -24,6 +24,20 @@ final class SettingsStore: ObservableObject {
     @Published var dailyJournalEnabled: Bool { didSet { defaults.set(dailyJournalEnabled, forKey: "jarvis.dailyJournalEnabled") } }
     @Published var projectFocus: String { didSet { defaults.set(projectFocus, forKey: "jarvis.projectFocus") } }
 
+    // Frontend-only capabilities. These remain useful even when the PC backend
+    // cannot be changed: on-device Vision OCR/barcodes, a RAM-only visual cache,
+    // connection telemetry, offline command staging, local sensor context and
+    // local command aliases.
+    @Published var localVisualHistoryEnabled: Bool { didSet { defaults.set(localVisualHistoryEnabled, forKey: "jarvis.localVisualHistoryEnabled") } }
+    @Published var localFastPerceptionEnabled: Bool { didSet { defaults.set(localFastPerceptionEnabled, forKey: "jarvis.localFastPerceptionEnabled") } }
+    @Published var offlineQueueEnabled: Bool { didSet { defaults.set(offlineQueueEnabled, forKey: "jarvis.offlineQueueEnabled") } }
+    @Published var localCommandAliasesEnabled: Bool { didSet { defaults.set(localCommandAliasesEnabled, forKey: "jarvis.localCommandAliasesEnabled") } }
+    @Published var localSensorContextEnabled: Bool { didSet { defaults.set(localSensorContextEnabled, forKey: "jarvis.localSensorContextEnabled") } }
+    @Published var frontendDiagnosticsEnabled: Bool { didSet { defaults.set(frontendDiagnosticsEnabled, forKey: "jarvis.frontendDiagnosticsEnabled") } }
+    @Published var offlineMeetingCaptureEnabled: Bool { didSet { defaults.set(offlineMeetingCaptureEnabled, forKey: "jarvis.offlineMeetingCaptureEnabled") } }
+    @Published var adaptiveCueVolumeEnabled: Bool { didSet { defaults.set(adaptiveCueVolumeEnabled, forKey: "jarvis.adaptiveCueVolumeEnabled") } }
+    @Published var cueVolume: Double { didSet { defaults.set(cueVolume, forKey: "jarvis.cueVolume") } }
+
     let conversationSessionID: String
 
     private let defaults: UserDefaults
@@ -61,5 +75,15 @@ final class SettingsStore: ObservableObject {
         smartAudioDampingEnabled = defaults.object(forKey: "jarvis.smartAudioDampingEnabled") as? Bool ?? true
         dailyJournalEnabled = defaults.object(forKey: "jarvis.dailyJournalEnabled") as? Bool ?? false
         projectFocus = defaults.string(forKey: "jarvis.projectFocus") ?? "Jarvis"
+
+        localVisualHistoryEnabled = defaults.object(forKey: "jarvis.localVisualHistoryEnabled") as? Bool ?? true
+        localFastPerceptionEnabled = defaults.object(forKey: "jarvis.localFastPerceptionEnabled") as? Bool ?? false
+        offlineQueueEnabled = defaults.object(forKey: "jarvis.offlineQueueEnabled") as? Bool ?? true
+        localCommandAliasesEnabled = defaults.object(forKey: "jarvis.localCommandAliasesEnabled") as? Bool ?? true
+        localSensorContextEnabled = defaults.object(forKey: "jarvis.localSensorContextEnabled") as? Bool ?? false
+        frontendDiagnosticsEnabled = defaults.object(forKey: "jarvis.frontendDiagnosticsEnabled") as? Bool ?? true
+        offlineMeetingCaptureEnabled = defaults.object(forKey: "jarvis.offlineMeetingCaptureEnabled") as? Bool ?? true
+        adaptiveCueVolumeEnabled = defaults.object(forKey: "jarvis.adaptiveCueVolumeEnabled") as? Bool ?? true
+        cueVolume = defaults.object(forKey: "jarvis.cueVolume") as? Double ?? 1.0
     }
 }

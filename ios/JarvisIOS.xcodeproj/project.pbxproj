@@ -55,6 +55,7 @@
 		10000000000000000000000D /* AmbientCuePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCuePlayer.swift; sourceTree = "<group>"; };
 		10000000000000000000000E /* CompanionConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionConnection.swift; sourceTree = "<group>"; };
 		10000000000000000000000F /* PersistentPresenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistentPresenceController.swift; sourceTree = "<group>"; };
+		100000000000000000000010 /* JarvisIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = JarvisIOS.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -103,6 +104,7 @@
 				100000000000000000000006 /* SpeechSynthesizer.swift */,
 				100000000000000000000007 /* GeofenceManager.swift */,
 				100000000000000000000008 /* MetaGlassesManager.swift */,
+				100000000000000000000010 /* JarvisIOS.entitlements */,
 				10000000000000000000000B /* Info.plist */,
 			);
 			path = JarvisIOS;
@@ -244,6 +246,7 @@
 		500000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = JarvisIOS/JarvisIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -267,6 +270,7 @@
 		500000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = JarvisIOS/JarvisIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;

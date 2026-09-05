@@ -97,8 +97,8 @@ def _stream_service(text: str) -> Iterator[str]:
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 11")
-    print("Persistent presence enabled. Type 'exit' to quit.")
+    print("Jarvis for MRB — milestone 12")
+    print("Autonomous context enabled. Type 'exit' to quit.")
 
     while True:
         try:

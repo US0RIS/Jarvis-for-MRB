@@ -55,6 +55,9 @@ final class KnownPeopleController: ObservableObject {
     @Published private(set) var lastFaceCount = 0
 
     private static let storageAccount = "jarvis.knownPeople.v1"
+    private weak var appModel: JarvisAppModel?
+    private var loopTask: Task<Void, Never>?
+    private var started = false
     private var candidateID: UUID?
     private var candidateHits = 0
     private var lastRecognitionAttempt = Date.distantPast
@@ -64,6 +67,109 @@ final class KnownPeopleController: ObservableObject {
     }
 
     var hasEnrolledPeople: Bool { !people.isEmpty }
+
+    func start(appModel: JarvisAppModel) async {
+        guard !started else { return }
+        started = true
+        self.appModel = appModel
+
+        // Preserve the existing iPhone-only OCR/QR/local-command handler and
+        // layer known-person questions in front of it.
+        let previousHandler = appModel.frontendCommandHandler
+        appModel.frontendCommandHandler = { [weak self, weak appModel] command in
+            if let self, let appModel,
+               let response = await self.handleKnownPersonCommand(command, appModel: appModel) {
+                return response
+            }
+            return await previousHandler?(command)
+        }
+
+        appModel.frontendContextProvider = { [weak self, weak appModel] _ in
+            guard let self, let appModel,
+                  appModel.settings.knownPeopleRecognitionEnabled,
+                  appModel.settings.knownPeopleContextInjectionEnabled else { return nil }
+            return self.backendContext(conversationLog: appModel.conversationLog)
+        }
+
+        loopTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runLoop()
+        }
+    }
+
+    func stop() {
+        started = false
+        loopTask?.cancel()
+        loopTask = nil
+        currentMatch = nil
+        candidateID = nil
+        candidateHits = 0
+        status = people.isEmpty ? "No enrolled people" : "Recognition stopped"
+    }
+
+    private func runLoop() async {
+        while !Task.isCancelled && started {
+            guard let appModel else { return }
+            guard appModel.settings.knownPeopleRecognitionEnabled, !people.isEmpty else {
+                currentMatch = nil
+                candidateID = nil
+                candidateHits = 0
+                status = people.isEmpty ? "No enrolled people" : "Recognition off"
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+
+            if appModel.metaGlasses.streamState == "Stopped",
+               appModel.metaGlasses.isRegistered,
+               appModel.metaGlasses.hasEligibleDevice {
+                status = "Starting Ray-Ban camera for known-people recognition…"
+                await appModel.metaGlasses.startStream()
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+
+            if let frame = appModel.metaGlasses.currentFrame,
+               let jpeg = Self.downsampledJPEG(frame) {
+                await recognize(
+                    jpeg: jpeg,
+                    toleranceMultiplier: appModel.settings.knownPeopleTolerance,
+                    force: false
+                )
+            } else {
+                status = "Waiting for a Ray-Ban frame"
+            }
+            try? await Task.sleep(for: .milliseconds(650))
+        }
+    }
+
+    func recognizeCurrentPerson(force: Bool = true) async {
+        guard let appModel else {
+            status = "Known-people recognizer is not attached"
+            return
+        }
+        guard !people.isEmpty else {
+            status = "No enrolled people"
+            return
+        }
+        if appModel.metaGlasses.streamState == "Stopped" {
+            guard appModel.metaGlasses.isRegistered, appModel.metaGlasses.hasEligibleDevice else {
+                status = "Ray-Ban camera unavailable"
+                return
+            }
+            status = "Starting Ray-Ban camera…"
+            await appModel.metaGlasses.startStream()
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard let frame = appModel.metaGlasses.currentFrame,
+              let jpeg = Self.downsampledJPEG(frame) else {
+            status = "No current Ray-Ban frame"
+            return
+        }
+        await recognize(
+            jpeg: jpeg,
+            toleranceMultiplier: appModel.settings.knownPeopleTolerance,
+            force: force
+        )
+    }
 
     func enroll(name rawName: String, notes rawNotes: String, imageData: [Data]) async -> String {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -184,17 +290,21 @@ final class KnownPeopleController: ObservableObject {
                 return
             }
 
-            currentMatch = RecognizedPersonMatch(
+            let match = RecognizedPersonMatch(
                 personID: best.person.id,
                 name: best.person.name,
                 distance: best.distance,
                 threshold: best.threshold,
                 matchedAt: Date()
             )
-            status = "Matched enrolled contact: \(best.person.name) • \(currentMatch!.scoreDescription)"
+            currentMatch = match
+            status = "Matched enrolled contact: \(best.person.name) • \(match.scoreDescription)"
         } catch {
             candidateID = nil
             candidateHits = 0
+            if let match = currentMatch, Date().timeIntervalSince(match.matchedAt) > 4 {
+                currentMatch = nil
+            }
             status = "Recognition unavailable: \(error.localizedDescription)"
         }
     }
@@ -267,6 +377,19 @@ final class KnownPeopleController: ObservableObject {
         if !context.isEmpty { lines.append(context) }
         lines.append("[End private on-device known-person context]")
         return lines.joined(separator: "\n")
+    }
+
+    private func handleKnownPersonCommand(_ raw: String, appModel: JarvisAppModel) async -> String? {
+        guard appModel.settings.knownPeopleRecognitionEnabled else { return nil }
+        let text = " " + raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) + " "
+        let cues = [
+            " who is this ", " who is that ", " who am i talking to ", " who am i speaking to ",
+            " do i know this person ", " remind me who this is ", " what do i know about this person ",
+            " what did i talk about with them ", " what have i talked about with them "
+        ]
+        guard cues.contains(where: { text.contains($0) }) else { return nil }
+        await recognizeCurrentPerson(force: true)
+        return answerAboutCurrentPerson(conversationLog: appModel.conversationLog)
     }
 
     private func load() {
@@ -393,6 +516,17 @@ final class KnownPeopleController: ObservableObject {
         try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
     }
 
+    private static func downsampledJPEG(_ image: UIImage) -> Data? {
+        let maxDimension: CGFloat = 720
+        let size = image.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let scale = min(1, maxDimension / max(size.width, size.height))
+        let target = CGSize(width: max(1, size.width * scale), height: max(1, size.height * scale))
+        let renderer = UIGraphicsImageRenderer(size: target)
+        let normalized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+        return normalized.jpegData(compressionQuality: 0.45)
+    }
+
     private func searchTerms(for name: String) -> [String] {
         var terms = [name]
         let words = name.split(separator: " ").map(String.init).filter { $0.count >= 3 }
@@ -404,7 +538,7 @@ final class KnownPeopleController: ObservableObject {
 
 struct KnownPeopleView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
-    @EnvironmentObject private var frontend: FrontendIntelligenceController
+    @EnvironmentObject private var knownPeople: KnownPeopleController
 
     @State private var name = ""
     @State private var notes = ""
@@ -413,8 +547,6 @@ struct KnownPeopleView: View {
     @State private var enrollmentStatus = ""
     @State private var isEnrolling = false
     @State private var showForgetAll = false
-
-    private var knownPeople: KnownPeopleController { frontend.knownPeople }
 
     var body: some View {
         Form {
@@ -429,7 +561,7 @@ struct KnownPeopleView: View {
                     }
                 }
                 Button("Recognize Current Ray-Ban View") {
-                    Task { await frontend.recognizeCurrentPerson(force: true) }
+                    Task { await knownPeople.recognizeCurrentPerson(force: true) }
                 }
                 .disabled(!knownPeople.hasEnrolledPeople || !appModel.metaGlasses.hasEligibleDevice)
             }

@@ -106,7 +106,7 @@ struct SettingsView: View {
                     Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
                     TextField("Current project focus", text: $settings.projectFocus)
 
-                    Text("Passive vision keeps a 30-second RAM-only rolling frame history on the PC for questions about things that just passed out of view. Away from home, adaptive bandwidth reduces image resolution and sampling frequency automatically over the Tailscale path.")
+                    Text("Passive vision sends sampled glasses frames to the existing PC backend. The separate iPhone visual cache below does not depend on the backend and is intentionally not presented as general scene understanding.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -119,11 +119,40 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("iPhone-only Intelligence") {
+                    Toggle("30-second on-device visual cache", isOn: $settings.localVisualHistoryEnabled)
+                    Toggle("Continuous on-device fast perception", isOn: $settings.localFastPerceptionEnabled)
+                    Toggle("Offline command staging", isOn: $settings.offlineQueueEnabled)
+                    Toggle("Local voice command aliases", isOn: $settings.localCommandAliasesEnabled)
+                    Toggle("Motion / travel context", isOn: $settings.localSensorContextEnabled)
+                    Toggle("Frontend diagnostics", isOn: $settings.frontendDiagnosticsEnabled)
+                    Toggle("Allow offline meeting capture", isOn: $settings.offlineMeetingCaptureEnabled)
+
+                    Text("On-device fast perception uses Apple's Vision framework on the iPhone for OCR, QR/barcode decoding, human/face counts without identity, rectangle detection and visual saliency. It does not replace Moondream for general scene understanding.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Offline staging never executes commands automatically when connectivity returns. A queued command must be sent explicitly from the app or by asking Jarvis to send the queued command.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Jarvis App Shortcuts are registered with iOS for Talk to Jarvis, Visual Scan, Read Visible Text, Toggle Vision and Meeting Notes. They can be assigned through Shortcuts or the Action Button where iOS offers app shortcuts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Voice & Privacy") {
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
                     Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
                     Toggle("Adaptive whisper mode", isOn: $settings.adaptiveWhisperEnabled)
                     Toggle("Quiet-speech mode", isOn: $settings.subvocalModeEnabled)
+                    Toggle("Adapt HUD cue volume to room noise", isOn: $settings.adaptiveCueVolumeEnabled)
+
+                    VStack(alignment: .leading) {
+                        Text("HUD cue volume: \(Int(settings.cueVolume * 100))%")
+                            .font(.caption)
+                        Slider(value: $settings.cueVolume, in: 0.1 ... 1.5, step: 0.05)
+                    }
 
                     if settings.adaptiveWhisperEnabled {
                         VStack(alignment: .leading) {
@@ -141,7 +170,7 @@ struct SettingsView: View {
                     }
                     Button("Check Neural Voice") { Task { await checkNeuralVoice() } }
 
-                    Text("Adaptive whisper lowers Kokoro playback volume and apparent pitch when the measured noise floor is quiet. Quiet-speech mode keeps the existing always-listening acoustic speech path intended for very soft speech; it is not literal EMG/subvocal thought decoding.")
+                    Text("Adaptive whisper lowers Kokoro playback volume and apparent pitch when the measured noise floor is quiet. You can also say 'whisper for 10 minutes' as a local iPhone command. Quiet-speech mode remains acoustic speech, not EMG/subvocal thought decoding.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

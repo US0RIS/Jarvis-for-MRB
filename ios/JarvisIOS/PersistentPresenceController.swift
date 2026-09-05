@@ -69,6 +69,7 @@ final class PersistentPresenceController: ObservableObject {
         visionTask?.cancel()
         reconnectTask = nil
         visionTask = nil
+        cuePlayer.stopThinking()
         companion.disconnect()
         companionStatus = "Stopped"
         visionStatus = "Off"
@@ -174,6 +175,17 @@ final class PersistentPresenceController: ObservableObject {
         let type = String(describing: event["type"] ?? "")
         let cue = String(describing: event["cue"] ?? "attention")
         let message = String(describing: event["message"] ?? "")
+
+        if type == "thinking_start" {
+            if appModel.settings.ambientCuesEnabled {
+                cuePlayer.startThinking(preferBluetooth: appModel.settings.preferBluetoothAudio)
+            }
+            return
+        }
+        if type == "thinking_stop" {
+            cuePlayer.stopThinking()
+            return
+        }
 
         // Vision-state telemetry can arrive multiple times per analysis. Never play
         // an ambient sound for telemetry; cues are reserved for actual attention,

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from datetime import datetime
 from typing import Any
 
+import httpx
+
 from jarvis_mrb.environment_state import get_state
 from jarvis_mrb.event_bus import emit_proactive
+from jarvis_mrb.planner_model import FAST_MODEL
 from jarvis_mrb.tools.google import query_calendar_events, query_emails
 
+OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 _LOCK = threading.RLock()
 _LAST_ALERTS: dict[str, float] = {}
 _STARTED = False
@@ -35,9 +40,34 @@ def _parse_time(value: str) -> datetime | None:
         return None
 
 
+def _prefetch_for_event(event_id: str, summary: str) -> None:
+    if not _dedup(f"prefetch:{event_id}", 4 * 3600):
+        return
+
+    def work() -> None:
+        # Pre-warm the low-latency planner without producing any output.
+        try:
+            with httpx.Client(timeout=httpx.Timeout(60.0, connect=2.0)) as client:
+                client.post(
+                    f"{OLLAMA_URL}/api/generate",
+                    json={"model": FAST_MODEL, "prompt": "", "keep_alive": "30m"},
+                )
+        except httpx.HTTPError:
+            pass
+        # Warm the local semantic index around the meeting topic. This is a local
+        # lookup only; it does not spend Serper quota or contact arbitrary sites.
+        try:
+            from jarvis_mrb.knowledge_index import search
+            search(summary, limit=3)
+        except Exception:
+            pass
+
+    threading.Thread(target=work, name="jarvis-meeting-prefetch", daemon=True).start()
+
+
 def _check_calendar() -> None:
     now = datetime.now().astimezone()
-    result = query_calendar_events(direction="future", days=1, limit=5)
+    result = query_calendar_events(direction="future", days=1, limit=8)
     if not result.ok or not result.data:
         return
     for event in result.data.get("events", []):
@@ -55,6 +85,10 @@ def _check_calendar() -> None:
         event_id = str(event.get("id") or event.get("summary") or start_raw)
         summary = str(event.get("summary") or "your next event")
         location = str(event.get("location") or "").strip()
+
+        if 3 <= minutes <= 8:
+            _prefetch_for_event(event_id, summary)
+
         if minutes <= 12:
             if not _dedup(f"calendar-urgent:{event_id}", 45 * 60):
                 continue
@@ -108,13 +142,11 @@ def check_once() -> None:
 
 
 def _loop() -> None:
-    # Give startup/Google token refresh a moment before the first poll.
     time.sleep(8)
     cycle = 0
     while True:
         try:
             _check_calendar()
-            # Gmail polling is less frequent than calendar polling.
             if cycle % 3 == 0:
                 _check_urgent_mail()
         except Exception:
@@ -129,4 +161,28 @@ def start() -> None:
         if _STARTED:
             return
         _STARTED = True
+
+    # These monitors are deliberately independent daemon threads. A failure in a
+    # peripheral feature cannot take down the voice/control service.
+    try:
+        from jarvis_mrb.pc_context import start as start_pc_context
+        start_pc_context()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.resource_monitor import start as start_resource_monitor
+        start_resource_monitor()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.audio_damping import start as start_audio_damping
+        start_audio_damping()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.daily_journal import start as start_daily_journal
+        start_daily_journal()
+    except Exception:
+        pass
+
     threading.Thread(target=_loop, name="jarvis-proactive", daemon=True).start()

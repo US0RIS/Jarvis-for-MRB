@@ -18,7 +18,7 @@ from jarvis_mrb.agent import handle_natural_language
 from jarvis_mrb.conversation import ConversationMessage, append_message, recent_messages
 from jarvis_mrb.email_policy import get_allowed_recipients, set_allowed_recipients
 from jarvis_mrb.environment_state import get_state, update_state
-from jarvis_mrb.event_bus import companion_events
+from jarvis_mrb.event_bus import companion_events, emit_thinking
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
 from jarvis_mrb.memory import memory_context, remember_exchange_async, status as memory_status_data
 from jarvis_mrb.model_router import choose_model
@@ -34,6 +34,7 @@ from jarvis_mrb.planner_model import (
 )
 from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.streaming_agent import stream_natural_language
+from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
 from jarvis_mrb.vision import status as vision_status_data, submit_frame
 
@@ -46,7 +47,7 @@ _INITIAL_MODEL = get_planner_model()
 agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
-app = FastAPI(title="Jarvis for MRB", version="0.11.1")
+app = FastAPI(title="Jarvis for MRB", version="0.11.2")
 _scheduler_started = False
 _tts_start_attempted = False
 
@@ -216,9 +217,10 @@ def health() -> dict[str, Any]:
     settings = planner_settings()
     return {
         "status": "ok",
-        "version": "0.11.1",
+        "version": "0.11.2",
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
+        "web_search": "ready" if web_status().ok else "unconfigured",
         "planner_model": settings["model"],
         "auto_route": settings["auto_route"],
     }
@@ -227,14 +229,18 @@ def health() -> dict[str, Any]:
 @app.post("/command", response_model=CommandResponse)
 def command(request: CommandRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)
-    session_id = request.session_id or "default"
-    history = _contextual_history(session_id, request.text, limit=12)
-    reply = handle_natural_language(request.text, history=history)
-    append_message(session_id, "user", request.text)
-    if reply.message and reply.message != "__EXIT__":
-        append_message(session_id, "assistant", reply.message)
-        remember_exchange_async(session_id, request.text, reply.message)
-    return CommandResponse(ok=reply.ok, message=reply.message)
+    emit_thinking(True)
+    try:
+        session_id = request.session_id or "default"
+        history = _contextual_history(session_id, request.text, limit=12)
+        reply = handle_natural_language(request.text, history=history)
+        append_message(session_id, "user", request.text)
+        if reply.message and reply.message != "__EXIT__":
+            append_message(session_id, "assistant", reply.message)
+            remember_exchange_async(session_id, request.text, reply.message)
+        return CommandResponse(ok=reply.ok, message=reply.message)
+    finally:
+        emit_thinking(False)
 
 
 @app.post("/command/stream")
@@ -243,17 +249,23 @@ def command_stream(
     authorization: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     _check_auth(authorization)
-    session_id = request.session_id or "default"
-    route = choose_model(request.text)
-    # The 8B model does not need 20 full turns for routine voice interactions.
-    # A smaller prompt reduces prefill time substantially while the 27B path keeps
-    # the wider history window for harder reasoning.
-    history_limit = 8 if route.model == FAST_MODEL else 20
-    history = _contextual_history(session_id, request.text, limit=history_limit)
+    emit_thinking(True)
+    try:
+        session_id = request.session_id or "default"
+        route = choose_model(request.text)
+        # The 8B model does not need 20 full turns for routine voice interactions.
+        # A smaller prompt reduces prefill time substantially while the 27B path keeps
+        # the wider history window for harder reasoning.
+        history_limit = 8 if route.model == FAST_MODEL else 20
+        history = _contextual_history(session_id, request.text, limit=history_limit)
+    except Exception:
+        emit_thinking(False)
+        raise
 
     def generate():
         pieces: list[str] = []
         ok = True
+        first_output = True
         try:
             yield json.dumps(
                 {
@@ -270,14 +282,23 @@ def command_stream(
             ):
                 if not piece:
                     continue
+                if first_output:
+                    first_output = False
+                    # The thinking bed is only for the silent wait. Stop it before
+                    # the first conversational/tool-result audio can begin.
+                    emit_thinking(False)
                 pieces.append(piece)
                 yield json.dumps({"type": "delta", "text": piece}, ensure_ascii=False) + "\n"
         except Exception as exc:
+            if first_output:
+                first_output = False
+                emit_thinking(False)
             ok = False
             message = f"I'm sorry, sir. Streaming failed: {exc}"
             pieces.append(message)
             yield json.dumps({"type": "delta", "text": message}, ensure_ascii=False) + "\n"
         finally:
+            emit_thinking(False)
             full = "".join(pieces).strip()
             append_message(session_id, "user", request.text)
             if full:

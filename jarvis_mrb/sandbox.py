@@ -39,7 +39,34 @@ def docker_available() -> bool:
 
 
 def status() -> dict[str, Any]:
-    return {"docker": docker_available(), "image": DOCKER_IMAGE, "network": "none"}
+    return {"docker": docker_available(), "image": DOCKER_IMAGE, "network": "none", "host_shell": False}
+
+
+def _docker_base(work: Path) -> list[str]:
+    return [
+        "docker", "run", "--rm",
+        "--network", "none",
+        "--memory", "256m",
+        "--cpus", "1.0",
+        "--pids-limit", "64",
+        "--read-only",
+        "--security-opt", "no-new-privileges",
+        "--cap-drop", "ALL",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=32m",
+        "-v", f"{work}:/work:ro",
+        "-w", "/work",
+        DOCKER_IMAGE,
+    ]
+
+
+def _finish(completed: subprocess.CompletedProcess[str], label: str) -> SandboxResult:
+    stdout = completed.stdout[-8000:]
+    stderr = completed.stderr[-4000:]
+    if completed.returncode != 0:
+        detail = stderr.strip() or stdout.strip() or f"exit code {completed.returncode}"
+        return SandboxResult(False, f"{label} failed: {detail[:1200]}", stdout, stderr)
+    result_text = stdout.strip() or f"{label} completed successfully with no output."
+    return SandboxResult(True, result_text[:4000], stdout, stderr)
 
 
 def run_python(code: str, *, stdin_json: Any = None, timeout_seconds: int = 8) -> SandboxResult:
@@ -59,22 +86,7 @@ def run_python(code: str, *, stdin_json: Any = None, timeout_seconds: int = 8) -
         script.write_text(source, encoding="utf-8")
         if stdin_json is not None:
             (work / "input.json").write_text(json.dumps(stdin_json, ensure_ascii=False), encoding="utf-8")
-
-        command = [
-            "docker", "run", "--rm",
-            "--network", "none",
-            "--memory", "256m",
-            "--cpus", "1.0",
-            "--pids-limit", "64",
-            "--read-only",
-            "--security-opt", "no-new-privileges",
-            "--cap-drop", "ALL",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=32m",
-            "-v", f"{work}:/work:ro",
-            "-w", "/work",
-            DOCKER_IMAGE,
-            "python", "main.py",
-        ]
+        command = _docker_base(work) + ["python", "main.py"]
         try:
             completed = subprocess.run(
                 command,
@@ -87,13 +99,41 @@ def run_python(code: str, *, stdin_json: Any = None, timeout_seconds: int = 8) -
             return SandboxResult(False, f"Sandbox execution exceeded {timeout_value} seconds.")
         except OSError as exc:
             return SandboxResult(False, f"Sandbox could not start: {exc}")
+    return _finish(completed, "Sandbox code")
 
-    stdout = completed.stdout[-8000:]
-    stderr = completed.stderr[-4000:]
-    if completed.returncode != 0:
-        detail = stderr.strip() or stdout.strip() or f"exit code {completed.returncode}"
-        return SandboxResult(False, f"Sandbox code failed: {detail[:1200]}", stdout, stderr)
-    result_text = stdout.strip()
-    if not result_text:
-        result_text = "Sandbox code completed successfully with no output."
-    return SandboxResult(True, result_text[:4000], stdout, stderr)
+
+def run_command(command: str, *, timeout_seconds: int = 8) -> SandboxResult:
+    """Run a terminal command only inside the locked-down disposable container.
+
+    This deliberately does not provide a host Windows shell. The exact command is
+    still considered security-sensitive and the agent layer requires explicit
+    voice confirmation before this function is invoked.
+    """
+    text = command.strip()
+    if not text:
+        return SandboxResult(False, "Sandbox command is empty.")
+    if len(text) > 4000:
+        return SandboxResult(False, "Sandbox command exceeds the 4 KB limit.")
+    if "\x00" in text:
+        return SandboxResult(False, "Sandbox command contains an invalid null byte.")
+    if not docker_available():
+        return SandboxResult(False, "Docker is not available, so the isolated terminal cannot run.")
+
+    timeout_value = max(1, min(int(timeout_seconds), 20))
+    SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="jarvis-cmd-", dir=SANDBOX_DIR) as temp:
+        work = Path(temp)
+        command_line = _docker_base(work) + ["/bin/sh", "-lc", text]
+        try:
+            completed = subprocess.run(
+                command_line,
+                capture_output=True,
+                text=True,
+                timeout=timeout_value,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return SandboxResult(False, f"Sandbox command exceeded {timeout_value} seconds.")
+        except OSError as exc:
+            return SandboxResult(False, f"Sandbox command could not start: {exc}")
+    return _finish(completed, "Sandbox command")

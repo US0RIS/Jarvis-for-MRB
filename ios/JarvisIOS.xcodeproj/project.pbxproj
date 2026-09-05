@@ -26,7 +26,7 @@
 		200000000000000000000011 /* KnownPeople.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* KnownPeople.swift */; };
 		200000000000000000000012 /* FeatureGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* FeatureGuide.swift */; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
-		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000002 /* MWDATCamera */; };
+		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */

@@ -47,6 +47,13 @@ final class AmbientCuePlayer {
         case "thinking":
             notes = [(470, 0.055), (560, 0.065)]
             baseVolume = 0.18
+        case "response_complete":
+            // Short descending resolution tone: deliberately distinct from
+            // task_complete, which represents an asynchronous/background task.
+            // This means “the spoken answer is finished; no more sentence is
+            // still being generated.”
+            notes = [(900, 0.055), (720, 0.085)]
+            baseVolume = 0.28
         case "vision_scan":
             notes = [(820, 0.035), (1040, 0.045)]
             baseVolume = 0.24

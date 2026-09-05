@@ -173,7 +173,7 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
         guard !started else { return }
         started = true
         if CMMotionActivityManager.isActivityAvailable() {
-            motion.startActivityUpdates(to: .main) { [weak self] sample in
+            motion.startActivityUpdates(to: OperationQueue.main) { [weak self] sample in
                 guard let sample else { return }
                 Task { @MainActor in
                     guard let self else { return }
@@ -506,7 +506,7 @@ final class FrontendIntelligenceController: ObservableObject {
         Ray-Ban registration: \(appModel.metaGlasses.registrationStatus)
         DAT eligible: \(appModel.metaGlasses.hasEligibleDevice)
         Camera stream: \(appModel.metaGlasses.streamState)
-        Local visual cache: \(visualSnapshots.count) frames; newest \(frameAge) ago; \(lastJPEGBytes) bytes
+        Local visual cache: \(visualSnapshots.count) frames; ~\(String(format: "%.1f", estimatedCaptureFPS)) fps; newest \(frameAge) ago; \(lastJPEGBytes) bytes
         Local perception: \(perceptionStatus); \(perceptionSummary)
         Offline queue: \(offlineQueue.items.count)
         Motion: \(sensors.activity)
@@ -592,6 +592,7 @@ final class FrontendIntelligenceController: ObservableObject {
         case "read_text":
             let response = await readRecognizedText()
             appModel.lastResponse = response
+            await appModel.speakFrontendResponseIfEnabled(response)
         case "toggle_vision":
             appModel.settings.passiveVisionEnabled.toggle()
         case "toggle_speech":
@@ -632,12 +633,11 @@ final class FrontendIntelligenceController: ObservableObject {
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         }
-        let started = ContinuousClock.now
+        let started = Date()
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
-            let elapsed = started.duration(to: .now)
-            return max(0, Int(Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000))
+            return max(0, Int(Date().timeIntervalSince(started) * 1000))
         } catch {
             return nil
         }
@@ -714,9 +714,32 @@ struct FrontendIntelligenceCard: View {
                     "Local visual cache",
                     value: appModel.settings.localVisualHistoryEnabled ? "\(frontend.visualSnapshots.count) frames" : "Off"
                 )
+                LabeledContent("Capture rate", value: String(format: "%.1f fps", frontend.estimatedCaptureFPS))
                 LabeledContent("Fast perception", value: frontend.perceptionStatus)
                 LabeledContent("Motion", value: frontend.sensors.activity)
                 LabeledContent("Offline queue", value: "\(frontend.offlineQueue.items.count)")
+
+                if !frontend.visualSnapshots.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(frontend.visualSnapshots.suffix(6))) { snapshot in
+                                if let image = UIImage(data: snapshot.jpeg) {
+                                    VStack(spacing: 2) {
+                                        Image(uiImage: image)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 72, height: 46)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                            .clipped()
+                                        Text("-\(max(0, Int(Date().timeIntervalSince(snapshot.capturedAt))))s")
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if !frontend.perceptionSummary.isEmpty && frontend.perceptionSummary != "Not scanned" {
                     Text(frontend.perceptionSummary)
@@ -815,7 +838,7 @@ struct ConversationHistoryView: View {
                 if filtered.isEmpty {
                     Text("No matching turns.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(filtered.reversed()) { turn in
+                    ForEach(Array(filtered.reversed())) { turn in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(turn.role == "user" ? "You" : "Jarvis").bold()
@@ -836,7 +859,7 @@ struct ConversationHistoryView: View {
                 if frontend.proactiveInbox.isEmpty {
                     Text("No captured proactive events this app session.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(frontend.proactiveInbox.reversed()) { item in
+                    ForEach(Array(frontend.proactiveInbox.reversed())) { item in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(item.message)
                             Text(item.timestamp.formatted(date: .omitted, time: .standard))
@@ -852,6 +875,9 @@ struct ConversationHistoryView: View {
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                 Button("Copy diagnostics") { frontend.copyDiagnostics() }
+                Button("Clear local conversation history", role: .destructive) {
+                    appModel.clearFrontendConversationHistory()
+                }
             }
         }
         .navigationTitle("Jarvis History")

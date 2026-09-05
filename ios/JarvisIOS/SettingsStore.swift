@@ -38,6 +38,12 @@ final class SettingsStore: ObservableObject {
     @Published var adaptiveCueVolumeEnabled: Bool { didSet { defaults.set(adaptiveCueVolumeEnabled, forKey: "jarvis.adaptiveCueVolumeEnabled") } }
     @Published var cueVolume: Double { didSet { defaults.set(cueVolume, forKey: "jarvis.cueVolume") } }
 
+    // Closed-set known-people recognition is explicit opt-in. The iPhone only
+    // compares a visible face against profiles that the user deliberately enrolled.
+    @Published var knownPeopleRecognitionEnabled: Bool { didSet { defaults.set(knownPeopleRecognitionEnabled, forKey: "jarvis.knownPeopleRecognitionEnabled") } }
+    @Published var knownPeopleContextInjectionEnabled: Bool { didSet { defaults.set(knownPeopleContextInjectionEnabled, forKey: "jarvis.knownPeopleContextInjectionEnabled") } }
+    @Published var knownPeopleTolerance: Double { didSet { defaults.set(knownPeopleTolerance, forKey: "jarvis.knownPeopleTolerance") } }
+
     let conversationSessionID: String
 
     private let defaults: UserDefaults
@@ -85,5 +91,9 @@ final class SettingsStore: ObservableObject {
         offlineMeetingCaptureEnabled = defaults.object(forKey: "jarvis.offlineMeetingCaptureEnabled") as? Bool ?? true
         adaptiveCueVolumeEnabled = defaults.object(forKey: "jarvis.adaptiveCueVolumeEnabled") as? Bool ?? true
         cueVolume = defaults.object(forKey: "jarvis.cueVolume") as? Double ?? 1.0
+
+        knownPeopleRecognitionEnabled = defaults.object(forKey: "jarvis.knownPeopleRecognitionEnabled") as? Bool ?? false
+        knownPeopleContextInjectionEnabled = defaults.object(forKey: "jarvis.knownPeopleContextInjectionEnabled") as? Bool ?? true
+        knownPeopleTolerance = defaults.object(forKey: "jarvis.knownPeopleTolerance") as? Double ?? 1.65
     }
 }

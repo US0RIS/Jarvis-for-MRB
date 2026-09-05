@@ -1154,7 +1154,13 @@ struct LocalPowerFeaturesView: View {
             }
 
             Section("Rolling Audio & Speech Memory") {
-                Toggle("30-second RAM-only rolling audio/speech memory", isOn: $appModel.settings.rollingAudioMemoryEnabled)
+                Toggle(
+                    "30-second RAM-only rolling audio/speech memory",
+                    isOn: Binding(
+                        get: { appModel.settings.rollingAudioMemoryEnabled },
+                        set: { appModel.settings.rollingAudioMemoryEnabled = $0 }
+                    )
+                )
                 if !speechHistory.snippets.isEmpty {
                     Text(speechHistory.latestUsefulText(seconds: 30))
                         .font(.caption).lineLimit(5).textSelection(.enabled)

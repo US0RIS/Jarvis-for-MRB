@@ -91,6 +91,12 @@ struct JarvisAppShortcuts: AppShortcutsProvider {
             systemImageName: "camera"
         )
         AppShortcut(
+            intent: ToggleJarvisSpeechIntent(),
+            phrases: ["Toggle speech in \(.applicationName)"],
+            shortTitle: "Toggle Speech",
+            systemImageName: "speaker.wave.2"
+        )
+        AppShortcut(
             intent: ToggleMeetingNotesIntent(),
             phrases: ["Toggle meeting notes in \(.applicationName)"],
             shortTitle: "Meeting Notes",

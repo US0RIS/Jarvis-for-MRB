@@ -21,11 +21,7 @@ struct MainView: View {
             .navigationTitle("Jarvis")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
+                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -39,9 +35,7 @@ struct MainView: View {
             } message: {
                 Text(appModel.errorMessage ?? "")
             }
-            .onOpenURL { url in
-                Task { await appModel.metaGlasses.handleURL(url) }
-            }
+            .onOpenURL { url in Task { await appModel.metaGlasses.handleURL(url) } }
         }
     }
 
@@ -50,26 +44,15 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(appModel.connectionStatus)
-                            .font(.headline)
-                        Text(
-                            persistentPresence.activeServerURL.isEmpty
-                                ? appModel.settings.baseURL
-                                : persistentPresence.activeServerURL
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        Text(appModel.connectionStatus).font(.headline)
+                        Text(persistentPresence.activeServerURL.isEmpty ? appModel.settings.baseURL : persistentPresence.activeServerURL)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Button("Check") {
-                        Task { await appModel.checkConnection() }
-                    }
-                    .buttonStyle(.bordered)
+                    Button("Check") { Task { await appModel.checkConnection() } }.buttonStyle(.bordered)
                 }
                 LabeledContent("Companion", value: persistentPresence.companionStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         }
@@ -83,12 +66,8 @@ struct MainView: View {
                         .textFieldStyle(.roundedBorder)
                         .submitLabel(.send)
                         .onSubmit { Task { await appModel.sendCurrentCommand() } }
-
-                    Button {
-                        Task { await appModel.sendCurrentCommand() }
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
+                    Button { Task { await appModel.sendCurrentCommand() } } label: {
+                        Image(systemName: "arrow.up.circle.fill").font(.title2)
                     }
                     .disabled(appModel.commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.isSending)
                 }
@@ -105,37 +84,38 @@ struct MainView: View {
 
                     Toggle("Hands-free Jarvis", isOn: Binding(
                         get: { appModel.handsFreeEnabled },
-                        set: { enabled in
-                            Task { await appModel.setHandsFreeEnabled(enabled) }
-                        }
+                        set: { enabled in Task { await appModel.setHandsFreeEnabled(enabled) } }
                     ))
                     .labelsHidden()
                 }
 
                 HStack(spacing: 8) {
                     Image(systemName: appModel.handsFreeEnabled ? "waveform.circle.fill" : "waveform.circle")
-                    Text(appModel.voiceStatus)
-                        .font(.callout)
+                    Text(appModel.voiceStatus).font(.callout)
                 }
 
                 LabeledContent("Audio route", value: appModel.audioRouteManager.routeSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Noise floor", value: "\(Int(round(appModel.speechRecognizer.ambientNoiseFloorDBFS))) dBFS")
+                    .font(.caption).foregroundStyle(.secondary)
 
+                if appModel.speechSynthesizer.isWhispering {
+                    Label("Adaptive whisper active", systemImage: "speaker.wave.1")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if appModel.settings.subvocalModeEnabled {
+                    Label("Quiet-speech mode enabled", systemImage: "waveform.badge.mic")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if appModel.settings.preferBluetoothAudio && !appModel.audioRouteManager.hasBluetoothHFP && appModel.handsFreeEnabled {
                     Text("No Bluetooth hands-free microphone is currently available, so Jarvis is using the iPhone audio route.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(.orange)
                 }
-
                 if appModel.isListening {
                     SpeechTranscriptView(recognizer: appModel.speechRecognizer, wakeMode: appModel.handsFreeEnabled)
                 }
-
                 if !appModel.lastHeardCommand.isEmpty {
-                    Text("Last heard: \(appModel.lastHeardCommand)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Last heard: \(appModel.lastHeardCommand)").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -152,23 +132,29 @@ struct MainView: View {
     private var persistentPresenceCard: some View {
         GroupBox("Persistent Presence") {
             VStack(alignment: .leading, spacing: 8) {
-                LabeledContent(
-                    "Passive vision",
-                    value: appModel.settings.passiveVisionEnabled ? persistentPresence.visionStatus : "Off"
-                )
-                LabeledContent(
-                    "Remote path",
-                    value: persistentPresence.companionStatus
-                )
+                LabeledContent("Passive vision", value: appModel.settings.passiveVisionEnabled ? persistentPresence.visionStatus : "Off")
+                LabeledContent("Remote path", value: persistentPresence.companionStatus)
+                LabeledContent("Interrupt threshold", value: appModel.settings.proactiveThreshold.capitalized)
+
+                Button {
+                    Task { await persistentPresence.requestSilentScan() }
+                } label: {
+                    Label("Silent Visual Scan", systemImage: "eye")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appModel.metaGlasses.isRegistered || !appModel.metaGlasses.hasEligibleDevice)
+
                 if !persistentPresence.lastVisionScene.isEmpty {
                     Text("Seeing: \(persistentPresence.lastVisionScene)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if !persistentPresence.lastProactiveMessage.isEmpty {
                     Text("Last proactive observation: \(persistentPresence.lastProactiveMessage)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if appModel.settings.healthContextEnabled {
+                    LabeledContent("Apple Health", value: persistentPresence.healthContext.status)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -185,13 +171,10 @@ private struct SpeechTranscriptView: View {
             HStack {
                 ProgressView()
                 Text(wakeMode ? "Microphone active" : "Listening")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if !recognizer.transcript.isEmpty {
-                Text(recognizer.transcript)
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(recognizer.transcript).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -212,20 +195,16 @@ private struct MetaGlassesCard: View {
 
                 if let frame = manager.currentFrame {
                     Image(uiImage: frame)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
+                        .resizable().scaledToFit().frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
 
                 HStack {
                     if manager.isRegistered {
-                        Label("Registered", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                        Label("Registered", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     } else {
                         Button("Register") { Task { await manager.startRegistration() } }
                     }
-
                     Button("Camera Access") { Task { await manager.requestCameraPermission() } }
                         .disabled(!manager.isRegistered)
                 }
@@ -238,15 +217,12 @@ private struct MetaGlassesCard: View {
                     } else {
                         Button("Stop Camera", role: .destructive) { manager.stopStream() }
                     }
-                    Button("Photo") { manager.capturePhoto() }
-                        .disabled(manager.streamState == "Stopped")
+                    Button("Photo") { manager.capturePhoto() }.disabled(manager.streamState == "Stopped")
                 }
                 .buttonStyle(.bordered)
 
                 if let error = manager.errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                    Text(error).font(.caption).foregroundStyle(.red)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -260,11 +236,9 @@ private struct GeofenceCard: View {
     var body: some View {
         GroupBox("Home Automation") {
             VStack(alignment: .leading, spacing: 8) {
-                Text(manager.statusMessage)
-                    .font(.callout)
-                Text("When iOS detects home arrival, the app posts the `home_arrival` event to Jarvis and updates its environmental state.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(manager.statusMessage).font(.callout)
+                Text("Home arrival/departure can also switch the home/mobile Jarvis profile when geofenced profiles are enabled.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -54,9 +54,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     }
 
     func speak(_ text: String, preferBluetooth: Bool, whisper: Bool? = nil) async {
-        let cleaned = Self.respectfulSpeechText(
-            text.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        let cleaned = Self.respectfulSpeechText(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !cleaned.isEmpty else { return }
         let quiet = resolveWhisper(whisper)
 
@@ -97,25 +95,21 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         player.enableRate = true
         player.rate = quiet ? 0.92 : 1.0
         player.volume = quiet ? 0.34 : 1.0
+        // A slight left bias gives quiet responses a distinct HUD character on
+        // stereo routes. Bluetooth HFP is often mono, in which case iOS simply
+        // ignores pan and playback remains centered.
+        player.pan = quiet ? -0.14 : 0.0
         player.prepareToPlay()
         audioPlayer = player
 
         await withCheckedContinuation { continuation in
             completion = continuation
-            if player.play() {
-                startBargeInListening()
-            } else {
-                finalizeCurrentOutput()
-            }
+            if player.play() { startBargeInListening() } else { finalizeCurrentOutput() }
         }
     }
 
     private func prepareOutput(text: String, preferBluetooth: Bool, whisper: Bool) {
-        do {
-            try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
-        } catch {
-            // Playback can still succeed on the current route.
-        }
+        do { try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth) } catch { }
         isSpeaking = true
         isWhispering = whisper
         lastOutputInterrupted = false
@@ -128,9 +122,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
     private static func respectfulSpeechText(_ text: String) -> String {
         guard !text.isEmpty else { return text }
-        if text.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil {
-            return text
-        }
+        if text.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil { return text }
         if text == "Yes?" { return "Yes, sir?" }
         if text == "Ready. Say confirm or cancel." { return "Ready, sir. Say confirm or cancel." }
         return "Sir, " + text.prefix(1).lowercased() + String(text.dropFirst())
@@ -144,9 +136,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             let matches = usEnglish.filter {
                 $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
             }
-            if let best = matches.max(by: { $0.quality.rawValue < $1.quality.rawValue }) {
-                return best
-            }
+            if let best = matches.max(by: { $0.quality.rawValue < $1.quality.rawValue }) { return best }
         }
         return AVSpeechSynthesisVoice(language: "en-US")
     }
@@ -172,9 +162,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
         request.contextualStrings = ["Jarvis", "stop", "wait", "hold on", "actually", "Dubeck"]
-        if bargeInRecognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        if bargeInRecognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
         bargeInRequest = request
 
         let input = bargeInAudioEngine.inputNode
@@ -186,9 +174,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in request.append(buffer) }
         bargeInTapInstalled = true
         bargeInAudioEngine.prepare()
-        do {
-            try bargeInAudioEngine.start()
-        } catch {
+        do { try bargeInAudioEngine.start() } catch {
             stopBargeInListening()
             return
         }
@@ -196,8 +182,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         bargeInTask = bargeInRecognizer.recognitionTask(with: request) { [weak self] result, _ in
             Task { @MainActor in
                 guard let self, self.isSpeaking, let result else { return }
-                let heard = result.bestTranscription.formattedString
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let heard = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !heard.isEmpty else { return }
 
                 if heard != self.latestBargeInTranscript {
@@ -226,11 +211,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         guard !normalizedHeard.isEmpty else { return false }
         if isLikelyEcho(heard) { return false }
         let joined = normalizedHeard.joined(separator: " ")
-        let explicit = [
-            "jarvis", "stop", "wait", "hold on", "actually", "no", "but",
-            "what", "why", "how", "when", "where", "who", "which",
-            "can you", "could you", "don't", "do not"
-        ]
+        let explicit = ["jarvis", "stop", "wait", "hold on", "actually", "no", "but", "what", "why", "how", "when", "where", "who", "which", "can you", "could you", "don't", "do not"]
         if explicit.contains(where: { cue in joined == cue || joined.hasPrefix(cue + " ") }) { return true }
         return normalizedHeard.count >= 2
     }
@@ -250,25 +231,19 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     private func commandPayload(fromInterruption heard: String) -> String {
         var text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         if let range = text.range(of: "jarvis", options: [.caseInsensitive, .diacriticInsensitive]) {
-            return text[range.upperBound...]
-                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            return text[range.upperBound...].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
         }
         let lower = text.lowercased()
-        if ["stop", "wait", "hold on", "hang on"].contains(lower.trimmingCharacters(in: .punctuationCharacters)) {
-            return ""
-        }
+        if ["stop", "wait", "hold on", "hang on"].contains(lower.trimmingCharacters(in: .punctuationCharacters)) { return "" }
         for prefix in ["wait ", "hold on ", "hang on "] where lower.hasPrefix(prefix) {
-            text = String(text.dropFirst(prefix.count))
-                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            text = String(text.dropFirst(prefix.count)).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
             break
         }
         return text
     }
 
     private static func normalizedWords(_ text: String) -> [String] {
-        text.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
+        text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     }
 
     private func beginBargeInFinalize() {
@@ -288,9 +263,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             if now.timeIntervalSince(lastBargeInTranscriptChange) >= 0.9 || now.timeIntervalSince(started) >= 4.0 { break }
             try? await Task.sleep(for: .milliseconds(80))
         }
-        if !latestBargeInTranscript.isEmpty {
-            BargeInBuffer.store(commandPayload(fromInterruption: latestBargeInTranscript))
-        }
+        if !latestBargeInTranscript.isEmpty { BargeInBuffer.store(commandPayload(fromInterruption: latestBargeInTranscript)) }
         bargeInFinalizeTask = nil
         finalizeCurrentOutput()
     }

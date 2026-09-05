@@ -44,6 +44,21 @@ final class SettingsStore: ObservableObject {
     @Published var knownPeopleContextInjectionEnabled: Bool { didSet { defaults.set(knownPeopleContextInjectionEnabled, forKey: "jarvis.knownPeopleContextInjectionEnabled") } }
     @Published var knownPeopleTolerance: Double { didSet { defaults.set(knownPeopleTolerance, forKey: "jarvis.knownPeopleTolerance") } }
 
+    // Frontend-only power layer. Privacy-sensitive continuous capture features
+    // default off; they can be enabled explicitly in Settings/Power Features.
+    @Published var rollingAudioMemoryEnabled: Bool { didSet { defaults.set(rollingAudioMemoryEnabled, forKey: "jarvis.rollingAudioMemoryEnabled") } }
+    @Published var soundRecognitionEnabled: Bool { didSet { defaults.set(soundRecognitionEnabled, forKey: "jarvis.soundRecognitionEnabled") } }
+    @Published var visualChangeDetectionEnabled: Bool { didSet { defaults.set(visualChangeDetectionEnabled, forKey: "jarvis.visualChangeDetectionEnabled") } }
+    @Published var visualChangeThreshold: Double { didSet { defaults.set(visualChangeThreshold, forKey: "jarvis.visualChangeThreshold") } }
+    @Published var personalInventoryAutoRecognitionEnabled: Bool { didSet { defaults.set(personalInventoryAutoRecognitionEnabled, forKey: "jarvis.personalInventoryAutoRecognitionEnabled") } }
+    @Published var inventoryKnowledgeAlertsEnabled: Bool { didSet { defaults.set(inventoryKnowledgeAlertsEnabled, forKey: "jarvis.inventoryKnowledgeAlertsEnabled") } }
+    @Published var knownPersonBriefingsEnabled: Bool { didSet { defaults.set(knownPersonBriefingsEnabled, forKey: "jarvis.knownPersonBriefingsEnabled") } }
+    @Published var spokenKnownPersonBriefingsEnabled: Bool { didSet { defaults.set(spokenKnownPersonBriefingsEnabled, forKey: "jarvis.spokenKnownPersonBriefingsEnabled") } }
+    @Published var localEncounterCaptureEnabled: Bool { didSet { defaults.set(localEncounterCaptureEnabled, forKey: "jarvis.localEncounterCaptureEnabled") } }
+    @Published var offlineAppleBrainEnabled: Bool { didSet { defaults.set(offlineAppleBrainEnabled, forKey: "jarvis.offlineAppleBrainEnabled") } }
+    @Published var speakContextualRemindersEnabled: Bool { didSet { defaults.set(speakContextualRemindersEnabled, forKey: "jarvis.speakContextualRemindersEnabled") } }
+    @Published var frontendAutoRecoveryEnabled: Bool { didSet { defaults.set(frontendAutoRecoveryEnabled, forKey: "jarvis.frontendAutoRecoveryEnabled") } }
+
     let conversationSessionID: String
 
     private let defaults: UserDefaults
@@ -95,5 +110,18 @@ final class SettingsStore: ObservableObject {
         knownPeopleRecognitionEnabled = defaults.object(forKey: "jarvis.knownPeopleRecognitionEnabled") as? Bool ?? false
         knownPeopleContextInjectionEnabled = defaults.object(forKey: "jarvis.knownPeopleContextInjectionEnabled") as? Bool ?? true
         knownPeopleTolerance = defaults.object(forKey: "jarvis.knownPeopleTolerance") as? Double ?? 1.65
+
+        rollingAudioMemoryEnabled = defaults.object(forKey: "jarvis.rollingAudioMemoryEnabled") as? Bool ?? false
+        soundRecognitionEnabled = defaults.object(forKey: "jarvis.soundRecognitionEnabled") as? Bool ?? false
+        visualChangeDetectionEnabled = defaults.object(forKey: "jarvis.visualChangeDetectionEnabled") as? Bool ?? false
+        visualChangeThreshold = defaults.object(forKey: "jarvis.visualChangeThreshold") as? Double ?? 0.38
+        personalInventoryAutoRecognitionEnabled = defaults.object(forKey: "jarvis.personalInventoryAutoRecognitionEnabled") as? Bool ?? false
+        inventoryKnowledgeAlertsEnabled = defaults.object(forKey: "jarvis.inventoryKnowledgeAlertsEnabled") as? Bool ?? false
+        knownPersonBriefingsEnabled = defaults.object(forKey: "jarvis.knownPersonBriefingsEnabled") as? Bool ?? true
+        spokenKnownPersonBriefingsEnabled = defaults.object(forKey: "jarvis.spokenKnownPersonBriefingsEnabled") as? Bool ?? false
+        localEncounterCaptureEnabled = defaults.object(forKey: "jarvis.localEncounterCaptureEnabled") as? Bool ?? false
+        offlineAppleBrainEnabled = defaults.object(forKey: "jarvis.offlineAppleBrainEnabled") as? Bool ?? true
+        speakContextualRemindersEnabled = defaults.object(forKey: "jarvis.speakContextualRemindersEnabled") as? Bool ?? true
+        frontendAutoRecoveryEnabled = defaults.object(forKey: "jarvis.frontendAutoRecoveryEnabled") as? Bool ?? true
     }
 }

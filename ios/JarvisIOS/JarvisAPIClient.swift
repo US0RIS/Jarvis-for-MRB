@@ -213,23 +213,59 @@ struct JarvisAPIClient {
                         throw JarvisAPIError.badResponse
                     }
 
+                    var sawTextDelta = false
+                    var reachedDonePacket = false
+
                     for try await line in bytes.lines {
                         guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
                         let packet = try JSONDecoder().decode(JarvisStreamPacket.self, from: data)
                         switch packet.type {
                         case "start":
                             continuation.yield(.start(model: packet.model, routeReason: packet.routeReason))
+
                         case "delta":
                             if let text = packet.text, !text.isEmpty {
+                                sawTextDelta = true
                                 continuation.yield(.delta(text))
                             }
+
                         case "done":
-                            continuation.yield(.done(ok: packet.ok))
+                            reachedDonePacket = true
+                            if !sawTextDelta {
+                                try await recoverFromEmptyStream(
+                                    originalText: text,
+                                    backendOK: packet.ok,
+                                    continuation: continuation
+                                )
+                            } else {
+                                continuation.yield(.done(ok: packet.ok))
+                            }
                             continuation.finish()
                             return
+
                         default:
-                            continue
+                            // Be tolerant of a deployed backend using a different
+                            // packet label while still supplying textual content.
+                            // This keeps frontend-only updates compatible with an
+                            // older PC that cannot be upgraded immediately.
+                            if let text = packet.text, !text.isEmpty {
+                                sawTextDelta = true
+                                continuation.yield(.delta(text))
+                            }
                         }
+                    }
+
+                    // A clean HTTP 200/EOF with no textual delta used to be treated
+                    // as a successful turn. That produced the exact failure mode
+                    // where the UI flashed “Thinking…” and immediately returned to
+                    // “Listening for Jarvis…” without ever answering. Never allow a
+                    // command to disappear silently again.
+                    if !sawTextDelta && !reachedDonePacket {
+                        try await recoverFromEmptyStream(
+                            originalText: text,
+                            backendOK: nil,
+                            continuation: continuation
+                        )
                     }
                     continuation.finish()
                 } catch {
@@ -240,6 +276,66 @@ struct JarvisAPIClient {
                 }
             }
         }
+    }
+
+    private func recoverFromEmptyStream(
+        originalText: String,
+        backendOK: Bool?,
+        continuation: AsyncThrowingStream<JarvisStreamEvent, Error>.Continuation
+    ) async throws {
+        if Self.safeToRetryAsReadOnlyRequest(originalText) {
+            let response = try await command(originalText)
+            let message = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !message.isEmpty {
+                continuation.yield(.delta(response.message))
+                continuation.yield(.done(ok: response.ok))
+                return
+            }
+        }
+
+        let explanation: String
+        if Self.safeToRetryAsReadOnlyRequest(originalText) {
+            explanation = "I'm sorry, sir. The Jarvis backend completed that request but returned no answer."
+        } else if backendOK == false {
+            explanation = "I'm sorry, sir. The Jarvis backend failed that request before returning an answer. I did not retry it automatically because doing so could duplicate an action."
+        } else {
+            explanation = "I'm sorry, sir. The Jarvis backend returned no answer. I did not retry that request automatically because doing so could duplicate an action."
+        }
+        continuation.yield(.delta(explanation))
+        continuation.yield(.done(ok: false))
+    }
+
+    private static func safeToRetryAsReadOnlyRequest(_ raw: String) -> Bool {
+        let normalized = " " + raw.lowercased()
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines) + " "
+
+        // Never replay something that plausibly changes external/local state.
+        // An empty streaming response is ambiguous: the first attempt may have
+        // performed its action but lost the textual acknowledgement.
+        let mutationMarkers = [
+            " send ", " reply ", " forward ", " create ", " schedule ", " remind ",
+            " cancel ", " delete ", " remove ", " open ", " close ", " launch ",
+            " start ", " stop ", " set ", " change ", " update ", " write ",
+            " log ", " export ", " run ", " execute ", " apply ", " enable ",
+            " disable ", " turn on ", " turn off ", " move ", " rename ",
+            " archive ", " trash ", " post ", " submit ", " book ", " call ",
+            " text ", " upload ", " download ", " install ", " restart ",
+        ]
+        if mutationMarkers.contains(where: { normalized.contains($0) }) {
+            return false
+        }
+
+        let trimmed = normalized.trimmingCharacters(in: .whitespaces)
+        let readOnlyPrefixes = [
+            "what ", "who ", "when ", "where ", "why ", "how ", "which ",
+            "is ", "are ", "am ", "do ", "does ", "did ", "can ", "could ",
+            "should ", "would ", "tell me ", "explain ", "compare ", "summarize ",
+            "search ", "find ", "check ", "list ", "show ", "give me ",
+        ]
+        return readOnlyPrefixes.contains(where: { trimmed.hasPrefix($0) })
+            || trimmed.hasSuffix("?")
     }
 
     func streamCommand(_ text: String) -> AsyncThrowingStream<String, Error> {

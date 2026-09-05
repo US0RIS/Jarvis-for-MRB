@@ -120,6 +120,12 @@ struct SettingsView: View {
                 }
 
                 Section("iPhone-only Intelligence") {
+                    NavigationLink {
+                        LocalPowerFeaturesView()
+                    } label: {
+                        Label("Power Features", systemImage: "bolt.shield.fill")
+                    }
+
                     Toggle("30-second on-device visual cache", isOn: $settings.localVisualHistoryEnabled)
                     Toggle("Continuous on-device fast perception", isOn: $settings.localFastPerceptionEnabled)
                     Toggle("Offline command staging", isOn: $settings.offlineQueueEnabled)
@@ -145,11 +151,46 @@ struct SettingsView: View {
                         }
                     }
 
-                    Text("Known People is closed-set and opt-in: the iPhone only compares visible faces with profiles you explicitly enroll. Enrollment feature prints stay in this device's Keychain; raw enrollment photos are discarded. Commands such as 'who is this?' and 'what do I know about this person?' can use your private note and recent iPhone-stored Jarvis conversation context.")
+                    Toggle("Prepare local known-person briefings", isOn: $settings.knownPersonBriefingsEnabled)
+                    Toggle("Speak known-person briefings aloud", isOn: $settings.spokenKnownPersonBriefingsEnabled)
+                        .disabled(!settings.knownPersonBriefingsEnabled)
+                    Toggle("Capture local post-encounter context", isOn: $settings.localEncounterCaptureEnabled)
+
+                    Divider()
+
+                    Toggle("30-second RAM-only rolling audio memory", isOn: $settings.rollingAudioMemoryEnabled)
+                    Toggle("Classify environmental sounds locally", isOn: $settings.soundRecognitionEnabled)
+                    Toggle("Detect major visual scene changes", isOn: $settings.visualChangeDetectionEnabled)
+                    if settings.visualChangeDetectionEnabled {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Visual-change sensitivity threshold: \(String(format: "%.2f", settings.visualChangeThreshold))")
+                                .font(.caption)
+                            Slider(value: $settings.visualChangeThreshold, in: 0.20 ... 0.80, step: 0.02)
+                            Text("Lower values flag more changes. This compares whole-frame Apple Vision feature prints; it is not semantic object tracking.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Toggle("Auto-recognize enrolled inventory items", isOn: $settings.personalInventoryAutoRecognitionEnabled)
+                    Toggle("Alert on enrolled item notes/warnings", isOn: $settings.inventoryKnowledgeAlertsEnabled)
+                        .disabled(!settings.personalInventoryAutoRecognitionEnabled)
+                    Toggle("Use Apple on-device model when PC is offline", isOn: $settings.offlineAppleBrainEnabled)
+                    Toggle("Speak contextual local reminders", isOn: $settings.speakContextualRemindersEnabled)
+                    Toggle("Automatically recover frontend camera/voice", isOn: $settings.frontendAutoRecoveryEnabled)
+
+                    Text("Known People remains closed-set and opt-in: the iPhone only compares visible faces with profiles you explicitly enroll. Feature prints stay in this device's Keychain; raw enrollment photos are discarded.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Text("On-device fast perception uses Apple's Vision framework on the iPhone for OCR, QR/barcode decoding, human/face counts without identity, rectangle detection and visual saliency. It does not replace Moondream for general scene understanding.")
+                    Text("Rolling microphone audio is off by default and remains in RAM for roughly 30 seconds. It is written to storage only when you explicitly save an incident; incident files are encrypted on this device. Local post-encounter capture is also off by default.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("On-device fast perception uses Apple's Vision framework for OCR, QR/barcode decoding, human/face counts without identity, rectangle detection and visual saliency. It does not replace Moondream for general scene understanding.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("The Apple on-device fallback can answer suitable local/general requests when the PC is unreachable, but it has no network, Gmail, Calendar or PC-control authority and must not claim external actions occurred.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -157,7 +198,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Text("Jarvis App Shortcuts are registered with iOS for Talk to Jarvis, Visual Scan, Read Visible Text, Toggle Vision and Meeting Notes. They can be assigned through Shortcuts or the Action Button where iOS offers app shortcuts.")
+                    Text("Jarvis App Shortcuts include Talk, Visual Scan, Read Visible Text, vision/speech toggles, Meeting Notes, privacy/driving modes, encrypted incident capture and text handoff to Jarvis.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

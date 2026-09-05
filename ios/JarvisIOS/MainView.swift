@@ -243,7 +243,12 @@ struct MainView: View {
     private var persistentPresenceCard: some View {
         GroupBox("Persistent Presence") {
             VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("Passive vision", value: appModel.settings.passiveVisionEnabled ? persistentPresence.visionStatus : "Off")
+                LabeledContent(
+                    "Passive vision",
+                    value: appModel.metaGlasses.cameraMasterEnabled
+                        ? (appModel.settings.passiveVisionEnabled ? persistentPresence.visionStatus : "Off")
+                        : "Camera stopped by user"
+                )
                 LabeledContent("Remote path", value: persistentPresence.companionStatus)
                 LabeledContent("Interrupt threshold", value: appModel.settings.proactiveThreshold.capitalized)
 
@@ -253,7 +258,11 @@ struct MainView: View {
                     Label("Send Backend Visual Scan", systemImage: "eye")
                 }
                 .buttonStyle(.bordered)
-                .disabled(!appModel.metaGlasses.isRegistered || !appModel.metaGlasses.hasEligibleDevice)
+                .disabled(
+                    !appModel.metaGlasses.cameraMasterEnabled
+                    || !appModel.metaGlasses.isRegistered
+                    || !appModel.metaGlasses.hasEligibleDevice
+                )
 
                 if !persistentPresence.lastVisionScene.isEmpty {
                     Text("Backend scene: \(persistentPresence.lastVisionScene)")
@@ -593,6 +602,7 @@ private struct MetaGlassesCard: View {
                 LabeledContent("Glasses available", value: String(manager.availableDeviceCount))
                 LabeledContent("DAT eligible", value: manager.hasEligibleDevice ? "Yes" : "Waiting")
                 LabeledContent("Camera permission", value: manager.cameraPermissionStatus)
+                LabeledContent("Camera master", value: manager.cameraMasterEnabled ? "Enabled" : "Stopped by user")
                 LabeledContent("Stream", value: manager.streamState)
 
                 if let frame = manager.currentFrame {
@@ -614,14 +624,24 @@ private struct MetaGlassesCard: View {
 
                 HStack {
                     if manager.streamState == "Stopped" {
-                        Button("Start Camera") { Task { await manager.startStream() } }
+                        Button("Start Camera") { Task { await manager.startStreamByUser() } }
                             .disabled(!manager.isRegistered || !manager.hasEligibleDevice)
                     } else {
                         Button("Stop Camera", role: .destructive) { manager.stopStream() }
                     }
-                    Button("Photo") { manager.capturePhoto() }.disabled(manager.streamState == "Stopped")
+                    Button("Photo") { manager.capturePhoto() }
+                        .disabled(manager.streamState == "Stopped" || !manager.cameraMasterEnabled)
                 }
                 .buttonStyle(.bordered)
+
+                if !manager.cameraMasterEnabled {
+                    Label(
+                        "Camera master switch is OFF. Passive vision, Known People, inventory recognition, visual scans, local perception, and recovery logic cannot restart the camera. Only Start Camera can re-enable it.",
+                        systemImage: "camera.fill.badge.ellipsis"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
 
                 if let error = manager.errorMessage {
                     Text(error).font(.caption).foregroundStyle(.red)

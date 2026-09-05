@@ -39,7 +39,7 @@ struct SettingsView: View {
                         .keyboardType(.URL)
                     SecureField("API token", text: $settings.apiToken)
                         .textInputAutocapitalization(.never)
-                    Text("Jarvis tries the LAN address first, then automatically falls back to the Tailscale address when you leave home. Example remote URL: http://100.x.x.x:8765. Port 8765 should not be forwarded on your router.")
+                    Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -74,40 +74,57 @@ struct SettingsView: View {
                     HStack {
                         Text("Mode")
                         Spacer()
-                        if isSwitchingPlanner {
-                            ProgressView().controlSize(.small)
-                        }
+                        if isSwitchingPlanner { ProgressView().controlSize(.small) }
                         Text(autoRoutePlanner ? "Automatic 8B ↔ 27B" : (useFastPlanner ? "Qwen3 8B" : "Qwen3.8 27B"))
                             .foregroundStyle(.secondary)
                     }
-
                     Text(plannerModelStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
                     Text(autoRoutePlanner
-                         ? "Routine conversation and tool routing use 8B. Hard reasoning, architecture, code, math, and long multi-stage requests are dispatched to 27B with a brief spoken status cue. Thinking stays disabled on both."
-                         : (useFastPlanner
-                            ? "8B is the low-latency manual option. Thinking remains disabled."
-                            : "27B is the higher-capability manual option. Thinking remains disabled."))
+                         ? "Routine voice turns stay on 8B. Hard reasoning is routed to 27B, then 8B is rewarmed for the next conversational turn. Thinking remains disabled."
+                         : "Manual mode pins the selected planner model. Thinking remains disabled.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Persistent Presence") {
                     Toggle("Passive vision", isOn: $settings.passiveVisionEnabled)
-                    Toggle("Ambient audio cues", isOn: $settings.ambientCuesEnabled)
+                    Toggle("Ambient audio HUD cues", isOn: $settings.ambientCuesEnabled)
                     Toggle("Speak proactive alerts", isOn: $settings.proactiveAnnouncements)
+
+                    Picker("Interrupt me at", selection: $settings.proactiveThreshold) {
+                        Text("Info or higher").tag("info")
+                        Text("Warning or higher").tag("warning")
+                        Text("Urgent only").tag("urgent")
+                    }
+
+                    Toggle("Geofenced system profiles", isOn: $settings.geofencedProfilesEnabled)
+                    Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
                     TextField("Current project focus", text: $settings.projectFocus)
 
-                    Text("Passive vision samples one low-resolution glasses frame per second and sends it only to your Jarvis PC over the private companion connection. The PC drops frames whenever the local vision worker is busy and only speaks high-confidence useful observations. Conversation and visual summaries are indexed in Jarvis's local episodic memory for long-term recall.")
+                    Text("Passive vision samples the glasses camera and now also records conservative last-seen locations for visible portable objects. The proactive threshold controls unsolicited spoken interruptions; background-task completions still report normally.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Health context is opt-in and read-only. Jarvis can receive recent heart rate, HRV, and sleep data from Apple Health, but it does not infer diagnoses, stress, or emotional state from those values.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Voice") {
+                Section("Voice & Privacy") {
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
                     Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
+                    Toggle("Adaptive whisper mode", isOn: $settings.adaptiveWhisperEnabled)
+                    Toggle("Quiet-speech mode", isOn: $settings.subvocalModeEnabled)
+
+                    if settings.adaptiveWhisperEnabled {
+                        VStack(alignment: .leading) {
+                            Text("Whisper threshold: \(Int(settings.whisperThresholdDBFS)) dBFS")
+                                .font(.caption)
+                            Slider(value: $settings.whisperThresholdDBFS, in: -60 ... -25, step: 1)
+                        }
+                    }
 
                     HStack {
                         Text("Neural voice")
@@ -115,18 +132,15 @@ struct SettingsView: View {
                         Text(neuralVoiceStatus)
                             .foregroundStyle(neuralVoiceStatus == "Kokoro ready" ? Color.green : Color.secondary)
                     }
+                    Button("Check Neural Voice") { Task { await checkNeuralVoice() } }
 
-                    Button("Check Neural Voice") {
-                        Task { await checkNeuralVoice() }
-                    }
-
-                    Text("Jarvis uses local Kokoro-82M for low-latency speech. Apple speech is only a fallback. Barge-in remains active while either voice path is speaking.")
+                    Text("Adaptive whisper lowers Kokoro playback volume and apparent pitch when the measured noise floor is quiet. Quiet-speech mode keeps the existing always-listening acoustic speech path intended for very soft speech; it is not literal EMG/subvocal thought decoding.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("Email Safety") {
-                    Text("Jarvis can send email only to exact addresses on this list. The PC enforces this after contact-name resolution, so even a speech-to-text error plus an accidental confirmation cannot send to a different address.")
+                    Text("Jarvis can send email only to exact addresses on this list. The PC enforces this after contact-name resolution, and outbound mail still requires confirmation by default.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -135,11 +149,8 @@ struct SettingsView: View {
                             .textInputAutocapitalization(.never)
                             .keyboardType(.emailAddress)
                             .autocorrectionDisabled()
-
-                        Button("Add") {
-                            Task { await addAllowedRecipient() }
-                        }
-                        .disabled(newAllowedRecipient.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingAllowlist)
+                        Button("Add") { Task { await addAllowedRecipient() } }
+                            .disabled(newAllowedRecipient.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingAllowlist)
                     }
 
                     if allowedRecipients.isEmpty {
@@ -153,23 +164,17 @@ struct SettingsView: View {
                                 Spacer()
                                 Button(role: .destructive) {
                                     Task { await removeAllowedRecipient(address) }
-                                } label: {
-                                    Image(systemName: "trash")
-                                }
+                                } label: { Image(systemName: "trash") }
                                 .buttonStyle(.borderless)
                                 .disabled(isSavingAllowlist)
                             }
                         }
                     }
-
                     Text(allowlistStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    Button("Reload Allowed Recipients") {
-                        Task { await loadAllowedRecipients() }
-                    }
-                    .disabled(isSavingAllowlist)
+                    Button("Reload Allowed Recipients") { Task { await loadAllowedRecipients() } }
+                        .disabled(isSavingAllowlist)
                 }
 
                 Section("Home Geofence") {
@@ -197,13 +202,9 @@ struct SettingsView: View {
                             radius: settings.homeRadius
                         )
                     }
-
                     if geofence.isMonitoringHome {
-                        Button("Stop Home Monitoring", role: .destructive) {
-                            geofence.stopMonitoringHome()
-                        }
+                        Button("Stop Home Monitoring", role: .destructive) { geofence.stopMonitoringHome() }
                     }
-
                     Text(geofence.statusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -217,9 +218,7 @@ struct SettingsView: View {
                 _ = await (plannerLoad, voiceCheck, recipientsLoad)
             }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
     }
@@ -260,7 +259,6 @@ struct SettingsView: View {
         isSwitchingPlanner = true
         plannerModelStatus = fast ? "Switching to Qwen3 8B…" : "Switching to Qwen3.8 27B…"
         defer { isSwitchingPlanner = false }
-
         let requested = fast ? fastPlannerModel : qualityPlannerModel
         do {
             let response = try await client.setPlannerModel(model: requested)
@@ -299,9 +297,7 @@ struct SettingsView: View {
     }
 
     private func addAllowedRecipient() async {
-        let value = newAllowedRecipient
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+        let value = newAllowedRecipient.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !value.isEmpty else { return }
         var updated = allowedRecipients
         if !updated.contains(value) { updated.append(value) }

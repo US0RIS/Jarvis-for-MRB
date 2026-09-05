@@ -10,6 +10,7 @@ struct JarvisIOSApp: App {
     @StateObject private var frontendIntelligence: FrontendIntelligenceController
     @StateObject private var knownPeople: KnownPeopleController
     @StateObject private var localPower: LocalPowerFeaturesController
+    @StateObject private var localProductivity: LocalProductivityController
 
     init() {
         do {
@@ -29,6 +30,11 @@ struct JarvisIOSApp: App {
             knownPeople: people,
             meetingCapture: meeting
         )
+        let productivity = LocalProductivityController(
+            appModel: model,
+            knownPeople: people,
+            power: power
+        )
         frontend.attach(persistentPresence: presence, meetingCapture: meeting)
 
         _appModel = StateObject(wrappedValue: model)
@@ -37,6 +43,7 @@ struct JarvisIOSApp: App {
         _frontendIntelligence = StateObject(wrappedValue: frontend)
         _knownPeople = StateObject(wrappedValue: people)
         _localPower = StateObject(wrappedValue: power)
+        _localProductivity = StateObject(wrappedValue: productivity)
     }
 
     var body: some Scene {
@@ -48,11 +55,13 @@ struct JarvisIOSApp: App {
                 .environmentObject(frontendIntelligence)
                 .environmentObject(knownPeople)
                 .environmentObject(localPower)
+                .environmentObject(localProductivity)
                 .task {
                     await persistentPresence.start()
                     await frontendIntelligence.start()
                     await knownPeople.start(appModel: appModel)
                     await localPower.start()
+                    localProductivity.start()
                 }
         }
     }

@@ -6,6 +6,7 @@ import MWDATCore
 struct JarvisIOSApp: App {
     @StateObject private var appModel: JarvisAppModel
     @StateObject private var persistentPresence: PersistentPresenceController
+    @StateObject private var meetingCapture: MeetingCaptureController
 
     init() {
         do {
@@ -19,6 +20,9 @@ struct JarvisIOSApp: App {
         _persistentPresence = StateObject(
             wrappedValue: PersistentPresenceController(appModel: model)
         )
+        _meetingCapture = StateObject(
+            wrappedValue: MeetingCaptureController(appModel: model)
+        )
     }
 
     var body: some Scene {
@@ -26,6 +30,7 @@ struct JarvisIOSApp: App {
             MainView()
                 .environmentObject(appModel)
                 .environmentObject(persistentPresence)
+                .environmentObject(meetingCapture)
                 .task {
                     await persistentPresence.start()
                 }

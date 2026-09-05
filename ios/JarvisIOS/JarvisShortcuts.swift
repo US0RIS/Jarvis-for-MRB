@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 
 struct TalkToJarvisIntent: AppIntent {
     static var title: LocalizedStringResource = "Talk to Jarvis"

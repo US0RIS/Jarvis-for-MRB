@@ -50,6 +50,7 @@ TOOL_RISK: dict[str, Risk] = {
     "web.search": "read",
     "jobs.list": "read",
     "jobs.create_time": "local_write",
+    "jobs.create_recurring": "local_write",
     "jobs.create_event": "local_write",
     "jobs.cancel": "destructive",
     "background.submit": "local_write",
@@ -58,13 +59,29 @@ TOOL_RISK: dict[str, Risk] = {
     "background.cancel": "destructive",
     "state.get": "read",
     "state.update": "local_write",
+    "state.temp_get": "read",
+    "state.temp_set": "local_write",
+    "state.temp_clear": "local_write",
+    "knowledge.refresh": "read",
+    "knowledge.search": "read",
+    "spatial.find": "read",
+    "briefing.generate": "read",
+    "workflow.run": "local_write",
+    "sandbox.status": "read",
+    "sandbox.python": "security",
+    "custom.list": "read",
+    "custom.run": "security",
+    "custom.synthesize": "security",
+    "custom.enable": "security",
 }
+
 
 @dataclass(frozen=True)
 class PermissionDecision:
     allowed: bool
     needs_confirmation: bool
     risk: Risk
+
 
 def _load() -> dict[str, str]:
     APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -80,14 +97,17 @@ def _load() -> dict[str, str]:
             pass
     return policy
 
+
 def policy_summary() -> str:
     policy = _load()
     return ", ".join(f"{key}={policy[key]}" for key in DEFAULT_POLICY)
+
 
 def decide(tool: str) -> PermissionDecision:
     risk = TOOL_RISK.get(tool, "security")
     mode = _load().get(risk, "confirm")
     return PermissionDecision(allowed=mode != "deny", needs_confirmation=mode == "confirm", risk=risk)
+
 
 def set_policy(risk: str, mode: str) -> str:
     if risk not in DEFAULT_POLICY:

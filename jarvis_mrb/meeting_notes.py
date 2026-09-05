@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from jarvis_mrb.event_bus import emit_proactive
+from jarvis_mrb.fact_checker import check_claim
 from jarvis_mrb.planner_model import FAST_MODEL
 
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 DB_PATH = APP_DIR / "meeting_notes.sqlite3"
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+_FACT_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jarvis-fact-check")
 
 
 def _connect() -> sqlite3.Connection:
@@ -49,6 +54,37 @@ def start(title: str = "") -> dict[str, Any]:
     return {"id": meeting_id, "started_at": now, "title": title.strip(), "status": "recording"}
 
 
+def _metric_claims(chunk: str) -> list[str]:
+    candidates = re.split(r"(?<=[.!?])\s+|\n+", chunk)
+    result: list[str] = []
+    metric_cue = re.compile(
+        r"(?:\d|%|\$|\beuros?\b|\bdollars?\b|\bmillion\b|\bbillion\b|\bpercent\b|\bpercentage\b)",
+        flags=re.IGNORECASE,
+    )
+    for candidate in candidates:
+        text = " ".join(candidate.split()).strip()
+        if len(text.split()) < 4 or not metric_cue.search(text):
+            continue
+        result.append(text[:1000])
+        if len(result) >= 2:
+            break
+    return result
+
+
+def _check_metric_claims(chunk: str) -> None:
+    for claim in _metric_claims(chunk):
+        try:
+            verdict = check_claim(claim)
+        except Exception:
+            continue
+        if verdict.lower().startswith("possible contradiction"):
+            emit_proactive(
+                verdict,
+                cue="attention",
+                severity="info",
+            )
+
+
 def append_transcript(meeting_id: int, text: str) -> None:
     chunk = " ".join(text.strip().split())
     if not chunk:
@@ -63,6 +99,13 @@ def append_transcript(meeting_id: int, text: str) -> None:
         combined = (existing + "\n" + chunk).strip()
         conn.execute("UPDATE meetings SET transcript=? WHERE id=?", (combined[-120000:], int(meeting_id)))
         conn.commit()
+
+    # During an explicitly active meeting-note session, check only concrete metric
+    # claims against the user's local index. This is deliberately narrow: it does
+    # not score speakers, infer deception/emotion, or treat Jarvis's local records
+    # as infallible truth.
+    if _metric_claims(chunk):
+        _FACT_POOL.submit(_check_metric_claims, chunk)
 
 
 def _extract_actions(transcript: str) -> list[dict[str, str]]:

@@ -13,6 +13,12 @@ final class SettingsStore: ObservableObject {
     @Published var passiveVisionEnabled: Bool { didSet { defaults.set(passiveVisionEnabled, forKey: "jarvis.passiveVisionEnabled") } }
     @Published var ambientCuesEnabled: Bool { didSet { defaults.set(ambientCuesEnabled, forKey: "jarvis.ambientCuesEnabled") } }
     @Published var proactiveAnnouncements: Bool { didSet { defaults.set(proactiveAnnouncements, forKey: "jarvis.proactiveAnnouncements") } }
+    @Published var proactiveThreshold: String { didSet { defaults.set(proactiveThreshold, forKey: "jarvis.proactiveThreshold") } }
+    @Published var adaptiveWhisperEnabled: Bool { didSet { defaults.set(adaptiveWhisperEnabled, forKey: "jarvis.adaptiveWhisperEnabled") } }
+    @Published var whisperThresholdDBFS: Double { didSet { defaults.set(whisperThresholdDBFS, forKey: "jarvis.whisperThresholdDBFS") } }
+    @Published var subvocalModeEnabled: Bool { didSet { defaults.set(subvocalModeEnabled, forKey: "jarvis.subvocalModeEnabled") } }
+    @Published var geofencedProfilesEnabled: Bool { didSet { defaults.set(geofencedProfilesEnabled, forKey: "jarvis.geofencedProfilesEnabled") } }
+    @Published var healthContextEnabled: Bool { didSet { defaults.set(healthContextEnabled, forKey: "jarvis.healthContextEnabled") } }
     @Published var projectFocus: String { didSet { defaults.set(projectFocus, forKey: "jarvis.projectFocus") } }
 
     let conversationSessionID: String
@@ -42,6 +48,12 @@ final class SettingsStore: ObservableObject {
         passiveVisionEnabled = defaults.object(forKey: "jarvis.passiveVisionEnabled") as? Bool ?? false
         ambientCuesEnabled = defaults.object(forKey: "jarvis.ambientCuesEnabled") as? Bool ?? true
         proactiveAnnouncements = defaults.object(forKey: "jarvis.proactiveAnnouncements") as? Bool ?? true
+        proactiveThreshold = defaults.string(forKey: "jarvis.proactiveThreshold") ?? "warning"
+        adaptiveWhisperEnabled = defaults.object(forKey: "jarvis.adaptiveWhisperEnabled") as? Bool ?? true
+        whisperThresholdDBFS = defaults.object(forKey: "jarvis.whisperThresholdDBFS") as? Double ?? -42.0
+        subvocalModeEnabled = defaults.object(forKey: "jarvis.subvocalModeEnabled") as? Bool ?? false
+        geofencedProfilesEnabled = defaults.object(forKey: "jarvis.geofencedProfilesEnabled") as? Bool ?? true
+        healthContextEnabled = defaults.object(forKey: "jarvis.healthContextEnabled") as? Bool ?? false
         projectFocus = defaults.string(forKey: "jarvis.projectFocus") ?? "Jarvis"
     }
 }

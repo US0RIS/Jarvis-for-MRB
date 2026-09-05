@@ -25,6 +25,18 @@ struct PlannerModelResponse: Decodable {
     }
 }
 
+struct MeetingStartResponse: Decodable {
+    let ok: Bool
+    let meetingID: Int
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case meetingID = "meeting_id"
+        case message
+    }
+}
+
 private struct APIErrorDetail: Decodable {
     let detail: String
 }
@@ -56,9 +68,6 @@ private actor JarvisEndpointResolver {
         }
 
         for (index, candidate) in candidates.enumerated() {
-            // A healthy home-LAN Jarvis responds essentially immediately. Fail over
-            // quickly when that address is unreachable, then cache the working path
-            // for 30 seconds so voice turns do not pay a health-probe tax repeatedly.
             let timeout: TimeInterval = index == 0 ? 0.25 : 1.5
             if await probe(candidate, apiToken: apiToken, timeout: timeout) {
                 cachedURL = candidate
@@ -279,6 +288,26 @@ struct JarvisAPIClient {
         try await post(path: "event", body: ["event": name])
     }
 
+    func startMeeting(title: String = "") async throws -> MeetingStartResponse {
+        let (data, response) = try await postData(path: "meeting/start", body: ["title": title])
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(MeetingStartResponse.self, from: data)
+    }
+
+    func appendMeetingTranscript(meetingID: Int, text: String) async throws {
+        let (data, response) = try await postData(path: "meeting/transcript", body: [
+            "meeting_id": meetingID,
+            "text": text,
+        ])
+        try validate(response: response, data: data)
+    }
+
+    func finishMeeting(meetingID: Int) async throws -> JarvisAPIResponse {
+        let (data, response) = try await postData(path: "meeting/finish", body: ["meeting_id": meetingID])
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+    }
+
     func emailAllowlist() async throws -> [String] {
         let (data, response) = try await get(path: "settings/email-allowlist", timeout: 10)
         try validate(response: response, data: data)
@@ -322,6 +351,12 @@ struct JarvisAPIClient {
     }
 
     private func post(path: String, body: [String: String]) async throws -> JarvisAPIResponse {
+        let (data, response) = try await postData(path: path, body: body)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+    }
+
+    private func postData(path: String, body: [String: Any]) async throws -> (Data, URLResponse) {
         let base = try await activeBaseURL()
         guard let url = URL(string: base)?.appendingPathComponent(path) else { throw JarvisAPIError.badURL }
         var request = URLRequest(url: url)
@@ -332,9 +367,7 @@ struct JarvisAPIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            try validate(response: response, data: data)
-            return try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+            return try await URLSession.shared.data(for: request)
         } catch {
             await JarvisEndpointResolver.shared.invalidate(base)
             throw error

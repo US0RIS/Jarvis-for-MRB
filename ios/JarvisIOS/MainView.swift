@@ -4,6 +4,7 @@ struct MainView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
     @EnvironmentObject private var persistentPresence: PersistentPresenceController
     @EnvironmentObject private var meetingCapture: MeetingCaptureController
+    @EnvironmentObject private var frontend: FrontendIntelligenceController
     @State private var showingSettings = false
 
     var body: some View {
@@ -15,6 +16,7 @@ struct MainView: View {
                     meetingCard
                     responseCard
                     persistentPresenceCard
+                    FrontendIntelligenceCard()
                     MetaGlassesCard(manager: appModel.metaGlasses)
                     GeofenceCard(manager: appModel.geofenceManager)
                 }
@@ -51,9 +53,17 @@ struct MainView: View {
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Button("Check") { Task { await appModel.checkConnection() } }.buttonStyle(.bordered)
+                    Button("Check") {
+                        Task {
+                            await appModel.checkConnection()
+                            await frontend.probeConnections()
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
                 LabeledContent("Companion", value: persistentPresence.companionStatus)
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Route probe", value: frontend.connectivityStatus)
                     .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
@@ -101,9 +111,11 @@ struct MainView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Noise floor", value: "\(Int(round(appModel.speechRecognizer.ambientNoiseFloorDBFS))) dBFS")
                     .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Speech recognition", value: appModel.speechRecognizer.recognitionDebugSummary)
+                    .font(.caption).foregroundStyle(.secondary)
 
                 if appModel.speechSynthesizer.isWhispering {
-                    Label("Adaptive whisper active", systemImage: "speaker.wave.1")
+                    Label("Adaptive/forced whisper active", systemImage: "speaker.wave.1")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if appModel.settings.subvocalModeEnabled {
@@ -129,13 +141,33 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label(
-                        meetingCapture.isActive ? "Recording locally" : "Off",
+                        meetingCapture.isActive ? (meetingCapture.isPaused ? "Paused" : "Recording locally") : "Off",
                         systemImage: meetingCapture.isActive ? "record.circle.fill" : "record.circle"
                     )
-                    .foregroundStyle(meetingCapture.isActive ? .red : .secondary)
+                    .foregroundStyle(meetingCapture.isActive && !meetingCapture.isPaused ? .red : .secondary)
                     Spacer()
                     if meetingCapture.isActive {
-                        Button("Stop & Extract Actions", role: .destructive) {
+                        Text(meetingCapture.elapsedText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack {
+                    if meetingCapture.isActive {
+                        Button(meetingCapture.isPaused ? "Resume" : "Pause") {
+                            Task {
+                                if meetingCapture.isPaused { await meetingCapture.resume() }
+                                else { await meetingCapture.pause() }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Bookmark") { meetingCapture.addBookmark() }
+                            .buttonStyle(.bordered)
+                            .disabled(meetingCapture.isPaused)
+
+                        Button("Stop", role: .destructive) {
                             Task { await meetingCapture.stop() }
                         }
                         .buttonStyle(.bordered)
@@ -144,6 +176,13 @@ struct MainView: View {
                             Task { await meetingCapture.start() }
                         }
                         .buttonStyle(.borderedProminent)
+
+                        if meetingCapture.syncPending {
+                            Button("Sync & Extract") {
+                                Task { await meetingCapture.syncOfflineTranscript() }
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
                 }
 
@@ -158,7 +197,21 @@ struct MainView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Text("Meeting transcription is explicit opt-in and visibly active. Jarvis stores transcript chunks locally on your PC and extracts only concrete commitments when you stop. It does not identify speakers by voiceprint or infer emotion/stress. Use recording only where permitted and with appropriate participant notice/consent.")
+                if !meetingCapture.bookmarks.isEmpty {
+                    Text("Bookmarks: " + meetingCapture.bookmarks.map { $0.label }.joined(separator: " • "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                if !meetingCapture.exportText.isEmpty {
+                    ShareLink(item: meetingCapture.exportText) {
+                        Label("Share Local Transcript", systemImage: "square.and.arrow.up")
+                    }
+                    .font(.caption)
+                }
+
+                Text("Meeting transcription is explicit opt-in and visibly active. The iPhone now keeps its own local transcript buffer, pause/resume state and bookmarks. If the PC is unreachable, capture can continue locally and be synchronized later. It does not identify speakers by voiceprint or infer emotion/stress. Use recording only where permitted and with appropriate participant notice/consent.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -168,9 +221,14 @@ struct MainView: View {
 
     private var responseCard: some View {
         GroupBox("Last Response") {
-            Text(appModel.lastResponse.isEmpty ? "No response yet." : appModel.lastResponse)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(appModel.lastResponse.isEmpty ? "No response yet." : appModel.lastResponse)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                Text(appModel.lastLatency.compactDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -184,13 +242,13 @@ struct MainView: View {
                 Button {
                     Task { await persistentPresence.requestSilentScan() }
                 } label: {
-                    Label("Silent Visual Scan", systemImage: "eye")
+                    Label("Send Backend Visual Scan", systemImage: "eye")
                 }
                 .buttonStyle(.bordered)
                 .disabled(!appModel.metaGlasses.isRegistered || !appModel.metaGlasses.hasEligibleDevice)
 
                 if !persistentPresence.lastVisionScene.isEmpty {
-                    Text("Seeing: \(persistentPresence.lastVisionScene)")
+                    Text("Backend scene: \(persistentPresence.lastVisionScene)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if !persistentPresence.lastProactiveMessage.isEmpty {
@@ -207,22 +265,57 @@ struct MainView: View {
     }
 }
 
+struct MeetingBookmark: Identifiable, Equatable {
+    let id = UUID()
+    let seconds: Int
+    let snippet: String
+
+    var label: String {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        let time = String(format: "%d:%02d", minutes, remainder)
+        return snippet.isEmpty ? time : "\(time) \(snippet)"
+    }
+}
+
 @MainActor
 final class MeetingCaptureController: ObservableObject {
     @Published private(set) var isActive = false
+    @Published private(set) var isPaused = false
     @Published private(set) var status = "Not recording"
     @Published private(set) var meetingID: Int?
     @Published private(set) var liveTranscript = ""
+    @Published private(set) var localTranscript = ""
+    @Published private(set) var elapsedSeconds: Int = 0
+    @Published private(set) var bookmarks: [MeetingBookmark] = []
+    @Published private(set) var syncPending = false
 
     private unowned let appModel: JarvisAppModel
     private let recognizer: SpeechRecognizer
     private var captureTask: Task<Void, Never>?
     private var resumeHandsFree = false
     private var isStopping = false
+    private var startedAt: Date?
+    private var currentChunkStartedAt = Date()
 
     init(appModel: JarvisAppModel) {
         self.appModel = appModel
         recognizer = SpeechRecognizer(audioRouteManager: appModel.audioRouteManager)
+    }
+
+    var elapsedText: String {
+        let minutes = elapsedSeconds / 60
+        let seconds = elapsedSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    var exportText: String {
+        guard !localTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        var value = localTranscript
+        if !bookmarks.isEmpty {
+            value += "\n\nBookmarks:\n" + bookmarks.map { "- \($0.label)" }.joined(separator: "\n")
+        }
+        return value
     }
 
     private var client: JarvisAPIClient {
@@ -240,19 +333,34 @@ final class MeetingCaptureController: ObservableObject {
         do {
             try await recognizer.requestPermissions()
             resumeHandsFree = appModel.handsFreeEnabled
-            if appModel.handsFreeEnabled {
-                appModel.stopWakeWordMode()
-            }
+            if appModel.handsFreeEnabled { appModel.stopWakeWordMode() }
             if appModel.speechRecognizer.isActive {
                 _ = appModel.speechRecognizer.stopListening()
                 appModel.isListening = false
             }
 
-            let response = try await client.startMeeting(title: title)
-            meetingID = response.meetingID
+            localTranscript = ""
+            liveTranscript = ""
+            bookmarks = []
+            syncPending = false
+            elapsedSeconds = 0
+            startedAt = Date()
+            currentChunkStartedAt = Date()
+
+            do {
+                let response = try await client.startMeeting(title: title)
+                meetingID = response.meetingID
+                status = "Recording locally • session \(response.meetingID)"
+            } catch {
+                guard appModel.settings.offlineMeetingCaptureEnabled else { throw error }
+                meetingID = nil
+                syncPending = true
+                status = "Recording locally • PC unavailable"
+            }
+
             try recognizer.startListening(preferBluetooth: appModel.settings.preferBluetoothAudio)
             isActive = true
-            status = "Recording locally • session \(response.meetingID)"
+            isPaused = false
             captureTask = Task { [weak self] in
                 guard let self else { return }
                 await self.captureLoop()
@@ -261,6 +369,7 @@ final class MeetingCaptureController: ObservableObject {
             status = "Could not start meeting notes: \(error.localizedDescription)"
             meetingID = nil
             isActive = false
+            startedAt = nil
             if resumeHandsFree {
                 resumeHandsFree = false
                 await appModel.startWakeWordMode()
@@ -268,22 +377,55 @@ final class MeetingCaptureController: ObservableObject {
         }
     }
 
+    func pause() async {
+        guard isActive, !isPaused else { return }
+        await persistCurrentChunk()
+        isPaused = true
+        status = meetingID == nil ? "Paused • local-only" : "Paused"
+    }
+
+    func resume() async {
+        guard isActive, isPaused else { return }
+        do {
+            try recognizer.startListening(preferBluetooth: appModel.settings.preferBluetoothAudio)
+            currentChunkStartedAt = Date()
+            isPaused = false
+            status = meetingID.map { "Recording locally • session \($0)" } ?? "Recording locally • PC unavailable"
+        } catch {
+            status = "Could not resume microphone: \(error.localizedDescription)"
+        }
+    }
+
+    func addBookmark() {
+        guard isActive else { return }
+        let snippet = liveTranscript.split(separator: " ").suffix(8).joined(separator: " ")
+        bookmarks.append(MeetingBookmark(seconds: elapsedSeconds, snippet: snippet))
+        if bookmarks.count > 40 { bookmarks.removeFirst(bookmarks.count - 40) }
+    }
+
     func stop() async {
         guard isActive, !isStopping else { return }
         isStopping = true
         isActive = false
+        isPaused = false
         captureTask?.cancel()
         captureTask = nil
+        await persistCurrentChunk()
+        _ = saveLocalTranscriptSnapshot()
 
-        let finalChunk = Self.cleanedMeetingText(recognizer.stopListening())
-        liveTranscript = finalChunk
-        if let meetingID, !finalChunk.isEmpty {
-            try? await client.appendMeetingTranscript(meetingID: meetingID, text: finalChunk)
+        if syncPending || meetingID == nil {
+            status = "Meeting saved locally • sync pending"
+            meetingID = nil
+            isStopping = false
+            startedAt = nil
+            await restoreHandsFreeIfNeeded()
+            return
         }
 
         guard let id = meetingID else {
             status = "Meeting capture stopped"
             isStopping = false
+            startedAt = nil
             await restoreHandsFreeIfNeeded()
             return
         }
@@ -294,18 +436,38 @@ final class MeetingCaptureController: ObservableObject {
             status = "Completed • session \(id)"
             appModel.lastResponse = response.message
         } catch {
-            status = "Meeting ended, but action extraction failed: \(error.localizedDescription)"
+            status = "Meeting saved locally • extraction unavailable"
+            syncPending = true
         }
         meetingID = nil
         isStopping = false
+        startedAt = nil
         await restoreHandsFreeIfNeeded()
     }
 
+    func syncOfflineTranscript() async {
+        guard !isActive,
+              syncPending,
+              !localTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        status = "Synchronizing local transcript…"
+        do {
+            let response = try await client.startMeeting(title: "Synced iPhone meeting")
+            try await client.appendMeetingTranscript(meetingID: response.meetingID, text: localTranscript)
+            let finished = try await client.finishMeeting(meetingID: response.meetingID)
+            syncPending = false
+            status = "Synchronized • session \(response.meetingID)"
+            appModel.lastResponse = finished.message
+        } catch {
+            status = "Sync still unavailable: \(error.localizedDescription)"
+        }
+    }
+
     private func captureLoop() async {
-        var sessionStarted = Date()
         while !Task.isCancelled && isActive {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled && isActive else { return }
+            if let startedAt { elapsedSeconds = max(0, Int(Date().timeIntervalSince(startedAt))) }
+            guard !isPaused else { continue }
 
             let current = recognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
             liveTranscript = current
@@ -315,29 +477,52 @@ final class MeetingCaptureController: ObservableObject {
                 return
             }
 
-            // Apple speech tasks are not intended to run forever. Rotate the local
-            // recognizer every ~20 seconds and persist each chunk to the PC. This
-            // also bounds the amount of transcript that could be lost to a crash.
-            if !recognizer.isActive || Date().timeIntervalSince(sessionStarted) >= 20 {
-                let chunk = Self.cleanedMeetingText(recognizer.stopListening())
-                if let id = meetingID, !chunk.isEmpty {
-                    do {
-                        try await client.appendMeetingTranscript(meetingID: id, text: chunk)
-                    } catch {
-                        status = "Recording • waiting to sync transcript"
-                    }
-                }
-                guard isActive else { return }
+            if !recognizer.isActive || Date().timeIntervalSince(currentChunkStartedAt) >= 20 {
+                await persistCurrentChunk()
+                guard isActive, !isPaused else { continue }
                 do {
                     try recognizer.startListening(preferBluetooth: appModel.settings.preferBluetoothAudio)
-                    sessionStarted = Date()
+                    currentChunkStartedAt = Date()
                     liveTranscript = ""
                     if let id = meetingID { status = "Recording locally • session \(id)" }
+                    else { status = "Recording locally • PC unavailable" }
                 } catch {
                     status = "Microphone interrupted • retrying"
                     try? await Task.sleep(for: .seconds(1))
                 }
             }
+        }
+    }
+
+    private func persistCurrentChunk() async {
+        let chunk = Self.cleanedMeetingText(recognizer.stopListening())
+        liveTranscript = ""
+        guard !chunk.isEmpty else { return }
+        localTranscript = localTranscript.isEmpty ? chunk : localTranscript + "\n" + chunk
+        guard let id = meetingID, !syncPending else { return }
+        do {
+            try await client.appendMeetingTranscript(meetingID: id, text: chunk)
+        } catch {
+            syncPending = true
+            status = "Recording locally • transcript sync pending"
+        }
+    }
+
+    @discardableResult
+    private func saveLocalTranscriptSnapshot() -> URL? {
+        guard !exportText.isEmpty else { return nil }
+        do {
+            let fm = FileManager.default
+            let base = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let folder = base.appendingPathComponent("JarvisMeetingNotes", isDirectory: true)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+            let url = folder.appendingPathComponent("meeting-\(formatter.string(from: Date())).txt")
+            try exportText.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            return nil
         }
     }
 

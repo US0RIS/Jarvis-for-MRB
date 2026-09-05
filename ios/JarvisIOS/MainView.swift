@@ -25,7 +25,14 @@ struct MainView: View {
             }
             .navigationTitle("Jarvis")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink {
+                        FeatureGuideView()
+                    } label: {
+                        Image(systemName: "book.closed")
+                    }
+                    .accessibilityLabel("Jarvis Feature Guide")
+
                     Button { showingSettings = true } label: { Image(systemName: "gearshape") }
                 }
             }

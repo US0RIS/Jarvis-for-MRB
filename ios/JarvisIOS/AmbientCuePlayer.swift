@@ -15,11 +15,8 @@ final class AmbientCuePlayer {
     func startThinking(preferBluetooth: Bool) {
         guard thinkingTask == nil else { return }
         thinkingTask = Task { [weak self] in
-            // Do not chirp for genuinely instant deterministic actions. If the
-            // request is still silent after this delay, begin a very quiet pulse.
             try? await Task.sleep(for: .milliseconds(280))
             guard let self, !Task.isCancelled else { return }
-
             while !Task.isCancelled {
                 self.play("thinking", preferBluetooth: preferBluetooth)
                 try? await Task.sleep(for: .milliseconds(760))
@@ -48,16 +45,26 @@ final class AmbientCuePlayer {
         let volume: Float
         switch cue {
         case "thinking":
-            // Short, low-volume two-note pulse. It repeats while the server is
-            // waiting for model/tool output and stops before speech begins.
             notes = [(470, 0.055), (560, 0.065)]
             volume = 0.18
+        case "vision_scan":
+            notes = [(820, 0.035), (1040, 0.045)]
+            volume = 0.24
+        case "search":
+            notes = [(610, 0.055), (720, 0.055), (610, 0.045)]
+            volume = 0.28
+        case "workflow_started":
+            notes = [(420, 0.06), (560, 0.07), (700, 0.08)]
+            volume = 0.32
         case "task_complete":
             notes = [(660, 0.10), (880, 0.13)]
             volume = 0.45
         case "task_started":
             notes = [(520, 0.10)]
-            volume = 0.45
+            volume = 0.40
+        case "urgent":
+            notes = [(840, 0.08), (840, 0.08), (1040, 0.12)]
+            volume = 0.52
         case "warning":
             notes = [(430, 0.11), (350, 0.14)]
             volume = 0.45
@@ -111,9 +118,7 @@ final class AmbientCuePlayer {
         appendUInt16(16, to: &data)
         data.append("data".data(using: .ascii)!)
         appendUInt32(UInt32(pcmBytes), to: &data)
-        for sample in samples {
-            appendInt16(sample, to: &data)
-        }
+        for sample in samples { appendInt16(sample, to: &data) }
         return data
     }
 

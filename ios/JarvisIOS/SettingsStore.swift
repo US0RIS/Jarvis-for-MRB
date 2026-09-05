@@ -11,6 +11,7 @@ final class SettingsStore: ObservableObject {
     @Published var speakResponses: Bool { didSet { defaults.set(speakResponses, forKey: "jarvis.speakResponses") } }
     @Published var preferBluetoothAudio: Bool { didSet { defaults.set(preferBluetoothAudio, forKey: "jarvis.preferBluetoothAudio") } }
     @Published var passiveVisionEnabled: Bool { didSet { defaults.set(passiveVisionEnabled, forKey: "jarvis.passiveVisionEnabled") } }
+    @Published var adaptiveBandwidthEnabled: Bool { didSet { defaults.set(adaptiveBandwidthEnabled, forKey: "jarvis.adaptiveBandwidthEnabled") } }
     @Published var ambientCuesEnabled: Bool { didSet { defaults.set(ambientCuesEnabled, forKey: "jarvis.ambientCuesEnabled") } }
     @Published var proactiveAnnouncements: Bool { didSet { defaults.set(proactiveAnnouncements, forKey: "jarvis.proactiveAnnouncements") } }
     @Published var proactiveThreshold: String { didSet { defaults.set(proactiveThreshold, forKey: "jarvis.proactiveThreshold") } }
@@ -19,6 +20,8 @@ final class SettingsStore: ObservableObject {
     @Published var subvocalModeEnabled: Bool { didSet { defaults.set(subvocalModeEnabled, forKey: "jarvis.subvocalModeEnabled") } }
     @Published var geofencedProfilesEnabled: Bool { didSet { defaults.set(geofencedProfilesEnabled, forKey: "jarvis.geofencedProfilesEnabled") } }
     @Published var healthContextEnabled: Bool { didSet { defaults.set(healthContextEnabled, forKey: "jarvis.healthContextEnabled") } }
+    @Published var smartAudioDampingEnabled: Bool { didSet { defaults.set(smartAudioDampingEnabled, forKey: "jarvis.smartAudioDampingEnabled") } }
+    @Published var dailyJournalEnabled: Bool { didSet { defaults.set(dailyJournalEnabled, forKey: "jarvis.dailyJournalEnabled") } }
     @Published var projectFocus: String { didSet { defaults.set(projectFocus, forKey: "jarvis.projectFocus") } }
 
     let conversationSessionID: String
@@ -46,6 +49,7 @@ final class SettingsStore: ObservableObject {
         speakResponses = defaults.object(forKey: "jarvis.speakResponses") as? Bool ?? true
         preferBluetoothAudio = defaults.object(forKey: "jarvis.preferBluetoothAudio") as? Bool ?? true
         passiveVisionEnabled = defaults.object(forKey: "jarvis.passiveVisionEnabled") as? Bool ?? false
+        adaptiveBandwidthEnabled = defaults.object(forKey: "jarvis.adaptiveBandwidthEnabled") as? Bool ?? true
         ambientCuesEnabled = defaults.object(forKey: "jarvis.ambientCuesEnabled") as? Bool ?? true
         proactiveAnnouncements = defaults.object(forKey: "jarvis.proactiveAnnouncements") as? Bool ?? true
         proactiveThreshold = defaults.string(forKey: "jarvis.proactiveThreshold") ?? "warning"
@@ -54,6 +58,8 @@ final class SettingsStore: ObservableObject {
         subvocalModeEnabled = defaults.object(forKey: "jarvis.subvocalModeEnabled") as? Bool ?? false
         geofencedProfilesEnabled = defaults.object(forKey: "jarvis.geofencedProfilesEnabled") as? Bool ?? true
         healthContextEnabled = defaults.object(forKey: "jarvis.healthContextEnabled") as? Bool ?? false
+        smartAudioDampingEnabled = defaults.object(forKey: "jarvis.smartAudioDampingEnabled") as? Bool ?? true
+        dailyJournalEnabled = defaults.object(forKey: "jarvis.dailyJournalEnabled") as? Bool ?? false
         projectFocus = defaults.string(forKey: "jarvis.projectFocus") ?? "Jarvis"
     }
 }

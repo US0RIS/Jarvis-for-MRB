@@ -18,8 +18,10 @@ from jarvis_mrb.agent import handle_natural_language
 from jarvis_mrb.conversation import ConversationMessage, append_message, recent_messages
 from jarvis_mrb.email_policy import get_allowed_recipients, set_allowed_recipients
 from jarvis_mrb.environment_state import get_state, update_state
-from jarvis_mrb.event_bus import companion_events, emit_thinking
+from jarvis_mrb.event_bus import companion_events, emit_proactive, emit_thinking
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
+from jarvis_mrb.knowledge_index import refresh as refresh_knowledge_index
+from jarvis_mrb.knowledge_index import status as knowledge_status_data
 from jarvis_mrb.memory import memory_context, remember_exchange_async, status as memory_status_data
 from jarvis_mrb.model_router import choose_model
 from jarvis_mrb.planner_model import (
@@ -32,7 +34,11 @@ from jarvis_mrb.planner_model import (
     set_auto_route,
     set_planner_model,
 )
+from jarvis_mrb.proactive_monitor import check_once as proactive_check_once
+from jarvis_mrb.proactive_monitor import start as start_proactive_monitor
+from jarvis_mrb.sandbox import status as sandbox_status_data
 from jarvis_mrb.server_config import load_server_config
+from jarvis_mrb.spatial_memory import status as spatial_status_data
 from jarvis_mrb.streaming_agent import stream_natural_language
 from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
@@ -47,9 +53,10 @@ _INITIAL_MODEL = get_planner_model()
 agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
-app = FastAPI(title="Jarvis for MRB", version="0.11.2")
+app = FastAPI(title="Jarvis for MRB", version="0.12.0")
 _scheduler_started = False
 _tts_start_attempted = False
+_knowledge_started = False
 
 
 class CommandRequest(BaseModel):
@@ -105,8 +112,6 @@ def _websocket_authorized(websocket: WebSocket) -> bool:
 
 def _contextual_history(session_id: str, query: str, *, limit: int = 20) -> list[ConversationMessage]:
     history = recent_messages(session_id, limit=limit)
-    # memory_context is latency-aware: it performs a vector lookup only when the
-    # wording actually suggests older episodic context is needed.
     retrieved = memory_context(query, limit=3)
     if retrieved:
         history = [ConversationMessage(role="assistant", content=retrieved), *history]
@@ -115,7 +120,11 @@ def _contextual_history(session_id: str, query: str, *, limit: int = 20) -> list
 
 def _execute_job(command: str) -> str:
     reply = handle_natural_language(command)
-    return reply.message
+    message = reply.message
+    normalized = command.lower()
+    if message and ("briefing" in normalized or normalized.startswith("remind ")):
+        emit_proactive(message, cue="task_complete", severity="info")
+    return message
 
 
 def _scheduler_loop() -> None:
@@ -133,6 +142,26 @@ def _ensure_scheduler() -> None:
         return
     _scheduler_started = True
     threading.Thread(target=_scheduler_loop, name="jarvis-scheduler", daemon=True).start()
+
+
+def _knowledge_loop() -> None:
+    # Keep the unified personal index reasonably fresh without adding latency to
+    # ordinary voice turns. The explicit knowledge.refresh tool remains available.
+    time.sleep(20)
+    while True:
+        try:
+            refresh_knowledge_index()
+        except Exception:
+            pass
+        time.sleep(15 * 60)
+
+
+def _ensure_knowledge_refresh() -> None:
+    global _knowledge_started
+    if _knowledge_started:
+        return
+    _knowledge_started = True
+    threading.Thread(target=_knowledge_loop, name="jarvis-knowledge-refresh", daemon=True).start()
 
 
 def _start_tts_in_background() -> None:
@@ -205,24 +234,25 @@ def _warm_fast_model() -> None:
 @app.on_event("startup")
 def startup() -> None:
     _ensure_scheduler()
+    _ensure_knowledge_refresh()
     _start_tts_in_background()
-    # Automatic routing should feel fast on the first ordinary request as well as
-    # later ones. Clear a stale 27B resident model and preload 8B without blocking
-    # API startup.
+    start_proactive_monitor()
     _warm_fast_model()
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     settings = planner_settings()
+    sandbox_state = sandbox_status_data()
     return {
         "status": "ok",
-        "version": "0.11.2",
+        "version": "0.12.0",
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
         "web_search": "ready" if web_status().ok else "unconfigured",
         "planner_model": settings["model"],
         "auto_route": settings["auto_route"],
+        "sandbox": "ready" if sandbox_state.get("docker") else "docker-unavailable",
     }
 
 
@@ -253,9 +283,6 @@ def command_stream(
     try:
         session_id = request.session_id or "default"
         route = choose_model(request.text)
-        # The 8B model does not need 20 full turns for routine voice interactions.
-        # A smaller prompt reduces prefill time substantially while the 27B path keeps
-        # the wider history window for harder reasoning.
         history_limit = 8 if route.model == FAST_MODEL else 20
         history = _contextual_history(session_id, request.text, limit=history_limit)
     except Exception:
@@ -284,8 +311,6 @@ def command_stream(
                     continue
                 if first_output:
                     first_output = False
-                    # The thinking bed is only for the silent wait. Stop it before
-                    # the first conversational/tool-result audio can begin.
                     emit_thinking(False)
                 pieces.append(piece)
                 yield json.dumps({"type": "delta", "text": piece}, ensure_ascii=False) + "\n"
@@ -305,9 +330,6 @@ def command_stream(
                 append_message(session_id, "assistant", full)
                 remember_exchange_async(session_id, request.text, full)
 
-            # Auto-routed 27B turns are deliberately temporary. streaming_agent
-            # asks Ollama to unload 27B when generation finishes; immediately warm
-            # 8B again so the next conversational turn does not pay a cold-load cost.
             if get_auto_route() and route.model == QUALITY_MODEL:
                 threading.Thread(
                     target=_warm_selected_model,
@@ -325,9 +347,18 @@ def command_stream(
 def event(request: EventRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)
     if request.event == "home_arrival":
-        update_state({"location": "home"})
+        update_state({"location": "home", "active_profile": "home"})
+    elif request.event == "home_departure":
+        update_state({"location": "away", "active_profile": "mobile"})
     result = trigger_event(request.event, _execute_job)
     return CommandResponse(ok=result.ok, message=result.message)
+
+
+@app.post("/proactive/check")
+def proactive_check(authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
+    _check_auth(authorization)
+    proactive_check_once()
+    return {"status": "checked"}
 
 
 @app.get("/tts/status")
@@ -431,6 +462,24 @@ def put_email_allowlist(
 def memory_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
     _check_auth(authorization)
     return memory_status_data()
+
+
+@app.get("/knowledge/status")
+def knowledge_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+    _check_auth(authorization)
+    return knowledge_status_data()
+
+
+@app.get("/spatial/status")
+def spatial_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+    _check_auth(authorization)
+    return spatial_status_data()
+
+
+@app.get("/sandbox/status")
+def sandbox_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+    _check_auth(authorization)
+    return sandbox_status_data()
 
 
 @app.get("/vision/status")

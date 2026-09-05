@@ -59,9 +59,11 @@
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Jarvis converts spoken commands to text.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Jarvis uses your location to configure location-based automations and system profiles.</string>
+    <string>Jarvis uses your location to configure location-based automations and optional on-device travel context.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Jarvis uses a home geofence to trigger automations and switch between home and mobile profiles.</string>
+    <key>NSMotionUsageDescription</key>
+    <string>Jarvis can optionally use motion activity to provide on-device walking, running, cycling, driving, or stationary context.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Jarvis connects securely to your Jarvis agent running on your computer.</string>
     <key>NSHealthShareUsageDescription</key>

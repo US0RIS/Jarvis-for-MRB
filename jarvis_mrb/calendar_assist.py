@@ -16,6 +16,10 @@ def _parse(value: str) -> datetime | None:
         return None
 
 
+def _clock(value: datetime) -> str:
+    return value.strftime("%I:%M %p").lstrip("0")
+
+
 def _event_interval(event: dict[str, Any]) -> tuple[datetime, datetime] | None:
     start = _parse(str(event.get("start") or ""))
     end = _parse(str(event.get("end") or ""))
@@ -45,7 +49,7 @@ def find_conflicts(days: int = 7) -> str:
                 left = str(event.get("summary") or "Untitled event")
                 right = str(other.get("summary") or "Untitled event")
                 conflicts.append(
-                    f"{left} overlaps {right} on {start.strftime('%A')} around {other_start.strftime('%-I:%M %p') if hasattr(start, 'strftime') else other_start.isoformat()}"
+                    f"{left} overlaps {right} on {start.strftime('%A')} around {_clock(other_start)}"
                 )
     if not conflicts:
         return f"I found no overlapping timed calendar events in the next {days} day(s)."
@@ -80,7 +84,7 @@ def _alternative_slots(
         while cursor + timedelta(minutes=60) <= end_of_day:
             slot_end = cursor + timedelta(minutes=60)
             if all(slot_end <= start or cursor >= end for start, end in occupied):
-                results.append(f"{cursor.strftime('%A')} at {cursor.strftime('%I:%M %p').lstrip('0')}")
+                results.append(f"{cursor.strftime('%A')} at {_clock(cursor)}")
                 if len(results) >= limit:
                     return results
             cursor += timedelta(minutes=30)

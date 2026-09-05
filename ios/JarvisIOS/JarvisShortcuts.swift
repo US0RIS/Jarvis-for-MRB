@@ -64,6 +64,24 @@ struct ToggleMeetingNotesIntent: AppIntent {
     }
 }
 
+struct StageTextInJarvisIntent: AppIntent {
+    static var title: LocalizedStringResource = "Send Text to Jarvis"
+    static var description = IntentDescription("Hand text from Shortcuts or a Share Sheet shortcut to the Jarvis command field without automatically executing it.")
+    static var openAppWhenRun = true
+
+    @Parameter(title: "Text")
+    var text: String
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            return .result(dialog: "There is no text to hand to Jarvis.")
+        }
+        FrontendImportMailbox.post(cleaned)
+        return .result(dialog: "Text staged in Jarvis. It has not been sent or executed.")
+    }
+}
+
 struct JarvisAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -101,6 +119,12 @@ struct JarvisAppShortcuts: AppShortcutsProvider {
             phrases: ["Toggle meeting notes in \(.applicationName)"],
             shortTitle: "Meeting Notes",
             systemImageName: "record.circle"
+        )
+        AppShortcut(
+            intent: StageTextInJarvisIntent(),
+            phrases: ["Send text to \(.applicationName)"],
+            shortTitle: "Send Text to Jarvis",
+            systemImageName: "square.and.arrow.down"
         )
     }
 }

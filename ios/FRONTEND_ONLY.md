@@ -15,7 +15,7 @@ The iPhone can keep a 30-second RAM-only ring buffer of downsampled Ray-Ban DAT 
 - OCR / visible text recognition
 - QR and barcode decoding
 - human rectangle detection
-- face rectangle counting without identity
+- face rectangle counting
 - rectangle detection
 - attention-based saliency
 
@@ -28,6 +28,31 @@ Local commands include forms such as:
 Recognized text/code payloads are copied to the **iPhone** clipboard. These local features do not imply that the iPhone can semantically describe arbitrary scenes like Moondream.
 
 The app exposes a recent-frame thumbnail timeline, cache size, estimated local capture FPS, last compressed frame size and local-perception status.
+
+## Known People — closed-set private recognition
+
+Known People is an explicit opt-in, frontend-only recognition layer. It does **not** attempt to identify arbitrary strangers. The user deliberately creates a profile with a contact label and at least two (preferably 3–6) clear samples of that same person.
+
+Enrollment and matching work locally on the iPhone:
+
+1. Apple Vision detects the largest face in each enrollment sample.
+2. The app crops the face region and creates a `VNFeaturePrintObservation`.
+3. Raw enrollment photos are discarded by this feature after the feature print is created.
+4. The contact label, private user note, calibration distance and archived feature prints are stored in the app's this-device-only Keychain item.
+5. While recognition is enabled, current Ray-Ban frames are compared only against those explicitly enrolled profiles.
+6. Continuous recognition requires two consecutive compatible matches before accepting a contact. An explicit `who is this?` request can force an immediate comparison.
+7. If two enrolled people score too closely, the result stays ambiguous instead of forcing an identity.
+
+Local commands include:
+
+- `Jarvis, who is this?`
+- `Jarvis, who am I talking to?`
+- `Jarvis, what do I know about this person?`
+- `Jarvis, what did I talk about with them?`
+
+The frontend can retrieve the user's private note for that profile and recent conversation turns stored by the iPhone app that mention the person's name. It phrases recognition as an estimate rather than certain identity.
+
+**Current frontend-only limitation:** full filtered retrieval across the PC's long-term Gmail, Calendar, notes and semantic vector index is not yet available without a backend update. The current running Windows backend must not be assumed to know the recognized contact automatically.
 
 ## Offline command staging
 
@@ -65,6 +90,7 @@ Selected commands can execute on the iPhone without an LLM round trip, including
 
 - read/copy visible text
 - scan QR/barcode
+- closed-set known-person questions when recognition is enabled
 - passive vision on/off
 - mute/unmute proactive speech
 - mute/unmute response speech
@@ -106,7 +132,7 @@ The app registers App Intents for:
 - Read Visible Text
 - Toggle Passive Vision
 - Toggle Meeting Notes
-- Toggle Jarvis spoken responses (intent is registered in-app even if not shown in the primary shortcut list)
+- Toggle Jarvis spoken responses
 
 These can be invoked from Shortcuts and can be assigned to the iPhone Action Button where iOS offers app shortcuts.
 
@@ -115,6 +141,10 @@ These can be invoked from Shortcuts and can be assigned to the iPhone Action But
 ### General live scene understanding
 
 Still backend/Moondream-dependent and explicitly not considered working on the currently deployed backend.
+
+### Full cross-app person-specific memory retrieval
+
+Known People can use private profile notes and the bounded iPhone conversation history now. Filtering the PC's full Gmail/Calendar/notes/vector-memory index by a stable contact identity requires a later backend change.
 
 ### Dynamic Island / Live Activity and true Lock Screen widget controls
 

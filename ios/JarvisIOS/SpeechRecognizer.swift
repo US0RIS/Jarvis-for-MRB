@@ -101,6 +101,7 @@ final class SpeechRecognizer: ObservableObject {
     @Published private(set) var isActive = false
     @Published private(set) var lastError: String?
     @Published private(set) var ambientLevelDBFS: Double = -80.0
+    @Published private(set) var ambientNoiseFloorDBFS: Double = -55.0
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
@@ -166,9 +167,13 @@ final class SpeechRecognizer: ObservableObject {
             let db = jarvisAverageDBFS(buffer)
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Smooth the meter enough that a single consonant or click does not
-                // make whisper mode flicker between states.
                 self.ambientLevelDBFS = (self.ambientLevelDBFS * 0.82) + (db * 0.18)
+                // While no speech has been transcribed, this is a useful estimate
+                // of the room's noise floor. Once the wearer starts speaking we
+                // freeze the estimate so their own voice does not disable whisper mode.
+                if self.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.ambientNoiseFloorDBFS = (self.ambientNoiseFloorDBFS * 0.94) + (db * 0.06)
+                }
             }
         }
         tapInstalled = true

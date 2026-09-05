@@ -5,6 +5,15 @@ enum KeychainStore {
     private static let service = "com.us0ris.JarvisMRB"
 
     static func read(_ account: String) -> String? {
+        guard let data = readData(account) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func save(_ value: String, account: String) {
+        saveData(Data(value.utf8), account: account)
+    }
+
+    static func readData(_ account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -15,11 +24,10 @@ enum KeychainStore {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        return data
     }
 
-    static func save(_ value: String, account: String) {
-        let data = Data(value.utf8)
+    static func saveData(_ data: Data, account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -33,5 +41,14 @@ enum KeychainStore {
             create[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             SecItemAdd(create as CFDictionary, nil)
         }
+    }
+
+    static func delete(_ account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }

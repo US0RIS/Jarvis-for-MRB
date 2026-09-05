@@ -8,22 +8,39 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from jarvis_mrb.ephemeral_state import prompt_context as ephemeral_prompt_context
+
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 STATE_PATH = APP_DIR / "environment_state.json"
 _LOCK = threading.RLock()
 
 _DEFAULT_STATE: dict[str, Any] = {
     "location": "unknown",
+    "active_profile": "default",
     "project_focus": "Jarvis",
     "devices": {
         "ray_ban_meta": "unknown",
         "phone_transport": "unknown",
+    },
+    "audio": {
+        "ambient_dbfs": None,
+        "whisper_mode": False,
+    },
+    "health": {
+        "enabled": False,
+        "heart_rate_bpm": None,
+        "hrv_ms": None,
+        "sleep_hours": None,
+        "updated_at": None,
     },
     "preferences": {
         "address": "sir",
         "response_style": "concise, direct, technical when appropriate",
         "email_emojis": False,
         "proactive_interruptions": "only when useful and high confidence",
+        "proactive_monitoring": True,
+        "proactive_threshold": "warning",
+        "reality_check": True,
     },
     "vision": {
         "last_scene": "",
@@ -68,19 +85,21 @@ def update_state(patch: dict[str, Any]) -> dict[str, Any]:
 
 
 def set_value(key: str, value: Any) -> dict[str, Any]:
-    """Set a small set of user-facing state keys from the agent tool surface."""
     normalized = key.strip().lower().replace(" ", "_")
     if normalized in {"project", "project_focus", "focus"}:
         return update_state({"project_focus": str(value)[:500]})
     if normalized in {"location", "place"}:
         return update_state({"location": str(value)[:200]})
+    if normalized in {"profile", "active_profile"}:
+        return update_state({"active_profile": str(value)[:100]})
     if normalized.startswith("preference."):
         subkey = normalized.split(".", 1)[1][:100]
         return update_state({"preferences": {subkey: value}})
-    raise ValueError("State key must be project_focus, location, or preference.<name>.")
+    raise ValueError("State key must be project_focus, location, active_profile, or preference.<name>.")
 
 
 def prompt_context() -> str:
     state = get_state()
-    # Keep this bounded because it is appended to every model request.
-    return json.dumps(state, ensure_ascii=False, separators=(",", ":"))[:5000]
+    durable = json.dumps(state, ensure_ascii=False, separators=(",", ":"))[:5000]
+    temporary = ephemeral_prompt_context()
+    return f"durable={durable}\ntemporary={temporary}"[:8000]

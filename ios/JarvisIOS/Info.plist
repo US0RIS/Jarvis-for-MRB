@@ -55,15 +55,17 @@
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Jarvis connects to your Meta Ray-Ban glasses.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Jarvis uses the microphone for voice commands.</string>
+    <string>Jarvis uses the microphone for voice commands and optional quiet-speech interaction.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Jarvis converts spoken commands to text.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Jarvis uses your location to configure location-based automations.</string>
+    <string>Jarvis uses your location to configure location-based automations and system profiles.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Jarvis uses a home geofence to trigger automations such as preparing your PC when you arrive.</string>
+    <string>Jarvis uses a home geofence to trigger automations and switch between home and mobile profiles.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Jarvis connects securely to your Jarvis agent running on your computer.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>Jarvis can optionally read recent Apple Health heart rate, HRV, and sleep data as private assistant context. It does not write health data.</string>
 
     <key>NSAppTransportSecurity</key>
     <dict>

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import jarvis_mrb.agent as agent_module
 import jarvis_mrb.streaming_agent as streaming_agent_module
 from jarvis_mrb.agent import handle_natural_language
+from jarvis_mrb.audio_damping import status as audio_damping_status_data
 from jarvis_mrb.conversation import ConversationMessage, append_message, recent_messages
 from jarvis_mrb.email_policy import get_allowed_recipients, set_allowed_recipients
 from jarvis_mrb.environment_state import get_state, update_state
@@ -22,6 +23,9 @@ from jarvis_mrb.event_bus import companion_events, emit_proactive, emit_thinking
 from jarvis_mrb.jobs import run_due_jobs, trigger_event
 from jarvis_mrb.knowledge_index import refresh as refresh_knowledge_index
 from jarvis_mrb.knowledge_index import status as knowledge_status_data
+from jarvis_mrb.meeting_notes import append_transcript as append_meeting_transcript
+from jarvis_mrb.meeting_notes import finish as finish_meeting_notes
+from jarvis_mrb.meeting_notes import start as start_meeting_notes
 from jarvis_mrb.memory import memory_context, remember_exchange_async, status as memory_status_data
 from jarvis_mrb.model_router import choose_model
 from jarvis_mrb.planner_model import (
@@ -36,6 +40,7 @@ from jarvis_mrb.planner_model import (
 )
 from jarvis_mrb.proactive_monitor import check_once as proactive_check_once
 from jarvis_mrb.proactive_monitor import start as start_proactive_monitor
+from jarvis_mrb.resource_monitor import sample as resource_status_data
 from jarvis_mrb.sandbox import status as sandbox_status_data
 from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.spatial_memory import status as spatial_status_data
@@ -43,6 +48,7 @@ from jarvis_mrb.streaming_agent import stream_natural_language
 from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
 from jarvis_mrb.vision import status as vision_status_data, submit_frame
+from jarvis_mrb.visual_history import status as visual_history_status_data
 
 _CONFIG = load_server_config()
 BIND_HOST = _CONFIG.bind_host
@@ -53,7 +59,7 @@ _INITIAL_MODEL = get_planner_model()
 agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
-app = FastAPI(title="Jarvis for MRB", version="0.12.0")
+app = FastAPI(title="Jarvis for MRB", version="0.13.0")
 _scheduler_started = False
 _tts_start_attempted = False
 _knowledge_started = False
@@ -94,6 +100,25 @@ class PlannerModelResponse(BaseModel):
 
 class TTSRequest(BaseModel):
     text: str
+
+
+class MeetingStartRequest(BaseModel):
+    title: str = ""
+
+
+class MeetingStartResponse(BaseModel):
+    ok: bool
+    meeting_id: int
+    message: str
+
+
+class MeetingTranscriptRequest(BaseModel):
+    meeting_id: int
+    text: str
+
+
+class MeetingFinishRequest(BaseModel):
+    meeting_id: int
 
 
 def _check_auth(authorization: str | None) -> None:
@@ -145,8 +170,6 @@ def _ensure_scheduler() -> None:
 
 
 def _knowledge_loop() -> None:
-    # Keep the unified personal index reasonably fresh without adding latency to
-    # ordinary voice turns. The explicit knowledge.refresh tool remains available.
     time.sleep(20)
     while True:
         try:
@@ -246,13 +269,15 @@ def health() -> dict[str, Any]:
     sandbox_state = sandbox_status_data()
     return {
         "status": "ok",
-        "version": "0.12.0",
+        "version": "0.13.0",
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
         "web_search": "ready" if web_status().ok else "unconfigured",
         "planner_model": settings["model"],
         "auto_route": settings["auto_route"],
         "sandbox": "ready" if sandbox_state.get("docker") else "docker-unavailable",
+        "visual_history": "ready",
+        "resource_guardrails": "active",
     }
 
 
@@ -359,6 +384,56 @@ def proactive_check(authorization: Annotated[str | None, Header()] = None) -> di
     _check_auth(authorization)
     proactive_check_once()
     return {"status": "checked"}
+
+
+@app.post("/meeting/start", response_model=MeetingStartResponse)
+def meeting_start(
+    request: MeetingStartRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> MeetingStartResponse:
+    _check_auth(authorization)
+    item = start_meeting_notes(request.title)
+    update_state({"meeting": {"active": True, "id": item["id"], "title": item.get("title") or ""}})
+    return MeetingStartResponse(
+        ok=True,
+        meeting_id=int(item["id"]),
+        message=f"Meeting-note session {item['id']} started.",
+    )
+
+
+@app.post("/meeting/transcript", response_model=CommandResponse)
+def meeting_transcript(
+    request: MeetingTranscriptRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CommandResponse:
+    _check_auth(authorization)
+    try:
+        append_meeting_transcript(request.meeting_id, request.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CommandResponse(ok=True, message="Transcript segment stored locally.")
+
+
+@app.post("/meeting/finish", response_model=CommandResponse)
+def meeting_finish(
+    request: MeetingFinishRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CommandResponse:
+    _check_auth(authorization)
+    try:
+        message = finish_meeting_notes(request.meeting_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    update_state({"meeting": {"active": False, "id": request.meeting_id}})
+    companion_events.publish(
+        {
+            "type": "meeting_complete",
+            "meeting_id": request.meeting_id,
+            "message": message,
+            "cue": "task_complete",
+        }
+    )
+    return CommandResponse(ok=True, message=message)
 
 
 @app.get("/tts/status")
@@ -486,6 +561,24 @@ def sandbox_status(authorization: Annotated[str | None, Header()] = None) -> dic
 def vision_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
     _check_auth(authorization)
     return vision_status_data()
+
+
+@app.get("/visual-history/status")
+def visual_history_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+    _check_auth(authorization)
+    return visual_history_status_data()
+
+
+@app.get("/resources/status")
+def resources_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    _check_auth(authorization)
+    return resource_status_data()
+
+
+@app.get("/audio-damping/status")
+def audio_damping_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    _check_auth(authorization)
+    return audio_damping_status_data()
 
 
 @app.get("/state")

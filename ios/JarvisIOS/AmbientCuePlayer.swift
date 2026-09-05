@@ -42,39 +42,51 @@ final class AmbientCuePlayer {
         }
 
         let notes: [(Double, Double)]
-        let volume: Float
+        let baseVolume: Float
         switch cue {
         case "thinking":
             notes = [(470, 0.055), (560, 0.065)]
-            volume = 0.18
+            baseVolume = 0.18
         case "vision_scan":
             notes = [(820, 0.035), (1040, 0.045)]
-            volume = 0.24
+            baseVolume = 0.24
         case "search":
             notes = [(610, 0.055), (720, 0.055), (610, 0.045)]
-            volume = 0.28
+            baseVolume = 0.28
         case "workflow_started":
             notes = [(420, 0.06), (560, 0.07), (700, 0.08)]
-            volume = 0.32
+            baseVolume = 0.32
         case "task_complete":
             notes = [(660, 0.10), (880, 0.13)]
-            volume = 0.45
+            baseVolume = 0.45
         case "task_started":
             notes = [(520, 0.10)]
-            volume = 0.40
+            baseVolume = 0.40
         case "urgent":
             notes = [(840, 0.08), (840, 0.08), (1040, 0.12)]
-            volume = 0.52
+            baseVolume = 0.52
         case "warning":
             notes = [(430, 0.11), (350, 0.14)]
-            volume = 0.45
+            baseVolume = 0.45
         case "error":
             notes = [(300, 0.12), (260, 0.16)]
-            volume = 0.45
+            baseVolume = 0.45
         default:
             notes = [(740, 0.10)]
-            volume = 0.40
+            baseVolume = 0.40
         }
+
+        let defaults = UserDefaults.standard
+        let userScale = max(0.05, min(1.5, defaults.object(forKey: "jarvis.cueVolume") as? Double ?? 1.0))
+        let adaptive = defaults.object(forKey: "jarvis.adaptiveCueVolumeEnabled") as? Bool ?? true
+        var ambientScale = 1.0
+        if adaptive {
+            let db = JarvisAudioEnvironment.noiseFloorDBFS
+            if db <= -52 { ambientScale = 0.58 }
+            else if db <= -43 { ambientScale = 0.78 }
+            else if db >= -30 { ambientScale = 1.18 }
+        }
+        let volume = Float(max(0.02, min(1.0, Double(baseVolume) * userScale * ambientScale)))
 
         guard let data = Self.makeWAV(notes: notes) else { return }
         currentCue = cue

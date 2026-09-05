@@ -19,7 +19,7 @@ def main() -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps({"api_key": key}, indent=2), encoding="utf-8")
     print(f"Saved Serper configuration to: {CONFIG_PATH}")
-    print("Restart the Jarvis service before using web search.")
+    print("Web search is now configured; Jarvis reads this file dynamically.")
 
 
 if __name__ == "__main__":

@@ -135,6 +135,47 @@ def _websocket_authorized(websocket: WebSocket) -> bool:
     return websocket.headers.get("authorization") == f"Bearer {API_TOKEN}"
 
 
+def _command_alias(text: str) -> str:
+    normalized = " ".join(text.lower().strip().split()).strip(".?!")
+    if normalized in {
+        "execute exact command",
+        "execute the exact command",
+        "run exact command",
+        "run the exact command",
+    }:
+        return "confirm"
+    if normalized in {"cancel exact command", "cancel the exact command"}:
+        return "cancel"
+    return text
+
+
+def _voice_safe_confirmation(message: str) -> str:
+    """Keep terminal confirmation explicit instead of letting iOS abbreviate it.
+
+    The iPhone deliberately shortens ordinary confirmation prompts to avoid reading
+    full email bodies/recipients aloud. For the isolated terminal tool, the user
+    specifically requested that the exact command itself be spoken before approval.
+    Rewording the final phrase avoids the generic confirmation abbreviation while
+    keeping the backend's pending security action intact.
+    """
+    lower = message.lower()
+    if "exact isolated terminal command" not in lower:
+        return message
+    value = message
+    for phrase in (
+        "Say 'confirm' to proceed or 'cancel'.",
+        'Say "confirm" to proceed or "cancel".',
+        "Say confirm to proceed or cancel.",
+    ):
+        if phrase in value:
+            value = value.replace(
+                phrase,
+                "After hearing that exact command, say 'execute exact command' to proceed, or 'never mind' to cancel.",
+            )
+            break
+    return value
+
+
 def _contextual_history(session_id: str, query: str, *, limit: int = 20) -> list[ConversationMessage]:
     history = recent_messages(session_id, limit=limit)
     retrieved = memory_context(query, limit=3)
@@ -287,13 +328,15 @@ def command(request: CommandRequest, authorization: Annotated[str | None, Header
     emit_thinking(True)
     try:
         session_id = request.session_id or "default"
-        history = _contextual_history(session_id, request.text, limit=12)
-        reply = handle_natural_language(request.text, history=history)
+        effective_text = _command_alias(request.text)
+        history = _contextual_history(session_id, effective_text, limit=12)
+        reply = handle_natural_language(effective_text, history=history)
+        message = _voice_safe_confirmation(reply.message)
         append_message(session_id, "user", request.text)
-        if reply.message and reply.message != "__EXIT__":
-            append_message(session_id, "assistant", reply.message)
-            remember_exchange_async(session_id, request.text, reply.message)
-        return CommandResponse(ok=reply.ok, message=reply.message)
+        if message and message != "__EXIT__":
+            append_message(session_id, "assistant", message)
+            remember_exchange_async(session_id, request.text, message)
+        return CommandResponse(ok=reply.ok, message=message)
     finally:
         emit_thinking(False)
 
@@ -307,9 +350,10 @@ def command_stream(
     emit_thinking(True)
     try:
         session_id = request.session_id or "default"
-        route = choose_model(request.text)
+        effective_text = _command_alias(request.text)
+        route = choose_model(effective_text)
         history_limit = 8 if route.model == FAST_MODEL else 20
-        history = _contextual_history(session_id, request.text, limit=history_limit)
+        history = _contextual_history(session_id, effective_text, limit=history_limit)
     except Exception:
         emit_thinking(False)
         raise
@@ -327,18 +371,19 @@ def command_stream(
                 }
             ) + "\n"
             for piece in stream_natural_language(
-                request.text,
+                effective_text,
                 history=history,
                 model_override=route.model,
                 announce_analysis=route.announce_analysis,
             ):
                 if not piece:
                     continue
+                delivered_piece = _voice_safe_confirmation(piece)
                 if first_output:
                     first_output = False
                     emit_thinking(False)
-                pieces.append(piece)
-                yield json.dumps({"type": "delta", "text": piece}, ensure_ascii=False) + "\n"
+                pieces.append(delivered_piece)
+                yield json.dumps({"type": "delta", "text": delivered_piece}, ensure_ascii=False) + "\n"
         except Exception as exc:
             if first_output:
                 first_output = False

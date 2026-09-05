@@ -95,9 +95,6 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         player.enableRate = true
         player.rate = quiet ? 0.92 : 1.0
         player.volume = quiet ? 0.34 : 1.0
-        // A slight left bias gives quiet responses a distinct HUD character on
-        // stereo routes. Bluetooth HFP is often mono, in which case iOS simply
-        // ignores pan and playback remains centered.
         player.pan = quiet ? -0.14 : 0.0
         player.prepareToPlay()
         audioPlayer = player
@@ -166,12 +163,16 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         bargeInRequest = request
 
         let input = bargeInAudioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
+        let format = input.inputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             bargeInRequest = nil
             return
         }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in request.append(buffer) }
+        // Bluetooth HFP can renegotiate the node format while output begins.
+        // Supplying a previously-read AVAudioFormat can therefore crash inside
+        // AVAudioNode.installTap with an Objective-C format-mismatch exception.
+        // Let AVAudioEngine bind the tap to the live native format instead.
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in request.append(buffer) }
         bargeInTapInstalled = true
         bargeInAudioEngine.prepare()
         do { try bargeInAudioEngine.start() } catch {

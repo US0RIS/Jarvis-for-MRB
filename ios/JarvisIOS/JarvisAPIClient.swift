@@ -37,6 +37,12 @@ struct MeetingStartResponse: Decodable {
     }
 }
 
+enum JarvisStreamEvent {
+    case start(model: String?, routeReason: String?)
+    case delta(String)
+    case done(ok: Bool?)
+}
+
 private struct APIErrorDetail: Decodable {
     let detail: String
 }
@@ -45,6 +51,16 @@ private struct JarvisStreamPacket: Decodable {
     let type: String
     let text: String?
     let ok: Bool?
+    let model: String?
+    let routeReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case ok
+        case model
+        case routeReason = "route_reason"
+    }
 }
 
 private actor JarvisEndpointResolver {
@@ -163,7 +179,7 @@ struct JarvisAPIClient {
         try await post(path: "command", body: ["text": text, "session_id": sessionID])
     }
 
-    func streamCommand(_ text: String) -> AsyncThrowingStream<String, Error> {
+    func streamCommandEvents(_ text: String) -> AsyncThrowingStream<JarvisStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 var resolvedBase = ""
@@ -201,11 +217,14 @@ struct JarvisAPIClient {
                         guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
                         let packet = try JSONDecoder().decode(JarvisStreamPacket.self, from: data)
                         switch packet.type {
+                        case "start":
+                            continuation.yield(.start(model: packet.model, routeReason: packet.routeReason))
                         case "delta":
                             if let text = packet.text, !text.isEmpty {
-                                continuation.yield(text)
+                                continuation.yield(.delta(text))
                             }
                         case "done":
+                            continuation.yield(.done(ok: packet.ok))
                             continuation.finish()
                             return
                         default:
@@ -217,6 +236,21 @@ struct JarvisAPIClient {
                     if !resolvedBase.isEmpty {
                         await JarvisEndpointResolver.shared.invalidate(resolvedBase)
                     }
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    func streamCommand(_ text: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    for try await event in streamCommandEvents(text) {
+                        if case .delta(let text) = event { continuation.yield(text) }
+                    }
+                    continuation.finish()
+                } catch {
                     continuation.finish(throwing: error)
                 }
             }

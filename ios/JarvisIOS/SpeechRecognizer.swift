@@ -159,7 +159,7 @@ final class SpeechRecognizer: ObservableObject {
         self.request = request
 
         let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
+        let format = input.inputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             self.request = nil
             recognitionPrefix = ""
@@ -167,7 +167,14 @@ final class SpeechRecognizer: ObservableObject {
         }
 
         removeInputTapIfNeeded()
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // Do not pass a snapshot of the Bluetooth input format here. Selecting an
+        // HFP microphone can trigger an asynchronous route/format transition, and
+        // iOS 27 may change the input-node format between reading it above and
+        // installTap(). Passing that stale format raises an Objective-C exception
+        // ("Failed to create tap due to format mismatch") which Swift cannot catch.
+        // A nil format tells AVAudioEngine to use the node's live native format at
+        // the instant the tap is installed, eliminating that race.
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             request.append(buffer)
             let db = jarvisAverageDBFS(buffer)
             Task { @MainActor [weak self] in

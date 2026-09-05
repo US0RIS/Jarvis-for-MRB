@@ -107,6 +107,9 @@ final class SpeechRecognizer: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var ambientLevelDBFS: Double = -80.0
     @Published private(set) var ambientNoiseFloorDBFS: Double = -55.0
+    @Published private(set) var transcriptionConfidence: Double = 0
+    @Published private(set) var lastResultWasFinal = false
+    @Published private(set) var lastRecognitionUpdate: Date?
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
@@ -117,6 +120,13 @@ final class SpeechRecognizer: ObservableObject {
     private var recognitionPrefix = ""
     private var interruptionTask: Task<Void, Never>?
     private var mediaResetTask: Task<Void, Never>?
+
+    var recognitionDebugSummary: String {
+        let confidence = Int(round(transcriptionConfidence * 100))
+        let state = isActive ? "active" : "idle"
+        let final = lastResultWasFinal ? "final" : "partial"
+        return "ASR \(state) • \(confidence)% confidence • \(final)"
+    }
 
     init(audioRouteManager: AudioRouteManager) {
         self.audioRouteManager = audioRouteManager
@@ -142,6 +152,8 @@ final class SpeechRecognizer: ObservableObject {
         recognitionPrefix = BargeInBuffer.take()
         transcript = recognitionPrefix
         lastError = nil
+        transcriptionConfidence = 0
+        lastResultWasFinal = false
 
         guard let recognizer, recognizer.isAvailable else {
             throw NSError(domain: "JarvisSpeech", code: 3, userInfo: [NSLocalizedDescriptionKey: "Speech recognition is temporarily unavailable."])
@@ -167,13 +179,9 @@ final class SpeechRecognizer: ObservableObject {
         }
 
         removeInputTapIfNeeded()
-        // Do not pass a snapshot of the Bluetooth input format here. Selecting an
-        // HFP microphone can trigger an asynchronous route/format transition, and
-        // iOS 27 may change the input-node format between reading it above and
-        // installTap(). Passing that stale format raises an Objective-C exception
-        // ("Failed to create tap due to format mismatch") which Swift cannot catch.
-        // A nil format tells AVAudioEngine to use the node's live native format at
-        // the instant the tap is installed, eliminating that race.
+        // Bluetooth HFP can renegotiate its format asynchronously. A nil tap
+        // format binds to the node's live native format and avoids iOS 27's
+        // uncaught "Failed to create tap due to format mismatch" exception.
         input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             request.append(buffer)
             let db = jarvisAverageDBFS(buffer)
@@ -205,6 +213,13 @@ final class SpeechRecognizer: ObservableObject {
                         to: result.bestTranscription.formattedString
                     )
                     self.transcript = Self.joinPrefix(self.recognitionPrefix, corrected)
+                    let segments = result.bestTranscription.segments
+                    if !segments.isEmpty {
+                        let total = segments.reduce(0.0) { $0 + Double($1.confidence) }
+                        self.transcriptionConfidence = max(0, min(1, total / Double(segments.count)))
+                    }
+                    self.lastResultWasFinal = result.isFinal
+                    self.lastRecognitionUpdate = Date()
                 }
                 if let error {
                     self.lastError = error.localizedDescription

@@ -16,6 +16,13 @@ final class MetaGlassesManager: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var cameraMasterEnabled: Bool
 
+    /// Fired when the DAT device becomes available again after having been
+    /// unavailable for a meaningful period. Meta DAT does not currently expose a
+    /// reliable public “worn/on-head” state, so this intentionally uses device
+    /// return (typically fold/unfold/reconnect) rather than pretending we can
+    /// distinguish every physical don/doff event.
+    var onGlassesBecameAvailable: (() -> Void)?
+
     private static let cameraMasterEnabledKey = "jarvis.cameraMasterEnabled"
 
     private let wearables = Wearables.shared
@@ -28,6 +35,11 @@ final class MetaGlassesManager: ObservableObject {
     private var stream: MWDATCamera.Stream?
     private let streamTokenBag = ListenerTokenBag()
 
+    private var availabilityInitialized = false
+    private var previousEligible = false
+    private var unavailableSince: Date?
+    private var lastWelcomeSignal = Date.distantPast
+
     init() {
         // Stop Camera is a master privacy switch, not merely a request to stop
         // the current DAT stream. Persist it so background/passive protocols
@@ -39,9 +51,6 @@ final class MetaGlassesManager: ObservableObject {
         // AutoDeviceSelector learns its active device asynchronously from the
         // SDK's device stream. Keep one alive for the lifetime of the manager so
         // it is already populated by the time the user taps Start Camera.
-        // Creating a fresh selector immediately before createSession() races that
-        // discovery and can throw DeviceSessionError.noEligibleDevice even when
-        // devicesStream() is already reporting the glasses.
         self.deviceSelector = AutoDeviceSelector(wearables: Wearables.shared)
         observeRegistration()
         observeDevices()
@@ -140,13 +149,8 @@ final class MetaGlassesManager: ObservableObject {
         errorMessage = nil
         streamState = "Connecting"
 
-        // The selector can take a moment to become active after returning from
-        // Meta AI or waking the glasses. Give its monitor a short window to
-        // converge instead of immediately failing with noEligibleDevice.
         if !hasEligibleDevice {
             for _ in 0..<80 where !hasEligibleDevice {
-                // Re-check the master switch during the wait so a Stop Camera tap
-                // wins even while an automatic start attempt is already pending.
                 guard cameraMasterEnabled else {
                     streamState = "Stopped"
                     return
@@ -263,10 +267,6 @@ final class MetaGlassesManager: ObservableObject {
         }
     }
 
-    /// Explicit user-facing Stop Camera. This is a persistent master kill switch:
-    /// it prevents passive vision, Known People, inventory, local perception,
-    /// recovery logic, silent scans, or any future automatic protocol from
-    /// restarting the camera until the user explicitly taps Start Camera.
     func stopStream() {
         setCameraMasterEnabled(false)
         stopStreamInternal(preserveError: false)
@@ -278,8 +278,6 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     private func stopStreamInternal(preserveError: Bool) {
-        // Detach listeners first so late SDK callbacks cannot make the UI look
-        // active again after the user has stopped the camera.
         streamTokenBag.clear()
         stream?.stop()
         camera?.stop()
@@ -341,7 +339,37 @@ final class MetaGlassesManager: ObservableObject {
             guard let self else { return }
             for await deviceID in deviceSelector.activeDeviceStream() {
                 guard !Task.isCancelled else { return }
-                hasEligibleDevice = deviceID != nil
+                let eligible = deviceID != nil
+                let now = Date()
+                hasEligibleDevice = eligible
+
+                if !availabilityInitialized {
+                    availabilityInitialized = true
+                    previousEligible = eligible
+                    if !eligible { unavailableSince = now }
+                    continue
+                }
+
+                if !eligible {
+                    if previousEligible { unavailableSince = now }
+                    previousEligible = false
+                    continue
+                }
+
+                if !previousEligible {
+                    let unavailableDuration = unavailableSince.map { now.timeIntervalSince($0) } ?? 0
+                    previousEligible = true
+                    unavailableSince = nil
+
+                    // Ignore startup settling and momentary Bluetooth flaps. A
+                    // sustained unavailable -> available transition is the best
+                    // public DAT signal currently available for “glasses returned.”
+                    if unavailableDuration >= 5,
+                       now.timeIntervalSince(lastWelcomeSignal) >= 30 {
+                        lastWelcomeSignal = now
+                        onGlassesBecameAvailable?()
+                    }
+                }
             }
         }
     }

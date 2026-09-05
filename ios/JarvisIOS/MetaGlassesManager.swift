@@ -14,6 +14,9 @@ final class MetaGlassesManager: ObservableObject {
     @Published private(set) var currentFrame: UIImage?
     @Published private(set) var capturedPhoto: Data?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var cameraMasterEnabled: Bool
+
+    private static let cameraMasterEnabledKey = "jarvis.cameraMasterEnabled"
 
     private let wearables = Wearables.shared
     private let deviceSelector: AutoDeviceSelector
@@ -26,6 +29,13 @@ final class MetaGlassesManager: ObservableObject {
     private let streamTokenBag = ListenerTokenBag()
 
     init() {
+        // Stop Camera is a master privacy switch, not merely a request to stop
+        // the current DAT stream. Persist it so background/passive protocols
+        // cannot silently reopen the camera after the user explicitly stopped it,
+        // including across an app relaunch. Only an explicit Start Camera action
+        // is allowed to clear this latch.
+        cameraMasterEnabled = UserDefaults.standard.object(forKey: Self.cameraMasterEnabledKey) as? Bool ?? true
+
         // AutoDeviceSelector learns its active device asynchronously from the
         // SDK's device stream. Keep one alive for the lifetime of the manager so
         // it is already populated by the time the user taps Start Camera.
@@ -52,7 +62,7 @@ final class MetaGlassesManager: ObservableObject {
     }
 
     func unregister() async {
-        stopStream()
+        stopStreamInternal(preserveError: false)
         errorMessage = nil
         do {
             try await wearables.startUnregistration()
@@ -98,7 +108,29 @@ final class MetaGlassesManager: ObservableObject {
         }
     }
 
+    /// Automatic/internal camera start used by passive vision, Known People,
+    /// on-device perception, recovery logic, etc. This method can never override
+    /// an explicit user Stop Camera action.
     func startStream() async {
+        guard cameraMasterEnabled else {
+            streamState = "Stopped"
+            return
+        }
+        await startStreamInternal()
+    }
+
+    /// The only operation that may clear the master Stop Camera latch.
+    /// This must be called from an explicit user Start Camera action.
+    func startStreamByUser() async {
+        setCameraMasterEnabled(true)
+        await startStreamInternal()
+    }
+
+    private func startStreamInternal() async {
+        guard cameraMasterEnabled else {
+            streamState = "Stopped"
+            return
+        }
         guard isRegistered else {
             errorMessage = "Register Jarvis with Meta AI before starting the camera."
             return
@@ -113,8 +145,18 @@ final class MetaGlassesManager: ObservableObject {
         // converge instead of immediately failing with noEligibleDevice.
         if !hasEligibleDevice {
             for _ in 0..<80 where !hasEligibleDevice {
+                // Re-check the master switch during the wait so a Stop Camera tap
+                // wins even while an automatic start attempt is already pending.
+                guard cameraMasterEnabled else {
+                    streamState = "Stopped"
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
+        }
+        guard cameraMasterEnabled else {
+            streamState = "Stopped"
+            return
         }
         guard hasEligibleDevice else {
             streamState = "Stopped"
@@ -124,6 +166,10 @@ final class MetaGlassesManager: ObservableObject {
 
         do {
             let permission = try await wearables.checkPermissionStatus(.camera)
+            guard cameraMasterEnabled else {
+                streamState = "Stopped"
+                return
+            }
             guard permission == .granted else {
                 streamState = "Stopped"
                 cameraPermissionStatus = String(describing: permission)
@@ -144,9 +190,18 @@ final class MetaGlassesManager: ObservableObject {
         )
 
         do {
+            guard cameraMasterEnabled else {
+                streamState = "Stopped"
+                return
+            }
             let session = try wearables.createSession(deviceSelector: deviceSelector)
             try session.start()
             for await state in session.stateStream() {
+                guard cameraMasterEnabled else {
+                    session.stop()
+                    streamState = "Stopped"
+                    return
+                }
                 streamState = String(describing: state)
                 if state == .started { break }
                 if state == .stopped {
@@ -154,6 +209,11 @@ final class MetaGlassesManager: ObservableObject {
                 }
             }
 
+            guard cameraMasterEnabled else {
+                session.stop()
+                streamState = "Stopped"
+                return
+            }
             guard let camera = try session.addCamera(config: config) else {
                 throw NSError(domain: "JarvisMeta", code: 2, userInfo: [NSLocalizedDescriptionKey: "The glasses camera capability is unavailable."])
             }
@@ -164,45 +224,79 @@ final class MetaGlassesManager: ObservableObject {
 
             streamTokenBag.clear()
             stream.statePublisher.listen { [weak self] state in
-                Task { @MainActor in self?.streamState = String(describing: state) }
+                Task { @MainActor in
+                    guard let self, self.cameraMasterEnabled else { return }
+                    self.streamState = String(describing: state)
+                }
             }.store(in: streamTokenBag)
             stream.videoFramePublisher.listen { [weak self] frame in
                 guard let image = frame.makeUIImage() else { return }
-                Task { @MainActor in self?.currentFrame = image }
+                Task { @MainActor in
+                    guard let self, self.cameraMasterEnabled else { return }
+                    self.currentFrame = image
+                }
             }.store(in: streamTokenBag)
             stream.errorPublisher.listen { [weak self] error in
-                Task { @MainActor in self?.errorMessage = error.localizedDescription }
+                Task { @MainActor in
+                    guard let self, self.cameraMasterEnabled else { return }
+                    self.errorMessage = error.localizedDescription
+                }
             }.store(in: streamTokenBag)
             stream.photoDataPublisher.listen { [weak self] photoData in
-                Task { @MainActor in self?.capturedPhoto = photoData.data }
+                Task { @MainActor in
+                    guard let self, self.cameraMasterEnabled else { return }
+                    self.capturedPhoto = photoData.data
+                }
             }.store(in: streamTokenBag)
+
+            guard cameraMasterEnabled else {
+                stopStreamInternal(preserveError: false)
+                return
+            }
             stream.start()
         } catch {
             streamState = "Stopped"
-            errorMessage = error.localizedDescription
-            stopStream(preserveError: true)
+            if cameraMasterEnabled {
+                errorMessage = error.localizedDescription
+            }
+            stopStreamInternal(preserveError: true)
         }
     }
 
+    /// Explicit user-facing Stop Camera. This is a persistent master kill switch:
+    /// it prevents passive vision, Known People, inventory, local perception,
+    /// recovery logic, silent scans, or any future automatic protocol from
+    /// restarting the camera until the user explicitly taps Start Camera.
     func stopStream() {
-        stopStream(preserveError: false)
+        setCameraMasterEnabled(false)
+        stopStreamInternal(preserveError: false)
     }
 
-    private func stopStream(preserveError: Bool) {
+    private func setCameraMasterEnabled(_ enabled: Bool) {
+        cameraMasterEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.cameraMasterEnabledKey)
+    }
+
+    private func stopStreamInternal(preserveError: Bool) {
+        // Detach listeners first so late SDK callbacks cannot make the UI look
+        // active again after the user has stopped the camera.
+        streamTokenBag.clear()
+        stream?.stop()
         camera?.stop()
         deviceSession?.stop()
-        streamTokenBag.clear()
         stream = nil
         camera = nil
         deviceSession = nil
         streamState = "Stopped"
         currentFrame = nil
+        capturedPhoto = nil
         if !preserveError {
             errorMessage = nil
         }
     }
 
     func capturePhoto() {
+        guard cameraMasterEnabled else { return }
         stream?.capturePhoto(format: .jpeg)
     }
 

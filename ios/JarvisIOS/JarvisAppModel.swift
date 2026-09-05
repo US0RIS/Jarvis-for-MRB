@@ -23,6 +23,7 @@ final class JarvisAppModel: ObservableObject {
 
     var frontendCommandHandler: ((String) async -> String?)?
     var offlineQueueHandler: ((String) -> Void)?
+    var offlineResponseHandler: ((String) async -> String?)?
 
     private var wakeWordTask: Task<Void, Never>?
     private var confirmationFollowUpDeadline: Date?
@@ -290,7 +291,26 @@ final class JarvisAppModel: ObservableObject {
             } catch {
                 confirmationFollowUpDeadline = nil
                 conversationalFollowUpDeadline = nil
-                if settings.offlineQueueEnabled && Self.isConnectivityError(error) {
+                if Self.isConnectivityError(error),
+                   let offlineResponseHandler,
+                   let localResponse = await offlineResponseHandler(text),
+                   !localResponse.isEmpty {
+                    if firstResponseAt == nil { firstResponseAt = Date() }
+                    modelLabel = "Apple on-device"
+                    routeReason = "PC unreachable; answered by iPhone Foundation Models"
+                    fullResponse = localResponse
+                    lastResponse = localResponse
+                    recordTurn(role: "assistant", text: localResponse, model: modelLabel)
+                    assistantRecorded = true
+                    if settings.speakResponses {
+                        if fromHandsFree { voiceStatus = "Speaking offline…" }
+                        await speechSynthesizer.speak(localResponse, preferBluetooth: settings.preferBluetoothAudio)
+                    }
+                    if fromHandsFree {
+                        conversationalFollowUpDeadline = Date().addingTimeInterval(5)
+                        voiceStatus = "Listening for follow-up…"
+                    }
+                } else if settings.offlineQueueEnabled && Self.isConnectivityError(error) {
                     offlineQueueHandler?(text)
                     let message = "The Jarvis server is unreachable, so I staged that command on this iPhone instead of losing it. Nothing will execute until you explicitly send the queued command."
                     lastResponse = message
@@ -298,7 +318,7 @@ final class JarvisAppModel: ObservableObject {
                     modelLabel = "iPhone queue"
                     if fromHandsFree {
                         voiceStatus = "Queued offline"
-                        if settings.speakResponses { await speakOneResponse(message) }
+                        if settings.speakResponses { await speechSynthesizer.speak(message, preferBluetooth: settings.preferBluetoothAudio) }
                     }
                 } else {
                     errorMessage = error.localizedDescription

@@ -11,6 +11,7 @@ import httpx
 
 from jarvis_mrb.planner_model import QUALITY_MODEL
 from jarvis_mrb.sandbox import run_python
+from jarvis_mrb.tool_repair import queue_repair
 
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 TOOLS_DIR = APP_DIR / "custom_tools"
@@ -127,8 +128,6 @@ Return Python source only."""
     if not code:
         raise ValueError("The synthesis model returned no Python source.")
 
-    # Execute once with empty arguments inside the locked-down sandbox. A valid
-    # adapter should at least emit a structurally valid request plan.
     test = run_python(code, stdin_json={"_jarvis_test": True}, timeout_seconds=6)
     if not test.ok:
         raise ValueError(f"Generated tool failed sandbox validation: {test.message}")
@@ -182,25 +181,40 @@ def _validate_plan(plan: Any, *, hosts: list[str], risk: str) -> tuple[str, str,
 
 def run(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     item = get_tool(name)
+    tool_name = str(item.get("name") or name)
     if not item.get("enabled"):
         raise ValueError(f"Custom tool {name!r} is disabled. Enable it explicitly before use.")
     code = str(item.get("code") or "")
     result = run_python(code, stdin_json=arguments, timeout_seconds=8)
     if not result.ok:
-        raise ValueError(result.message)
+        queue_repair(tool_name, result.message)
+        raise ValueError(result.message + " A sandbox-validated repair will be queued for your approval if Jarvis can produce one.")
     try:
         plan = json.loads(result.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError) as exc:
-        raise ValueError("Custom tool did not emit a valid request plan.") from exc
+        queue_repair(tool_name, "Adapter did not emit a valid JSON request plan.")
+        raise ValueError("Custom tool did not emit a valid request plan. A repair proposal has been requested.") from exc
 
     hosts = [str(value).lower() for value in item.get("allowed_hosts") or []]
     risk = str(item.get("risk") or "read")
-    method, url, headers, body = _validate_plan(plan, hosts=hosts, risk=risk)
+    try:
+        method, url, headers, body = _validate_plan(plan, hosts=hosts, risk=risk)
+    except ValueError as exc:
+        queue_repair(tool_name, str(exc))
+        raise
     try:
         with httpx.Client(timeout=httpx.Timeout(20.0, connect=3.0), follow_redirects=False) as client:
             response = client.request(method, url, headers=headers, json=body if isinstance(body, (dict, list)) else None, content=body if isinstance(body, str) else None)
     except httpx.HTTPError as exc:
+        # Network failures are usually transient, so do not rewrite an adapter for
+        # a timeout/DNS outage. Structural HTTP failures below may warrant repair.
         raise ValueError(f"Custom API request failed: {exc}") from exc
+
+    if response.status_code in {400, 404, 405, 410, 415, 422}:
+        queue_repair(
+            tool_name,
+            f"API returned HTTP {response.status_code}. Response excerpt: {response.text[:1200]}",
+        )
 
     content_type = response.headers.get("content-type", "")
     if "json" in content_type.lower():

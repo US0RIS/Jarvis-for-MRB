@@ -23,6 +23,7 @@
 		20000000000000000000000E /* PersistentPresenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000F /* PersistentPresenceController.swift */; };
 		20000000000000000000000F /* FrontendIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000011 /* FrontendIntelligence.swift */; };
 		200000000000000000000010 /* JarvisShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* JarvisShortcuts.swift */; };
+		200000000000000000000011 /* KnownPeople.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* KnownPeople.swift */; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
 		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
 /* End PBXBuildFile section */
@@ -60,6 +61,7 @@
 		100000000000000000000010 /* JarvisIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = JarvisIOS.entitlements; sourceTree = "<group>"; };
 		100000000000000000000011 /* FrontendIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontendIntelligence.swift; sourceTree = "<group>"; };
 		100000000000000000000012 /* JarvisShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisShortcuts.swift; sourceTree = "<group>"; };
+		100000000000000000000013 /* KnownPeople.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownPeople.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +101,7 @@
 				10000000000000000000000F /* PersistentPresenceController.swift */,
 				100000000000000000000011 /* FrontendIntelligence.swift */,
 				100000000000000000000012 /* JarvisShortcuts.swift */,
+				100000000000000000000013 /* KnownPeople.swift */,
 				10000000000000000000000E /* CompanionConnection.swift */,
 				10000000000000000000000D /* AmbientCuePlayer.swift */,
 				100000000000000000000009 /* MainView.swift */,
@@ -208,6 +211,7 @@
 				20000000000000000000000E /* PersistentPresenceController.swift in Sources */,
 				20000000000000000000000F /* FrontendIntelligence.swift in Sources */,
 				200000000000000000000010 /* JarvisShortcuts.swift in Sources */,
+				200000000000000000000011 /* KnownPeople.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

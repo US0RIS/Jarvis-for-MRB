@@ -284,6 +284,7 @@ final class PersistentPresenceController: ObservableObject {
 
     private func sendEnvironmentState() async {
         guard companion.isConnected else { return }
+
         let rayBanState: String
         if appModel.metaGlasses.hasEligibleDevice {
             rayBanState = appModel.metaGlasses.streamState == "Stopped" ? "connected" : "streaming"
@@ -292,31 +293,48 @@ final class PersistentPresenceController: ObservableObject {
         } else {
             rayBanState = "unavailable"
         }
+
         let whisper = appModel.settings.adaptiveWhisperEnabled
             && JarvisAudioEnvironment.noiseFloorDBFS <= appModel.settings.whisperThresholdDBFS
 
+        // Build each nested object separately. A single deeply heterogeneous
+        // dictionary literal caused the Swift compiler to hit its type-checker
+        // diagnostic failure on current Xcode/iOS 27 toolchains.
+        let audioState: [String: Any] = [
+            "ambient_dbfs": Int(round(JarvisAudioEnvironment.noiseFloorDBFS)),
+            "whisper_mode": whisper,
+            "subvocal_mode": appModel.settings.subvocalModeEnabled,
+        ]
+
+        let healthState: [String: Any]
+        if appModel.settings.healthContextEnabled {
+            healthState = healthContext.environmentPayload
+        } else {
+            healthState = ["enabled": false]
+        }
+
+        let preferenceState: [String: Any] = [
+            "proactive_threshold": appModel.settings.proactiveThreshold,
+        ]
+
+        let deviceState: [String: Any] = [
+            "ray_ban_meta": rayBanState,
+            "passive_vision": appModel.settings.passiveVisionEnabled,
+            "companion_endpoint": companion.activeServerURL,
+        ]
+
+        let activeProfile = appModel.settings.geofencedProfilesEnabled ? profileLabel : "default"
+        var environment: [String: Any] = [:]
+        environment["location"] = locationLabel
+        environment["active_profile"] = activeProfile
+        environment["project_focus"] = appModel.settings.projectFocus
+        environment["audio"] = audioState
+        environment["health"] = healthState
+        environment["preferences"] = preferenceState
+        environment["devices"] = deviceState
+
         do {
-            try await companion.sendEnvironment([
-                "location": locationLabel,
-                "active_profile": appModel.settings.geofencedProfilesEnabled ? profileLabel : "default",
-                "project_focus": appModel.settings.projectFocus,
-                "audio": [
-                    "ambient_dbfs": Int(round(JarvisAudioEnvironment.noiseFloorDBFS)),
-                    "whisper_mode": whisper,
-                    "subvocal_mode": appModel.settings.subvocalModeEnabled,
-                ],
-                "health": appModel.settings.healthContextEnabled
-                    ? healthContext.environmentPayload
-                    : ["enabled": false],
-                "preferences": [
-                    "proactive_threshold": appModel.settings.proactiveThreshold,
-                ],
-                "devices": [
-                    "ray_ban_meta": rayBanState,
-                    "passive_vision": appModel.settings.passiveVisionEnabled,
-                    "companion_endpoint": companion.activeServerURL,
-                ],
-            ])
+            try await companion.sendEnvironment(environment)
         } catch {
             companion.disconnect()
         }

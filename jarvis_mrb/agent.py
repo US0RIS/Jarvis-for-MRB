@@ -10,13 +10,17 @@ from typing import Any, Sequence
 import httpx
 
 from jarvis_mrb.briefing import generate_briefing
+from jarvis_mrb.calendar_assist import find_conflicts
 from jarvis_mrb.conversation import ConversationMessage
 from jarvis_mrb.custom_tools import list_tools as list_custom_tools
 from jarvis_mrb.custom_tools import run as run_custom_tool
 from jarvis_mrb.custom_tools import set_enabled as set_custom_tool_enabled
 from jarvis_mrb.custom_tools import synthesize as synthesize_custom_tool
+from jarvis_mrb.daily_journal import generate_message as generate_journal
 from jarvis_mrb.environment_state import get_state, set_value
 from jarvis_mrb.ephemeral_state import clear_temporary, get_all as get_temporary_state, set_temporary
+from jarvis_mrb.expense_tracker import capture_recent_receipt, export_message as export_expenses, list_recent as list_expenses
+from jarvis_mrb.fact_checker import check_claim
 from jarvis_mrb.jobs import (
     cancel_job,
     create_event_job,
@@ -26,11 +30,19 @@ from jarvis_mrb.jobs import (
 )
 from jarvis_mrb.knowledge_index import describe_search as knowledge_search
 from jarvis_mrb.knowledge_index import refresh as refresh_knowledge
+from jarvis_mrb.meeting_notes import finish as finish_meeting
+from jarvis_mrb.meeting_notes import recent as recent_meetings
+from jarvis_mrb.meeting_notes import start as start_meeting
+from jarvis_mrb.pc_context import describe as describe_pc_context
 from jarvis_mrb.permissions import decide, policy_summary, set_policy
 from jarvis_mrb.personality import full_personality_context
+from jarvis_mrb.resource_monitor import describe as describe_resources
+from jarvis_mrb.sandbox import run_command as run_sandbox_command
 from jarvis_mrb.sandbox import run_python as run_sandbox_python
 from jarvis_mrb.sandbox import status as sandbox_status
 from jarvis_mrb.spatial_memory import describe_last_seen
+from jarvis_mrb.tool_repair import apply_repair as apply_custom_repair
+from jarvis_mrb.tool_repair import list_repairs as list_custom_repairs
 from jarvis_mrb.tools.browser import browser_status, close_tab, focus_tab, list_tabs, open_site, tab_status
 from jarvis_mrb.tools.google import (
     create_calendar_event,
@@ -44,6 +56,7 @@ from jarvis_mrb.tools.google import (
 )
 from jarvis_mrb.tools.pc import app_status, close_app, launch_app, launch_minecraft, list_running_apps, minecraft_status, open_path, open_url
 from jarvis_mrb.tools.web import web_answer, web_status
+from jarvis_mrb.visual_history import copy_visible_text_to_pc_clipboard, query_recent as query_recent_vision
 from jarvis_mrb.workflow_engine import execute_workflow
 
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
@@ -106,13 +119,20 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
     if tool == "background.cancel":
         return f"cancel background task {args.get('task_id')}"
     if tool == "sandbox.python":
-        return "run generated Python inside the isolated Docker sandbox"
+        preview = " ".join(str(args.get("code") or "").split())[:240]
+        return f"run generated Python inside the isolated Docker sandbox; code begins {preview!r}"
+    if tool == "sandbox.command":
+        # The user explicitly requested full-command voice confirmation for terminal
+        # operations. Do not abbreviate this string.
+        return f"run this exact isolated terminal command: {str(args.get('command') or '').strip()!r}"
     if tool == "custom.synthesize":
         return f"synthesize and validate custom API tool {args.get('name')!r}"
     if tool == "custom.enable":
         return f"change custom tool {args.get('name')!r} enabled state"
     if tool == "custom.run":
         return f"run custom API tool {args.get('name')!r}"
+    if tool == "custom.apply_repair":
+        return f"apply the sandbox-validated repair proposal for custom tool {args.get('name')!r}"
     return f"run {tool} with {args}"
 
 
@@ -137,6 +157,8 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "pc.list_running_apps": return _result(list_running_apps(int(args.get("limit") or 30)))
     if tool == "pc.open_url": return _result(open_url(str(args.get("url") or "")))
     if tool == "pc.open_path": return _result(open_path(str(args.get("path") or "")))
+    if tool == "pc.context": return AgentReply(True, describe_pc_context())
+    if tool == "system.resources": return AgentReply(True, describe_resources())
 
     if tool == "google.status": return _result(google_status())
     if tool == "contacts.resolve": return _result(resolve_contact(str(args.get("query") or "")))
@@ -161,6 +183,8 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
             start=str(args.get("start") or "").strip() or None,
             end=str(args.get("end") or "").strip() or None,
         ))
+    if tool == "calendar.conflicts":
+        return AgentReply(True, find_conflicts(int(args.get("days") or 7)))
     if tool == "calendar.create":
         return _result(create_calendar_event(
             str(args.get("summary") or ""),
@@ -172,6 +196,51 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "web.status": return _result(web_status())
     if tool == "web.search":
         return _result(web_answer(str(args.get("query") or ""), num=int(args.get("num") or 5)))
+
+    if tool == "vision.recall":
+        try:
+            answer = query_recent_vision(
+                str(args.get("query") or "What was visible just before now?"),
+                seconds=float(args.get("seconds") or 30),
+                max_frames=int(args.get("max_frames") or 6),
+            )
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        return AgentReply(True, answer)
+    if tool == "vision.ocr_clipboard":
+        try:
+            return AgentReply(True, copy_visible_text_to_pc_clipboard())
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+
+    if tool == "expense.capture":
+        try:
+            return AgentReply(True, capture_recent_receipt())
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+    if tool == "expense.list":
+        return AgentReply(True, list_expenses(int(args.get("limit") or 10)))
+    if tool == "expense.export":
+        return AgentReply(True, export_expenses())
+
+    if tool == "fact.check":
+        return AgentReply(True, check_claim(str(args.get("claim") or args.get("query") or "")))
+    if tool == "journal.generate":
+        try:
+            return AgentReply(True, generate_journal())
+        except Exception as exc:
+            return AgentReply(False, f"Daily journal generation failed: {exc}")
+
+    if tool == "meeting.start":
+        item = start_meeting(str(args.get("title") or ""))
+        return AgentReply(True, f"Meeting-note session {item['id']} started. Recording/transcription must remain explicitly enabled in the companion app.")
+    if tool == "meeting.finish":
+        try:
+            return AgentReply(True, finish_meeting(int(args.get("meeting_id") or 0)))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+    if tool == "meeting.list":
+        return AgentReply(True, recent_meetings(int(args.get("limit") or 5)))
 
     if tool == "jobs.list": return _result(list_jobs())
     if tool == "jobs.create_time": return _result(create_time_job(str(args.get("when") or ""), str(args.get("command") or "")))
@@ -243,6 +312,12 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
             timeout_seconds=int(args.get("timeout_seconds") or 8),
         )
         return AgentReply(result.ok, result.message)
+    if tool == "sandbox.command":
+        result = run_sandbox_command(
+            str(args.get("command") or ""),
+            timeout_seconds=int(args.get("timeout_seconds") or 8),
+        )
+        return AgentReply(result.ok, result.message)
 
     if tool == "custom.list":
         tools = list_custom_tools()
@@ -278,6 +353,20 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
         body = result.get("body")
         rendered = json.dumps(body, ensure_ascii=False) if not isinstance(body, str) else body
         return AgentReply(True, f"Custom tool returned HTTP {result.get('status_code')}. {rendered[:2500]}")
+    if tool == "custom.repairs":
+        repairs = list_custom_repairs()
+        if not repairs:
+            return AgentReply(True, "There are no queued custom-tool repair proposals.")
+        return AgentReply(True, "Queued repair proposals: " + "; ".join(
+            f"{item.get('name')} ({'validated' if item.get('validated') else 'not validated'}): {item.get('error')}"
+            for item in repairs[:8]
+        ))
+    if tool == "custom.apply_repair":
+        try:
+            item = apply_custom_repair(str(args.get("name") or ""))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        return AgentReply(True, f"Applied the validated repair to custom tool {item['name']}. Its enabled state and security policy were left unchanged.")
 
     if tool.startswith("background."):
         from jarvis_mrb.background_workers import cancel, get_task, list_tasks, submit
@@ -368,6 +457,10 @@ def _fast_path(text: str) -> AgentReply | None:
     if n in {"list tabs", "show tabs", "what tabs are open", "what tabs are open?"}: return execute_tool("browser.list_tabs", {})
     if n in {"google status", "gmail status", "calendar status", "is gmail connected", "is gmail connected?"}: return execute_tool("google.status", {})
     if n in {"web search status", "serper status", "is web search configured", "is web search configured?"}: return execute_tool("web.status", {})
+    if n in {"what's on my pc", "what is on my pc", "what am i working on on my pc", "what was i doing on my pc"}:
+        return execute_tool("pc.context", {})
+    if n in {"system resources", "resource status", "gpu status", "vram status", "how is the pc doing", "how's the pc doing"}:
+        return execute_tool("system.resources", {})
 
     for pattern in (
         r"(?:search|search the web|search online) (?:the web |online )?(?:for )?(.+)",
@@ -391,6 +484,40 @@ def _fast_path(text: str) -> AgentReply | None:
     m = re.fullmatch(r"where (?:are|is) (?:my |the )?(.+?)[?.!]?", n)
     if m and any(word in m.group(1) for word in ("keys", "wallet", "glasses", "remote", "phone", "tool", "screwdriver")):
         return execute_tool("spatial.find", {"object": m.group(1).strip()})
+
+    if n in {"what was on that sign", "what did that sign say", "what was on the sign", "what did the sign say"}:
+        return execute_tool("vision.recall", {"query": "What did the passing sign say? Quote only text that is actually legible.", "seconds": 30, "max_frames": 6})
+    if n in {"what did i just see", "what was i just looking at", "what was that thing i just saw"}:
+        return execute_tool("vision.recall", {"query": "What was visually relevant in the preceding few seconds?", "seconds": 30, "max_frames": 6})
+    if n in {"copy that text to my clipboard", "copy the text i'm looking at", "copy what i'm looking at to my clipboard", "ocr this to my clipboard"}:
+        return execute_tool("vision.ocr_clipboard", {})
+
+    if n in {"log this receipt", "capture this receipt", "track this receipt", "add this receipt to expenses"}:
+        return execute_tool("expense.capture", {})
+    if n in {"show my expenses", "list my expenses", "recent expenses"}:
+        return execute_tool("expense.list", {"limit": 10})
+    if n in {"export my expenses", "export expenses", "update the expense spreadsheet"}:
+        return execute_tool("expense.export", {})
+
+    if n in {"check my calendar for conflicts", "check calendar conflicts", "do i have any calendar conflicts", "find calendar conflicts"}:
+        return execute_tool("calendar.conflicts", {"days": 7})
+
+    if n in {"write today's journal", "generate today's journal", "generate my daily journal", "write my daily journal"}:
+        return execute_tool("journal.generate", {})
+
+    m = re.fullmatch(r"(?:fact check|check) (?:this claim: )?(.+)", n)
+    if m and len(m.group(1).split()) >= 3:
+        return execute_tool("fact.check", {"claim": m.group(1).strip()})
+
+    if n in {"list custom tool repairs", "show repair proposals", "what repairs are waiting"}:
+        return execute_tool("custom.repairs", {})
+    m = re.fullmatch(r"apply (?:the )?repair (?:for )?([a-z0-9_.-]+)", n)
+    if m:
+        return execute_tool("custom.apply_repair", {"name": m.group(1)})
+
+    m = re.fullmatch(r"run (?:this )?(?:sandbox|isolated) (?:terminal )?command[: ]+(.+)", text.strip(), flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        return execute_tool("sandbox.command", {"command": m.group(1).strip(), "timeout_seconds": 8})
 
     if n in {"refresh unified memory", "refresh knowledge index", "index my email and calendar"}:
         return execute_tool("knowledge.refresh", {})
@@ -449,35 +576,47 @@ When the user wants an action, private-data lookup, current public information, 
 Tools:
 smart.status {{name}}; smart.open {{name}}; smart.close {{name}};
 browser.status {{}}; browser.list_tabs {{}}; browser.tab_status {{query}}; browser.close_tab {{query}}; browser.focus_tab {{query}}; browser.open_site {{query}};
-pc.app_status {{name}}; pc.launch_app {{name}}; pc.close_app {{name}}; pc.list_running_apps {{limit}}; pc.open_url {{url}}; pc.open_path {{path}};
+pc.app_status {{name}}; pc.launch_app {{name}}; pc.close_app {{name}}; pc.list_running_apps {{limit}}; pc.open_url {{url}}; pc.open_path {{path}}; pc.context {{}}; system.resources {{}};
 pc.minecraft_status {{}}; pc.launch_minecraft {{}}; pc.ensure_minecraft_running {{}};
 google.status {{}}; contacts.resolve {{query}}; gmail.query {{query,limit}}; gmail.send {{recipient,body,subject}};
-calendar.list {{days,limit}}; calendar.recent {{days_back}}; calendar.query {{direction,days,limit,query,start,end}}; calendar.create {{summary,start,end,description}};
+calendar.list {{days,limit}}; calendar.recent {{days_back}}; calendar.query {{direction,days,limit,query,start,end}}; calendar.conflicts {{days}}; calendar.create {{summary,start,end,description}};
 web.status {{}}; web.search {{query,num}};
+vision.recall {{query,seconds,max_frames}}; vision.ocr_clipboard {{}};
+expense.capture {{}}; expense.list {{limit}}; expense.export {{}}; fact.check {{claim}}; journal.generate {{}};
+meeting.start {{title}}; meeting.finish {{meeting_id}}; meeting.list {{limit}};
 knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}};
 briefing.generate {{}};
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_recurring {{when,command,recurrence}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}};
 background.submit {{prompt}}; background.list {{limit}}; background.status {{task_id}}; background.cancel {{task_id}};
 workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
-sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}};
-custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}.
+sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
+custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
 
 Routing rules:
 - web.search: current/recent/public information. Make the query self-contained; Jarvis refines conversational searches automatically.
+- vision.recall: answer a question about something visible in the previous 30 seconds, such as a passing sign. The image cache is RAM-only and expires automatically.
+- vision.ocr_clipboard: only when the user explicitly asks to copy visible text/error code/serial number to the PC clipboard.
+- expense.capture: user explicitly wants to log a visible receipt/invoice. It stores structured local data and updates a CSV.
+- pc.context: hand off active Windows application/window and browser-tab context. Never imply the full document contents were read unless a content-reading tool supplied them.
+- system.resources: CPU/RAM/GPU/VRAM/background-queue status.
+- calendar.conflicts: identify overlaps and propose open times. Never move/decline meetings without the existing write confirmation path.
+- fact.check: compare a concrete claim against the user's local indexed records. Describe conflicts as possible contradictions, not absolute truth.
+- meeting.start/finish: only when the user explicitly asks to start or stop local meeting notes. Do not start background transcription merely because a meeting is present on the calendar.
 - knowledge.search: natural-language search across indexed mail, calendar, local notes, and prior conversation memory. Use this when the user asks to find something across their own data without naming one app.
-- spatial.find: where an object was last seen by passive vision.
+- spatial.find: where an object was last seen by passive vision. This is last-seen context, not reliable turn-by-turn navigation.
 - briefing.generate: a concise current briefing from calendar, unread mail, weather/news, and background work.
 - workflow.run: user asks for a multi-step goal that needs several tools in sequence. The DAG engine may parallelize safe reads. Existing permission policy still applies to every node; do not promise confirmation-free external/destructive writes.
 - background.submit: long analysis/work that should continue while the live voice channel remains available.
 - state.temp_set: temporary focus/context that should expire automatically; use a sensible TTL in minutes. Use state.update only for durable context.
-- sandbox.python and custom.* are security-sensitive. Never use them unless the user explicitly asks to run code, create a tool, or use a previously enabled custom tool.
-- Custom API tool synthesis is sandboxed and allow-host constrained. Generated tools start disabled and require explicit enablement.
+- sandbox.python, sandbox.command, and custom.* are security-sensitive. Never use them unless the user explicitly asks. sandbox.command runs inside the locked-down Docker container, never the Windows host shell, and the confirmation reads the exact command aloud.
+- Custom API tool synthesis is sandboxed and allow-host constrained. Generated tools start disabled. If an enabled adapter fails structurally, Jarvis may queue a sandbox-validated repair proposal, but custom.apply_repair always requires explicit confirmation.
 - Gmail read/check/find/search/review received mail -> gmail.query. Latest inbox email: query='in:inbox', limit=1. Never request more than 10.
 - Gmail send -> gmail.send. Sending is protected by confirmation and the exact backend allowlist.
 - Calendar past -> calendar.query direction='past'; future -> direction='future'; last -> calendar.recent.
 - At a specific future time -> jobs.create_time. Repeating daily/weekday/weekly -> jobs.create_recurring. Home arrival -> jobs.create_event event='home_arrival'.
 - Reality-check infeasible or contradictory requests before selecting an action. If there is no feasible safe action, use tool=null and explain briefly.
+- If speech is unclear and the immediately preceding exchange does not resolve it unambiguously, ask one short clarification. Do not resurrect an older unrelated topic simply because it appears elsewhere in history.
 Return one JSON object only: {{"tool":"name or null","arguments":{{}},"response":"..."}}.
 """
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]

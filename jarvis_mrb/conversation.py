@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,6 +11,29 @@ APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 DB_PATH = APP_DIR / "conversation.sqlite3"
 DEFAULT_HISTORY_MESSAGES = 20
 MAX_STORED_MESSAGES_PER_SESSION = 200
+
+# Older conversation remains durable, but it should not be placed in every prompt.
+# Small local models are especially prone to "topic gravity": when current speech is
+# imperfect or underspecified, an old concrete topic can become the model's default
+# interpretation. Jarvis therefore supplies only the immediately preceding exchange
+# unless the user explicitly signals that an older turn matters.
+_EXTENDED_CONTEXT_PATTERNS = (
+    r"\bremember\b",
+    r"\brecall\b",
+    r"\bearlier\b",
+    r"\bprevious(?:ly)?\b",
+    r"\bbefore\b",
+    r"\blast time\b",
+    r"\bback to\b",
+    r"\bgo back to\b",
+    r"\b(?:a|the) few (?:turns|prompts|messages) ago\b",
+    r"\b\d+ (?:turns|prompts|messages) ago\b",
+    r"\b(?:you|we|i) (?:said|mentioned|told|discussed|talked|looked|worked)\b",
+    r"\bwhat (?:did|was|were) (?:you|we|i)\b",
+    r"\b(?:first|second|third|fourth|fifth|other|former|latter) (?:one|thing|option|idea|point)\b",
+    r"\bthe one (?:you|we|i)\b",
+    r"\bwhich one (?:did|was|were)\b",
+)
 
 
 @dataclass(frozen=True)
@@ -59,7 +83,7 @@ def append_message(session_id: str | None, role: str, content: str) -> None:
             (sid, role, text[:12000], datetime.now().astimezone().isoformat()),
         )
         # Keep enough durable history for continuity without letting the database
-        # grow forever. The model only receives the most recent window.
+        # grow forever. The model only receives a selected recent window.
         conn.execute(
             """
             DELETE FROM conversation_messages
@@ -96,6 +120,31 @@ def recent_messages(
         ConversationMessage(role=str(row["role"]), content=str(row["content"]))
         for row in reversed(rows)
     ]
+
+
+def requests_extended_context(query: str) -> bool:
+    """Return true only when the current wording explicitly reaches farther back.
+
+    Ordinary follow-ups still receive the immediately preceding user/assistant
+    exchange, which is enough for pronouns such as "it" or "that". Wider history is
+    reserved for explicit historical references, preventing an unrelated older topic
+    from becoming the fallback interpretation of a noisy speech transcript.
+    """
+    normalized = " ".join((query or "").lower().split())
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in _EXTENDED_CONTEXT_PATTERNS)
+
+
+def contextual_messages(
+    session_id: str | None,
+    query: str,
+    *,
+    immediate_limit: int = 2,
+    extended_limit: int = 12,
+) -> list[ConversationMessage]:
+    limit = extended_limit if requests_extended_context(query) else immediate_limit
+    return recent_messages(session_id, limit=limit)
 
 
 def clear_session(session_id: str | None) -> None:

@@ -161,6 +161,23 @@ final class PersistentPresenceController: ObservableObject {
         )
     }
 
+    private var usingRemotePath: Bool {
+        guard !companion.activeServerURL.isEmpty else { return false }
+        return companion.activeServerURL != appModel.settings.baseURL
+    }
+
+    private var conversationActive: Bool {
+        if appModel.isSending || appModel.speechSynthesizer.isSpeaking { return true }
+        let activeStatuses = [
+            "Listening for command…",
+            "Listening for follow-up…",
+            "Say confirm or cancel",
+            "Thinking…",
+            "Speaking…",
+        ]
+        return activeStatuses.contains(appModel.voiceStatus)
+    }
+
     func start() async {
         guard !started else { return }
         started = true
@@ -199,7 +216,7 @@ final class PersistentPresenceController: ObservableObject {
             try? await Task.sleep(for: .milliseconds(450))
         }
         guard let frame = appModel.metaGlasses.currentFrame,
-              let jpeg = Self.sampledJPEG(from: frame) else {
+              let jpeg = Self.sampledJPEG(from: frame, maxDimension: 640, quality: 0.45) else {
             visionStatus = "No glasses frame available"
             return
         }
@@ -237,7 +254,9 @@ final class PersistentPresenceController: ObservableObject {
                     : "Connected over Tailscale"
                 await sendEnvironmentState()
             }
-            try? await Task.sleep(for: .seconds(companion.isConnected ? 10 : 2))
+            // Ambient state now drives PC audio damping and other near-real-time
+            // behavior, so update it more frequently than the old 10-second loop.
+            try? await Task.sleep(for: .seconds(companion.isConnected ? 2 : 2))
         }
     }
 
@@ -264,11 +283,19 @@ final class PersistentPresenceController: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
                 continue
             }
+
+            let throttled = usingRemotePath && appModel.settings.adaptiveBandwidthEnabled
+            let maxDimension: CGFloat = throttled ? 384 : 512
+            let quality: CGFloat = throttled ? 0.26 : 0.35
+            let interval: Duration = throttled ? .seconds(3) : .seconds(1)
+
             if let frame = appModel.metaGlasses.currentFrame,
-               let jpeg = Self.sampledJPEG(from: frame) {
+               let jpeg = Self.sampledJPEG(from: frame, maxDimension: maxDimension, quality: quality) {
                 do {
                     try await companion.sendFrame(jpeg)
-                    if visionStatus == "Starting glasses camera" || visionStatus == "Waiting for frame" {
+                    if throttled {
+                        visionStatus = "Remote • bandwidth-saving sampling"
+                    } else if visionStatus == "Starting glasses camera" || visionStatus == "Waiting for frame" {
                         visionStatus = "Frame sent to PC"
                     }
                 } catch {
@@ -278,7 +305,7 @@ final class PersistentPresenceController: ObservableObject {
             } else {
                 visionStatus = "Waiting for frame"
             }
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: interval)
         }
     }
 
@@ -297,13 +324,11 @@ final class PersistentPresenceController: ObservableObject {
         let whisper = appModel.settings.adaptiveWhisperEnabled
             && JarvisAudioEnvironment.noiseFloorDBFS <= appModel.settings.whisperThresholdDBFS
 
-        // Build each nested object separately. A single deeply heterogeneous
-        // dictionary literal caused the Swift compiler to hit its type-checker
-        // diagnostic failure on current Xcode/iOS 27 toolchains.
         let audioState: [String: Any] = [
             "ambient_dbfs": Int(round(JarvisAudioEnvironment.noiseFloorDBFS)),
             "whisper_mode": whisper,
             "subvocal_mode": appModel.settings.subvocalModeEnabled,
+            "conversation_active": conversationActive,
         ]
 
         let healthState: [String: Any]
@@ -315,12 +340,16 @@ final class PersistentPresenceController: ObservableObject {
 
         let preferenceState: [String: Any] = [
             "proactive_threshold": appModel.settings.proactiveThreshold,
+            "smart_audio_damping": appModel.settings.smartAudioDampingEnabled,
+            "daily_journal": appModel.settings.dailyJournalEnabled,
+            "adaptive_bandwidth": appModel.settings.adaptiveBandwidthEnabled,
         ]
 
         let deviceState: [String: Any] = [
             "ray_ban_meta": rayBanState,
             "passive_vision": appModel.settings.passiveVisionEnabled,
             "companion_endpoint": companion.activeServerURL,
+            "remote_transport": usingRemotePath,
         ]
 
         let activeProfile = appModel.settings.geofencedProfilesEnabled ? profileLabel : "default"
@@ -378,7 +407,7 @@ final class PersistentPresenceController: ObservableObject {
         }
 
         if appModel.settings.ambientCuesEnabled,
-           ["cue", "proactive_alert", "background_complete", "background_failed"].contains(type) {
+           ["cue", "proactive_alert", "background_complete", "background_failed", "meeting_complete"].contains(type) {
             cuePlayer.play(cue, preferBluetooth: appModel.settings.preferBluetoothAudio)
         }
 
@@ -401,7 +430,7 @@ final class PersistentPresenceController: ObservableObject {
             default: break
             }
 
-        case "proactive_alert", "background_complete", "background_failed":
+        case "proactive_alert", "background_complete", "background_failed", "meeting_complete":
             guard !message.isEmpty else { return }
             lastProactiveMessage = message
             if appModel.settings.proactiveAnnouncements {
@@ -470,14 +499,17 @@ final class PersistentPresenceController: ObservableObject {
         }
     }
 
-    private static func sampledJPEG(from image: UIImage) -> Data? {
+    private static func sampledJPEG(
+        from image: UIImage,
+        maxDimension: CGFloat,
+        quality: CGFloat
+    ) -> Data? {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return nil }
-        let maxDimension: CGFloat = 512
         let scale = min(1, maxDimension / max(size.width, size.height))
         let target = CGSize(width: max(1, size.width * scale), height: max(1, size.height * scale))
         let renderer = UIGraphicsImageRenderer(size: target)
         let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
-        return resized.jpegData(compressionQuality: 0.35)
+        return resized.jpegData(compressionQuality: quality)
     }
 }

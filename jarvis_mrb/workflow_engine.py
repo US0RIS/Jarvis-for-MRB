@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import httpx
 
+from jarvis_mrb.event_bus import emit_cue
 from jarvis_mrb.permissions import decide
 from jarvis_mrb.planner_model import QUALITY_MODEL
 
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 
-# Deliberately excludes arbitrary shell/code execution and workflow recursion.
 _ALLOWED_NODE_TOOLS = {
     "smart.status", "smart.open", "smart.close",
     "browser.status", "browser.list_tabs", "browser.tab_status", "browser.focus_tab", "browser.open_site", "browser.close_tab",
@@ -64,6 +65,7 @@ Allowed tools: {tools}
 Rules:
 - Use no more than 8 nodes.
 - Use explicit dependencies. Independent read-only lookups may have no dependency and can run in parallel.
+- A dependent argument may reference an earlier node's returned message with the exact placeholder ${{n1.message}}. Example: {{"body":"Summary: ${{n1.message}}"}}. Only reference nodes listed in depends_on.
 - Never invent a tool.
 - Do not include a write action unless the user's goal actually requires it.
 - Prefer read-only gathering before writes.
@@ -116,13 +118,17 @@ def _validate_plan(plan: dict[str, Any]) -> None:
         if not isinstance(deps, list):
             raise ValueError(f"Workflow node {node_id} depends_on must be a list.")
         ids.add(node_id)
+
     for raw in nodes:
         node_id = str(raw["id"])
-        for dep in raw.get("depends_on") or []:
-            if str(dep) not in ids or str(dep) == node_id:
+        deps = {str(dep) for dep in raw.get("depends_on") or []}
+        for dep in deps:
+            if dep not in ids or dep == node_id:
                 raise ValueError(f"Workflow node {node_id} has an invalid dependency {dep!r}.")
+        references = set(re.findall(r"\$\{([A-Za-z0-9_-]+)\.message\}", json.dumps(raw.get("arguments") or {})))
+        if not references <= deps:
+            raise ValueError(f"Workflow node {node_id} references a node that is not in depends_on.")
 
-    # Kahn cycle check.
     remaining = {str(node["id"]): {str(dep) for dep in node.get("depends_on") or []} for node in nodes}
     resolved: set[str] = set()
     while remaining:
@@ -134,12 +140,30 @@ def _validate_plan(plan: dict[str, Any]) -> None:
             remaining.pop(node_id, None)
 
 
+def _resolve_value(value: Any, completed: dict[str, dict[str, Any]]) -> Any:
+    if isinstance(value, str):
+        def replace(match: re.Match[str]) -> str:
+            node_id = match.group(1)
+            return str((completed.get(node_id) or {}).get("message") or "")
+        return re.sub(r"\$\{([A-Za-z0-9_-]+)\.message\}", replace, value)
+    if isinstance(value, list):
+        return [_resolve_value(item, completed) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _resolve_value(item, completed) for key, item in value.items()}
+    return value
+
+
+def _resolved_arguments(node: dict[str, Any], completed: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return dict(_resolve_value(dict(node.get("arguments") or {}), completed))
+
+
 def execute_workflow(
     goal: str,
     *,
     executor: Callable[[str, dict[str, Any]], Any],
 ) -> WorkflowResult:
     plan = plan_workflow(goal)
+    emit_cue("workflow_started")
     nodes = {str(node["id"]): node for node in plan["nodes"]}
     completed: dict[str, dict[str, Any]] = {}
     failed = False
@@ -159,9 +183,11 @@ def execute_workflow(
         serial_ready = [node for node in ready if node not in read_ready]
 
         if read_ready:
+            # All dependencies for this layer are already complete, so the
+            # resolved argument snapshot is stable while these safe reads run.
             with ThreadPoolExecutor(max_workers=min(4, len(read_ready)), thread_name_prefix="jarvis-dag") as pool:
                 futures = {
-                    pool.submit(executor, str(node["tool"]), dict(node.get("arguments") or {})): node
+                    pool.submit(executor, str(node["tool"]), _resolved_arguments(node, completed)): node
                     for node in read_ready
                 }
                 for future in as_completed(futures):
@@ -181,7 +207,7 @@ def execute_workflow(
         for node in serial_ready:
             node_id = str(node["id"])
             try:
-                reply = executor(str(node["tool"]), dict(node.get("arguments") or {}))
+                reply = executor(str(node["tool"]), _resolved_arguments(node, completed))
                 ok = bool(getattr(reply, "ok", False))
                 message = str(getattr(reply, "message", reply))
             except Exception as exc:

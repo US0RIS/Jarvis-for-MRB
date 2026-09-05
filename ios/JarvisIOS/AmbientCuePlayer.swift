@@ -5,9 +5,36 @@ import Foundation
 final class AmbientCuePlayer {
     private let audioRouteManager: AudioRouteManager
     private var player: AVAudioPlayer?
+    private var currentCue = ""
+    private var thinkingTask: Task<Void, Never>?
 
     init(audioRouteManager: AudioRouteManager) {
         self.audioRouteManager = audioRouteManager
+    }
+
+    func startThinking(preferBluetooth: Bool) {
+        guard thinkingTask == nil else { return }
+        thinkingTask = Task { [weak self] in
+            // Do not chirp for genuinely instant deterministic actions. If the
+            // request is still silent after this delay, begin a very quiet pulse.
+            try? await Task.sleep(for: .milliseconds(280))
+            guard let self, !Task.isCancelled else { return }
+
+            while !Task.isCancelled {
+                self.play("thinking", preferBluetooth: preferBluetooth)
+                try? await Task.sleep(for: .milliseconds(760))
+            }
+        }
+    }
+
+    func stopThinking() {
+        thinkingTask?.cancel()
+        thinkingTask = nil
+        if currentCue == "thinking" {
+            player?.stop()
+            player = nil
+            currentCue = ""
+        }
     }
 
     func play(_ cue: String, preferBluetooth: Bool) {
@@ -18,22 +45,34 @@ final class AmbientCuePlayer {
         }
 
         let notes: [(Double, Double)]
+        let volume: Float
         switch cue {
+        case "thinking":
+            // Short, low-volume two-note pulse. It repeats while the server is
+            // waiting for model/tool output and stops before speech begins.
+            notes = [(470, 0.055), (560, 0.065)]
+            volume = 0.18
         case "task_complete":
             notes = [(660, 0.10), (880, 0.13)]
+            volume = 0.45
         case "task_started":
             notes = [(520, 0.10)]
+            volume = 0.45
         case "warning":
             notes = [(430, 0.11), (350, 0.14)]
+            volume = 0.45
         case "error":
             notes = [(300, 0.12), (260, 0.16)]
+            volume = 0.45
         default:
             notes = [(740, 0.10)]
+            volume = 0.40
         }
 
         guard let data = Self.makeWAV(notes: notes) else { return }
+        currentCue = cue
         player = try? AVAudioPlayer(data: data)
-        player?.volume = 0.45
+        player?.volume = volume
         player?.prepareToPlay()
         player?.play()
     }

@@ -25,6 +25,8 @@
 		200000000000000000000010 /* JarvisShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* JarvisShortcuts.swift */; };
 		200000000000000000000011 /* KnownPeople.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* KnownPeople.swift */; };
 		200000000000000000000012 /* FeatureGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* FeatureGuide.swift */; };
+		200000000000000000000013 /* LocalAudioMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* LocalAudioMemory.swift */; };
+		200000000000000000000014 /* LocalPowerFeatures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* LocalPowerFeatures.swift */; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
 		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
 /* End PBXBuildFile section */
@@ -64,6 +66,8 @@
 		100000000000000000000012 /* JarvisShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisShortcuts.swift; sourceTree = "<group>"; };
 		100000000000000000000013 /* KnownPeople.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownPeople.swift; sourceTree = "<group>"; };
 		100000000000000000000014 /* FeatureGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGuide.swift; sourceTree = "<group>"; };
+		100000000000000000000015 /* LocalAudioMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAudioMemory.swift; sourceTree = "<group>"; };
+		100000000000000000000016 /* LocalPowerFeatures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPowerFeatures.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -105,6 +109,8 @@
 				100000000000000000000012 /* JarvisShortcuts.swift */,
 				100000000000000000000013 /* KnownPeople.swift */,
 				100000000000000000000014 /* FeatureGuide.swift */,
+				100000000000000000000015 /* LocalAudioMemory.swift */,
+				100000000000000000000016 /* LocalPowerFeatures.swift */,
 				10000000000000000000000E /* CompanionConnection.swift */,
 				10000000000000000000000D /* AmbientCuePlayer.swift */,
 				100000000000000000000009 /* MainView.swift */,
@@ -150,7 +156,7 @@
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		001000000000000000000001 /* Project object */ = {
+		001000000000000000000001 = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
@@ -216,6 +222,8 @@
 				200000000000000000000010 /* JarvisShortcuts.swift in Sources */,
 				200000000000000000000011 /* KnownPeople.swift in Sources */,
 				200000000000000000000012 /* FeatureGuide.swift in Sources */,
+				200000000000000000000013 /* LocalAudioMemory.swift in Sources */,
+				200000000000000000000014 /* LocalPowerFeatures.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

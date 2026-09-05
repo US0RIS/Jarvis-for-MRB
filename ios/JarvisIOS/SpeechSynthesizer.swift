@@ -48,6 +48,9 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     private func resolveWhisper(_ override: Bool?) -> Bool {
         if let override { return override }
         let defaults = UserDefaults.standard
+        let forcedUntil = defaults.double(forKey: "jarvis.forceWhisperUntil")
+        if forcedUntil > Date().timeIntervalSince1970 { return true }
+        if forcedUntil > 0 { defaults.removeObject(forKey: "jarvis.forceWhisperUntil") }
         let enabled = defaults.object(forKey: "jarvis.adaptiveWhisperEnabled") as? Bool ?? true
         let threshold = defaults.object(forKey: "jarvis.whisperThresholdDBFS") as? Double ?? -42.0
         return enabled && JarvisAudioEnvironment.noiseFloorDBFS <= threshold
@@ -168,10 +171,8 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
             bargeInRequest = nil
             return
         }
-        // Bluetooth HFP can renegotiate the node format while output begins.
-        // Supplying a previously-read AVAudioFormat can therefore crash inside
-        // AVAudioNode.installTap with an Objective-C format-mismatch exception.
-        // Let AVAudioEngine bind the tap to the live native format instead.
+        // HFP routes can renegotiate while output begins. Bind the tap to the
+        // node's current native format rather than a stale format snapshot.
         input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in request.append(buffer) }
         bargeInTapInstalled = true
         bargeInAudioEngine.prepare()

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct MainView: View {
@@ -406,11 +407,14 @@ final class MeetingCaptureController: ObservableObject {
     func stop() async {
         guard isActive, !isStopping else { return }
         isStopping = true
+        let wasPaused = isPaused
         isActive = false
-        isPaused = false
         captureTask?.cancel()
         captureTask = nil
-        await persistCurrentChunk()
+        if !wasPaused {
+            await persistCurrentChunk()
+        }
+        isPaused = false
         _ = saveLocalTranscriptSnapshot()
 
         if syncPending || meetingID == nil {
@@ -515,7 +519,7 @@ final class MeetingCaptureController: ObservableObject {
             let fm = FileManager.default
             let base = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             let folder = base.appendingPathComponent("JarvisMeetingNotes", isDirectory: true)
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: nil)
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd-HHmmss"
             let url = folder.appendingPathComponent("meeting-\(formatter.string(from: Date())).txt")

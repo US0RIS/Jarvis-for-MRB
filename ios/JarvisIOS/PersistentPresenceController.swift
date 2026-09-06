@@ -128,7 +128,6 @@ final class PersistentPresenceController: ObservableObject {
     private var pendingAnnouncements: [(String, String)] = []
     private var lastObservedResponse = ""
     private var responseCompletionPending = false
-    private var welcomeInProgress = false
 
     init(appModel: JarvisAppModel) {
         self.appModel = appModel
@@ -141,11 +140,10 @@ final class PersistentPresenceController: ObservableObject {
             }
         }
 
-        appModel.metaGlasses.onGlassesBecameAvailable = { [weak self] in
-            Task { @MainActor in
-                await self?.welcomeBackForGlassesReturn()
-            }
-        }
+        // Glasses-return greetings intentionally are not owned here. The frontend
+        // operations layer has the one authoritative WelcomeBackCoordinator. Keeping
+        // the callback out of Persistent Presence removes the startup race where two
+        // different controllers could greet from the same DAT availability change.
 
         appModel.geofenceManager.onHomeStateChanged = { [weak self] isHome in
             Task { @MainActor in
@@ -275,38 +273,6 @@ final class PersistentPresenceController: ObservableObject {
             }
 
             try? await Task.sleep(for: .milliseconds(100))
-        }
-    }
-
-    private func welcomeBackForGlassesReturn() async {
-        guard started,
-              !welcomeInProgress,
-              appModel.settings.speakResponses,
-              !appModel.isSending,
-              !appModel.speechSynthesizer.isSpeaking else { return }
-
-        welcomeInProgress = true
-        defer { welcomeInProgress = false }
-
-        // Give Bluetooth HFP a moment to settle after the DAT device returns so
-        // the greeting is more likely to route through the glasses themselves.
-        try? await Task.sleep(for: .milliseconds(650))
-        guard appModel.metaGlasses.hasEligibleDevice else { return }
-
-        let wasHandsFree = appModel.handsFreeEnabled
-        if wasHandsFree {
-            appModel.stopWakeWordMode()
-        } else if appModel.isListening || appModel.speechRecognizer.isActive {
-            _ = appModel.speechRecognizer.stopListening()
-            appModel.isListening = false
-        }
-
-        appModel.audioRouteManager.refresh()
-        await appModel.speakFrontendResponseIfEnabled("Welcome back, sir.")
-
-        if wasHandsFree {
-            try? await Task.sleep(for: .milliseconds(180))
-            await appModel.startWakeWordMode()
         }
     }
 

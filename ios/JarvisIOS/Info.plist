@@ -68,6 +68,16 @@
     <string>Jarvis connects securely to your Jarvis agent running on your computer.</string>
     <key>NSHealthShareUsageDescription</key>
     <string>Jarvis can optionally read recent Apple Health heart rate, HRV, and sleep data as private assistant context. It does not write health data.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Jarvis can optionally read calendars available on this iPhone so schedule questions can be answered locally without the PC.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Jarvis can optionally read calendars available on this iPhone so schedule questions can be answered locally without the PC.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Jarvis can optionally create Apple Reminders on this iPhone when you explicitly ask.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>Jarvis can optionally create Apple Reminders on this iPhone when you explicitly ask.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Jarvis can optionally look up your saved contacts and link explicitly enrolled Known People profiles to them.</string>
 
     <key>NSAppTransportSecurity</key>
     <dict>

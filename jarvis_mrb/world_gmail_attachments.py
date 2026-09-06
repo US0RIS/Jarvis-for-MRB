@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import io
-import json
 import re
 import zipfile
 from email.utils import parseaddr
@@ -151,8 +150,6 @@ def _extract(filename: str, mime_type: str, data: bytes) -> str:
 
 
 def _already_indexed(message_id: str, attachment_ref: str) -> bool:
-    # The world model owns source identity. Avoid repeatedly downloading immutable
-    # Gmail attachment bodies after their document entity has been established.
     try:
         import sqlite3
         from jarvis_mrb.world_model import DB_PATH
@@ -206,6 +203,7 @@ def sync(*, query: str = "in:anywhere newer_than:30d has:attachment", limit: int
         except Exception:
             continue
         messages += 1
+        thread_id = str(message.get("threadId") or "").strip()[:500]
         payload = message.get("payload") or {}
         headers = _headers(payload)
         raw_sender = headers.get("from", "")
@@ -230,7 +228,7 @@ def sync(*, query: str = "in:anywhere newer_than:30d has:attachment", limit: int
             subject,
             external_namespace="gmail",
             external_id=message_id,
-            attributes={"source_kind": "gmail", "sender": raw_sender},
+            attributes={"source_kind": "gmail", "sender": raw_sender, "thread_id": thread_id},
             confidence=1.0,
         )
 
@@ -285,6 +283,7 @@ def sync(*, query: str = "in:anywhere newer_than:30d has:attachment", limit: int
                 occurred_at=date_raw or None,
                 metadata={
                     "message_id": message_id,
+                    "thread_id": thread_id,
                     "attachment_ref": attachment_ref,
                     "filename": filename,
                     "mime_type": str(part.get("mimeType") or "")[:200],
@@ -317,4 +316,5 @@ def status() -> dict[str, Any]:
         "allowed_extensions": sorted(_ALLOWED_EXTENSIONS),
         "max_attachment_bytes": _MAX_ATTACHMENT_BYTES,
         "max_text_chars": _MAX_TEXT_CHARS,
+        "preserves_thread_identity": True,
     }

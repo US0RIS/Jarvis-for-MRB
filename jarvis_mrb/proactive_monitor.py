@@ -4,7 +4,7 @@ import os
 import threading
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -19,19 +19,51 @@ _LAST_ALERTS: dict[str, float] = {}
 _STARTED = False
 
 
+def _health_success(subsystem: str) -> None:
+    try:
+        from jarvis_mrb.runtime_health import record_success
+        record_success(subsystem)
+    except Exception:
+        pass
+
+
+def _health_failure(subsystem: str, error: object) -> None:
+    try:
+        from jarvis_mrb.runtime_health import record_failure
+        record_failure(subsystem, error)
+    except Exception:
+        pass
+
+
+def _run_isolated(subsystem: str, operation: Callable[[], None]) -> None:
+    try:
+        operation()
+        _health_success(subsystem)
+    except Exception as exc:
+        _health_failure(subsystem, exc)
+
+
 def _install_action_audit() -> bool:
     try:
         from jarvis_mrb.tool_audit import install as install_tool_audit
-
         return bool(install_tool_audit())
-    except Exception:
+    except Exception as exc:
+        _health_failure("action_audit", exc)
         return False
 
 
 # service.py imports proactive_monitor before it starts scheduler/background threads.
-# Install the action-ingestion wrapper at import time so even startup-due jobs are
-# tracked. start() retries if module initialization happened in an unusual order.
+# Bring the shared world schema to the one supported version before any runtime thread
+# can observe or mutate it. Migration failure is intentionally fatal: running with a
+# partially known schema is less safe than refusing to start.
+from jarvis_mrb.world_migrations import run_migrations as _run_world_migrations
+
+_MIGRATION_STATE = _run_world_migrations()
 _AUDIT_READY = _install_action_audit()
+if not _AUDIT_READY:
+    raise RuntimeError("Jarvis action audit/verification wrapper could not be installed safely.")
+_health_success("world_migrations")
+_health_success("action_audit")
 
 
 def _dedup(key: str, seconds: int = 3600) -> bool:
@@ -66,13 +98,17 @@ def _prefetch_for_event(event_id: str, summary: str) -> None:
                     f"{OLLAMA_URL}/api/generate",
                     json={"model": FAST_MODEL, "prompt": "", "keep_alive": "30m"},
                 )
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as exc:
+            _health_failure("meeting_prefetch_model", exc)
+        else:
+            _health_success("meeting_prefetch_model")
         try:
             from jarvis_mrb.knowledge_index import search
             search(summary, limit=3)
-        except Exception:
-            pass
+        except Exception as exc:
+            _health_failure("meeting_prefetch_knowledge", exc)
+        else:
+            _health_success("meeting_prefetch_knowledge")
 
     threading.Thread(target=work, name="jarvis-meeting-prefetch", daemon=True).start()
 
@@ -80,9 +116,9 @@ def _prefetch_for_event(event_id: str, summary: str) -> None:
 def _contextual_prebrief(event_id: str, summary: str) -> dict[str, Any] | None:
     try:
         from jarvis_mrb.world_prebrief import build
-
         return build(event_id, summary)
-    except Exception:
+    except Exception as exc:
+        _health_failure("world_prebrief", exc)
         return None
 
 
@@ -90,6 +126,8 @@ def _check_calendar() -> None:
     now = datetime.now().astimezone()
     result = query_calendar_events(direction="future", days=1, limit=8)
     if not result.ok or not result.data:
+        if not result.ok:
+            raise RuntimeError(result.message)
         return
     for event in result.data.get("events", []):
         if not isinstance(event, dict):
@@ -148,6 +186,8 @@ def _check_urgent_mail() -> None:
         limit=3,
     )
     if not result.ok or not result.data:
+        if not result.ok:
+            raise RuntimeError(result.message)
         return
     for email in result.data.get("emails", []):
         if not isinstance(email, dict) or not email.get("unread"):
@@ -165,12 +205,9 @@ def _check_urgent_mail() -> None:
 
 
 def _check_action_verifications() -> None:
-    try:
-        from jarvis_mrb.world_verification import check_due
+    from jarvis_mrb.world_verification import check_due
 
-        outcomes = check_due(limit=20)
-    except Exception:
-        return
+    outcomes = check_due(limit=20)
     for item in outcomes:
         status = str(item.get("status") or "")
         if status not in {"failed", "timed_out"}:
@@ -189,29 +226,48 @@ def _check_action_verifications() -> None:
         emit_proactive(message, cue="error", severity="warning")
 
 
+def _proactive_enabled() -> bool:
+    try:
+        state = get_state()
+        preferences = state.get("preferences") if isinstance(state.get("preferences"), dict) else {}
+        _health_success("environment_state_read")
+        return preferences.get("proactive_monitoring", True) is not False
+    except Exception as exc:
+        _health_failure("environment_state_read", exc)
+        # A preference read failure must not disable verification or calendar safety
+        # checks silently. Default to the documented enabled behavior.
+        return True
+
+
 def check_once() -> None:
-    state = get_state()
-    preferences = state.get("preferences") if isinstance(state.get("preferences"), dict) else {}
-    if preferences.get("proactive_monitoring", True) is False:
+    if not _proactive_enabled():
         return
-    _check_calendar()
-    _check_urgent_mail()
-    _check_action_verifications()
+    _run_isolated("proactive_calendar", _check_calendar)
+    _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+    _run_isolated("action_verification", _check_action_verifications)
 
 
 def _loop() -> None:
     time.sleep(8)
     cycle = 0
     while True:
-        try:
-            _check_calendar()
-            _check_action_verifications()
+        if _proactive_enabled():
+            # Isolate each provider. Calendar failure must not suppress action
+            # verification; verifier failure must not suppress urgent-mail checks.
+            _run_isolated("proactive_calendar", _check_calendar)
+            _run_isolated("action_verification", _check_action_verifications)
             if cycle % 3 == 0:
-                _check_urgent_mail()
-        except Exception:
-            pass
+                _run_isolated("proactive_urgent_mail", _check_urgent_mail)
         cycle += 1
         time.sleep(60)
+
+
+def _start_optional(subsystem: str, starter: Callable[[], None]) -> None:
+    try:
+        starter()
+        _health_success(subsystem)
+    except Exception as exc:
+        _health_failure(subsystem, exc)
 
 
 def start() -> None:
@@ -223,26 +279,29 @@ def start() -> None:
 
     if not _AUDIT_READY:
         _AUDIT_READY = _install_action_audit()
+        if not _AUDIT_READY:
+            raise RuntimeError("Jarvis action audit/verification wrapper is unavailable.")
 
     try:
         from jarvis_mrb.pc_context import start as start_pc_context
-        start_pc_context()
-    except Exception:
-        pass
+        _start_optional("pc_context", start_pc_context)
+    except Exception as exc:
+        _health_failure("pc_context", exc)
     try:
         from jarvis_mrb.resource_monitor import start as start_resource_monitor
-        start_resource_monitor()
-    except Exception:
-        pass
+        _start_optional("resource_monitor", start_resource_monitor)
+    except Exception as exc:
+        _health_failure("resource_monitor", exc)
     try:
         from jarvis_mrb.audio_damping import start as start_audio_damping
-        start_audio_damping()
-    except Exception:
-        pass
+        _start_optional("audio_damping", start_audio_damping)
+    except Exception as exc:
+        _health_failure("audio_damping", exc)
     try:
         from jarvis_mrb.daily_journal import start as start_daily_journal
-        start_daily_journal()
-    except Exception:
-        pass
+        _start_optional("daily_journal", start_daily_journal)
+    except Exception as exc:
+        _health_failure("daily_journal", exc)
 
     threading.Thread(target=_loop, name="jarvis-proactive", daemon=True).start()
+    _health_success("proactive_loop")

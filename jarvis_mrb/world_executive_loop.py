@@ -12,40 +12,16 @@ from jarvis_mrb.world_model import DB_PATH
 from jarvis_mrb.world_relevance import is_executive_query, relevant_intentions
 
 _PLAN_CUES = (
-    "status",
-    "where does",
-    "where do",
-    "where are we",
-    "where am i",
-    "blocker",
-    "blocking",
-    "dependency",
-    "dependencies",
-    "next step",
-    "next action",
-    "what changed",
-    "what's changed",
-    "what has changed",
-    "waiting on",
-    "due",
-    "deadline",
-    "at risk",
-    "verification",
-    "verified",
-    "did it work",
-    "did that work",
+    "status", "where does", "where do", "where are we", "where am i",
+    "blocker", "blocking", "dependency", "dependencies", "next step", "next action",
+    "what changed", "what's changed", "what has changed", "waiting on", "due", "deadline",
+    "at risk", "verification", "verified", "did it work", "did that work",
 )
 
 _RECENT_CHANGE_TYPES = {
-    "document.version_changed",
-    "term.changed_or_conflicted",
-    "meeting.finished",
-    "meeting.completed",
-    "commitment.resolved",
-    "knowledge.gmail_attachment",
-    "verification.verified",
-    "verification.failed",
-    "verification.timed_out",
+    "document.version_changed", "term.changed_or_conflicted", "meeting.finished",
+    "meeting.completed", "commitment.resolved", "knowledge.gmail_attachment",
+    "verification.verified", "verification.failed", "verification.timed_out",
 }
 
 
@@ -55,15 +31,6 @@ def _now() -> str:
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())[:1500]
-
-
-def _loads(raw: str | None, fallback: Any) -> Any:
-    if not raw:
-        return fallback
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return fallback
 
 
 def _stable_key(*parts: object) -> str:
@@ -95,6 +62,7 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS executive_attention (
@@ -170,65 +138,74 @@ def _project_ids(item: dict[str, Any]) -> list[str]:
 
 
 def _active_term_conflicts(conn: sqlite3.Connection, project_ids: list[str]) -> list[dict[str, Any]]:
+    """Return only discrepancies attached to each term's chronological latest source."""
     if not project_ids:
         return []
-    placeholders = ",".join("?" for _ in project_ids)
     try:
-        rows = conn.execute(
-            f"""
-            SELECT c.older_observation_id,c.newer_observation_id,c.conflict_event_id,
-                   older.value_text AS older_value,older.source_kind AS older_source,
-                   newer.project_id,newer.term_key,newer.display_name,newer.value_text AS newer_value,
-                   newer.source_kind AS newer_source,newer.occurred_at,
-                   e.summary AS event_summary,e.confidence AS event_confidence
-            FROM term_conflicts c
-            JOIN term_observations older ON older.id=c.older_observation_id
-            JOIN term_observations newer ON newer.id=c.newer_observation_id
-            JOIN (
-                SELECT project_id,term_key,MAX(id) AS max_id
-                FROM term_observations
-                GROUP BY project_id,term_key
-            ) latest ON latest.max_id=newer.id
-            LEFT JOIN events e ON e.id=c.conflict_event_id
-            WHERE newer.project_id IN ({placeholders})
-            ORDER BY newer.id DESC
-            LIMIT 12
-            """,
-            tuple(project_ids),
-        ).fetchall()
-    except sqlite3.OperationalError:
+        from jarvis_mrb.world_terms import latest_observations
+    except Exception:
         return []
 
     result: list[dict[str, Any]] = []
-    for row in rows:
-        project_id = str(row["project_id"])
-        project = _entity_name(conn, project_id)
-        detail = str(row["event_summary"] or "").strip()
-        if not detail:
-            detail = (
-                f"{project} {row['display_name']} differs across current sources: "
-                f"{row['older_value']} ({row['older_source']}) versus "
-                f"{row['newer_value']} ({row['newer_source']})."
+    for project_id in project_ids[:8]:
+        latest = latest_observations(project_id)
+        for observation in latest:
+            observation_id = int(observation.get("id") or 0)
+            if not observation_id:
+                continue
+            try:
+                row = conn.execute(
+                    """
+                    SELECT c.older_observation_id,c.newer_observation_id,c.conflict_event_id,
+                           older.value_text AS older_value,older.source_kind AS older_source,
+                           newer.project_id,newer.term_key,newer.display_name,newer.value_text AS newer_value,
+                           newer.source_kind AS newer_source,newer.occurred_at,
+                           e.summary AS event_summary,e.confidence AS event_confidence
+                    FROM term_conflicts c
+                    JOIN term_observations older ON older.id=c.older_observation_id
+                    JOIN term_observations newer ON newer.id=c.newer_observation_id
+                    LEFT JOIN events e ON e.id=c.conflict_event_id
+                    WHERE newer.project_id=? AND newer.term_key=? AND newer.id=?
+                    ORDER BY e.occurred_at DESC,e.id DESC LIMIT 1
+                    """,
+                    (project_id, str(observation.get("term_key") or ""), observation_id),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = None
+            if row is None:
+                continue
+            project = _entity_name(conn, project_id)
+            detail = str(row["event_summary"] or "").strip()
+            if not detail:
+                detail = (
+                    f"{project} {row['display_name']} differs across current sources: "
+                    f"{row['older_value']} ({row['older_source']}) versus "
+                    f"{row['newer_value']} ({row['newer_source']})."
+                )
+            result.append(
+                {
+                    "kind": "term_conflict",
+                    "source_ref": f"term-conflict:{row['older_observation_id']}:{row['newer_observation_id']}",
+                    "source_event_id": int(row["conflict_event_id"]) if row["conflict_event_id"] else None,
+                    "title": f"Resolve {row['display_name']} discrepancy on {project}",
+                    "detail": detail[:1800],
+                    "severity": "high",
+                    "score": 100.0,
+                    "due_at": None,
+                    "evidence": f"chronologically latest explicit {row['display_name']} observation conflicts with the preceding explicit source",
+                    "project": project,
+                    "term": str(row["display_name"]),
+                    "older_value": str(row["older_value"]),
+                    "newer_value": str(row["newer_value"]),
+                    "occurred_at": str(row["occurred_at"]),
+                    "confidence": float(row["event_confidence"] or 0.9),
+                }
             )
-        result.append(
-            {
-                "kind": "term_conflict",
-                "source_ref": f"term-conflict:{row['older_observation_id']}:{row['newer_observation_id']}",
-                "source_event_id": int(row["conflict_event_id"]) if row["conflict_event_id"] else None,
-                "title": f"Resolve {row['display_name']} discrepancy on {project}",
-                "detail": detail[:1800],
-                "severity": "high",
-                "score": 100.0,
-                "due_at": None,
-                "evidence": f"latest explicit {row['display_name']} observation conflicts with the preceding explicit source",
-                "project": project,
-                "term": str(row["display_name"]),
-                "older_value": str(row["older_value"]),
-                "newer_value": str(row["newer_value"]),
-                "confidence": float(row["event_confidence"] or 0.9),
-            }
-        )
-    return result
+    result.sort(
+        key=lambda item: (_parse_time(str(item.get("occurred_at") or "")) or datetime.min.astimezone()),
+        reverse=True,
+    )
+    return result[:12]
 
 
 def _commitment_items(conn: sqlite3.Connection, item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -344,35 +321,36 @@ def _recent_changes(conn: sqlite3.Connection, project_ids: list[str]) -> list[di
         SELECT DISTINCT e.id,e.event_type,e.occurred_at,e.summary,e.confidence,e.source_kind,e.source_ref
         FROM events e
         JOIN event_entities ee ON ee.event_id=e.id
-        WHERE ee.entity_id IN ({placeholders})
-          AND e.event_type IN ({type_placeholders})
-        ORDER BY e.id DESC
-        LIMIT 12
+        WHERE ee.entity_id IN ({placeholders}) AND e.event_type IN ({type_placeholders})
+        ORDER BY e.id DESC LIMIT 500
         """,
         (*tuple(project_ids), *tuple(sorted(_RECENT_CHANGE_TYPES))),
     ).fetchall()
-    result: list[dict[str, Any]] = []
     now = datetime.now().astimezone()
+    candidates: list[tuple[datetime, sqlite3.Row]] = []
     for row in rows:
         occurred = _parse_time(str(row["occurred_at"] or ""))
-        if occurred is not None and (now - occurred).total_seconds() > 14 * 86400:
+        if occurred is None:
+            continue
+        age = (now - occurred).total_seconds()
+        if age < -86400 or age > 14 * 86400:
             continue
         if str(row["event_type"]) == "term.changed_or_conflicted":
             continue
-        result.append(
-            {
-                "event_id": int(row["id"]),
-                "event_type": str(row["event_type"]),
-                "occurred_at": str(row["occurred_at"]),
-                "summary": str(row["summary"]),
-                "confidence": float(row["confidence"]),
-                "source_kind": str(row["source_kind"]),
-                "source_ref": str(row["source_ref"]),
-            }
-        )
-        if len(result) >= 5:
-            break
-    return result
+        candidates.append((occurred, row))
+    candidates.sort(key=lambda item: (item[0], int(item[1]["id"])), reverse=True)
+    return [
+        {
+            "event_id": int(row["id"]),
+            "event_type": str(row["event_type"]),
+            "occurred_at": str(row["occurred_at"]),
+            "summary": str(row["summary"]),
+            "confidence": float(row["confidence"]),
+            "source_kind": str(row["source_kind"]),
+            "source_ref": str(row["source_ref"]),
+        }
+        for _, row in candidates[:5]
+    ]
 
 
 def _deadline_attention(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -438,10 +416,9 @@ def _proposal_for(candidate: dict[str, Any], projects: list[str]) -> tuple[str, 
         )
     if kind == "document_change":
         project = projects[0] if projects else ""
-        query = f"{project} revised draft changes".strip()
         return (
             "knowledge.search",
-            {"query": query, "limit": 5},
+            {"query": f"{project} revised draft changes".strip(), "limit": 5},
             "Review the changed source material connected to the active objective.",
         )
     if kind == "verification_pending":
@@ -466,8 +443,9 @@ def _decision_view(candidate: dict[str, Any], projects: list[str]) -> dict[str, 
             tool_rationale = "The relevant tool is currently denied by permission policy."
 
     summary = str(candidate.get("title") or candidate.get("detail") or "Review active objective")[:1200]
-    rationale_parts = [str(candidate.get("evidence") or "").strip(), tool_rationale.strip()]
-    rationale = " ".join(part for part in rationale_parts if part)[:2200]
+    rationale = " ".join(
+        part for part in (str(candidate.get("evidence") or "").strip(), tool_rationale.strip()) if part
+    )[:2200]
     return {
         "summary": summary,
         "rationale": rationale,
@@ -491,33 +469,17 @@ def _persist_attention(conn: sqlite3.Connection, intention_id: str, candidate: d
             severity,score,due_at,status,evidence,created_at,updated_at
         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(attention_key) DO UPDATE SET
-            source_event_id=excluded.source_event_id,
-            commitment_id=excluded.commitment_id,
-            title=excluded.title,
-            detail=excluded.detail,
-            severity=excluded.severity,
-            score=excluded.score,
-            due_at=excluded.due_at,
-            status='open',
-            evidence=excluded.evidence,
-            updated_at=excluded.updated_at
+            source_event_id=excluded.source_event_id,commitment_id=excluded.commitment_id,
+            title=excluded.title,detail=excluded.detail,severity=excluded.severity,score=excluded.score,
+            due_at=excluded.due_at,status='open',evidence=excluded.evidence,updated_at=excluded.updated_at
         """,
         (
-            key,
-            intention_id,
-            str(candidate.get("kind") or "attention")[:80],
-            str(candidate.get("source_ref") or "")[:500],
-            candidate.get("source_event_id"),
-            candidate.get("commitment_id"),
-            str(candidate.get("title") or "")[:1200],
-            str(candidate.get("detail") or "")[:2400],
-            str(candidate.get("severity") or "low")[:20],
-            float(candidate.get("score") or 0.0),
-            str(candidate.get("due_at") or "")[:100] or None,
-            "open",
-            str(candidate.get("evidence") or "")[:1500],
-            created,
-            now,
+            key, intention_id, str(candidate.get("kind") or "attention")[:80],
+            str(candidate.get("source_ref") or "")[:500], candidate.get("source_event_id"),
+            candidate.get("commitment_id"), str(candidate.get("title") or "")[:1200],
+            str(candidate.get("detail") or "")[:2400], str(candidate.get("severity") or "low")[:20],
+            float(candidate.get("score") or 0.0), str(candidate.get("due_at") or "")[:100] or None,
+            "open", str(candidate.get("evidence") or "")[:1500], created, now,
         ),
     )
     return key
@@ -547,33 +509,17 @@ def _persist_decision(
             proposed_args_json,risk,requires_confirmation,confidence,status,created_at,updated_at
         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
-            attention_key=excluded.attention_key,
-            decision_type=excluded.decision_type,
-            summary=excluded.summary,
-            rationale=excluded.rationale,
-            proposed_tool=excluded.proposed_tool,
-            proposed_args_json=excluded.proposed_args_json,
-            risk=excluded.risk,
-            requires_confirmation=excluded.requires_confirmation,
-            confidence=excluded.confidence,
-            status='current',
-            updated_at=excluded.updated_at
+            attention_key=excluded.attention_key,decision_type=excluded.decision_type,summary=excluded.summary,
+            rationale=excluded.rationale,proposed_tool=excluded.proposed_tool,
+            proposed_args_json=excluded.proposed_args_json,risk=excluded.risk,
+            requires_confirmation=excluded.requires_confirmation,confidence=excluded.confidence,
+            status='current',updated_at=excluded.updated_at
         """,
         (
-            decision_id,
-            intention_id,
-            attention_key,
-            str(candidate.get("kind") or "review"),
-            summary,
-            str(view["rationale"]),
-            str(view["tool"]),
-            json.dumps(view["arguments"], ensure_ascii=False, sort_keys=True),
-            str(view["risk"]),
-            1 if view["requires_confirmation"] else 0,
-            float(view["confidence"]),
-            "current",
-            created,
-            now,
+            decision_id, intention_id, attention_key, str(candidate.get("kind") or "review"), summary,
+            str(view["rationale"]), str(view["tool"]),
+            json.dumps(view["arguments"], ensure_ascii=False, sort_keys=True), str(view["risk"]),
+            1 if view["requires_confirmation"] else 0, float(view["confidence"]), "current", created, now,
         ),
     )
     return {"id": decision_id, **view}
@@ -652,24 +598,18 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
     )
     decision = (
         _persist_decision(conn, intention_id, top_key, top_candidate, project_names)
-        if persist
-        else _decision_view(top_candidate, project_names)
+        if persist else _decision_view(top_candidate, project_names)
     )
 
     blockers = [
-        candidate
-        for _, candidate in keyed_candidates
+        candidate for _, candidate in keyed_candidates
         if candidate.get("kind") in {
-            "term_conflict",
-            "overdue_commitment",
-            "verification_failed",
-            "verification_timed_out",
-            "verification_unverified",
+            "term_conflict", "overdue_commitment", "verification_failed",
+            "verification_timed_out", "verification_unverified",
         }
     ]
     dependencies = [
-        candidate
-        for _, candidate in keyed_candidates
+        candidate for _, candidate in keyed_candidates
         if candidate.get("kind") in {"overdue_commitment", "due_commitment", "dependency"}
     ]
     pending_verification = [
@@ -697,9 +637,7 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
             owner = str(candidate.get("owner") or "")
             action = str(candidate.get("detail") or "")
             next_actions.append(
-                f"Check/follow up with {owner} on {action}"
-                if owner
-                else f"Resolve overdue dependency: {action}"
+                f"Check/follow up with {owner} on {action}" if owner else f"Resolve overdue dependency: {action}"
             )
         elif kind == "due_commitment":
             next_actions.append(str(candidate.get("title") or "Review due dependency"))
@@ -762,26 +700,15 @@ def refresh() -> dict[str, int]:
             )
         else:
             conn.execute("UPDATE executive_attention SET status='stale',updated_at=? WHERE status='open'", (now,))
-            conn.execute(
-                "UPDATE executive_decisions SET status='superseded',updated_at=? WHERE status='current'",
-                (now,),
-            )
+            conn.execute("UPDATE executive_decisions SET status='superseded',updated_at=? WHERE status='current'", (now,))
         conn.execute(
             "INSERT INTO executive_loop_state(key,value) VALUES('last_refresh',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (now,),
         )
         conn.commit()
-        attention_count = int(
-            conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0]
-        )
-        decisions = int(
-            conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0]
-        )
-    return {
-        "active_intentions": len(items),
-        "attention_items": attention_count,
-        "current_decisions": decisions,
-    }
+        attention_count = int(conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0])
+        decisions = int(conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0])
+    return {"active_intentions": len(items), "attention_items": attention_count, "current_decisions": decisions}
 
 
 def plans_for_query(query: str, limit: int = 4) -> list[dict[str, Any]]:
@@ -792,18 +719,13 @@ def plans_for_query(query: str, limit: int = 4) -> list[dict[str, Any]]:
     selected = relevant_intentions(query, limit=max(1, min(int(limit), 8)))
     if not selected:
         return []
-    result: list[dict[str, Any]] = []
     with _connect() as conn:
-        for item in selected:
-            result.append(_compile_item(conn, item, persist=False))
-    return result
+        return [_compile_item(conn, item, persist=False) for item in selected]
 
 
 def should_supply_context(query: str) -> bool:
     normalized = _normalize(query)
-    if is_executive_query(query):
-        return True
-    return any(cue in normalized for cue in _PLAN_CUES)
+    return is_executive_query(query) or any(cue in normalized for cue in _PLAN_CUES)
 
 
 def context_for_query(query: str, limit: int = 3) -> str:
@@ -812,9 +734,7 @@ def context_for_query(query: str, limit: int = 3) -> str:
     plans = plans_for_query(query, limit=limit)
     if not plans:
         return ""
-    lines = [
-        "EXECUTIVE LOOP (persistent operational state derived from explicit intentions and provenance-bearing world evidence):"
-    ]
+    lines = ["EXECUTIVE LOOP (persistent operational state derived from explicit intentions and provenance-bearing world evidence):"]
     for plan in plans:
         lines.append(f"- OBJECTIVE: {plan['objective']} | state={plan['state']}")
         if plan["due_at"]:
@@ -825,8 +745,7 @@ def context_for_query(query: str, limit: int = 3) -> str:
             lines.append("  OUTCOME VERIFICATION:")
             for verification in plan["verifications"][:4]:
                 lines.append(
-                    f"    - {verification.get('verification_status')}: {verification.get('tool')}; "
-                    f"{verification.get('detail')}"
+                    f"    - {verification.get('verification_status')}: {verification.get('tool')}; {verification.get('detail')}"
                 )
         if plan["blockers"]:
             lines.append("  BLOCKERS:")
@@ -878,26 +797,15 @@ def describe(query: str) -> str:
 def status() -> dict[str, Any]:
     try:
         from jarvis_mrb.world_executive import status as executive_status
-
         executive_status()
         with _connect() as conn:
-            open_attention = int(
-                conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0]
-            )
-            current_decisions = int(
-                conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0]
-            )
-            row = conn.execute(
-                "SELECT value FROM executive_loop_state WHERE key='last_refresh'"
-            ).fetchone()
+            open_attention = int(conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0])
+            current_decisions = int(conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0])
+            row = conn.execute("SELECT value FROM executive_loop_state WHERE key='last_refresh'").fetchone()
             try:
-                pending_verification = int(
-                    conn.execute("SELECT COUNT(*) FROM action_verifications WHERE status='pending'").fetchone()[0]
-                )
+                pending_verification = int(conn.execute("SELECT COUNT(*) FROM action_verifications WHERE status='pending'").fetchone()[0])
                 failed_verification = int(
-                    conn.execute(
-                        "SELECT COUNT(*) FROM action_verifications WHERE status IN ('failed','timed_out','unverified')"
-                    ).fetchone()[0]
+                    conn.execute("SELECT COUNT(*) FROM action_verifications WHERE status IN ('failed','timed_out','unverified')").fetchone()[0]
                 )
             except sqlite3.OperationalError:
                 pending_verification = 0
@@ -913,6 +821,8 @@ def status() -> dict[str, Any]:
         "permission_aware_proposals": True,
         "closed_loop_verification": True,
         "verification_reenters_priority": True,
+        "term_conflicts_use_source_chronology": True,
+        "recent_changes_use_source_chronology": True,
         "pending_verifications": pending_verification,
         "failed_or_unverified_outcomes": failed_verification,
         "open_attention_items": open_attention,

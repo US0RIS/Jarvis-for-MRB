@@ -143,10 +143,9 @@ def refresh() -> dict[str, Any]:
     attachment_sync: dict[str, Any] | None = None
     calendar_enrichment: dict[str, Any] | None = None
     linker: dict[str, Any] | None = None
+    document_versions: dict[str, Any] | None = None
     executive: dict[str, Any] | None = None
 
-    # Both migrations run on this existing non-latency-sensitive refresh thread.
-    # Each has its own sentinel and becomes a near-zero-cost no-op after success.
     try:
         from jarvis_mrb.world_backfill import backfill_existing_state
 
@@ -179,10 +178,6 @@ def refresh() -> dict[str, Any]:
     elif not email_result.ok:
         errors.append(email_result.message)
 
-    # Attachments are a separate read-only ingestion lane. It accepts only a passive
-    # document allowlist, parses in memory, never executes an attachment, and skips
-    # already-indexed immutable Gmail attachment IDs. Run before graph linking so a
-    # Project/person mention inside a draft can participate in this refresh cycle.
     try:
         from jarvis_mrb.world_gmail_attachments import sync as sync_gmail_attachments
 
@@ -208,10 +203,6 @@ def refresh() -> dict[str, Any]:
         elif not calendar_result.ok:
             errors.append(calendar_result.message)
 
-    # The conversational Calendar adapter is intentionally compact. A separate
-    # read-only private sync adds attendee identities, organizer and description to
-    # the world graph so situation/relationship reasoning has the information the
-    # spoken calendar surface intentionally omits.
     try:
         from jarvis_mrb.world_calendar_sync import sync as sync_world_calendar
 
@@ -235,12 +226,31 @@ def refresh() -> dict[str, Any]:
         if _index_once(f"note:{relative}", text, kind="note"):
             indexed += 1
 
+    # Establish people/project relations in newly ingested attachments before version
+    # analysis. Lineage can then use shared project identity in addition to Gmail
+    # thread identity and textual overlap, reducing false pairings of generic file names.
     try:
         from jarvis_mrb.world_linker import refresh_links
 
         linker = refresh_links(limit=3000)
     except Exception as exc:
         linker = {"error": str(exc)[:500]}
+
+    # Compare likely predecessor/successor attachments. Generated change events are
+    # immediately linked back through their sender/project participants so they can
+    # appear in the same refresh cycle's meeting-prep and proactive context.
+    try:
+        from jarvis_mrb.world_document_versions import refresh as refresh_document_versions
+        from jarvis_mrb.world_linker import link_event
+
+        document_versions = refresh_document_versions(limit_pairs=80)
+        for event_id in document_versions.get("generated_event_ids") or []:
+            try:
+                link_event(int(event_id))
+            except Exception:
+                pass
+    except Exception as exc:
+        document_versions = {"error": str(exc)[:500]}
 
     try:
         from jarvis_mrb.world_executive import refresh_intentions
@@ -261,6 +271,7 @@ def refresh() -> dict[str, Any]:
         "world_gmail_attachments": attachment_sync,
         "world_calendar_enrichment": calendar_enrichment,
         "world_linker": linker,
+        "world_document_versions": document_versions,
         "world_executive": executive,
     }
 
@@ -290,7 +301,7 @@ def search(query: str, limit: int = 5) -> list[str]:
 def describe_search(query: str, limit: int = 5) -> str:
     items = search(query, limit=limit)
     if not items:
-        return "I couldn't find a matching entity, event, commitment, email, calendar item, attachment, note, or prior conversation in unified local knowledge."
+        return "I couldn't find a matching entity, event, commitment, email, calendar item, attachment, document change, note, or prior conversation in unified local knowledge."
     return "Relevant unified-knowledge matches: " + " | ".join(items)
 
 
@@ -301,6 +312,7 @@ def status() -> dict[str, Any]:
     executive: dict[str, Any] = {}
     relevance: dict[str, Any] = {}
     attachments: dict[str, Any] = {}
+    document_versions: dict[str, Any] = {}
     diagnostics: dict[str, Any] = {}
     try:
         from jarvis_mrb.world_linker import status as world_linker_status
@@ -327,6 +339,12 @@ def status() -> dict[str, Any]:
     except Exception:
         pass
     try:
+        from jarvis_mrb.world_document_versions import status as version_status
+
+        document_versions = version_status()
+    except Exception:
+        pass
+    try:
         from jarvis_mrb.world_diagnostics import validate as validate_world
 
         diagnostics = validate_world()
@@ -340,5 +358,6 @@ def status() -> dict[str, Any]:
         "world_executive": executive,
         "world_relevance": relevance,
         "world_gmail_attachments": attachments,
+        "world_document_versions": document_versions,
         "world_diagnostics": diagnostics,
     }

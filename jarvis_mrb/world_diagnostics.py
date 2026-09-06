@@ -13,7 +13,7 @@ _REQUIRED_TABLES = {
     "entity_relations", "relation_evidence", "intentions", "intention_entities", "intention_commitments",
     "term_observations", "term_conflicts", "document_version_pairs",
     "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
-    "runtime_subsystem_health", "world_schema_meta", "world_schema_history",
+    "runtime_subsystem_health", "gmail_attachment_sync_state", "world_schema_meta", "world_schema_history",
 }
 _STRONG_PERSON_PROJECT_ROLES = {
     "sender", "recipient", "attendee", "organizer", "owner", "assignee",
@@ -54,6 +54,7 @@ def validate() -> dict[str, Any]:
     from jarvis_mrb.world_document_versions import status as document_status
     from jarvis_mrb.world_executive import status as executive_status
     from jarvis_mrb.world_executive_loop import status as executive_loop_status
+    from jarvis_mrb.world_gmail_attachments import status as attachment_status
     from jarvis_mrb.world_linker import status as linker_status
     from jarvis_mrb.world_migrations import status as migration_status
     from jarvis_mrb.world_prebrief import status as prebrief_status
@@ -74,6 +75,7 @@ def validate() -> dict[str, Any]:
     verification = verification_status()
     migrations = migration_status()
     runtime = runtime_status()
+    attachments = attachment_status()
     problems: list[str] = []
     warnings: list[str] = []
 
@@ -88,6 +90,13 @@ def validate() -> dict[str, Any]:
         problems.append(
             f"World schema reports v{target_version} but migration history is not contiguous: {migration_history}."
         )
+
+    if bool(attachments.get("backlog_remaining")):
+        warnings.append("Gmail attachment ingestion has a resumable backlog; subsequent knowledge refreshes must continue draining it.")
+    attachment_state = str(attachments.get("last_status") or "never")
+    attachment_error = str(attachments.get("last_error") or "").strip()
+    if attachment_state in {"error", "partial"} and attachment_error:
+        warnings.append(f"Gmail attachment ingestion last reported {attachment_state}: {attachment_error}")
 
     with _connect() as conn:
         integrity_row = conn.execute("PRAGMA integrity_check").fetchone()
@@ -372,6 +381,7 @@ def validate() -> dict[str, Any]:
         "terms": terms,
         "documents": documents,
         "verification": verification,
+        "gmail_attachments": attachments,
         "runtime_health": runtime,
         "tool_audit": audit,
         "linker_lag_events": linker_lag,
@@ -394,6 +404,8 @@ def validate() -> dict[str, Any]:
         "verified_outcomes_without_evidence_events": verified_without_event,
         "pending_verifications_past_deadline": overdue_verifications,
         "unverified_outcomes": unverifiable,
+        "attachment_backlog_remaining": bool(attachments.get("backlog_remaining")),
+        "attachment_last_status": attachment_state,
         "degraded_subsystems": len(degraded_subsystems),
         "problems": problems,
         "warnings": warnings,

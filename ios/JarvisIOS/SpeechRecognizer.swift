@@ -39,7 +39,7 @@ final class AudioRouteManager: ObservableObject {
 
     var routeSummary: String {
         if isUsingBuiltInMic {
-            return "\(currentInputName) (iPhone room mic) → \(currentOutputName)"
+            return "\(currentInputName) (iPhone built-in mic) → \(currentOutputName)"
         }
         if isUsingBluetoothHFP {
             return "\(currentInputName) (Bluetooth hands-free)"

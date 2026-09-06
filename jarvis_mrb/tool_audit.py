@@ -121,7 +121,7 @@ def _verification_args(tool: str, args: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
+def _record(tool: str, args: dict[str, Any], reply: Any, *, confirmed_execution: bool = False) -> None:
     if str(tool).startswith("world."):
         return
     try:
@@ -146,7 +146,10 @@ def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
     try:
         from jarvis_mrb.world_verification import register_execution
 
-        executive_decision_id = _consume_staged_decision(tool, args) or _executive_decision_id(tool, args)
+        executive_decision_id = ""
+        if confirmed_execution:
+            executive_decision_id = _consume_staged_decision(tool, args)
+        executive_decision_id = executive_decision_id or _executive_decision_id(tool, args)
         register_execution(
             str(tool),
             _verification_args(tool, args),
@@ -188,7 +191,7 @@ def install() -> bool:
             if _is_staged_confirmation(reply):
                 _stage_executive_decision(tool, args)
             else:
-                _record(tool, args, reply)
+                _record(tool, args, reply, confirmed_execution=bool(bypass_confirmation))
             return reply
 
         setattr(audited_execute_tool, "_jarvis_world_audited", True)
@@ -212,7 +215,7 @@ def status() -> dict[str, Any]:
         "security_result_bodies_persisted": False,
         "repeated_identical_executions_preserved": True,
         "closed_loop_verification_registered": True,
-        "executive_decision_correlation": "exact persisted tool+arguments; one-shot staged confirmation cache",
+        "executive_decision_correlation": "exact persisted tool+arguments; one-shot staged confirmation cache consumed only by bypass-confirmation execution",
         "staged_executive_confirmations": staged,
         "staged_confirmation_ttl_seconds": _STAGED_TTL_SECONDS,
         "verification_input_normalization": ["state.temp_set.key"],

@@ -44,14 +44,23 @@ def _connect() -> sqlite3.Connection:
 
 def start(title: str = "") -> dict[str, Any]:
     now = datetime.now().astimezone().isoformat()
+    clean_title = title.strip()[:300]
     with _connect() as conn:
         cursor = conn.execute(
             "INSERT INTO meetings(started_at,title,status,transcript) VALUES(?,?,?,?)",
-            (now, title.strip()[:300], "recording", ""),
+            (now, clean_title, "recording", ""),
         )
         meeting_id = int(cursor.lastrowid)
         conn.commit()
-    return {"id": meeting_id, "started_at": now, "title": title.strip(), "status": "recording"}
+
+    try:
+        from jarvis_mrb.world_model import record_meeting_start
+
+        record_meeting_start(meeting_id, clean_title, now)
+    except Exception:
+        pass
+
+    return {"id": meeting_id, "started_at": now, "title": clean_title, "status": "recording"}
 
 
 def _metric_claims(chunk: str) -> list[str]:
@@ -160,6 +169,7 @@ def finish(meeting_id: int) -> str:
         if row is None:
             raise ValueError(f"Meeting {meeting_id} does not exist.")
         transcript = str(row["transcript"] or "")
+        title = str(row["title"] or "")
     actions = _extract_actions(transcript)
     ended = datetime.now().astimezone().isoformat()
     with _connect() as conn:
@@ -168,6 +178,23 @@ def finish(meeting_id: int) -> str:
             (ended, json.dumps(actions, ensure_ascii=False), int(meeting_id)),
         )
         conn.commit()
+
+    # Promote explicit meeting actions into shared commitments. The world model
+    # keeps source event/provenance and the extraction evidence, so downstream
+    # reminders can distinguish "observed in transcript" from inferred context.
+    try:
+        from jarvis_mrb.world_model import record_meeting_finish
+
+        record_meeting_finish(
+            int(meeting_id),
+            title,
+            ended,
+            actions,
+            transcript_excerpt=transcript[-6000:],
+        )
+    except Exception:
+        pass
+
     if not actions:
         return f"Meeting {meeting_id} ended. I did not find any clear commitments to confirm."
     rendered = []

@@ -143,6 +143,7 @@ def refresh() -> dict[str, Any]:
     errors: list[str] = []
     backfill: dict[str, Any] | None = None
     linker: dict[str, Any] | None = None
+    executive: dict[str, Any] | None = None
 
     # The service already runs knowledge refresh on its own background thread. Use
     # that existing non-latency-sensitive path for the one-time migration instead of
@@ -217,6 +218,15 @@ def refresh() -> dict[str, Any]:
     except Exception as exc:
         linker = {"error": str(exc)[:500]}
 
+    # Promote explicit goals into persistent intentions only after relationship
+    # linking has run, so goal↔project and goal↔commitment associations can be used.
+    try:
+        from jarvis_mrb.world_executive import refresh_intentions
+
+        executive = refresh_intentions()
+    except Exception as exc:
+        executive = {"error": str(exc)[:500]}
+
     return {
         "ok": not errors,
         "scanned": scanned,
@@ -226,6 +236,7 @@ def refresh() -> dict[str, Any]:
         "world_model_mirroring": True,
         "world_backfill": backfill,
         "world_linker": linker,
+        "world_executive": executive,
     }
 
 
@@ -244,10 +255,17 @@ def status() -> dict[str, Any]:
     with _connect() as conn:
         sources = int(conn.execute("SELECT COUNT(*) FROM indexed_sources").fetchone()[0])
     linker: dict[str, Any] = {}
+    executive: dict[str, Any] = {}
     try:
         from jarvis_mrb.world_linker import status as world_linker_status
 
         linker = world_linker_status()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.world_executive import status as world_executive_status
+
+        executive = world_executive_status()
     except Exception:
         pass
     return {
@@ -255,4 +273,5 @@ def status() -> dict[str, Any]:
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
         "world_linker": linker,
+        "world_executive": executive,
     }

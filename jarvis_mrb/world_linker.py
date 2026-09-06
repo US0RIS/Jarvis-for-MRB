@@ -8,20 +8,17 @@ from typing import Any
 from jarvis_mrb.world_model import DB_PATH, SELF_ID, WORLD_ID, ensure_entity, search as world_search
 
 _GENERIC_ALIASES = {
-    "user",
-    "jarvis",
-    "home",
-    "away",
-    "default",
-    "mobile",
-    "work",
-    "meeting",
-    "calendar",
-    "email",
-    "note",
-    "document",
-    "unknown",
-    "unnamed",
+    "user", "jarvis", "home", "away", "default", "mobile", "work", "meeting",
+    "calendar", "email", "note", "document", "unknown", "unnamed",
+}
+
+# A person's mere lexical mention next to a project is not durable evidence that the
+# person is actually associated with it. These roles originate from structured source
+# semantics (mail sender/recipient, calendar attendee/organizer, meeting participant,
+# assignment/ownership, etc.) and therefore support a person -> project relationship.
+_STRONG_PERSON_PROJECT_ROLES = {
+    "sender", "recipient", "attendee", "organizer", "owner", "assignee",
+    "participant", "meeting_participant", "speaker", "requester", "beneficiary",
 }
 
 
@@ -92,8 +89,6 @@ def _candidate_aliases(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
         alias = _normalize(str(row["normalized_alias"] or ""))
         if len(alias) < 3 or alias in _GENERIC_ALIASES:
             continue
-        # One-word aliases are useful for explicitly enrolled first names and objects,
-        # but extremely short/common words create too many accidental graph edges.
         if " " not in alias and "@" not in alias and len(alias) < 4:
             continue
         key = (str(row["id"]), alias)
@@ -107,9 +102,6 @@ def _candidate_aliases(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
 def _explicit_project_names(raw_text: str) -> list[str]:
     """Extract only literal `Project Name` identifiers, never inferred project names."""
     result: list[str] = []
-    # Deliberately capture one project-code/name token. This handles the common
-    # Project Apollo / PROJECT ATLAS convention without swallowing a document title
-    # such as "Project Apollo Diligence Memorandum" into the project identity.
     for match in re.finditer(r"\b(?:Project|PROJECT)\s+([A-Z][A-Za-z0-9_-]{2,40})\b", raw_text):
         name = f"Project {match.group(1)}"
         if name.casefold() not in {item.casefold() for item in result}:
@@ -127,6 +119,18 @@ def _mentioned(text: str, alias: str) -> bool:
     return re.search(rf"(?<![a-z0-9_]){re.escape(alias)}(?![a-z0-9_])", text) is not None
 
 
+def _strong_person_project_evidence(person_role: str, event_type: str) -> bool:
+    role = _normalize(person_role).replace(" ", "_")
+    if role in _STRONG_PERSON_PROJECT_ROLES:
+        return True
+    # Some source-specific roles are namespaced (for example calendar_attendee).
+    if any(token in role for token in ("attendee", "organizer", "sender", "recipient", "assignee", "participant")):
+        return True
+    # Never infer membership from a generic textual mention, even in a conversation,
+    # email body, document, or meeting transcript. Structured role evidence is needed.
+    return False
+
+
 def _relation_for(
     subject_kind: str,
     subject_role: str,
@@ -139,7 +143,9 @@ def _relation_for(
     et = event_type.lower()
 
     if sk == "person" and ok == "project":
-        return ("associated_with_project", 0.78)
+        if _strong_person_project_evidence(subject_role, event_type):
+            return ("associated_with_project", 0.78)
+        return None
     if sk in {"document", "calendar", "meeting"} and ok == "project":
         return ("about_project", 0.82)
     if sk == "goal" and ok == "project":
@@ -181,8 +187,6 @@ def _upsert_relation(
         relation_id = int(cursor.lastrowid)
     else:
         relation_id = int(row["id"])
-        # Repeated independent co-occurrence should strengthen a relation gradually,
-        # but never turn a heuristic lexical link into certainty.
         old = float(row["confidence"])
         strengthened = min(0.97, max(old, confidence) + min(0.08, 0.015 * int(row["evidence_count"])))
         conn.execute(
@@ -221,8 +225,6 @@ def link_event(event_id: int) -> dict[str, int]:
 
         mentions = 0
         projects_created = 0
-        # Explicitly named projects are first-class entities even if this is the
-        # first event in which Jarvis has ever encountered that project name.
         for project_name in _explicit_project_names(raw_text):
             project_id = ensure_entity("project", project_name, confidence=0.92)
             if project_id in linked:
@@ -262,11 +264,8 @@ def link_event(event_id: int) -> dict[str, int]:
                 if str(subject["entity_id"]) == str(obj["entity_id"]):
                     continue
                 relation = _relation_for(
-                    str(subject["kind"]),
-                    str(subject["role"]),
-                    str(obj["kind"]),
-                    str(obj["role"]),
-                    event_type,
+                    str(subject["kind"]), str(subject["role"]),
+                    str(obj["kind"]), str(obj["role"]), event_type,
                 )
                 if relation is None:
                     continue
@@ -279,11 +278,8 @@ def link_event(event_id: int) -> dict[str, int]:
                 )
                 _upsert_relation(
                     conn,
-                    str(subject["entity_id"]),
-                    predicate,
-                    str(obj["entity_id"]),
-                    evidence_confidence,
-                    int(event_id),
+                    str(subject["entity_id"]), predicate, str(obj["entity_id"]),
+                    evidence_confidence, int(event_id),
                     f"Co-occurrence in {event_type}: {str(event['summary'])[:700]}",
                 )
 
@@ -294,6 +290,55 @@ def link_event(event_id: int) -> dict[str, int]:
             "relations": max(0, relations_after - relations_before),
             "projects_created": projects_created,
         }
+
+
+def repair_person_project_relations() -> dict[str, int]:
+    """Retire legacy person/project edges that lack structured participant evidence.
+
+    Earlier linker versions allowed a generic textual mention of a person and project
+    in the same event to create `associated_with_project`. Historical source evidence
+    remains untouched, but the derived relation is retired unless at least one evidence
+    event contains the person in a structured strong role.
+    """
+    retired = 0
+    retained = 0
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT r.id,r.subject_id
+            FROM entity_relations r
+            JOIN entities s ON s.id=r.subject_id AND s.kind='person'
+            JOIN entities o ON o.id=r.object_id AND o.kind='project'
+            WHERE r.predicate='associated_with_project' AND r.state='current'
+            """
+        ).fetchall()
+        for row in rows:
+            relation_id = int(row["id"])
+            person_id = str(row["subject_id"])
+            evidence_rows = conn.execute(
+                """
+                SELECT ee.role,e.event_type
+                FROM relation_evidence re
+                JOIN events e ON e.id=re.event_id
+                JOIN event_entities ee ON ee.event_id=e.id AND ee.entity_id=?
+                WHERE re.relation_id=?
+                """,
+                (person_id, relation_id),
+            ).fetchall()
+            strong = any(
+                _strong_person_project_evidence(str(item["role"]), str(item["event_type"]))
+                for item in evidence_rows
+            )
+            if strong:
+                retained += 1
+                continue
+            conn.execute(
+                "UPDATE entity_relations SET state='retired',last_seen_at=? WHERE id=?",
+                (_now(), relation_id),
+            )
+            retired += 1
+        conn.commit()
+    return {"retired": retired, "retained": retained}
 
 
 def refresh_links(limit: int = 1200) -> dict[str, int]:
@@ -377,8 +422,6 @@ def related_entities(entity_id: str, limit: int = 12) -> list[dict[str, Any]]:
 
 
 def related_context(query: str, limit: int = 8) -> str:
-    # Keep linking incremental and bounded. On a normal turn there are usually zero
-    # or only a handful of new events, so this remains a cheap SQLite operation.
     try:
         refresh_links(limit=120)
     except Exception:
@@ -422,4 +465,5 @@ def status() -> dict[str, Any]:
         "relations": relations,
         "relation_evidence": evidence,
         "last_linked_event_id": int(row["value"]) if row and str(row["value"]).isdigit() else 0,
+        "person_project_requires_structured_role": True,
     }

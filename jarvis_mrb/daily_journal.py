@@ -125,7 +125,6 @@ Do not invent events, emotions, motives, or sensitive interpretations. Prefer 5-
             return text
     except (httpx.HTTPError, ValueError, TypeError):
         pass
-    # Deterministic fallback still produces a valid local journal.
     lines = [f"# {day.isoformat()}", "", "## Highlights"]
     conversations = source.get("conversations") or []
     if conversations:
@@ -137,6 +136,22 @@ Do not invent events, emotions, motives, or sensitive interpretations. Prefer 5-
     if sightings:
         lines.append(f"- {len(sightings)} recent object/location sightings were retained.")
     return "\n".join(lines) + "\n"
+
+
+def _mirror_journal(target_day: date, markdown: str, path: Path) -> None:
+    try:
+        from jarvis_mrb.world_model import record_knowledge_source
+
+        record_knowledge_source(
+            "journal",
+            target_day.isoformat(),
+            title=f"Daily journal {target_day.isoformat()}",
+            text=markdown,
+            occurred_at=f"{target_day.isoformat()}T23:59:00",
+            metadata={"path": str(path), "derived": True},
+        )
+    except Exception:
+        pass
 
 
 def generate(day: date | None = None) -> Path:
@@ -151,6 +166,7 @@ def generate(day: date | None = None) -> Path:
     JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
     path = JOURNAL_DIR / f"{target_day.isoformat()}.md"
     path.write_text(markdown.rstrip() + "\n", encoding="utf-8")
+    _mirror_journal(target_day, markdown, path)
     return path
 
 
@@ -170,8 +186,6 @@ def _loop() -> None:
     while True:
         now = datetime.now().astimezone()
         key = now.date().isoformat()
-        # Generate near the end of the local day. If the PC was asleep, generate
-        # shortly after it returns provided the date has not yet been journaled.
         should_run = now.hour == 23 and now.minute >= 45
         if _enabled() and should_run and _LAST_WRITTEN_DATE != key:
             try:

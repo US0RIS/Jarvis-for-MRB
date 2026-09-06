@@ -41,10 +41,7 @@ def _index_once(source_key: str, text: str, *, kind: str) -> bool:
         return False
     digest = _fingerprint(cleaned)
     with _connect() as conn:
-        row = conn.execute(
-            "SELECT content_hash FROM indexed_sources WHERE source_key=?",
-            (source_key,),
-        ).fetchone()
+        row = conn.execute("SELECT content_hash FROM indexed_sources WHERE source_key=?", (source_key,)).fetchone()
         if row and str(row[0]) == digest:
             return False
     remember_text(cleaned, session_id="knowledge", kind=kind)
@@ -142,18 +139,25 @@ def refresh() -> dict[str, Any]:
     scanned = 0
     errors: list[str] = []
     backfill: dict[str, Any] | None = None
+    extended_backfill: dict[str, Any] | None = None
     linker: dict[str, Any] | None = None
     executive: dict[str, Any] | None = None
 
-    # The service already runs knowledge refresh on its own background thread. Use
-    # that existing non-latency-sensitive path for the one-time migration instead of
-    # making the user's first post-upgrade voice request pay the backfill cost.
+    # Both migrations run on this existing non-latency-sensitive refresh thread.
+    # Each has its own sentinel and becomes a near-zero-cost no-op after success.
     try:
         from jarvis_mrb.world_backfill import backfill_existing_state
 
         backfill = backfill_existing_state()
     except Exception as exc:
         backfill = {"ok": False, "error": str(exc)[:500]}
+
+    try:
+        from jarvis_mrb.world_extended_backfill import backfill_extended_state
+
+        extended_backfill = backfill_extended_state()
+    except Exception as exc:
+        extended_backfill = {"ok": False, "error": str(exc)[:500]}
 
     email_result = query_emails(query="in:anywhere newer_than:30d", limit=10)
     if email_result.ok and email_result.data:
@@ -207,10 +211,6 @@ def refresh() -> dict[str, Any]:
         if _index_once(f"note:{relative}", text, kind="note"):
             indexed += 1
 
-    # Once all source records are in the shared graph, resolve cross-source mentions
-    # and derive evidence-backed relationships (person↔project, document↔project,
-    # meeting↔person, object↔place, and similar high-value edges). This stays fully
-    # local and deterministic; it does not ask an LLM to invent relationships.
     try:
         from jarvis_mrb.world_linker import refresh_links
 
@@ -218,8 +218,6 @@ def refresh() -> dict[str, Any]:
     except Exception as exc:
         linker = {"error": str(exc)[:500]}
 
-    # Promote explicit goals into persistent intentions only after relationship
-    # linking has run, so goal↔project and goal↔commitment associations can be used.
     try:
         from jarvis_mrb.world_executive import refresh_intentions
 
@@ -235,6 +233,7 @@ def refresh() -> dict[str, Any]:
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
         "world_backfill": backfill,
+        "world_extended_backfill": extended_backfill,
         "world_linker": linker,
         "world_executive": executive,
     }
@@ -243,10 +242,6 @@ def refresh() -> dict[str, Any]:
 def search(query: str, limit: int = 5) -> list[str]:
     safe_limit = max(1, min(int(limit), 8))
     result: list[str] = []
-
-    # Structured world matches come first because they carry source/time/provenance
-    # and can include people, projects, goals and commitments that are not usefully
-    # represented by a standalone embedding chunk.
     try:
         from jarvis_mrb.world_model import search as world_search
 
@@ -258,8 +253,6 @@ def search(query: str, limit: int = 5) -> list[str]:
     except Exception:
         pass
 
-    # Semantic retrieval remains valuable for fuzzy passages and older text that has
-    # not yet been promoted into structured entities/relations.
     for item in retrieve(query, limit=safe_limit):
         if item not in result:
             result.append(item)

@@ -140,6 +140,7 @@ def refresh() -> dict[str, Any]:
     errors: list[str] = []
     backfill: dict[str, Any] | None = None
     extended_backfill: dict[str, Any] | None = None
+    calendar_enrichment: dict[str, Any] | None = None
     linker: dict[str, Any] | None = None
     executive: dict[str, Any] | None = None
 
@@ -195,6 +196,17 @@ def refresh() -> dict[str, Any]:
         elif not calendar_result.ok:
             errors.append(calendar_result.message)
 
+    # The conversational Calendar adapter is intentionally compact. A separate
+    # read-only private sync adds attendee identities, organizer and description to
+    # the world graph so situation/relationship reasoning has the information the
+    # spoken calendar surface intentionally omits.
+    try:
+        from jarvis_mrb.world_calendar_sync import sync as sync_world_calendar
+
+        calendar_enrichment = sync_world_calendar(days_past=30, days_future=120, limit=100)
+    except Exception as exc:
+        calendar_enrichment = {"ok": False, "synced": 0, "error": str(exc)[:500]}
+
     NOTES_DIR.mkdir(parents=True, exist_ok=True)
     for path in sorted(NOTES_DIR.glob("**/*")):
         if not path.is_file() or path.suffix.lower() not in {".txt", ".md", ".json", ".log"}:
@@ -234,6 +246,7 @@ def refresh() -> dict[str, Any]:
         "world_model_mirroring": True,
         "world_backfill": backfill,
         "world_extended_backfill": extended_backfill,
+        "world_calendar_enrichment": calendar_enrichment,
         "world_linker": linker,
         "world_executive": executive,
     }
@@ -273,6 +286,7 @@ def status() -> dict[str, Any]:
         sources = int(conn.execute("SELECT COUNT(*) FROM indexed_sources").fetchone()[0])
     linker: dict[str, Any] = {}
     executive: dict[str, Any] = {}
+    relevance: dict[str, Any] = {}
     diagnostics: dict[str, Any] = {}
     try:
         from jarvis_mrb.world_linker import status as world_linker_status
@@ -287,6 +301,12 @@ def status() -> dict[str, Any]:
     except Exception:
         pass
     try:
+        from jarvis_mrb.world_relevance import status as world_relevance_status
+
+        relevance = world_relevance_status()
+    except Exception:
+        pass
+    try:
         from jarvis_mrb.world_diagnostics import validate as validate_world
 
         diagnostics = validate_world()
@@ -298,5 +318,6 @@ def status() -> dict[str, Any]:
         "world_model_mirroring": True,
         "world_linker": linker,
         "world_executive": executive,
+        "world_relevance": relevance,
         "world_diagnostics": diagnostics,
     }

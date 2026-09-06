@@ -104,11 +104,13 @@ def update_state(patch: dict[str, Any]) -> dict[str, Any]:
     # World-model mirroring is intentionally best-effort. A graph/database problem
     # must never prevent the live companion state from being updated.
     try:
-        from jarvis_mrb.world_model import ingest_frontend_snapshot, record_environment_snapshot
-
         if isinstance(frontend_world_snapshot, dict):
+            from jarvis_mrb.world_frontend_ingest import ingest_frontend_snapshot
+
             ingest_frontend_snapshot(frontend_world_snapshot)
         if any(key in working_patch for key in _WORLD_CONTEXT_KEYS):
+            from jarvis_mrb.world_model import record_environment_snapshot
+
             record_environment_snapshot(state)
     except Exception:
         pass

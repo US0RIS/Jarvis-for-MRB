@@ -4,7 +4,8 @@ import hashlib
 import json
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from jarvis_mrb.permissions import decide as permission_decision
@@ -23,6 +24,7 @@ _RECENT_CHANGE_TYPES = {
     "meeting.completed", "commitment.resolved", "knowledge.gmail_attachment",
     "verification.verified", "verification.failed", "verification.timed_out",
 }
+_TIME_FLOOR = datetime(1970, 1, 1, tzinfo=timezone.utc).astimezone()
 
 
 def _now() -> str:
@@ -39,16 +41,26 @@ def _stable_key(*parts: object) -> str:
 
 
 def _parse_time(raw: str | None) -> datetime | None:
+    """Parse world timestamps without relying on platform-local timestamp fallbacks.
+
+    Most world events are ISO-8601, but Gmail Date headers and historical backfills can
+    be RFC-2822/5322. Accept both forms explicitly. An unparseable value remains
+    unknown rather than being converted through datetime.min.astimezone(), which can
+    be platform-dependent on Windows for pre-epoch dates.
+    """
     text = str(raw or "").strip()
     if not text:
         return None
     try:
         value = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        if value.tzinfo is None:
-            value = value.astimezone()
-        return value.astimezone()
     except (TypeError, ValueError, OverflowError):
-        return None
+        try:
+            value = parsedate_to_datetime(text)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if value.tzinfo is None:
+        value = value.astimezone()
+    return value.astimezone()
 
 
 def _days_until(raw: str | None) -> float | None:
@@ -202,7 +214,7 @@ def _active_term_conflicts(conn: sqlite3.Connection, project_ids: list[str]) -> 
                 }
             )
     result.sort(
-        key=lambda item: (_parse_time(str(item.get("occurred_at") or "")) or datetime.min.astimezone()),
+        key=lambda item: (_parse_time(str(item.get("occurred_at") or "")) or _TIME_FLOOR),
         reverse=True,
     )
     return result[:12]
@@ -823,6 +835,8 @@ def status() -> dict[str, Any]:
         "verification_reenters_priority": True,
         "term_conflicts_use_source_chronology": True,
         "recent_changes_use_source_chronology": True,
+        "rfc_email_timestamps_supported": True,
+        "platform_safe_time_floor": True,
         "pending_verifications": pending_verification,
         "failed_or_unverified_outcomes": failed_verification,
         "open_attention_items": open_attention,

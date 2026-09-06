@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ def validate() -> dict[str, Any]:
     from jarvis_mrb.world_prebrief import status as prebrief_status
     from jarvis_mrb.world_relevance import status as relevance_status
     from jarvis_mrb.world_situation import status as situation_status
+    from jarvis_mrb.world_verification import status as verification_status
 
     core = world_status()
     linker = linker_status()
@@ -29,6 +31,7 @@ def validate() -> dict[str, Any]:
     relevance = relevance_status()
     situation = situation_status()
     prebrief = prebrief_status()
+    verification = verification_status()
     problems: list[str] = []
     warnings: list[str] = []
 
@@ -168,6 +171,47 @@ def validate() -> dict[str, Any]:
         if disputed:
             warnings.append(f"There are {disputed} disputed belief(s); this is allowed but should remain visible to reasoning.")
 
+        valid_verification_states = ("pending", "verified", "failed", "timed_out", "unverified", "superseded")
+        placeholders = ",".join("?" for _ in valid_verification_states)
+        invalid_verification_states = int(
+            conn.execute(
+                f"SELECT COUNT(*) FROM action_verifications WHERE status NOT IN ({placeholders})",
+                valid_verification_states,
+            ).fetchone()[0]
+        )
+        if invalid_verification_states:
+            problems.append(f"Action verifications with invalid states: {invalid_verification_states}")
+
+        verified_without_event = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM action_verifications v
+                LEFT JOIN events e ON e.id=v.resolved_event_id
+                WHERE v.status='verified'
+                  AND (v.resolved_event_id IS NULL OR e.event_type!='verification.verified')
+                """
+            ).fetchone()[0]
+        )
+        if verified_without_event:
+            problems.append(f"Verified action outcomes without verification.verified evidence events: {verified_without_event}")
+
+        now_iso = datetime.now().astimezone().isoformat()
+        overdue_verifications = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM action_verifications WHERE status='pending' AND deadline_at IS NOT NULL AND deadline_at<=?",
+                (now_iso,),
+            ).fetchone()[0]
+        )
+        if overdue_verifications:
+            warnings.append(f"There are {overdue_verifications} pending action verification(s) past deadline; the verifier loop should resolve them on its next pass.")
+
+        unverifiable = int(
+            conn.execute("SELECT COUNT(*) FROM action_verifications WHERE status='unverified'").fetchone()[0]
+        )
+        if unverifiable:
+            warnings.append(f"There are {unverifiable} action outcome(s) explicitly marked unverified; Jarvis must not infer success for them.")
+
     try:
         audit: dict[str, Any]
         from jarvis_mrb.tool_audit import status as audit_status
@@ -191,6 +235,7 @@ def validate() -> dict[str, Any]:
         "relevance": relevance,
         "situation": situation,
         "prebrief": prebrief,
+        "verification": verification,
         "tool_audit": audit,
         "linker_lag_events": linker_lag,
         "goal_intention_mismatches": goal_mismatches,
@@ -200,6 +245,10 @@ def validate() -> dict[str, Any]:
         "revoked_known_people_with_stale_ids": stale_revoked_identity,
         "revoked_known_people_with_alias_leaks": revoked_alias_leaks,
         "tombstone_relation_leaks": tombstone_relation_leaks,
+        "invalid_verification_states": invalid_verification_states,
+        "verified_outcomes_without_evidence_events": verified_without_event,
+        "pending_verifications_past_deadline": overdue_verifications,
+        "unverified_outcomes": unverifiable,
         "problems": problems,
         "warnings": warnings,
     }

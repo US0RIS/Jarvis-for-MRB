@@ -16,14 +16,16 @@ final class MetaGlassesManager: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var cameraMasterEnabled: Bool
 
-    /// Fired when the DAT device becomes available again after having been
-    /// unavailable for a meaningful period. Meta DAT does not currently expose a
-    /// reliable public “worn/on-head” state, so this intentionally uses device
-    /// return (typically fold/unfold/reconnect) rather than pretending we can
-    /// distinguish every physical don/doff event.
+    /// Fired only when a new *presence session* begins. Meta DAT exposes device
+    /// eligibility, not a reliable on-head switch, so Jarvis deliberately does not
+    /// treat every Bluetooth/DAT flap as "the user put the glasses back on." A new
+    /// session requires a sustained absence and is rate-limited across app launches.
     var onGlassesBecameAvailable: (() -> Void)?
 
     private static let cameraMasterEnabledKey = "jarvis.cameraMasterEnabled"
+    private static let lastPresenceSignalKey = "jarvis.meta.lastPresenceSignalEpoch"
+    private static let meaningfulAbsenceSeconds: TimeInterval = 30
+    private static let minimumPresenceSessionInterval: TimeInterval = 10 * 60
 
     private let wearables = Wearables.shared
     private let deviceSelector: AutoDeviceSelector
@@ -38,7 +40,7 @@ final class MetaGlassesManager: ObservableObject {
     private var availabilityInitialized = false
     private var previousEligible = false
     private var unavailableSince: Date?
-    private var lastWelcomeSignal = Date.distantPast
+    private var lastPresenceSignal: Date
 
     init() {
         // Stop Camera is a master privacy switch, not merely a request to stop
@@ -47,6 +49,11 @@ final class MetaGlassesManager: ObservableObject {
         // including across an app relaunch. Only an explicit Start Camera action
         // is allowed to clear this latch.
         cameraMasterEnabled = UserDefaults.standard.object(forKey: Self.cameraMasterEnabledKey) as? Bool ?? true
+
+        let lastSignalEpoch = UserDefaults.standard.double(forKey: Self.lastPresenceSignalKey)
+        lastPresenceSignal = lastSignalEpoch > 0
+            ? Date(timeIntervalSince1970: lastSignalEpoch)
+            : Date.distantPast
 
         // AutoDeviceSelector learns its active device asynchronously from the
         // SDK's device stream. Keep one alive for the lifetime of the manager so
@@ -343,6 +350,9 @@ final class MetaGlassesManager: ObservableObject {
                 let now = Date()
                 hasEligibleDevice = eligible
 
+                // The first DAT sample is initialization, not a return event. This
+                // prevents a greeting every time the app launches while the glasses
+                // are already connected.
                 if !availabilityInitialized {
                     availabilityInitialized = true
                     previousEligible = eligible
@@ -356,20 +366,23 @@ final class MetaGlassesManager: ObservableObject {
                     continue
                 }
 
-                if !previousEligible {
-                    let unavailableDuration = unavailableSince.map { now.timeIntervalSince($0) } ?? 0
-                    previousEligible = true
-                    unavailableSince = nil
+                guard !previousEligible else { continue }
+                let unavailableDuration = unavailableSince.map { now.timeIntervalSince($0) } ?? 0
+                previousEligible = true
+                unavailableSince = nil
 
-                    // Ignore startup settling and momentary Bluetooth flaps. A
-                    // sustained unavailable -> available transition is the best
-                    // public DAT signal currently available for “glasses returned.”
-                    if unavailableDuration >= 5,
-                       now.timeIntervalSince(lastWelcomeSignal) >= 30 {
-                        lastWelcomeSignal = now
-                        onGlassesBecameAvailable?()
-                    }
+                // Treat a sustained absence as the end of one wearing/presence
+                // session. Short DAT/Bluetooth flaps do not create a new session.
+                // Persist the emission time so an app restart cannot immediately
+                // produce a duplicate welcome-back event.
+                guard unavailableDuration >= Self.meaningfulAbsenceSeconds,
+                      now.timeIntervalSince(lastPresenceSignal) >= Self.minimumPresenceSessionInterval else {
+                    continue
                 }
+
+                lastPresenceSignal = now
+                UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastPresenceSignalKey)
+                onGlassesBecameAvailable?()
             }
         }
     }

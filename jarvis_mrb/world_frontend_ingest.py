@@ -102,4 +102,15 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         counts["linker"] = {"error": str(exc)[:300]}
 
+    # Explicit goal/Waiting-On mutations should also update Jarvis's persistent
+    # executive state immediately. This layer derives intentions only from explicit
+    # goals and evidence-backed graph links; ambient observations never silently
+    # become goals.
+    try:
+        from jarvis_mrb.world_executive import refresh_intentions
+
+        counts["executive"] = refresh_intentions()
+    except Exception as exc:
+        counts["executive"] = {"error": str(exc)[:300]}
+
     return counts

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,85 @@ def _index_once(source_key: str, text: str, *, kind: str) -> bool:
     return True
 
 
+def _record_world_email(email: dict[str, Any], text: str) -> None:
+    try:
+        from jarvis_mrb.world_model import ensure_entity, record_knowledge_source
+
+        raw_sender = str(email.get("sender") or email.get("from") or "").strip()
+        display_name, address = parseaddr(raw_sender)
+        person_name = " ".join((display_name or address or raw_sender or "Unknown sender").split())[:300]
+        participants: list[tuple[str, str, float]] = []
+        if person_name and person_name.lower() != "unknown sender":
+            person_id = ensure_entity(
+                "person",
+                person_name,
+                external_namespace="email_address" if address else None,
+                external_id=address.lower() if address else None,
+                aliases=[address] if address else [],
+                attributes={"email": address.lower()} if address else {},
+                confidence=1.0,
+            )
+            participants.append((person_id, "sender", 1.0))
+
+        record_knowledge_source(
+            "gmail",
+            str(email.get("id") or ""),
+            title=str(email.get("subject") or "(no subject)"),
+            text=text,
+            occurred_at=str(email.get("date") or "") or None,
+            metadata={
+                "sender": raw_sender,
+                "email_address": address.lower() if address else "",
+                "thread_id": str(email.get("threadId") or email.get("thread_id") or ""),
+            },
+            participants=participants,
+        )
+    except Exception:
+        pass
+
+
+def _record_world_calendar(event: dict[str, Any], text: str) -> None:
+    try:
+        from jarvis_mrb.world_model import ensure_entity, record_knowledge_source
+
+        participants: list[tuple[str, str, float]] = []
+        location = " ".join(str(event.get("location") or "").split())[:500]
+        if location:
+            place_id = ensure_entity("place", location, confidence=0.9)
+            participants.append((place_id, "location", 0.9))
+
+        record_knowledge_source(
+            "calendar",
+            str(event.get("id") or ""),
+            title=str(event.get("summary") or "(untitled event)"),
+            text=text,
+            occurred_at=str(event.get("start") or "") or None,
+            metadata={
+                "start": event.get("start"),
+                "end": event.get("end"),
+                "location": location,
+            },
+            participants=participants,
+        )
+    except Exception:
+        pass
+
+
+def _record_world_note(relative: str, raw: str) -> None:
+    try:
+        from jarvis_mrb.world_model import record_knowledge_source
+
+        record_knowledge_source(
+            "note",
+            relative,
+            title=relative,
+            text=raw,
+            metadata={"path": relative},
+        )
+    except Exception:
+        pass
+
+
 def refresh() -> dict[str, Any]:
     indexed = 0
     scanned = 0
@@ -74,6 +154,7 @@ def refresh() -> dict[str, Any]:
                 f"date: {email.get('date') or ''}. "
                 f"{email.get('body') or ''}"
             )
+            _record_world_email(email, text)
             if _index_once(f"gmail:{email.get('id')}", text, kind="gmail"):
                 indexed += 1
     elif not email_result.ok:
@@ -91,6 +172,7 @@ def refresh() -> dict[str, Any]:
                     f"start: {event.get('start') or ''}; end: {event.get('end') or ''}; "
                     f"location: {event.get('location') or ''}."
                 )
+                _record_world_calendar(event, text)
                 if _index_once(f"calendar:{event.get('id')}", text, kind="calendar"):
                     indexed += 1
         elif not calendar_result.ok:
@@ -108,6 +190,7 @@ def refresh() -> dict[str, Any]:
         scanned += 1
         relative = path.relative_to(NOTES_DIR).as_posix()
         text = f"Local note {relative}:\n{raw}"
+        _record_world_note(relative, raw)
         if _index_once(f"note:{relative}", text, kind="note"):
             indexed += 1
 
@@ -117,6 +200,7 @@ def refresh() -> dict[str, Any]:
         "indexed": indexed,
         "errors": errors[:5],
         "notes_directory": str(NOTES_DIR),
+        "world_model_mirroring": True,
     }
 
 
@@ -134,4 +218,8 @@ def describe_search(query: str, limit: int = 5) -> str:
 def status() -> dict[str, Any]:
     with _connect() as conn:
         sources = int(conn.execute("SELECT COUNT(*) FROM indexed_sources").fetchone()[0])
-    return {"indexed_sources": sources, "notes_directory": str(NOTES_DIR)}
+    return {
+        "indexed_sources": sources,
+        "notes_directory": str(NOTES_DIR),
+        "world_model_mirroring": True,
+    }

@@ -160,12 +160,25 @@ def remember_text(content: str, *, session_id: str = "default", kind: str = "con
 
 
 def _remember_exchange(session_id: str, user_text: str, assistant_text: str) -> None:
+    # The conversation occurrence and any explicit durable objective are both world
+    # events. Link them immediately so a declaration such as "we're trying to get
+    # Project Apollo signed by Friday" becomes a goal->project relation before the
+    # next turn. This path runs on the existing memory worker, not the voice thread.
     try:
+        from jarvis_mrb.world_intent_capture import capture as capture_explicit_intentions
         from jarvis_mrb.world_linker import link_event
         from jarvis_mrb.world_occurrence import record_conversation_occurrence
 
         event_id = record_conversation_occurrence(session_id, user_text, assistant_text)
         link_event(event_id)
+        for goal_event_id in capture_explicit_intentions(user_text, session_id=session_id):
+            link_event(goal_event_id)
+        try:
+            from jarvis_mrb.world_executive import refresh_intentions
+
+            refresh_intentions()
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -278,6 +291,7 @@ def status() -> dict[str, object]:
     executive: dict[str, object] = {}
     relevance: dict[str, object] = {}
     situation: dict[str, object] = {}
+    intent_capture: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
@@ -302,6 +316,12 @@ def status() -> dict[str, object]:
         situation = situation_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_intent_capture import status as intent_capture_status
+
+        intent_capture = intent_capture_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
@@ -317,4 +337,5 @@ def status() -> dict[str, object]:
         "world_executive": executive,
         "world_relevance": relevance,
         "world_situation": situation,
+        "world_intent_capture": intent_capture,
     }

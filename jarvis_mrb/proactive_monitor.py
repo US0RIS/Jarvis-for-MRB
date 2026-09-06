@@ -45,7 +45,6 @@ def _prefetch_for_event(event_id: str, summary: str) -> None:
         return
 
     def work() -> None:
-        # Pre-warm the low-latency planner without producing any output.
         try:
             with httpx.Client(timeout=httpx.Timeout(60.0, connect=2.0)) as client:
                 client.post(
@@ -54,8 +53,6 @@ def _prefetch_for_event(event_id: str, summary: str) -> None:
                 )
         except httpx.HTTPError:
             pass
-        # Warm the local semantic index around the meeting topic. This is a local
-        # lookup only; it does not spend Serper quota or contact arbitrary sites.
         try:
             from jarvis_mrb.knowledge_index import search
             search(summary, limit=3)
@@ -63,6 +60,15 @@ def _prefetch_for_event(event_id: str, summary: str) -> None:
             pass
 
     threading.Thread(target=work, name="jarvis-meeting-prefetch", daemon=True).start()
+
+
+def _contextual_prebrief(event_id: str, summary: str) -> dict[str, Any] | None:
+    try:
+        from jarvis_mrb.world_prebrief import build
+
+        return build(event_id, summary)
+    except Exception:
+        return None
 
 
 def _check_calendar() -> None:
@@ -88,6 +94,21 @@ def _check_calendar() -> None:
 
         if 3 <= minutes <= 8:
             _prefetch_for_event(event_id, summary)
+
+        # In the useful preparation window, prefer a world-grounded pre-brief over a
+        # generic countdown. The pre-brief exists only when the meeting has actionable
+        # connected context, so ordinary calendar events remain quiet and predictable.
+        if 12 < minutes <= 35:
+            prebrief = _contextual_prebrief(event_id, summary)
+            if prebrief:
+                if _dedup(f"calendar-context:{event_id}", 4 * 3600):
+                    emit_proactive(
+                        str(prebrief.get("message") or ""),
+                        cue="attention",
+                        severity=str(prebrief.get("severity") or "info"),
+                    )
+                # Do not follow a contextual brief with a redundant generic reminder.
+                continue
 
         if minutes <= 12:
             if not _dedup(f"calendar-urgent:{event_id}", 45 * 60):
@@ -162,8 +183,6 @@ def start() -> None:
             return
         _STARTED = True
 
-    # These monitors are deliberately independent daemon threads. A failure in a
-    # peripheral feature cannot take down the voice/control service.
     try:
         from jarvis_mrb.pc_context import start as start_pc_context
         start_pc_context()

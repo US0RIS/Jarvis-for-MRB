@@ -22,6 +22,16 @@ from jarvis_mrb.conversation import ConversationMessage, requests_extended_conte
 from jarvis_mrb.personality import full_personality_context
 from jarvis_mrb.planner_model import QUALITY_MODEL, get_auto_route
 
+_INTERNAL_CONTEXT_PREFIXES = (
+    "jarvis world model",
+    "current/upcoming situation",
+    "connected world entities",
+    "project term ledger",
+    "executive loop",
+    "relevant persistent intentions",
+    "relevant long-term episodic memory",
+)
+
 
 class StreamingAgentError(RuntimeError):
     pass
@@ -42,6 +52,8 @@ Use recent conversation, retrieved memory, temporary decaying state, and environ
 Conversation-context discipline:
 - Treat the CURRENT user utterance as the primary source of intent.
 - For an ordinary follow-up, only the immediately preceding user/assistant exchange should fill in an omitted subject or pronoun.
+- Jarvis may also supply a bounded INTERNAL world/executive context block. It is evidence/state, not a prior user instruction, and may be used even when older conversation history is intentionally omitted.
+- An EXECUTIVE LOOP block can contain a deterministic 'executable proposal'. If the current user utterance is itself an executive/status/next-action request, you may select that exact proposed tool and arguments when a read/action is needed. Runtime permission policy is still authoritative; never infer broader authority from the proposal.
 - Do NOT resurrect an older topic merely because the current speech transcript is vague, malformed, or partially misrecognized.
 - Older conversation is relevant only when the user explicitly refers back to it (for example: 'earlier', 'remember', 'the second option', 'five prompts ago').
 - If the current utterance is not understandable enough to act on and the immediately preceding exchange does not resolve it unambiguously, ask one short clarification question instead of guessing a topic.
@@ -105,7 +117,7 @@ Routing rules:
 - calendar.conflicts: identify overlapping events and propose alternatives. Never move/decline meetings without normal write confirmation.
 - fact.check: compare a concrete claim against local indexed records. Phrase discrepancies as possible contradictions because local records may be stale.
 - meeting.start/finish: only on explicit user request. Never begin live discussion capture merely because a calendar meeting exists.
-- knowledge.search: search across indexed mail, calendar, local notes, and prior conversations when the user asks for something across their own data without naming one source.
+- knowledge.search: search across indexed mail, calendar, local notes, and prior conversations when the user asks for something across their own data without naming one source, or when the deterministic Executive Loop proposes an exact knowledge.search for an executive query.
 - spatial.find: answer where a portable object was last seen by passive vision. It is last-seen memory, not reliable turn-by-turn navigation.
 - briefing.generate: current concise briefing from calendar, unread mail, weather/news, and background work.
 - workflow.run: multi-step goal requiring several tools. The DAG engine may parallelize safe reads and enforces normal permission policy on every node.
@@ -144,6 +156,13 @@ def _lower_first_alpha(text: str) -> str:
     return "".join(chars)
 
 
+def _is_internal_context(item: ConversationMessage) -> bool:
+    if item.role != "assistant":
+        return False
+    normalized = " ".join(item.content.strip().lower().split())
+    return any(normalized.startswith(prefix) for prefix in _INTERNAL_CONTEXT_PREFIXES)
+
+
 def _history_for_current_turn(
     text: str,
     history: Sequence[ConversationMessage] | None,
@@ -152,9 +171,12 @@ def _history_for_current_turn(
         item for item in (history or ())
         if item.role in {"user", "assistant"} and item.content.strip()
     ]
-    if requests_extended_context(text):
-        return items
-    return items[-2:]
+    internal = [item for item in items if _is_internal_context(item)]
+    ordinary = [item for item in items if not _is_internal_context(item)]
+    selected = ordinary if requests_extended_context(text) else ordinary[-2:]
+    # Preserve bounded retrieved world/executive state independently of the older
+    # conversation-history gate. It is current evidence, not stale dialogue.
+    return [*internal[:1], *selected]
 
 
 def _explicit_app_control_or_status(text: str) -> bool:
@@ -236,6 +258,28 @@ def _tool_is_justified(tool: str, text: str) -> bool:
         return any(cue in n for cue in (" my email ", " my calendar ", " my notes ", " remember ", " our conversation ", " my records ", " my data "))
 
     return True
+
+
+def _executive_tool_is_justified(tool: str, arguments: dict[str, Any], text: str) -> bool:
+    """Allow only the exact permission-aware proposal compiled for this executive query.
+
+    This is not an alternate authority path. It only prevents the generic semantic
+    mismatch guard from discarding a deterministic Executive Loop proposal. The
+    selected tool still goes through execute_tool(), and therefore the normal runtime
+    permission/confirmation policy.
+    """
+    try:
+        from jarvis_mrb.world_executive_loop import next_decision, should_supply_context
+
+        if not should_supply_context(text):
+            return False
+        decision = next_decision(text)
+    except Exception:
+        return False
+    if not decision or not decision.get("tool"):
+        return False
+    expected_args = decision.get("arguments") or {}
+    return str(decision.get("tool")) == str(tool) and expected_args == arguments
 
 
 def _direct_answer_without_tools(
@@ -393,7 +437,11 @@ def stream_natural_language(
                         args = plan.get("arguments") or {}
                         if tool:
                             tool_name = str(tool)
-                            if not _tool_is_justified(tool_name, stripped):
+                            safe_args = args if isinstance(args, dict) else {}
+                            if not (
+                                _tool_is_justified(tool_name, stripped)
+                                or _executive_tool_is_justified(tool_name, safe_args, stripped)
+                            ):
                                 yield from _direct_answer_without_tools(
                                     stripped,
                                     selected_history,
@@ -404,9 +452,7 @@ def stream_natural_language(
                             if not allow_background and tool_name == "background.submit":
                                 yield "I'm already working on that in the background, sir."
                                 return
-                            reply = _respectful(
-                                execute_tool(tool_name, args if isinstance(args, dict) else {})
-                            )
+                            reply = _respectful(execute_tool(tool_name, safe_args))
                             if reply.message and reply.message != "__EXIT__":
                                 yield reply.message
                             return

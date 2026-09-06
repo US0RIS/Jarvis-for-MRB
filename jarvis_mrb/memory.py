@@ -214,9 +214,9 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
 def memory_context(query: str, limit: int = 3) -> str:
     pieces: list[str] = []
     try:
-        from jarvis_mrb.world_executive import context as executive_context
         from jarvis_mrb.world_linker import related_context
         from jarvis_mrb.world_model import context_for_query
+        from jarvis_mrb.world_relevance import context_for_query as relevant_executive_context
 
         world = context_for_query(query, limit=max(4, limit * 2))
         if world:
@@ -224,7 +224,7 @@ def memory_context(query: str, limit: int = 3) -> str:
         connected = related_context(query, limit=max(4, limit * 2))
         if connected:
             pieces.append(connected)
-        executive = executive_context(limit=5)
+        executive = relevant_executive_context(query, limit=4)
         if executive:
             pieces.append(executive)
     except Exception:
@@ -247,6 +247,7 @@ def status() -> dict[str, object]:
         embedded = int(conn.execute("SELECT COUNT(*) FROM episodes WHERE dimensions>0").fetchone()[0])
     linker: dict[str, object] = {}
     executive: dict[str, object] = {}
+    relevance: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
@@ -259,12 +260,19 @@ def status() -> dict[str, object]:
         executive = executive_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_relevance import status as relevance_status
+
+        relevance = relevance_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "world-model + relation-traversal + persistent-intentions + episodic-on-demand",
+        "retrieval_mode": "query-aware world-model + relation-traversal + selective persistent-intentions + episodic-on-demand",
         "world_linker": linker,
         "world_executive": executive,
+        "world_relevance": relevance,
     }

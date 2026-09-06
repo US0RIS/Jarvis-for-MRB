@@ -136,6 +136,7 @@ def refresh() -> dict[str, Any]:
     document_versions: dict[str, Any] | None = None
     terms: dict[str, Any] | None = None
     executive: dict[str, Any] | None = None
+    executive_loop: dict[str, Any] | None = None
 
     try:
         from jarvis_mrb.world_backfill import backfill_existing_state
@@ -212,15 +213,12 @@ def refresh() -> dict[str, Any]:
         if _index_once(f"note:{relative}", text, kind="note"):
             indexed += 1
 
-    # First establish people/project identities on all newly ingested source events.
     try:
         from jarvis_mrb.world_linker import refresh_links
         linker = refresh_links(limit=3000)
     except Exception as exc:
         linker = {"error": str(exc)[:500]}
 
-    # Then perform deterministic same-document version analysis. Its generated events
-    # are immediately linked so project/person context remains available this cycle.
     try:
         from jarvis_mrb.world_document_versions import refresh as refresh_document_versions
         from jarvis_mrb.world_linker import link_event
@@ -234,9 +232,6 @@ def refresh() -> dict[str, Any]:
     except Exception as exc:
         document_versions = {"error": str(exc)[:500]}
 
-    # Finally reconcile explicit high-value project terms across conversation, meeting,
-    # email and attachment sources. A mismatch creates a provenance-bearing
-    # `term.changed_or_conflicted` event; it never declares which source is true.
     try:
         from jarvis_mrb.world_linker import link_event
         from jarvis_mrb.world_terms import refresh as refresh_terms
@@ -256,6 +251,16 @@ def refresh() -> dict[str, Any]:
     except Exception as exc:
         executive = {"error": str(exc)[:500]}
 
+    # Knowledge ingestion is a major world-state transition. Recompute persistent
+    # attention and the current decision only after source linking, document-version
+    # analysis, term reconciliation, and intention materialization all finish. This
+    # keeps the Executive Loop current without waiting for a later user query.
+    try:
+        from jarvis_mrb.world_executive_loop import refresh as refresh_executive_loop
+        executive_loop = refresh_executive_loop()
+    except Exception as exc:
+        executive_loop = {"error": str(exc)[:500]}
+
     return {
         "ok": not errors,
         "scanned": scanned,
@@ -271,6 +276,7 @@ def refresh() -> dict[str, Any]:
         "world_document_versions": document_versions,
         "world_terms": terms,
         "world_executive": executive,
+        "world_executive_loop": executive_loop,
     }
 
 
@@ -304,6 +310,7 @@ def status() -> dict[str, Any]:
         sources = int(conn.execute("SELECT COUNT(*) FROM indexed_sources").fetchone()[0])
     linker: dict[str, Any] = {}
     executive: dict[str, Any] = {}
+    executive_loop: dict[str, Any] = {}
     relevance: dict[str, Any] = {}
     attachments: dict[str, Any] = {}
     document_versions: dict[str, Any] = {}
@@ -317,6 +324,11 @@ def status() -> dict[str, Any]:
     try:
         from jarvis_mrb.world_executive import status as world_executive_status
         executive = world_executive_status()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.world_executive_loop import status as world_executive_loop_status
+        executive_loop = world_executive_loop_status()
     except Exception:
         pass
     try:
@@ -350,6 +362,7 @@ def status() -> dict[str, Any]:
         "world_model_mirroring": True,
         "world_linker": linker,
         "world_executive": executive,
+        "world_executive_loop": executive_loop,
         "world_relevance": relevance,
         "world_gmail_attachments": attachments,
         "world_document_versions": document_versions,

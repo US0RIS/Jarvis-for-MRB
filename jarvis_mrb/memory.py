@@ -212,31 +212,52 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
 
 
 def memory_context(query: str, limit: int = 3) -> str:
+    """Assemble private context through independent relevance lanes.
+
+    Situation requests use one compiled meeting packet instead of stacking global
+    world/goal context on top. Ordinary entity questions use structured world + graph
+    relations + selective intentions. Retrospective language independently adds the
+    slower semantic episodic lane. One failed provider never suppresses the others.
+    """
     pieces: list[str] = []
+    situation = ""
+
     try:
-        from jarvis_mrb.world_linker import related_context
-        from jarvis_mrb.world_model import context_for_query
-        from jarvis_mrb.world_relevance import context_for_query as relevant_executive_context
         from jarvis_mrb.world_situation import context_for_query as situation_context
 
-        # Situational context is highly selective and comes first: for meeting-prep
-        # requests it identifies the actual current/next calendar event and gathers
-        # graph-connected people/projects/obligations before the broader retrieval
-        # layers add supporting records.
         situation = situation_context(query)
-        if situation:
-            pieces.append(situation)
-        world = context_for_query(query, limit=max(4, limit * 2))
-        if world:
-            pieces.append(world)
-        connected = related_context(query, limit=max(4, limit * 2))
-        if connected:
-            pieces.append(connected)
-        executive = relevant_executive_context(query, limit=4)
-        if executive:
-            pieces.append(executive)
     except Exception:
-        pass
+        situation = ""
+
+    if situation:
+        pieces.append(situation)
+    else:
+        try:
+            from jarvis_mrb.world_model import context_for_query
+
+            world = context_for_query(query, limit=max(4, limit * 2))
+            if world:
+                pieces.append(world)
+        except Exception:
+            pass
+
+        try:
+            from jarvis_mrb.world_linker import related_context
+
+            connected = related_context(query, limit=max(4, limit * 2))
+            if connected:
+                pieces.append(connected)
+        except Exception:
+            pass
+
+        try:
+            from jarvis_mrb.world_relevance import context_for_query as relevant_executive_context
+
+            executive = relevant_executive_context(query, limit=4)
+            if executive:
+                pieces.append(executive)
+        except Exception:
+            pass
 
     if should_retrieve_memory(query):
         items = retrieve(query, limit=limit)
@@ -286,7 +307,12 @@ def status() -> dict[str, object]:
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "situation-aware + query-aware world-model + relation-traversal + selective persistent-intentions + episodic-on-demand",
+        "retrieval_mode": "routed: situation OR structured-world/relations/selective-intentions; episodic recall independently on-demand",
+        "context_router": {
+            "situation_short_circuits_broad_context": True,
+            "provider_failures_isolated": True,
+            "episodic_recall_independent": True,
+        },
         "world_linker": linker,
         "world_executive": executive,
         "world_relevance": relevance,

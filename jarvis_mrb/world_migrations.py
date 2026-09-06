@@ -125,8 +125,9 @@ def _migration_2_relations_and_intentions() -> None:
 
 def _migration_3_terms_and_document_lineage() -> None:
     from jarvis_mrb.world_document_versions import _connect as document_connect
-    from jarvis_mrb.world_terms import status as terms_status
+    from jarvis_mrb.world_terms import repair_conflict_chronology, status as terms_status
     terms_status()
+    repair_conflict_chronology()
     conn = document_connect()
     conn.close()
 
@@ -143,7 +144,7 @@ def _migration_4_executive_and_verification() -> None:
 _MIGRATIONS: tuple[tuple[int, str, Callable[[], None]], ...] = (
     (1, "Core world entities/events/beliefs/commitments", _migration_1_core),
     (2, "Evidence relations, intentions, and strong person/project semantics", _migration_2_relations_and_intentions),
-    (3, "Cross-source term ledger and document lineage", _migration_3_terms_and_document_lineage),
+    (3, "Chronology-safe cross-source term ledger and document lineage", _migration_3_terms_and_document_lineage),
     (4, "Executive Loop, closed-loop verification, and runtime subsystem health", _migration_4_executive_and_verification),
 )
 

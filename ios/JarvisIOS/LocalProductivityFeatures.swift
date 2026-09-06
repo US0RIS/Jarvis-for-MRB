@@ -70,6 +70,7 @@ final class LocalProductivityController: ObservableObject {
     @Published private(set) var receipts: [LocalActionReceipt]
     @Published private(set) var intentRadar = "No local suggestion yet"
     @Published private(set) var clipboardStatus = "Not inspected"
+    @Published private(set) var worldSyncStatus = "Waiting for Jarvis companion"
 
     private static let goalsAccount = "jarvis.localProductivity.goals.v1"
     private static let waitingAccount = "jarvis.localProductivity.waiting.v1"
@@ -81,6 +82,7 @@ final class LocalProductivityController: ObservableObject {
     private var loopTask: Task<Void, Never>?
     private var started = false
     private var notifiedDueIDs = Set<UUID>()
+    private var lastWorldSnapshotData: Data?
 
     init(appModel: JarvisAppModel, knownPeople: KnownPeopleController, power: LocalPowerFeaturesController) {
         self.appModel = appModel
@@ -221,12 +223,147 @@ final class LocalProductivityController: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    /// Metadata-only bridge into the PC world model. Biometric feature prints,
+    /// enrollment images, raw camera frames, rolling microphone audio, incidents,
+    /// clipboard contents, and privacy-zone coordinates are deliberately absent.
+    func worldSnapshot() -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+
+        let people: [[String: Any]] = knownPeople.people.map { person in
+            [
+                "id": person.id.uuidString,
+                "name": person.name,
+                "note": String(person.notes.prefix(2_000)),
+                "enrolled_at": iso.string(from: person.enrolledAt),
+            ]
+        }
+
+        let goalRows: [[String: Any]] = goals.map { goal in
+            var row: [String: Any] = [
+                "id": goal.id.uuidString,
+                "title": goal.title,
+                "next_action": goal.nextAction,
+                "note": goal.note,
+                "created_at": iso.string(from: goal.createdAt),
+            ]
+            if let due = goal.dueAt { row["due_at"] = iso.string(from: due) }
+            if let completed = goal.completedAt { row["completed_at"] = iso.string(from: completed) }
+            return row
+        }
+
+        let waitingRows: [[String: Any]] = waitingItems.map { item in
+            var row: [String: Any] = [
+                "id": item.id.uuidString,
+                "person": item.person,
+                "item": item.item,
+                "created_at": iso.string(from: item.createdAt),
+            ]
+            if let due = item.dueAt { row["due_at"] = iso.string(from: due) }
+            if let resolved = item.resolvedAt { row["resolved_at"] = iso.string(from: resolved) }
+            return row
+        }
+
+        let inventoryRows: [[String: Any]] = power.inventory.map { item in
+            var row: [String: Any] = [
+                "id": item.id.uuidString,
+                "name": item.name,
+                "note": item.note,
+            ]
+            if let seen = item.lastSeenAt { row["last_seen_at"] = iso.string(from: seen) }
+            if let latitude = item.lastSeenLatitude { row["latitude"] = latitude }
+            if let longitude = item.lastSeenLongitude { row["longitude"] = longitude }
+            return row
+        }
+
+        let reminderRows: [[String: Any]] = power.reminders.map { reminder in
+            var row: [String: Any] = [
+                "id": reminder.id.uuidString,
+                "text": reminder.text,
+                "trigger": reminder.trigger.rawValue,
+                "target": reminder.target,
+                "urgent": reminder.urgent,
+                "enabled": reminder.enabled,
+            ]
+            if let latitude = reminder.latitude { row["latitude"] = latitude }
+            if let longitude = reminder.longitude { row["longitude"] = longitude }
+            if let radius = reminder.radiusMeters { row["radius_meters"] = radius }
+            if let fired = reminder.firedAt { row["fired_at"] = iso.string(from: fired) }
+            return row
+        }
+
+        let encounterRows: [[String: Any]] = power.encounters.suffix(100).map { encounter in
+            [
+                "id": encounter.id.uuidString,
+                "person_id": encounter.personID.uuidString,
+                "person_name": encounter.personName,
+                "started_at": iso.string(from: encounter.startedAt),
+                "ended_at": iso.string(from: encounter.endedAt),
+                "transcript_excerpt": String(encounter.transcriptExcerpt.prefix(5_000)),
+                "summary": String(encounter.summary.prefix(4_000)),
+            ]
+        }
+
+        let eventRows: [[String: Any]] = power.events.suffix(100).map { event in
+            var row: [String: Any] = [
+                "id": event.id.uuidString,
+                "timestamp": iso.string(from: event.timestamp),
+                "kind": event.kind,
+                "title": event.title,
+                "detail": String(event.detail.prefix(3_000)),
+            ]
+            if let confidence = event.confidence { row["confidence"] = confidence }
+            return row
+        }
+
+        let receiptRows: [[String: Any]] = receipts.suffix(100).map { receipt in
+            [
+                "id": receipt.id.uuidString,
+                "timestamp": iso.string(from: receipt.timestamp),
+                "action": receipt.action,
+                "detail": String(receipt.detail.prefix(1_200)),
+            ]
+        }
+
+        return [
+            "schema_version": 1,
+            "captured_at": iso.string(from: Date()),
+            "mode": power.mode.rawValue,
+            "people": people,
+            "goals": goalRows,
+            "waiting": waitingRows,
+            "inventory": inventoryRows,
+            "reminders": reminderRows,
+            "encounters": encounterRows,
+            "events": eventRows,
+            "receipts": receiptRows,
+        ]
+    }
+
     private func loop() async {
         while !Task.isCancelled && started {
             refreshRoutineSuggestions()
             refreshIntentRadar()
             notifyIfNeeded()
+            await syncWorldSnapshotIfNeeded()
             try? await Task.sleep(for: .seconds(5))
+        }
+    }
+
+    private func syncWorldSnapshotIfNeeded() async {
+        let snapshot = worldSnapshot()
+        guard let serialized = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]) else {
+            worldSyncStatus = "Could not serialize local world metadata"
+            return
+        }
+        guard serialized != lastWorldSnapshotData else { return }
+        do {
+            try await CompanionConnection.sendWorldSnapshot(snapshot)
+            lastWorldSnapshotData = serialized
+            worldSyncStatus = "Synced metadata to Jarvis world model"
+        } catch {
+            // Do not mark the snapshot as delivered. The five-second local loop will
+            // retry after the existing companion connection becomes available.
+            worldSyncStatus = "Waiting for Jarvis companion"
         }
     }
 
@@ -393,6 +530,15 @@ struct LocalProductivityView: View {
             Section("Intent Radar") {
                 Text(productivity.intentRadar)
                 Button("Ask local intent radar") { Task { await appModel.sendCommand("what should I do next") } }
+            }
+
+            Section("World Model Sync") {
+                Text(productivity.worldSyncStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Only bounded metadata is synchronized. Face feature prints, raw camera/audio buffers, incident media, clipboard contents, and privacy-zone coordinates remain outside this bridge.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Goals") {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import threading
 import uuid
 from typing import Any, Callable
@@ -25,6 +27,39 @@ def _safe_result_message(tool: str, reply: Any) -> str:
         if str(tool).startswith(("sandbox.", "custom.")):
             return "Security-class tool completed; result body omitted from persistent world-model receipt."
     return raw[:1500]
+
+
+def _executive_decision_id(tool: str, args: dict[str, Any]) -> str:
+    """Best-effort exact correlation with the current Executive Loop proposal.
+
+    Confirmation can separate planning from execution by an arbitrary user turn, so
+    process-local context alone is insufficient. Correlation therefore requires an
+    exact tool+argument match against one current persisted executive decision. If
+    zero or multiple decisions match, no executive attribution is made.
+    """
+    try:
+        from jarvis_mrb.world_model import DB_PATH
+
+        rendered_args = json.dumps(dict(args or {}), ensure_ascii=False, sort_keys=True)
+        conn = sqlite3.connect(DB_PATH, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT id FROM executive_decisions
+                WHERE status='current' AND proposed_tool=? AND proposed_args_json=?
+                ORDER BY updated_at DESC
+                LIMIT 2
+                """,
+                (str(tool), rendered_args),
+            ).fetchall()
+        finally:
+            conn.close()
+        if len(rows) == 1:
+            return str(rows[0]["id"])
+    except Exception:
+        pass
+    return ""
 
 
 def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
@@ -57,6 +92,7 @@ def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
             dict(args or {}),
             reply,
             action_event_id=int(action_event_id),
+            executive_decision_id=_executive_decision_id(tool, args),
         )
     except Exception:
         pass
@@ -111,4 +147,5 @@ def status() -> dict[str, Any]:
         "security_result_bodies_persisted": False,
         "repeated_identical_executions_preserved": True,
         "closed_loop_verification_registered": True,
+        "executive_decision_correlation": "exact persisted tool+arguments match only",
     }

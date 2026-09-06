@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator, Sequence
 from datetime import datetime
 from typing import Any
@@ -45,6 +46,25 @@ Conversation-context discipline:
 - Older conversation is relevant only when the user explicitly refers back to it (for example: 'earlier', 'remember', 'the second option', 'five prompts ago').
 - If the current utterance is not understandable enough to act on and the immediately preceding exchange does not resolve it unambiguously, ask one short clarification question instead of guessing a topic.
 - Never default to the most concrete noun from older history.
+
+Tool restraint is a hard requirement:
+- A tool call is the EXCEPTION, not the default. Use tool=null whenever you can answer correctly from ordinary knowledge, the current conversation, or the Current local date/time supplied above.
+- Do not use a tool merely because a noun resembles an application name. The word 'time' does NOT mean the Clock app; 'calculate' does NOT mean open Calculator; 'music' does NOT mean inspect Spotify unless the user is actually asking about the app/service.
+- smart.status reports whether an APPLICATION/SITE is running or open. It is never a source of factual information about the concept named by that application.
+- smart.open/smart.close are only for explicit app/site control requests.
+- Current-time/date and timezone-conversion questions should normally be answered directly using Current local date/time plus timezone knowledge. Never inspect or launch the Clock app for them.
+- Arithmetic, definitions, explanations, writing, reasoning, general knowledge, and conversational questions normally require no tool.
+- Use web.search only when freshness/current public information materially matters or the user explicitly asks you to search/look something up online. Do not search the web merely to answer stable general knowledge.
+- Use private-data tools only when the requested answer actually depends on that private source (mail, calendar, PC state, stored memory, vision, etc.).
+- Before selecting a tool, silently ask: 'Would this tool return information or perform an action that I cannot already provide from the prompt and my knowledge?' If no, tool=null.
+Examples:
+- 'What time is it in DC?' -> tool=null; calculate the Eastern-time answer directly.
+- 'What is 17 times 24?' -> tool=null.
+- 'What is a black hole?' -> tool=null.
+- 'Is Clock running on my PC?' -> smart.status with name='clock'.
+- 'Open Clock' -> smart.open with name='clock'.
+- 'What meetings do I have tomorrow?' -> calendar.query.
+- 'What's the latest score?' -> web.search because freshness matters.
 
 You MUST use this streaming protocol:
 1. Your FIRST output line must be exactly one compact JSON object with keys tool and arguments, for example:
@@ -92,7 +112,7 @@ Routing rules:
 - Gmail read/check/find/search/review -> gmail.query. Latest inbox email: query='in:inbox', limit=1. Never request more than 10.
 - Gmail send -> gmail.send. Sending is protected by confirmation and the exact allowlist.
 - Calendar past -> calendar.query direction='past'; future -> direction='future'; last -> calendar.recent.
-- Ordinary app/site actions -> smart.open/smart.close/smart.status.
+- Ordinary app/site actions -> smart.open/smart.close/smart.status, but only when the user is actually asking about an app/site action or status.
 - One-time future task -> jobs.create_time. Repeating daily/weekday/weekly -> jobs.create_recurring. Home arrival -> jobs.create_event event='home_arrival'.
 - state.temp_set is for short-lived context/focus that should expire. state.update is for durable context.
 - sandbox.python, sandbox.command, and custom.* are security-sensitive. Use them only when explicitly requested. sandbox.command is Docker-isolated, never the host Windows shell, and requires exact-command confirmation.
@@ -134,10 +154,146 @@ def _history_for_current_turn(
     ]
     if requests_extended_context(text):
         return items
-    # Normal conversation gets exactly the immediately preceding exchange. This
-    # preserves natural 'it/that/why?' follow-ups without letting a topic from four
-    # or five turns ago become the fallback interpretation of imperfect ASR.
     return items[-2:]
+
+
+def _explicit_app_control_or_status(text: str) -> bool:
+    n = " " + re.sub(r"\s+", " ", text.strip().lower()) + " "
+    app_words = (
+        " app ", " application ", " program ", " process ", " browser ", " tab ",
+        " website ", " site ", " on my pc ", " on the pc ", " on my computer ",
+        " running ", " open on ", " currently open ", " status ",
+    )
+    action_words = (
+        " open ", " launch ", " start ", " run ", " close ", " quit ", " kill ",
+        " focus ", " switch to ",
+    )
+    return any(word in n for word in app_words + action_words)
+
+
+def _tool_is_justified(tool: str, text: str) -> bool:
+    """Reject obviously semantic-mismatch tool calls before they can make answers worse.
+
+    This is deliberately conservative. It is not a second planner; it only blocks
+    tool families when the user's words provide no plausible intent for that family.
+    Specialized tools continue to use the model's routing unless there is a clear
+    mismatch.
+    """
+    t = str(tool)
+    n = " " + re.sub(r"\s+", " ", text.strip().lower()) + " "
+
+    if t in {"smart.status", "smart.open", "smart.close", "pc.app_status", "pc.launch_app", "pc.close_app"}:
+        return _explicit_app_control_or_status(text)
+
+    if t.startswith("browser."):
+        return _explicit_app_control_or_status(text) or any(
+            cue in n for cue in (" browser ", " tab ", " website ", " site ", " opera ")
+        )
+
+    if t == "pc.list_running_apps":
+        return any(cue in n for cue in (" running apps ", " running processes ", " what is running ", " what's running "))
+
+    if t == "pc.context":
+        return any(cue in n for cue in (" my pc ", " my computer ", " working on ", " desktop ", " current window "))
+
+    if t == "system.resources":
+        return any(cue in n for cue in (" cpu ", " ram ", " gpu ", " vram ", " temperature ", " resources ", " pc doing "))
+
+    if t.startswith("gmail.") or t == "contacts.resolve":
+        return any(cue in n for cue in (" email ", " e-mail ", " gmail ", " inbox ", " message ", " contact ", " recipient "))
+
+    if t.startswith("calendar."):
+        return any(cue in n for cue in (" calendar ", " meeting ", " event ", " appointment ", " schedule ", " availability ", " busy ", " free time "))
+
+    if t == "web.search":
+        freshness = (
+            " latest ", " current ", " currently ", " today ", " tonight ", " tomorrow ",
+            " news ", " weather ", " forecast ", " price ", " score ", " result ",
+            " recent ", " this week ", " this month ", " live ", " online ",
+        )
+        explicit = (" search ", " look up ", " lookup ", " google ", " web ", " internet ")
+        return any(cue in n for cue in freshness + explicit)
+
+    if t.startswith("vision.") or t.startswith("expense."):
+        return any(cue in n for cue in (
+            " see ", " saw ", " looking at ", " visible ", " sign ", " screen ", " camera ",
+            " receipt ", " invoice ", " clipboard ",
+        ))
+
+    if t.startswith("meeting."):
+        return " meeting " in n or " meeting notes " in n or " transcript " in n
+
+    if t.startswith("jobs."):
+        return any(cue in n for cue in (" remind ", " reminder ", " schedule ", " every day ", " every week ", " when i ", " at "))
+
+    if t.startswith("background."):
+        return any(cue in n for cue in (" background ", " keep working ", " continue working ", " work on this later "))
+
+    if t.startswith("spatial."):
+        return any(cue in n for cue in (" where did i last see ", " where are my ", " where is my ", " last seen "))
+
+    if t.startswith("knowledge."):
+        return any(cue in n for cue in (" my email ", " my calendar ", " my notes ", " remember ", " our conversation ", " my records ", " my data "))
+
+    return True
+
+
+def _direct_answer_without_tools(
+    text: str,
+    history: Sequence[ConversationMessage] | None,
+    *,
+    model: str,
+    keep_alive: str,
+) -> Iterator[str]:
+    now = datetime.now().astimezone().isoformat()
+    system = f"""{full_personality_context()}
+Current local date/time: {now}.
+Answer the user's request DIRECTLY. Do not call, suggest, simulate, or describe any tool use.
+The previous planner attempted an unnecessary tool call, so correct that mistake by answering from ordinary knowledge, conversation context, reasoning, arithmetic, and the current date/time above.
+For current-time questions in another city, calculate the timezone conversion directly from the supplied current time and known timezone rules. Do not discuss the Clock app.
+Keep the answer natural and voice-friendly. Do not start with 'sir'; the transport will add it.
+"""
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    for item in history or ():
+        if item.role in {"user", "assistant"} and item.content.strip():
+            messages.append({"role": item.role, "content": item.content})
+    messages.append({"role": "user", "content": text})
+    payload = {
+        "model": model,
+        "stream": True,
+        "think": False,
+        "keep_alive": keep_alive,
+        "messages": messages,
+        "options": {"temperature": 0},
+    }
+
+    emitted = False
+    try:
+        with httpx.Client(timeout=httpx.Timeout(120.0, connect=3.0)) as client:
+            with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as response:
+                response.raise_for_status()
+                yield "Sir, "
+                for raw_line in response.iter_lines():
+                    if not raw_line:
+                        continue
+                    try:
+                        packet = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = str(packet.get("message", {}).get("content", ""))
+                    if not chunk:
+                        continue
+                    if not emitted:
+                        emitted = True
+                        yield _lower_first_alpha(chunk)
+                    else:
+                        yield chunk
+                if emitted:
+                    return
+    except (httpx.HTTPError, ValueError, TypeError):
+        pass
+
+    yield from _fallback(text, history)
 
 
 def _fallback(text: str, history: Sequence[ConversationMessage] | None) -> Iterator[str]:
@@ -236,11 +392,20 @@ def stream_natural_language(
                         tool = plan.get("tool")
                         args = plan.get("arguments") or {}
                         if tool:
-                            if not allow_background and str(tool) == "background.submit":
+                            tool_name = str(tool)
+                            if not _tool_is_justified(tool_name, stripped):
+                                yield from _direct_answer_without_tools(
+                                    stripped,
+                                    selected_history,
+                                    model=active_model,
+                                    keep_alive=active_keep_alive,
+                                )
+                                return
+                            if not allow_background and tool_name == "background.submit":
                                 yield "I'm already working on that in the background, sir."
                                 return
                             reply = _respectful(
-                                execute_tool(str(tool), args if isinstance(args, dict) else {})
+                                execute_tool(tool_name, args if isinstance(args, dict) else {})
                             )
                             if reply.message and reply.message != "__EXIT__":
                                 yield reply.message

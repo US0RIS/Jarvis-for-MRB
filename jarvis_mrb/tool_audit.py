@@ -38,11 +38,25 @@ def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
         # A private occurrence nonce therefore preserves two identical executions as
         # separate temporal events without changing the executed tool arguments.
         occurrence_args["_world_occurrence_id"] = str(uuid.uuid4())
-        record_tool_execution(
+        action_event_id = record_tool_execution(
             str(tool),
             occurrence_args,
             ok=bool(getattr(reply, "ok", False)),
             message=_safe_result_message(tool, reply),
+        )
+    except Exception:
+        return
+
+    # A successful tool call is only an execution receipt. The verification layer
+    # separately records whether the intended state was independently observed.
+    try:
+        from jarvis_mrb.world_verification import register_execution
+
+        register_execution(
+            str(tool),
+            dict(args or {}),
+            reply,
+            action_event_id=int(action_event_id),
         )
     except Exception:
         pass
@@ -96,4 +110,5 @@ def status() -> dict[str, Any]:
         "world_introspection_recorded": False,
         "security_result_bodies_persisted": False,
         "repeated_identical_executions_preserved": True,
+        "closed_loop_verification_registered": True,
     }

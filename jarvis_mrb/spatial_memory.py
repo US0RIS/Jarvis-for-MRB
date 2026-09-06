@@ -62,18 +62,21 @@ def remember_object(
         conn.commit()
 
     # Keep the proven low-latency spatial database for direct "where are my keys?"
-    # queries, while mirroring the same observation into the common temporal graph.
+    # queries, while mirroring the same observation as a distinct temporal occurrence.
     # No raw image is persisted in either path.
     try:
-        from jarvis_mrb.world_model import record_visual_observation
+        from jarvis_mrb.world_linker import link_event
+        from jarvis_mrb.world_occurrence import record_visual_occurrence
 
-        record_visual_observation(
+        event_id = record_visual_occurrence(
             scene_text,
             [object_name],
             location_context=location,
             confidence=score,
             occurred_at=seen_at,
+            occurrence_ref=f"spatial:{sighting_id}:{seen_at}",
         )
+        link_event(event_id)
     except Exception:
         pass
 

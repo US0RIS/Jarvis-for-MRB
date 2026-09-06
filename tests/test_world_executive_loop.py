@@ -11,7 +11,6 @@ import jarvis_mrb.world_executive_loop as world_executive_loop
 import jarvis_mrb.world_intent_capture as world_intent_capture
 import jarvis_mrb.world_linker as world_linker
 import jarvis_mrb.world_model as world_model
-import jarvis_mrb.world_relevance as world_relevance
 import jarvis_mrb.world_term_context as world_term_context
 import jarvis_mrb.world_terms as world_terms
 
@@ -108,6 +107,8 @@ class WorldExecutiveLoopTests(unittest.TestCase):
 
         result = world_executive_loop.refresh()
         self.assertEqual(result["active_intentions"], 1)
+        self.assertGreaterEqual(result["attention_items"], 2)
+        self.assertEqual(result["current_decisions"], 1)
 
         attention = self._rows(
             "SELECT kind,status FROM executive_attention WHERE intention_id=? ORDER BY score DESC",
@@ -132,6 +133,18 @@ class WorldExecutiveLoopTests(unittest.TestCase):
         self.assertIn("BLOCKERS", context)
         self.assertIn("indemnity cap", context.lower())
         self.assertIn("Daniel Reed", context)
+        self.assertIn("RECOMMENDED NOW", context)
+        self.assertIn("knowledge.search", context)
+        self.assertIn("confirmation_required=False", context)
+
+        projected = world_executive_loop.next_decision("What should I do about Project Apollo?")
+        self.assertIsNotNone(projected)
+        assert projected is not None
+        self.assertEqual(projected["tool"], "knowledge.search")
+        self.assertEqual(projected["risk"], "read")
+        self.assertFalse(projected["requires_confirmation"])
+        self.assertEqual(projected["state"], "at_risk")
+        self.assertIn("Project Apollo", str(projected["objective"]))
 
     def test_overdue_dependency_prefers_safe_read_before_followup(self) -> None:
         intention_id = self._create_apollo_goal()
@@ -160,6 +173,12 @@ class WorldExecutiveLoopTests(unittest.TestCase):
         self.assertIn("daniel@example.com", str(decision["proposed_args_json"]))
         self.assertEqual(str(decision["risk"]), "read")
         self.assertEqual(int(decision["requires_confirmation"]), 0)
+
+        projected = world_executive_loop.next_decision("What's blocking Project Apollo?")
+        self.assertIsNotNone(projected)
+        assert projected is not None
+        self.assertEqual(projected["tool"], "gmail.query")
+        self.assertIn("daniel@example.com", str(projected["arguments"]))
 
     def test_resolved_commitment_stales_dependency_attention(self) -> None:
         intention_id = self._create_apollo_goal()

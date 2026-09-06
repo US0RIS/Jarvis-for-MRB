@@ -11,7 +11,18 @@ import httpx
 
 from jarvis_mrb.agent import handle_natural_language
 from jarvis_mrb.conversation import append_message, recent_messages
+from jarvis_mrb.memory import memory_context, remember_exchange_async
 from jarvis_mrb.server_config import load_server_config
+
+# The normal CLI prefers jarvis-service, where model_router installs this wrapper.
+# If service startup fails and CLI falls back to direct local agent execution, install
+# the same audit layer here so the alternate path does not become a provenance hole.
+try:
+    from jarvis_mrb.tool_audit import install as _install_tool_audit
+
+    _install_tool_audit()
+except Exception:
+    pass
 
 _SERVER_CONFIG = load_server_config()
 SERVICE_URL = os.environ.get("JARVIS_SERVICE_URL", "http://127.0.0.1:8765").rstrip("/")
@@ -51,10 +62,16 @@ def _start_service() -> None:
 
 def _fallback_local(text: str) -> str:
     history = recent_messages(CLI_SESSION_ID, limit=20)
+    world = memory_context(text, limit=3)
+    if world:
+        from jarvis_mrb.conversation import ConversationMessage
+
+        history = [ConversationMessage(role="assistant", content=world), *history]
     reply = handle_natural_language(text, history=history)
     append_message(CLI_SESSION_ID, "user", text)
     if reply.message and reply.message != "__EXIT__":
         append_message(CLI_SESSION_ID, "assistant", reply.message)
+        remember_exchange_async(CLI_SESSION_ID, text, reply.message)
     return reply.message
 
 
@@ -97,7 +114,7 @@ def _stream_service(text: str) -> Iterator[str]:
 
 
 def main() -> None:
-    print("Jarvis for MRB — milestone 12")
+    print("Jarvis for MRB — milestone 13 + persistent world model")
     print("Autonomous context enabled. Type 'exit' to quit.")
 
     while True:

@@ -225,7 +225,9 @@ final class LocalProductivityController: ObservableObject {
 
     /// Metadata-only bridge into the PC world model. Biometric feature prints,
     /// enrollment images, raw camera frames, rolling microphone audio, incidents,
-    /// clipboard contents, and privacy-zone coordinates are deliberately absent.
+    /// clipboard contents, privacy-zone coordinates, match distances and biometric
+    /// thresholds are deliberately absent. A fresh Known People result may cross only
+    /// as advisory enrolled-person ID/name/time presence metadata.
     func worldSnapshot() -> [String: Any] {
         let iso = ISO8601DateFormatter()
 
@@ -324,10 +326,28 @@ final class LocalProductivityController: ObservableObject {
             ]
         }
 
+        let currentPerson: Any
+        if let match = knownPeople.currentMatch,
+           Date().timeIntervalSince(match.matchedAt) <= 8 {
+            currentPerson = [
+                "person_id": match.personID.uuidString,
+                "name": match.name,
+                "matched_at": iso.string(from: match.matchedAt),
+                "advisory": true,
+            ] as [String: Any]
+        } else {
+            // Keep an explicit nullable presence lane in schema v2. This means a
+            // present→absent transition changes the semantic snapshot exactly once,
+            // while older schema-v1 clients that do not send `presence` remain safely
+            // distinguishable from an authoritative absence observation.
+            currentPerson = NSNull()
+        }
+
         return [
-            "schema_version": 1,
+            "schema_version": 2,
             "captured_at": iso.string(from: Date()),
             "mode": power.mode.rawValue,
+            "presence": ["current_person": currentPerson],
             "people": people,
             "goals": goalRows,
             "waiting": waitingRows,
@@ -536,7 +556,7 @@ struct LocalProductivityView: View {
                 Text(productivity.worldSyncStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Only bounded metadata is synchronized. Face feature prints, raw camera/audio buffers, incident media, clipboard contents, and privacy-zone coordinates remain outside this bridge.")
+                Text("Only bounded metadata is synchronized. Fresh Known People presence is advisory ID/name/time only; face feature prints, match scores, raw camera/audio buffers, incident media, clipboard contents, and privacy-zone coordinates remain outside this bridge.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

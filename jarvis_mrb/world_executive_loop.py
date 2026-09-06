@@ -30,6 +30,10 @@ _PLAN_CUES = (
     "due",
     "deadline",
     "at risk",
+    "verification",
+    "verified",
+    "did it work",
+    "did that work",
 )
 
 _RECENT_CHANGE_TYPES = {
@@ -39,6 +43,9 @@ _RECENT_CHANGE_TYPES = {
     "meeting.completed",
     "commitment.resolved",
     "knowledge.gmail_attachment",
+    "verification.verified",
+    "verification.failed",
+    "verification.timed_out",
 }
 
 
@@ -271,6 +278,62 @@ def _commitment_items(conn: sqlite3.Connection, item: dict[str, Any]) -> list[di
     return result
 
 
+def _verification_items(conn: sqlite3.Connection, intention_id: str) -> list[dict[str, Any]]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT v.id,v.tool,v.status,v.verifier,v.deadline_at,v.last_evidence,v.last_error,
+                   v.action_event_id,v.resolved_event_id,v.updated_at
+            FROM action_verifications v
+            JOIN executive_decisions d ON d.id=v.executive_decision_id
+            WHERE d.intention_id=? AND v.status IN ('pending','failed','timed_out','unverified')
+            ORDER BY
+                CASE v.status WHEN 'failed' THEN 0 WHEN 'timed_out' THEN 1 WHEN 'unverified' THEN 2 ELSE 3 END,
+                v.updated_at DESC
+            LIMIT 12
+            """,
+            (intention_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        status = str(row["status"])
+        tool = str(row["tool"])
+        evidence = str(row["last_evidence"] or row["last_error"] or "")
+        if status == "failed":
+            kind, severity, score = "verification_failed", "high", 112.0
+            title = f"Verified outcome failed: {tool}"
+        elif status == "timed_out":
+            kind, severity, score = "verification_timed_out", "high", 108.0
+            title = f"Outcome verification timed out: {tool}"
+        elif status == "unverified":
+            kind, severity, score = "verification_unverified", "medium", 96.0
+            title = f"Outcome cannot be independently verified: {tool}"
+        else:
+            kind, severity, score = "verification_pending", "medium", 86.0
+            title = f"Awaiting independent outcome verification: {tool}"
+        result.append(
+            {
+                "kind": kind,
+                "verification_status": status,
+                "verification_id": str(row["id"]),
+                "source_ref": f"verification:{row['id']}",
+                "source_event_id": int(row["resolved_event_id"]) if row["resolved_event_id"] else None,
+                "title": title,
+                "detail": evidence[:1800] or f"Verifier {row['verifier']} has not produced conclusive evidence yet.",
+                "severity": severity,
+                "score": score,
+                "due_at": str(row["deadline_at"] or "") or None,
+                "evidence": f"closed-loop verification {status} for action event {row['action_event_id']}",
+                "confidence": 1.0,
+                "tool": tool,
+            }
+        )
+    return result
+
+
 def _recent_changes(conn: sqlite3.Connection, project_ids: list[str]) -> list[dict[str, Any]]:
     if not project_ids:
         return []
@@ -381,6 +444,10 @@ def _proposal_for(candidate: dict[str, Any], projects: list[str]) -> tuple[str, 
             {"query": query, "limit": 5},
             "Review the changed source material connected to the active objective.",
         )
+    if kind == "verification_pending":
+        return ("", {}, "Do not advance the plan until the independent verifier resolves the action outcome.")
+    if kind in {"verification_failed", "verification_timed_out", "verification_unverified"}:
+        return ("", {}, "The previous action outcome is not established; reassess or obtain independent confirmation before continuing.")
     return ("", {}, "")
 
 
@@ -518,6 +585,8 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
     project_names = [_entity_name(conn, project_id) for project_id in project_ids]
 
     candidates: list[dict[str, Any]] = []
+    verifications = _verification_items(conn, intention_id)
+    candidates.extend(verifications)
     candidates.extend(_active_term_conflicts(conn, project_ids))
     candidates.extend(_commitment_items(conn, item))
     deadline = _deadline_attention(item)
@@ -590,17 +659,28 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
     blockers = [
         candidate
         for _, candidate in keyed_candidates
-        if candidate.get("kind") in {"term_conflict", "overdue_commitment"}
+        if candidate.get("kind") in {
+            "term_conflict",
+            "overdue_commitment",
+            "verification_failed",
+            "verification_timed_out",
+            "verification_unverified",
+        }
     ]
     dependencies = [
         candidate
         for _, candidate in keyed_candidates
         if candidate.get("kind") in {"overdue_commitment", "due_commitment", "dependency"}
     ]
+    pending_verification = [
+        candidate for _, candidate in keyed_candidates if candidate.get("kind") == "verification_pending"
+    ]
 
     due_remaining = _days_until(str(item.get("due_at") or ""))
     if blockers:
         state = "at_risk"
+    elif pending_verification:
+        state = "awaiting_verification"
     elif due_remaining is not None and due_remaining < 0:
         state = "overdue"
     elif due_remaining is not None and due_remaining <= 2:
@@ -627,6 +707,14 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
             next_actions.append(str(candidate.get("title") or "Review document changes"))
         elif kind == "explicit_next_action":
             next_actions.append(str(candidate.get("detail") or ""))
+        elif kind == "verification_pending":
+            next_actions.append(f"Wait for independent verification of {candidate.get('tool') or 'the action'}")
+        elif kind == "verification_failed":
+            next_actions.append(f"Reassess after failed outcome verification for {candidate.get('tool') or 'the action'}")
+        elif kind == "verification_timed_out":
+            next_actions.append(f"Obtain manual confirmation or retry {candidate.get('tool') or 'the action'}")
+        elif kind == "verification_unverified":
+            next_actions.append(f"Do not assume success; independently confirm {candidate.get('tool') or 'the action'}")
         if len(next_actions) >= 5:
             break
     deduped_actions: list[str] = []
@@ -642,6 +730,7 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
         "due_at": str(item.get("due_at") or ""),
         "projects": project_names,
         "attention": [candidate for _, candidate in keyed_candidates][:12],
+        "verifications": verifications[:8],
         "blockers": blockers[:6],
         "dependencies": dependencies[:8],
         "recent_changes": recent_changes[:5],
@@ -732,6 +821,13 @@ def context_for_query(query: str, limit: int = 3) -> str:
             lines.append(f"  deadline: {plan['due_at']}")
         if plan["projects"]:
             lines.append("  projects: " + ", ".join(plan["projects"][:3]))
+        if plan["verifications"]:
+            lines.append("  OUTCOME VERIFICATION:")
+            for verification in plan["verifications"][:4]:
+                lines.append(
+                    f"    - {verification.get('verification_status')}: {verification.get('tool')}; "
+                    f"{verification.get('detail')}"
+                )
         if plan["blockers"]:
             lines.append("  BLOCKERS:")
             for blocker in plan["blockers"][:4]:
@@ -794,6 +890,18 @@ def status() -> dict[str, Any]:
             row = conn.execute(
                 "SELECT value FROM executive_loop_state WHERE key='last_refresh'"
             ).fetchone()
+            try:
+                pending_verification = int(
+                    conn.execute("SELECT COUNT(*) FROM action_verifications WHERE status='pending'").fetchone()[0]
+                )
+                failed_verification = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM action_verifications WHERE status IN ('failed','timed_out','unverified')"
+                    ).fetchone()[0]
+                )
+            except sqlite3.OperationalError:
+                pending_verification = 0
+                failed_verification = 0
     except Exception as exc:
         return {"installed": True, "error": str(exc)[:500]}
     return {
@@ -803,7 +911,10 @@ def status() -> dict[str, Any]:
         "deterministic_priority": True,
         "query_decision_projection": True,
         "permission_aware_proposals": True,
-        "closed_loop_verification": False,
+        "closed_loop_verification": True,
+        "verification_reenters_priority": True,
+        "pending_verifications": pending_verification,
+        "failed_or_unverified_outcomes": failed_verification,
         "open_attention_items": open_attention,
         "current_decisions": current_decisions,
         "last_refresh": str(row["value"]) if row else "",

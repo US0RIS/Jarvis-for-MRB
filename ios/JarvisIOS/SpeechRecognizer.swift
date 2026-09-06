@@ -26,6 +26,7 @@ final class AudioRouteManager: ObservableObject {
     @Published private(set) var currentInputName = "No input"
     @Published private(set) var currentOutputName = "No output"
     @Published private(set) var isUsingBluetoothHFP = false
+    @Published private(set) var isUsingBuiltInMic = false
     @Published private(set) var hasBluetoothHFP = false
 
     private var routeChangeTask: Task<Void, Never>?
@@ -37,6 +38,9 @@ final class AudioRouteManager: ObservableObject {
     }
 
     var routeSummary: String {
+        if isUsingBuiltInMic {
+            return "\(currentInputName) (iPhone room mic) → \(currentOutputName)"
+        }
         if isUsingBluetoothHFP {
             return "\(currentInputName) (Bluetooth hands-free)"
         }
@@ -55,8 +59,41 @@ final class AudioRouteManager: ObservableObject {
         if preferBluetooth,
            let bluetoothInput = preferredBluetoothInput(in: session.availableInputs ?? []) {
             try session.setPreferredInput(bluetoothInput)
+        } else if !preferBluetooth,
+                  let builtInInput = preferredBuiltInInput(in: session.availableInputs ?? []) {
+            // Explicitly leave HFP when the user has asked for the phone microphone.
+            // Merely omitting setPreferredInput() can leave the previous Ray-Ban HFP
+            // route active after a hands-free session.
+            try session.setPreferredInput(builtInInput)
         }
 
+        refresh()
+    }
+
+    /// Configure a far-field/room capture session.
+    ///
+    /// Ray-Ban HFP microphones are optimized for the wearer. Meeting Notes and other
+    /// ambient capture need the microphones physically exposed to the room, so this
+    /// profile deliberately removes HFP as an input option and selects the iPhone's
+    /// built-in microphone. Bluetooth A2DP remains allowed for output where iOS can
+    /// support it independently from the built-in input.
+    func prepareForRoomCapture() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(
+            .playAndRecord,
+            mode: .measurement,
+            options: [.allowBluetoothA2DP, .defaultToSpeaker]
+        )
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+
+        guard let builtInInput = preferredBuiltInInput(in: session.availableInputs ?? []) else {
+            throw NSError(
+                domain: "JarvisAudio",
+                code: 20,
+                userInfo: [NSLocalizedDescriptionKey: "The iPhone built-in microphone is unavailable for room capture."]
+            )
+        }
+        try session.setPreferredInput(builtInInput)
         refresh()
     }
 
@@ -67,6 +104,7 @@ final class AudioRouteManager: ObservableObject {
 
         currentInputName = input?.portName ?? "No input"
         currentOutputName = output?.portName ?? "No output"
+        isUsingBuiltInMic = input?.portType == .builtInMic
         isUsingBluetoothHFP = input?.portType == .bluetoothHFP || output?.portType == .bluetoothHFP
         hasBluetoothHFP = (session.availableInputs ?? []).contains { $0.portType == .bluetoothHFP }
     }
@@ -77,6 +115,10 @@ final class AudioRouteManager: ObservableObject {
             let name = $0.portName.lowercased()
             return name.contains("ray-ban") || name.contains("rayban") || name.contains("meta")
         }) ?? bluetoothInputs.first
+    }
+
+    private func preferredBuiltInInput(in inputs: [AVAudioSessionPortDescription]) -> AVAudioSessionPortDescription? {
+        inputs.first { $0.portType == .builtInMic }
     }
 
     private func observeRouteChanges() {
@@ -148,6 +190,21 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     func startListening(preferBluetooth: Bool) throws {
+        try startListening {
+            try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
+        }
+    }
+
+    /// Start speech recognition using the iPhone as a room-facing microphone.
+    /// This is deliberately separate from wearer-command capture so Meeting Notes
+    /// cannot silently inherit the Ray-Ban HFP input selected by hands-free mode.
+    func startRoomListening() throws {
+        try startListening {
+            try audioRouteManager.prepareForRoomCapture()
+        }
+    }
+
+    private func startListening(prepareAudio: () throws -> Void) throws {
         stopAudioOnly(cancelRecognition: true)
         recognitionPrefix = BargeInBuffer.take()
         transcript = recognitionPrefix
@@ -159,7 +216,7 @@ final class SpeechRecognizer: ObservableObject {
             throw NSError(domain: "JarvisSpeech", code: 3, userInfo: [NSLocalizedDescriptionKey: "Speech recognition is temporarily unavailable."])
         }
 
-        try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
+        try prepareAudio()
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true

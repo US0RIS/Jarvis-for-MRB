@@ -41,6 +41,9 @@ from jarvis_mrb.planner_model import (
 from jarvis_mrb.proactive_monitor import check_once as proactive_check_once
 from jarvis_mrb.proactive_monitor import start as start_proactive_monitor
 from jarvis_mrb.resource_monitor import sample as resource_status_data
+from jarvis_mrb.runtime_health import record_failure as record_runtime_failure
+from jarvis_mrb.runtime_health import record_success as record_runtime_success
+from jarvis_mrb.runtime_health import status as runtime_health_status_data
 from jarvis_mrb.sandbox import status as sandbox_status_data
 from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.spatial_memory import status as spatial_status_data
@@ -49,6 +52,8 @@ from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
 from jarvis_mrb.vision import status as vision_status_data, submit_frame
 from jarvis_mrb.visual_history import status as visual_history_status_data
+from jarvis_mrb.world_migrations import run_migrations, status as migration_status_data
+from jarvis_mrb.world_verification import status as verification_status_data
 
 _CONFIG = load_server_config()
 BIND_HOST = _CONFIG.bind_host
@@ -63,6 +68,7 @@ app = FastAPI(title="Jarvis for MRB", version="0.13.0")
 _scheduler_started = False
 _tts_start_attempted = False
 _knowledge_started = False
+_proactive_started = False
 
 
 class CommandRequest(BaseModel):
@@ -194,11 +200,16 @@ def _execute_job(command: str) -> str:
 
 
 def _scheduler_loop() -> None:
+    healthy_marked = False
     while True:
         try:
             run_due_jobs(_execute_job)
-        except Exception:
-            pass
+            if not healthy_marked:
+                record_runtime_success("scheduler")
+                healthy_marked = True
+        except Exception as exc:
+            record_runtime_failure("scheduler", exc)
+            healthy_marked = False
         time.sleep(1.0)
 
 
@@ -214,9 +225,14 @@ def _knowledge_loop() -> None:
     time.sleep(20)
     while True:
         try:
-            refresh_knowledge_index()
-        except Exception:
-            pass
+            result = refresh_knowledge_index()
+            if bool(result.get("ok", True)):
+                record_runtime_success("knowledge_refresh")
+            else:
+                errors = result.get("errors") or ["Knowledge refresh returned degraded status"]
+                record_runtime_failure("knowledge_refresh", "; ".join(str(item) for item in errors[:5]))
+        except Exception as exc:
+            record_runtime_failure("knowledge_refresh", exc)
         time.sleep(15 * 60)
 
 
@@ -237,8 +253,12 @@ def _start_tts_in_background() -> None:
     def start() -> None:
         try:
             ensure_tts_server(wait_seconds=0.0)
-        except Exception:
-            pass
+            if tts_health():
+                record_runtime_success("tts_start")
+            else:
+                record_runtime_failure("tts_start", "TTS process start returned but health is not ready yet")
+        except Exception as exc:
+            record_runtime_failure("tts_start", exc)
 
     threading.Thread(target=start, name="jarvis-tts-start", daemon=True).start()
 
@@ -295,12 +315,44 @@ def _warm_fast_model() -> None:
     ).start()
 
 
+def _safe_operational_health() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    try:
+        migrations = migration_status_data()
+    except Exception as exc:
+        migrations = {"ready": False, "current": 0, "target": 0, "error": str(exc)[:500]}
+    try:
+        verification = verification_status_data()
+    except Exception as exc:
+        verification = {"installed": False, "error": str(exc)[:500]}
+    try:
+        runtime = runtime_health_status_data()
+    except Exception as exc:
+        runtime = {"degraded": 1, "error": str(exc)[:500]}
+    return migrations, verification, runtime
+
+
 @app.on_event("startup")
 def startup() -> None:
+    global _proactive_started
+    # Schema compatibility is a hard startup boundary. Jarvis must not start background
+    # writers against a newer/partial world schema. Additive migrations are backed up
+    # before modification and are idempotent on subsequent launches.
+    try:
+        run_migrations(backup=True)
+        record_runtime_success("schema_migrations")
+    except Exception as exc:
+        try:
+            record_runtime_failure("schema_migrations", exc)
+        except Exception:
+            pass
+        raise
+
     _ensure_scheduler()
     _ensure_knowledge_refresh()
     _start_tts_in_background()
     start_proactive_monitor()
+    _proactive_started = True
+    record_runtime_success("proactive_monitor")
     _warm_fast_model()
 
 
@@ -308,6 +360,13 @@ def startup() -> None:
 def health() -> dict[str, Any]:
     settings = planner_settings()
     sandbox_state = sandbox_status_data()
+    migrations, verification, runtime = _safe_operational_health()
+    try:
+        from jarvis_mrb.tool_audit import status as tool_audit_status
+        audit = tool_audit_status()
+    except Exception as exc:
+        audit = {"installed": False, "error": str(exc)[:500]}
+
     return {
         "status": "ok",
         "version": "0.13.0",
@@ -319,6 +378,15 @@ def health() -> dict[str, Any]:
         "sandbox": "ready" if sandbox_state.get("docker") else "docker-unavailable",
         "visual_history": "ready",
         "resource_guardrails": "active",
+        "world_model": "ready" if bool(migrations.get("ready")) else "migration-required",
+        "world_schema_version": int(migrations.get("current") or 0),
+        "world_schema_target": int(migrations.get("target") or 0),
+        "verification": "ready" if bool(verification.get("installed")) and bool(verification.get("independent_readback")) else "degraded",
+        "tool_audit": "ready" if bool(audit.get("installed")) else "degraded",
+        "runtime_health": "ready" if int(runtime.get("degraded") or 0) == 0 else "degraded",
+        "scheduler": "running" if _scheduler_started else "stopped",
+        "knowledge_refresh": "running" if _knowledge_started else "stopped",
+        "proactive_monitor": "running" if _proactive_started else "stopped",
     }
 
 

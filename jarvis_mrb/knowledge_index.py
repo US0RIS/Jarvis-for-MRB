@@ -141,6 +141,17 @@ def refresh() -> dict[str, Any]:
     indexed = 0
     scanned = 0
     errors: list[str] = []
+    backfill: dict[str, Any] | None = None
+
+    # The service already runs knowledge refresh on its own background thread. Use
+    # that existing non-latency-sensitive path for the one-time migration instead of
+    # making the user's first post-upgrade voice request pay the backfill cost.
+    try:
+        from jarvis_mrb.world_backfill import backfill_existing_state
+
+        backfill = backfill_existing_state()
+    except Exception as exc:
+        backfill = {"ok": False, "error": str(exc)[:500]}
 
     email_result = query_emails(query="in:anywhere newer_than:30d", limit=10)
     if email_result.ok and email_result.data:
@@ -201,6 +212,7 @@ def refresh() -> dict[str, Any]:
         "errors": errors[:5],
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
+        "world_backfill": backfill,
     }
 
 

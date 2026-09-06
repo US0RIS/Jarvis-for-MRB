@@ -42,6 +42,18 @@ _FAST_PATTERNS = [
 ]
 
 
+# service.py imports agent and streaming_agent before model_router, making this the
+# first small module where both canonical execute_tool references are fully defined.
+# Install the audit wrapper here rather than modifying the large planner modules.
+try:
+    from jarvis_mrb.tool_audit import install as _install_tool_audit
+
+    _install_tool_audit()
+except Exception:
+    # Provenance must never prevent Jarvis from starting or routing a command.
+    pass
+
+
 def choose_model(text: str) -> RouteDecision:
     """Select 8B vs 27B without spending a model call on classification.
 

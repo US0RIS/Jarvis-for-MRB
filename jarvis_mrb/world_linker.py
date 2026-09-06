@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from datetime import datetime
 from typing import Any
 
-from jarvis_mrb.world_model import DB_PATH, SELF_ID, WORLD_ID, search as world_search
+from jarvis_mrb.world_model import DB_PATH, SELF_ID, WORLD_ID, ensure_entity, search as world_search
 
 _GENERIC_ALIASES = {
     "user",
@@ -105,6 +104,21 @@ def _candidate_aliases(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
     return result
 
 
+def _explicit_project_names(raw_text: str) -> list[str]:
+    """Extract only literal `Project Name` identifiers, never inferred project names."""
+    result: list[str] = []
+    # Deliberately capture one project-code/name token. This handles the common
+    # Project Apollo / PROJECT ATLAS convention without swallowing a document title
+    # such as "Project Apollo Diligence Memorandum" into the project identity.
+    for match in re.finditer(r"\b(?:Project|PROJECT)\s+([A-Z][A-Za-z0-9_-]{2,40})\b", raw_text):
+        name = f"Project {match.group(1)}"
+        if name.casefold() not in {item.casefold() for item in result}:
+            result.append(name)
+        if len(result) >= 8:
+            break
+    return result
+
+
 def _mentioned(text: str, alias: str) -> bool:
     if not text or not alias:
         return False
@@ -192,10 +206,11 @@ def link_event(event_id: int) -> dict[str, int]:
     with _connect() as conn:
         event = conn.execute("SELECT * FROM events WHERE id=?", (int(event_id),)).fetchone()
         if event is None:
-            return {"mentions": 0, "relations": 0}
+            return {"mentions": 0, "relations": 0, "projects_created": 0}
 
         payload = str(event["payload_json"] or "")
-        text = _normalize(f"{event['summary']} {event['evidence']} {payload}")
+        raw_text = f"{event['summary']} {event['evidence']} {payload}"
+        text = _normalize(raw_text)
         linked = {
             str(row["entity_id"]): (str(row["role"]), float(row["confidence"]))
             for row in conn.execute(
@@ -205,6 +220,21 @@ def link_event(event_id: int) -> dict[str, int]:
         }
 
         mentions = 0
+        projects_created = 0
+        # Explicitly named projects are first-class entities even if this is the
+        # first event in which Jarvis has ever encountered that project name.
+        for project_name in _explicit_project_names(raw_text):
+            project_id = ensure_entity("project", project_name, confidence=0.92)
+            if project_id in linked:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO event_entities(event_id,entity_id,role,confidence) VALUES(?,?,?,?)",
+                (int(event_id), project_id, "mentioned", 0.92),
+            )
+            linked[project_id] = ("mentioned", 0.92)
+            mentions += 1
+            projects_created += 1
+
         for entity_id, _kind, alias in _candidate_aliases(conn):
             if entity_id in linked or not _mentioned(text, alias):
                 continue
@@ -259,7 +289,11 @@ def link_event(event_id: int) -> dict[str, int]:
 
         conn.commit()
         relations_after = int(conn.execute("SELECT COUNT(*) FROM relation_evidence").fetchone()[0])
-        return {"mentions": mentions, "relations": max(0, relations_after - relations_before)}
+        return {
+            "mentions": mentions,
+            "relations": max(0, relations_after - relations_before),
+            "projects_created": projects_created,
+        }
 
 
 def refresh_links(limit: int = 1200) -> dict[str, int]:
@@ -275,6 +309,7 @@ def refresh_links(limit: int = 1200) -> dict[str, int]:
     processed = 0
     mentions = 0
     relations = 0
+    projects_created = 0
     newest = last_id
     for row in events:
         event_id = int(row["id"])
@@ -282,6 +317,7 @@ def refresh_links(limit: int = 1200) -> dict[str, int]:
         processed += 1
         mentions += int(result.get("mentions", 0))
         relations += int(result.get("relations", 0))
+        projects_created += int(result.get("projects_created", 0))
         newest = event_id
 
     if newest != last_id:
@@ -296,6 +332,7 @@ def refresh_links(limit: int = 1200) -> dict[str, int]:
         "processed_events": processed,
         "linked_mentions": mentions,
         "relation_evidence_added": relations,
+        "explicit_projects_created": projects_created,
         "last_event_id": newest,
     }
 

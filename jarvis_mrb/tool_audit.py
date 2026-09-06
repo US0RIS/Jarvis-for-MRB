@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from typing import Any, Callable
 
 _LOCK = threading.RLock()
@@ -15,9 +16,6 @@ def _is_staged_confirmation(reply: Any) -> bool:
 
 def _safe_result_message(tool: str, reply: Any) -> str:
     raw = str(getattr(reply, "message", "") or "")
-    # Security-class tools can return command output, API payloads, or generated
-    # adapter data containing credentials/tokens. Preserve that the action happened
-    # and whether it worked, but never copy the returned body into durable memory.
     try:
         from jarvis_mrb.permissions import decide
 
@@ -30,33 +28,28 @@ def _safe_result_message(tool: str, reply: Any) -> str:
 
 
 def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
-    # World-model reads are themselves introspection and would otherwise create
-    # self-referential action noise. Everything else—reads and writes—is useful
-    # execution provenance, with sensitive bodies/commands redacted downstream.
     if str(tool).startswith("world."):
         return
     try:
         from jarvis_mrb.world_model import record_tool_execution
 
+        occurrence_args = dict(args or {})
+        # record_tool_execution's event identity includes its sanitized arguments.
+        # A private occurrence nonce therefore preserves two identical executions as
+        # separate temporal events without changing the executed tool arguments.
+        occurrence_args["_world_occurrence_id"] = str(uuid.uuid4())
         record_tool_execution(
             str(tool),
-            dict(args or {}),
+            occurrence_args,
             ok=bool(getattr(reply, "ok", False)),
             message=_safe_result_message(tool, reply),
         )
     except Exception:
-        # Audit failure must never break the user's requested action.
         pass
 
 
 def install() -> bool:
-    """Install one process-wide audit wrapper around the canonical tool executor.
-
-    This is intentionally late-bound to avoid import cycles: service.py imports both
-    planner modules before model_router, which is the normal service path that calls
-    this installer. We patch both references because streaming_agent imported the
-    function by value rather than looking it up through the agent module.
-    """
+    """Install one process-wide audit wrapper around the canonical tool executor."""
     global _INSTALLED, _ORIGINAL
     with _LOCK:
         if _INSTALLED:
@@ -82,9 +75,6 @@ def install() -> bool:
             bypass_confirmation: bool = False,
         ) -> Any:
             reply = original(tool, args, bypass_confirmation=bypass_confirmation)
-            # A confirmation prompt means nothing has happened yet. The subsequent
-            # confirmed execution calls this wrapper again with bypass_confirmation,
-            # at which point the actual success/failure is recorded.
             if not _is_staged_confirmation(reply):
                 _record(tool, args, reply)
             return reply
@@ -105,4 +95,5 @@ def status() -> dict[str, Any]:
         "confirmation_prompts_recorded_as_actions": False,
         "world_introspection_recorded": False,
         "security_result_bodies_persisted": False,
+        "repeated_identical_executions_preserved": True,
     }

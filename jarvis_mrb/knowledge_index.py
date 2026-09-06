@@ -142,6 +142,7 @@ def refresh() -> dict[str, Any]:
     scanned = 0
     errors: list[str] = []
     backfill: dict[str, Any] | None = None
+    linker: dict[str, Any] | None = None
 
     # The service already runs knowledge refresh on its own background thread. Use
     # that existing non-latency-sensitive path for the one-time migration instead of
@@ -205,6 +206,17 @@ def refresh() -> dict[str, Any]:
         if _index_once(f"note:{relative}", text, kind="note"):
             indexed += 1
 
+    # Once all source records are in the shared graph, resolve cross-source mentions
+    # and derive evidence-backed relationships (person↔project, document↔project,
+    # meeting↔person, object↔place, and similar high-value edges). This stays fully
+    # local and deterministic; it does not ask an LLM to invent relationships.
+    try:
+        from jarvis_mrb.world_linker import refresh_links
+
+        linker = refresh_links(limit=3000)
+    except Exception as exc:
+        linker = {"error": str(exc)[:500]}
+
     return {
         "ok": not errors,
         "scanned": scanned,
@@ -213,6 +225,7 @@ def refresh() -> dict[str, Any]:
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
         "world_backfill": backfill,
+        "world_linker": linker,
     }
 
 
@@ -230,8 +243,16 @@ def describe_search(query: str, limit: int = 5) -> str:
 def status() -> dict[str, Any]:
     with _connect() as conn:
         sources = int(conn.execute("SELECT COUNT(*) FROM indexed_sources").fetchone()[0])
+    linker: dict[str, Any] = {}
+    try:
+        from jarvis_mrb.world_linker import status as world_linker_status
+
+        linker = world_linker_status()
+    except Exception:
+        pass
     return {
         "indexed_sources": sources,
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
+        "world_linker": linker,
     }

@@ -242,15 +242,22 @@ def memory_context(query: str, limit: int = 3) -> str:
     pieces: list[str] = []
     situation = ""
 
-    # Action-outcome state is independent of the situation/world routing lanes. A
-    # question such as "did that work?" must receive the verifier's evidence even
-    # when no entity/project name is present in the utterance.
+    # Action-outcome state is independent of the situation/world routing lanes. An
+    # explicit question such as "did that work?" forces an immediate read-back pass
+    # before context is rendered, so Jarvis does not answer from a stale pending row.
     try:
+        from jarvis_mrb.world_verification import check_due as check_verifications
         from jarvis_mrb.world_verification import context_for_query as verification_context
 
         verification = verification_context(query, limit=6)
         if verification:
-            pieces.append(verification)
+            try:
+                check_verifications(limit=6, force=True)
+                verification = verification_context(query, limit=6)
+            except Exception:
+                pass
+            if verification:
+                pieces.append(verification)
     except Exception:
         pass
 
@@ -407,6 +414,7 @@ def status() -> dict[str, object]:
             "structured_term_queries": True,
             "persistent_executive_loop": True,
             "closed_loop_verification": True,
+            "explicit_outcome_queries_force_fresh_check": True,
         },
         "world_linker": linker,
         "world_executive": executive,

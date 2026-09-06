@@ -7,14 +7,14 @@ from typing import Any, Callable
 
 from jarvis_mrb.world_model import DB_PATH
 
-TARGET_SCHEMA_VERSION = 4
+TARGET_SCHEMA_VERSION = 5
 _BACKUP_RETAIN = 3
 _REQUIRED_TABLES = {
     "entities", "external_ids", "aliases", "events", "event_entities", "beliefs", "commitments",
     "entity_relations", "relation_evidence", "intentions", "intention_entities", "intention_commitments",
     "term_observations", "term_conflicts", "document_version_pairs",
     "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
-    "runtime_subsystem_health", "world_schema_meta", "world_schema_history",
+    "runtime_subsystem_health", "gmail_attachment_sync_state", "world_schema_meta", "world_schema_history",
 }
 
 
@@ -148,11 +148,19 @@ def _migration_4_executive_and_verification() -> None:
     runtime_status()
 
 
+def _migration_5_ingestion_reliability() -> None:
+    # Status is deliberately side-effect-limited to creating the additive state table;
+    # it never connects to Gmail or alters semantic world data during migration.
+    from jarvis_mrb.world_gmail_attachments import status as attachment_status
+    attachment_status()
+
+
 _MIGRATIONS: tuple[tuple[int, str, Callable[[], None]], ...] = (
     (1, "Core world entities/events/beliefs/commitments", _migration_1_core),
     (2, "Evidence relations, intentions, and strong person/project semantics", _migration_2_relations_and_intentions),
     (3, "Chronology-safe cross-source term ledger and document lineage", _migration_3_terms_and_document_lineage),
     (4, "Executive Loop, closed-loop verification, and runtime subsystem health", _migration_4_executive_and_verification),
+    (5, "Resumable Gmail attachment ingestion state and explicit support telemetry", _migration_5_ingestion_reliability),
 )
 
 

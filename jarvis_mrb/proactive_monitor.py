@@ -153,6 +153,31 @@ def _check_urgent_mail() -> None:
         )
 
 
+def _check_action_verifications() -> None:
+    try:
+        from jarvis_mrb.world_verification import check_due
+
+        outcomes = check_due(limit=20)
+    except Exception:
+        return
+    for item in outcomes:
+        status = str(item.get("status") or "")
+        if status not in {"failed", "timed_out"}:
+            continue
+        verification_id = str(item.get("id") or "")
+        if not verification_id or not _dedup(f"verification:{verification_id}:{status}", 24 * 3600):
+            continue
+        tool = str(item.get("tool") or "action")
+        evidence = " ".join(str(item.get("evidence") or "").split())[:480]
+        if status == "failed":
+            message = f"A tracked action did not achieve its verified outcome: {tool}."
+        else:
+            message = f"I could not verify the outcome of a tracked action before its deadline: {tool}."
+        if evidence:
+            message += f" {evidence}"
+        emit_proactive(message, cue="error", severity="warning")
+
+
 def check_once() -> None:
     state = get_state()
     preferences = state.get("preferences") if isinstance(state.get("preferences"), dict) else {}
@@ -160,6 +185,7 @@ def check_once() -> None:
         return
     _check_calendar()
     _check_urgent_mail()
+    _check_action_verifications()
 
 
 def _loop() -> None:
@@ -168,6 +194,7 @@ def _loop() -> None:
     while True:
         try:
             _check_calendar()
+            _check_action_verifications()
             if cycle % 3 == 0:
                 _check_urgent_mail()
         except Exception:

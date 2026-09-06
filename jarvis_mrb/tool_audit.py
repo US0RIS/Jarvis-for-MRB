@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from typing import Any, Callable
 
 _LOCK = threading.RLock()
 _INSTALLED = False
 _ORIGINAL: Callable[..., Any] | None = None
+_STAGED_EXECUTIVE: dict[str, tuple[str, float]] = {}
+_STAGED_TTL_SECONDS = 10 * 60
 
 
 def _is_staged_confirmation(reply: Any) -> bool:
@@ -29,26 +32,30 @@ def _safe_result_message(tool: str, reply: Any) -> str:
     return raw[:1500]
 
 
-def _executive_decision_id(tool: str, args: dict[str, Any]) -> str:
-    """Best-effort exact correlation with the current Executive Loop proposal.
+def _action_key(tool: str, args: dict[str, Any]) -> str:
+    return f"{tool}\n{json.dumps(dict(args or {}), ensure_ascii=False, sort_keys=True, separators=(',', ':'))}"
 
-    Confirmation can separate planning from execution by an arbitrary user turn, so
-    process-local context alone is insufficient. Correlation therefore requires an
-    exact tool+argument match against one current persisted executive decision. If
-    zero or multiple decisions match, no executive attribution is made.
+
+def _executive_decision_id(tool: str, args: dict[str, Any], *, include_superseded: bool = False) -> str:
+    """Return one exact persisted Executive decision for this tool+arguments.
+
+    Current decisions are used for ordinary correlation. A staged confirmation may
+    later refer to a decision that has since been superseded, so callers validating a
+    staged cache may opt into superseded rows. No lexical/fuzzy attribution is used.
     """
     try:
         from jarvis_mrb.world_model import DB_PATH
 
         rendered_args = json.dumps(dict(args or {}), ensure_ascii=False, sort_keys=True)
+        state_clause = "status IN ('current','superseded')" if include_superseded else "status='current'"
         conn = sqlite3.connect(DB_PATH, timeout=5.0)
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
-                """
+                f"""
                 SELECT id FROM executive_decisions
-                WHERE status='current' AND proposed_tool=? AND proposed_args_json=?
-                ORDER BY updated_at DESC
+                WHERE {state_clause} AND proposed_tool=? AND proposed_args_json=?
+                ORDER BY CASE status WHEN 'current' THEN 0 ELSE 1 END, updated_at DESC
                 LIMIT 2
                 """,
                 (str(tool), rendered_args),
@@ -60,6 +67,50 @@ def _executive_decision_id(tool: str, args: dict[str, Any]) -> str:
     except Exception:
         pass
     return ""
+
+
+def _prune_staged(now: float | None = None) -> None:
+    current = float(now if now is not None else time.monotonic())
+    for key, (_, staged_at) in list(_STAGED_EXECUTIVE.items()):
+        if current - staged_at > _STAGED_TTL_SECONDS:
+            _STAGED_EXECUTIVE.pop(key, None)
+
+
+def _stage_executive_decision(tool: str, args: dict[str, Any]) -> None:
+    decision_id = _executive_decision_id(tool, args)
+    if not decision_id:
+        return
+    with _LOCK:
+        _prune_staged()
+        _STAGED_EXECUTIVE[_action_key(tool, args)] = (decision_id, time.monotonic())
+
+
+def _consume_staged_decision(tool: str, args: dict[str, Any]) -> str:
+    key = _action_key(tool, args)
+    with _LOCK:
+        _prune_staged()
+        cached = _STAGED_EXECUTIVE.pop(key, None)
+    if not cached:
+        return ""
+    decision_id, _ = cached
+    # Validate that the exact decision/action pair still exists. It may legitimately
+    # be superseded while the user is considering a confirmation, but it must never
+    # be rebound to different arguments.
+    try:
+        from jarvis_mrb.world_model import DB_PATH
+
+        rendered_args = json.dumps(dict(args or {}), ensure_ascii=False, sort_keys=True)
+        conn = sqlite3.connect(DB_PATH, timeout=5.0)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM executive_decisions WHERE id=? AND proposed_tool=? AND proposed_args_json=?",
+                (decision_id, str(tool), rendered_args),
+            ).fetchone()
+        finally:
+            conn.close()
+        return decision_id if row else ""
+    except Exception:
+        return ""
 
 
 def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
@@ -87,12 +138,13 @@ def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
     try:
         from jarvis_mrb.world_verification import register_execution
 
+        executive_decision_id = _consume_staged_decision(tool, args) or _executive_decision_id(tool, args)
         register_execution(
             str(tool),
             dict(args or {}),
             reply,
             action_event_id=int(action_event_id),
-            executive_decision_id=_executive_decision_id(tool, args),
+            executive_decision_id=executive_decision_id,
         )
     except Exception:
         pass
@@ -125,7 +177,9 @@ def install() -> bool:
             bypass_confirmation: bool = False,
         ) -> Any:
             reply = original(tool, args, bypass_confirmation=bypass_confirmation)
-            if not _is_staged_confirmation(reply):
+            if _is_staged_confirmation(reply):
+                _stage_executive_decision(tool, args)
+            else:
                 _record(tool, args, reply)
             return reply
 
@@ -139,6 +193,9 @@ def install() -> bool:
 
 
 def status() -> dict[str, Any]:
+    with _LOCK:
+        _prune_staged()
+        staged = len(_STAGED_EXECUTIVE)
     return {
         "installed": _INSTALLED,
         "has_original": _ORIGINAL is not None,
@@ -147,5 +204,7 @@ def status() -> dict[str, Any]:
         "security_result_bodies_persisted": False,
         "repeated_identical_executions_preserved": True,
         "closed_loop_verification_registered": True,
-        "executive_decision_correlation": "exact persisted tool+arguments match only",
+        "executive_decision_correlation": "exact persisted tool+arguments; one-shot staged confirmation cache",
+        "staged_executive_confirmations": staged,
+        "staged_confirmation_ttl_seconds": _STAGED_TTL_SECONDS,
     }

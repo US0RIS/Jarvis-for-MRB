@@ -7,7 +7,10 @@ import sys
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Validate the deployed Jarvis persistent world model without modifying user data."
+        description=(
+            "Validate the deployed Jarvis persistent world model and operational invariants. "
+            "Diagnostics do not retire/delete semantic user data, but additive schema tables may be initialized."
+        )
     )
     parser.add_argument(
         "--compact",

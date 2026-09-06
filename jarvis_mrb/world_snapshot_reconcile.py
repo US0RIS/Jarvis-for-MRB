@@ -25,6 +25,19 @@ def _ids(items: Any) -> set[str]:
     }
 
 
+def _authoritative_ids(data: dict[str, Any], key: str) -> set[str] | None:
+    """Return IDs only when this snapshot explicitly carries a full list.
+
+    Missing or malformed collections are not equivalent to authoritative emptiness.
+    This prevents an older/partial companion payload from retiring every goal,
+    Waiting-On item, or Known People enrollment merely because it omitted a field.
+    An explicit empty list remains authoritative and therefore means "none remain".
+    """
+    if key not in data or not isinstance(data.get(key), list):
+        return None
+    return _ids(data[key])
+
+
 def _normalized(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())[:500]
 
@@ -92,8 +105,6 @@ def _revoke_known_person_enrollment(current_people_ids: set[str]) -> int:
                 (entity_id, external_id),
             ).fetchall()
             attributes = _safe_attributes(str(row["attributes_json"] or "{}"))
-            # These fields originated in the explicit Known People profile and should
-            # not survive unenrollment merely because the graph retains history.
             attributes.pop("note", None)
             attributes.pop("contact_id", None)
             attributes["known_people_enrollment"] = "revoked"
@@ -108,24 +119,16 @@ def _revoke_known_person_enrollment(current_people_ids: set[str]) -> int:
             )
 
             if not other_ids:
-                # With no independent identity source, keeping the old enrolled name
-                # as an active entity would allow future text to relink to a person the
-                # user explicitly unenrolled. Tombstone the live identity instead.
                 tombstone = f"Former enrolled person {external_id[:8]}"
                 conn.execute(
                     "UPDATE entities SET canonical_name=?,normalized_name=?,attributes_json=? WHERE id=?",
                     (tombstone, _normalized(tombstone), json.dumps(attributes, ensure_ascii=False, sort_keys=True), entity_id),
                 )
-                # Derived current relations are disposable inference; source events
-                # remain. Removing them prevents a revoked local identity from
-                # continuing to influence current person/project context.
                 conn.execute(
                     "DELETE FROM entity_relations WHERE subject_id=? OR object_id=?",
                     (entity_id, entity_id),
                 )
             else:
-                # The person still exists through independent evidence. Preserve that
-                # identity while removing only Known People-specific private metadata.
                 conn.execute(
                     "UPDATE entities SET attributes_json=? WHERE id=?",
                     (json.dumps(attributes, ensure_ascii=False, sort_keys=True), entity_id),
@@ -136,95 +139,105 @@ def _revoke_known_person_enrollment(current_people_ids: set[str]) -> int:
 
 
 def reconcile_authoritative_snapshot(snapshot: dict[str, Any]) -> dict[str, int]:
-    """Reconcile current iPhone-owned lists against the persistent world model.
+    """Reconcile iPhone-owned lists only when the corresponding full list is present.
 
-    Goals and Waiting-On rows are operational state: omission retires the current row
-    while preserving history. Known People is an enrollment/privacy state: omission
-    revokes the iPhone enrollment identity and copied private profile metadata, but it
-    does not silently erase independent mail/calendar/history about the same person.
+    Goals and Waiting-On rows are operational state: explicit omission from a supplied
+    full list retires the current row while preserving history. Known People is an
+    enrollment/privacy state: explicit omission from a supplied full list revokes the
+    iPhone enrollment identity and copied profile metadata, without silently erasing
+    independent mail/calendar/history about the same person.
+
+    A collection that is absent or malformed is treated as unknown/partial and causes
+    no retirement or revocation. An explicit empty list remains authoritative.
 
     Inventory, encounters and reminders still use source-specific historical semantics
     and are not inferred deleted merely because a bounded snapshot omits a row.
     """
     data = dict(snapshot or {})
-    current_goal_ids = _ids(data.get("goals"))
-    current_waiting_ids = _ids(data.get("waiting"))
-    current_people_ids = _ids(data.get("people"))
+    current_goal_ids = _authoritative_ids(data, "goals")
+    current_waiting_ids = _authoritative_ids(data, "waiting")
+    current_people_ids = _authoritative_ids(data, "people")
     retired_goals = 0
     retired_waiting = 0
 
-    with _connect() as conn:
-        goal_rows = conn.execute(
-            """
-            SELECT x.external_id,e.id,e.canonical_name
-            FROM external_ids x
-            JOIN entities e ON e.id=x.entity_id
-            WHERE x.namespace='iphone_goal'
-            """
-        ).fetchall()
-
-    for row in goal_rows:
-        external_id = str(row["external_id"])
-        if external_id in current_goal_ids:
-            continue
-        entity_id = str(row["id"])
-        event_id = record_event(
-            "goal.removed",
-            f"Goal removed from iPhone Goal Manager: {row['canonical_name']}",
-            source_kind="iphone_snapshot_reconcile",
-            source_ref=f"goal:{external_id}",
-            payload={"goal_id": external_id, "status": "retired"},
-            evidence="The goal was absent from a later authoritative full iPhone Goal Manager snapshot.",
-            confidence=1.0,
-            participants=[(SELF_ID, "owner", 1.0), (entity_id, "goal", 1.0)],
-        )
-        assert_belief(
-            entity_id,
-            "status",
-            value="retired",
-            confidence=1.0,
-            source_event_id=event_id,
-            evidence="Removed from authoritative iPhone Goal Manager snapshot",
-        )
-        retired_goals += 1
-
-    with _connect() as conn:
-        waiting_rows = conn.execute(
-            "SELECT id,action,status,metadata_json FROM commitments WHERE id LIKE 'waiting:%'"
-        ).fetchall()
-
-    for row in waiting_rows:
-        commitment_id = str(row["id"])
-        external_id = commitment_id.split(":", 1)[1] if ":" in commitment_id else commitment_id
-        if external_id in current_waiting_ids or str(row["status"]) != "pending":
-            continue
-        metadata = _safe_attributes(str(row["metadata_json"] or "{}"))
-        if metadata.get("origin") != "iphone_waiting":
-            continue
-
-        event_id = record_event(
-            "commitment.waiting_removed",
-            f"Waiting-On item removed from iPhone tracker: {row['action']}",
-            source_kind="iphone_snapshot_reconcile",
-            source_ref=commitment_id,
-            payload={"commitment_id": commitment_id, "status": "retired"},
-            evidence="The Waiting-On row was absent from a later authoritative full iPhone snapshot.",
-            confidence=1.0,
-            participants=[(SELF_ID, "beneficiary", 1.0)],
-        )
+    if current_goal_ids is not None:
         with _connect() as conn:
-            metadata["retired_by"] = "authoritative_iphone_snapshot"
-            metadata["retirement_event_id"] = event_id
-            conn.execute(
-                "UPDATE commitments SET status='retired',updated_at=CURRENT_TIMESTAMP,metadata_json=? WHERE id=? AND status='pending'",
-                (json.dumps(metadata, ensure_ascii=False, sort_keys=True), commitment_id),
-            )
-            changed = conn.total_changes
-            conn.commit()
-        if changed:
-            retired_waiting += 1
+            goal_rows = conn.execute(
+                """
+                SELECT x.external_id,e.id,e.canonical_name
+                FROM external_ids x
+                JOIN entities e ON e.id=x.entity_id
+                WHERE x.namespace='iphone_goal'
+                """
+            ).fetchall()
 
-    revoked_people = _revoke_known_person_enrollment(current_people_ids)
+        for row in goal_rows:
+            external_id = str(row["external_id"])
+            if external_id in current_goal_ids:
+                continue
+            entity_id = str(row["id"])
+            event_id = record_event(
+                "goal.removed",
+                f"Goal removed from iPhone Goal Manager: {row['canonical_name']}",
+                source_kind="iphone_snapshot_reconcile",
+                source_ref=f"goal:{external_id}",
+                payload={"goal_id": external_id, "status": "retired"},
+                evidence="The goal was absent from a later authoritative full iPhone Goal Manager snapshot.",
+                confidence=1.0,
+                participants=[(SELF_ID, "owner", 1.0), (entity_id, "goal", 1.0)],
+            )
+            assert_belief(
+                entity_id,
+                "status",
+                value="retired",
+                confidence=1.0,
+                source_event_id=event_id,
+                evidence="Removed from authoritative iPhone Goal Manager snapshot",
+            )
+            retired_goals += 1
+
+    if current_waiting_ids is not None:
+        with _connect() as conn:
+            waiting_rows = conn.execute(
+                "SELECT id,action,status,metadata_json FROM commitments WHERE id LIKE 'waiting:%'"
+            ).fetchall()
+
+        for row in waiting_rows:
+            commitment_id = str(row["id"])
+            external_id = commitment_id.split(":", 1)[1] if ":" in commitment_id else commitment_id
+            if external_id in current_waiting_ids or str(row["status"]) != "pending":
+                continue
+            metadata = _safe_attributes(str(row["metadata_json"] or "{}"))
+            if metadata.get("origin") != "iphone_waiting":
+                continue
+
+            event_id = record_event(
+                "commitment.waiting_removed",
+                f"Waiting-On item removed from iPhone tracker: {row['action']}",
+                source_kind="iphone_snapshot_reconcile",
+                source_ref=commitment_id,
+                payload={"commitment_id": commitment_id, "status": "retired"},
+                evidence="The Waiting-On row was absent from a later authoritative full iPhone snapshot.",
+                confidence=1.0,
+                participants=[(SELF_ID, "beneficiary", 1.0)],
+            )
+            with _connect() as conn:
+                metadata["retired_by"] = "authoritative_iphone_snapshot"
+                metadata["retirement_event_id"] = event_id
+                cursor = conn.execute(
+                    "UPDATE commitments SET status='retired',updated_at=CURRENT_TIMESTAMP,metadata_json=? WHERE id=? AND status='pending'",
+                    (json.dumps(metadata, ensure_ascii=False, sort_keys=True), commitment_id),
+                )
+                changed = int(cursor.rowcount)
+                conn.commit()
+            if changed:
+                retired_waiting += 1
+
+    revoked_people = (
+        _revoke_known_person_enrollment(current_people_ids)
+        if current_people_ids is not None
+        else 0
+    )
 
     return {
         "retired_goals": retired_goals,

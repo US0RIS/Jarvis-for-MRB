@@ -4,84 +4,23 @@ import json
 import re
 import sqlite3
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from jarvis_mrb.world_model import DB_PATH, record_event
 
-# High-value structured terms whose semantics are stable enough for deterministic
-# extraction. This is intentionally narrower than arbitrary information extraction:
-# false project-term conflicts would be worse than missing an obscure term.
 _TERM_PATTERNS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "indemnity_cap": (
-        "indemnity cap",
-        (
-            r"\bindemn(?:ity|ification)\s+cap\b.{0,100}?({VALUE})",
-            r"\bcap\s+on\s+indemn(?:ity|ification)\b.{0,100}?({VALUE})",
-        ),
-    ),
-    "indemnity_basket": (
-        "indemnity basket",
-        (
-            r"\bindemn(?:ity|ification)\s+basket\b.{0,100}?({VALUE})",
-            r"\bbasket\b.{0,70}?({VALUE})",
-        ),
-    ),
-    "escrow": (
-        "escrow amount",
-        (
-            r"\bescrow(?:\s+amount)?\b.{0,100}?({VALUE})",
-            r"\bholdback(?:\s+amount)?\b.{0,100}?({VALUE})",
-        ),
-    ),
-    "survival_period": (
-        "survival period",
-        (
-            r"\bsurvival(?:\s+period)?\b.{0,100}?({DURATION})",
-            r"\brepresentations?.{0,60}?surviv(?:e|al)\b.{0,80}?({DURATION})",
-        ),
-    ),
-    "termination_fee": (
-        "termination fee",
-        (
-            r"\btermination\s+fee\b.{0,100}?({VALUE})",
-            r"\bbreak[- ]?up\s+fee\b.{0,100}?({VALUE})",
-        ),
-    ),
-    "purchase_price": (
-        "purchase price",
-        (r"\bpurchase\s+price\b.{0,100}?({MONEY})",),
-    ),
-    "working_capital_target": (
-        "working capital target",
-        (
-            r"\bworking\s+capital\s+(?:target|peg)\b.{0,100}?({MONEY})",
-            r"\b(?:target|peg)\s+working\s+capital\b.{0,100}?({MONEY})",
-        ),
-    ),
-    "earnout": (
-        "earnout",
-        (r"\bearn[- ]?out\b.{0,100}?({VALUE})",),
-    ),
-    "interest_rate": (
-        "interest rate",
-        (
-            r"\binterest\s+rate\b.{0,100}?({PERCENT})",
-            r"\brate\s+of\s+interest\b.{0,100}?({PERCENT})",
-        ),
-    ),
-    "ownership_percentage": (
-        "ownership percentage",
-        (
-            r"\b(?:ownership|equity|stake)\b.{0,100}?({PERCENT})",
-            r"\b({PERCENT}).{0,60}?\b(?:ownership|equity|stake)\b",
-        ),
-    ),
-    "deadline": (
-        "deadline",
-        (
-            r"\b(?:deadline|signing|closing)\b.{0,90}?\b(?:by|on|before)\s+({DATE})",
-        ),
-    ),
+    "indemnity_cap": ("indemnity cap", (r"\bindemn(?:ity|ification)\s+cap\b.{0,100}?({VALUE})", r"\bcap\s+on\s+indemn(?:ity|ification)\b.{0,100}?({VALUE})")),
+    "indemnity_basket": ("indemnity basket", (r"\bindemn(?:ity|ification)\s+basket\b.{0,100}?({VALUE})", r"\bbasket\b.{0,70}?({VALUE})")),
+    "escrow": ("escrow amount", (r"\bescrow(?:\s+amount)?\b.{0,100}?({VALUE})", r"\bholdback(?:\s+amount)?\b.{0,100}?({VALUE})")),
+    "survival_period": ("survival period", (r"\bsurvival(?:\s+period)?\b.{0,100}?({DURATION})", r"\brepresentations?.{0,60}?surviv(?:e|al)\b.{0,80}?({DURATION})")),
+    "termination_fee": ("termination fee", (r"\btermination\s+fee\b.{0,100}?({VALUE})", r"\bbreak[- ]?up\s+fee\b.{0,100}?({VALUE})")),
+    "purchase_price": ("purchase price", (r"\bpurchase\s+price\b.{0,100}?({MONEY})",)),
+    "working_capital_target": ("working capital target", (r"\bworking\s+capital\s+(?:target|peg)\b.{0,100}?({MONEY})", r"\b(?:target|peg)\s+working\s+capital\b.{0,100}?({MONEY})")),
+    "earnout": ("earnout", (r"\bearn[- ]?out\b.{0,100}?({VALUE})",)),
+    "interest_rate": ("interest rate", (r"\binterest\s+rate\b.{0,100}?({PERCENT})", r"\brate\s+of\s+interest\b.{0,100}?({PERCENT})")),
+    "ownership_percentage": ("ownership percentage", (r"\b(?:ownership|equity|stake)\b.{0,100}?({PERCENT})", r"\b({PERCENT}).{0,60}?\b(?:ownership|equity|stake)\b")),
+    "deadline": ("deadline", (r"\b(?:deadline|signing|closing)\b.{0,90}?\b(?:by|on|before)\s+({DATE})",)),
 }
 
 _MONEY = r"(?:[$€£]\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:million|billion|mm|bn|m|b))?)"
@@ -100,13 +39,7 @@ _SOURCE_CONFIDENCE = {
 }
 
 _IGNORED_EVENT_PREFIXES = (
-    "term.",
-    "document.version_",
-    "action.",
-    "context.",
-    "perception.",
-    "automation.",
-    "background.",
+    "term.", "document.version_", "action.", "context.", "perception.", "automation.", "background.",
 )
 
 
@@ -160,6 +93,28 @@ def _loads(raw: str | None, fallback: Any) -> Any:
         return fallback
 
 
+def _parse_time(raw: str | None) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        try:
+            value = parsedate_to_datetime(text)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if value.tzinfo is None:
+        value = value.astimezone()
+    return value.astimezone()
+
+
+def _chronology_key(row: sqlite3.Row) -> tuple[float, int, int]:
+    occurred = _parse_time(str(row["occurred_at"] or ""))
+    timestamp = occurred.timestamp() if occurred is not None else 0.0
+    return (timestamp, int(row["source_event_id"] or 0), int(row["id"] or 0))
+
+
 def _event_text(event: sqlite3.Row) -> str:
     payload = _loads(str(event["payload_json"] or "{}"), {})
     parts = [str(event["summary"] or "")]
@@ -168,9 +123,6 @@ def _event_text(event: sqlite3.Row) -> str:
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 parts.append(value)
-        # record_knowledge_source nests full text at top-level `text`; meeting records
-        # may nest transcript/actions directly in payload. JSON fallback preserves
-        # bounded structured wording for patterns without interpreting instructions.
         if len(parts) == 1:
             parts.append(json.dumps(payload, ensure_ascii=False)[:30_000])
     return "\n".join(parts)[:60_000]
@@ -179,11 +131,7 @@ def _event_text(event: sqlite3.Row) -> str:
 def _project_ids(event_id: int) -> list[str]:
     with _connect() as conn:
         rows = conn.execute(
-            """
-            SELECT DISTINCT ee.entity_id
-            FROM event_entities ee JOIN entities e ON e.id=ee.entity_id
-            WHERE ee.event_id=? AND e.kind='project'
-            """,
+            "SELECT DISTINCT ee.entity_id FROM event_entities ee JOIN entities e ON e.id=ee.entity_id WHERE ee.event_id=? AND e.kind='project'",
             (int(event_id),),
         ).fetchall()
     return [str(row["entity_id"]) for row in rows]
@@ -196,27 +144,22 @@ def _project_name(project_id: str) -> str:
 
 
 def _normalize_value(value: str) -> str:
-    text = " ".join(str(value or "").lower().split())
-    text = text.replace(",", "")
+    text = " ".join(str(value or "").lower().split()).replace(",", "")
     text = re.sub(r"\bpercent\b", "%", text)
     text = re.sub(r"\bbasis\s+points?\b", "bps", text)
     return text.strip(" .,:;()[]")[:300]
 
 
 def _expanded_pattern(template: str) -> re.Pattern[str]:
-    pattern = template.replace("{MONEY}", _MONEY)
-    pattern = pattern.replace("{PERCENT}", _PERCENT)
-    pattern = pattern.replace("{DURATION}", _DURATION)
-    pattern = pattern.replace("{DATE}", _DATE)
-    pattern = pattern.replace("{VALUE}", _GENERIC_VALUE)
+    pattern = template.replace("{MONEY}", _MONEY).replace("{PERCENT}", _PERCENT)
+    pattern = pattern.replace("{DURATION}", _DURATION).replace("{DATE}", _DATE).replace("{VALUE}", _GENERIC_VALUE)
     return re.compile(pattern, flags=re.IGNORECASE | re.DOTALL)
 
 
 def _context_window(text: str, start: int, end: int) -> str:
     left = max(0, start - 180)
     right = min(len(text), end + 180)
-    value = " ".join(text[left:right].split())
-    return value[:700]
+    return " ".join(text[left:right].split())[:700]
 
 
 def extract_terms(text: str) -> list[dict[str, str]]:
@@ -227,10 +170,7 @@ def extract_terms(text: str) -> list[dict[str, str]]:
     seen: set[tuple[str, str]] = set()
     for term_key, (display_name, templates) in _TERM_PATTERNS.items():
         for template in templates:
-            pattern = _expanded_pattern(template)
-            for match in pattern.finditer(value):
-                # Templates have one semantic capture. If future templates contain
-                # nested regex groups, choose the last non-empty captured value.
+            for match in _expanded_pattern(template).finditer(value):
                 captured = next((group for group in reversed(match.groups()) if group), "")
                 captured = " ".join(str(captured).split())[:300]
                 normalized = _normalize_value(captured)
@@ -240,15 +180,13 @@ def extract_terms(text: str) -> list[dict[str, str]]:
                 if key in seen:
                     continue
                 seen.add(key)
-                results.append(
-                    {
-                        "term_key": term_key,
-                        "display_name": display_name,
-                        "value_text": captured,
-                        "normalized_value": normalized,
-                        "context": _context_window(value, match.start(), match.end()),
-                    }
-                )
+                results.append({
+                    "term_key": term_key,
+                    "display_name": display_name,
+                    "value_text": captured,
+                    "normalized_value": normalized,
+                    "context": _context_window(value, match.start(), match.end()),
+                })
                 if len(results) >= 30:
                     return results
     return results
@@ -258,7 +196,12 @@ def _source_label(observation: sqlite3.Row) -> str:
     return f"{observation['source_kind']} at {observation['occurred_at']}"
 
 
-def _create_conflict(older: sqlite3.Row, newer: sqlite3.Row) -> int | None:
+def _ordered_pair(first: sqlite3.Row, second: sqlite3.Row) -> tuple[sqlite3.Row, sqlite3.Row]:
+    return (first, second) if _chronology_key(first) <= _chronology_key(second) else (second, first)
+
+
+def _create_conflict(first: sqlite3.Row, second: sqlite3.Row) -> int | None:
+    older, newer = _ordered_pair(first, second)
     if str(older["normalized_value"]) == str(newer["normalized_value"]):
         return None
     with _connect() as conn:
@@ -286,23 +229,17 @@ def _create_conflict(older: sqlite3.Row, newer: sqlite3.Row) -> int | None:
             "term_key": str(newer["term_key"]),
             "display_name": str(newer["display_name"]),
             "older": {
-                "observation_id": int(older["id"]),
-                "value": str(older["value_text"]),
-                "source_event_id": int(older["source_event_id"]),
-                "source_kind": str(older["source_kind"]),
-                "occurred_at": str(older["occurred_at"]),
-                "context": str(older["context"]),
+                "observation_id": int(older["id"]), "value": str(older["value_text"]),
+                "source_event_id": int(older["source_event_id"]), "source_kind": str(older["source_kind"]),
+                "occurred_at": str(older["occurred_at"]), "context": str(older["context"]),
             },
             "newer": {
-                "observation_id": int(newer["id"]),
-                "value": str(newer["value_text"]),
-                "source_event_id": int(newer["source_event_id"]),
-                "source_kind": str(newer["source_kind"]),
-                "occurred_at": str(newer["occurred_at"]),
-                "context": str(newer["context"]),
+                "observation_id": int(newer["id"]), "value": str(newer["value_text"]),
+                "source_event_id": int(newer["source_event_id"]), "source_kind": str(newer["source_kind"]),
+                "occurred_at": str(newer["occurred_at"]), "context": str(newer["context"]),
             },
         },
-        evidence="Deterministic project-term extraction found different explicit values for the same named term in two provenance-bearing sources. This is a possible change/conflict, not an assertion that either source is authoritative.",
+        evidence="Deterministic project-term extraction found different explicit values for the same named term in two provenance-bearing sources. Source chronology is based on occurred_at, not ingestion order. This is a possible change/conflict, not an assertion that either source is authoritative.",
         confidence=min(float(older["confidence"]), float(newer["confidence"])),
         participants=[(project_id, "project", 1.0)],
     )
@@ -313,6 +250,48 @@ def _create_conflict(older: sqlite3.Row, newer: sqlite3.Row) -> int | None:
         )
         conn.commit()
     return event_id
+
+
+def _adjacent_observations(project_id: str, term_key: str, observation_id: int) -> tuple[sqlite3.Row | None, sqlite3.Row | None, sqlite3.Row | None]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM term_observations WHERE project_id=? AND term_key=?",
+            (project_id, term_key),
+        ).fetchall()
+    ordered = sorted(rows, key=_chronology_key)
+    for index, row in enumerate(ordered):
+        if int(row["id"]) == int(observation_id):
+            previous = ordered[index - 1] if index > 0 else None
+            following = ordered[index + 1] if index + 1 < len(ordered) else None
+            return previous, row, following
+    return None, None, None
+
+
+def repair_conflict_chronology() -> dict[str, int]:
+    """Canonicalize legacy conflict pairs that were ordered by ingestion ID."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT older_observation_id,newer_observation_id FROM term_conflicts"
+        ).fetchall()
+    repaired = 0
+    for pair in rows:
+        with _connect() as conn:
+            first = conn.execute("SELECT * FROM term_observations WHERE id=?", (int(pair["older_observation_id"]),)).fetchone()
+            second = conn.execute("SELECT * FROM term_observations WHERE id=?", (int(pair["newer_observation_id"]),)).fetchone()
+        if first is None or second is None:
+            continue
+        older, newer = _ordered_pair(first, second)
+        if int(older["id"]) == int(pair["older_observation_id"]):
+            continue
+        with _connect() as conn:
+            conn.execute(
+                "DELETE FROM term_conflicts WHERE older_observation_id=? AND newer_observation_id=?",
+                (int(pair["older_observation_id"]), int(pair["newer_observation_id"])),
+            )
+            conn.commit()
+        _create_conflict(older, newer)
+        repaired += 1
+    return {"repaired": repaired}
 
 
 def observe_event(event_id: int) -> dict[str, Any]:
@@ -348,34 +327,30 @@ def observe_event(event_id: int) -> dict[str, Any]:
                     ) VALUES(?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
-                        project_id,
-                        term["term_key"],
-                        term["display_name"],
-                        term["value_text"],
-                        term["normalized_value"],
-                        term["context"],
-                        str(event["occurred_at"]),
-                        int(event_id),
-                        source_kind,
-                        confidence,
+                        project_id, term["term_key"], term["display_name"], term["value_text"],
+                        term["normalized_value"], term["context"], str(event["occurred_at"]),
+                        int(event_id), source_kind, confidence,
                     ),
                 )
                 did_insert = conn.total_changes > before
                 conn.commit()
                 if not did_insert:
                     continue
-                inserted += 1
                 new_row = conn.execute(
                     "SELECT * FROM term_observations WHERE project_id=? AND term_key=? AND normalized_value=? AND source_event_id=? ORDER BY id DESC LIMIT 1",
                     (project_id, term["term_key"], term["normalized_value"], int(event_id)),
                 ).fetchone()
-                older = conn.execute(
-                    "SELECT * FROM term_observations WHERE project_id=? AND term_key=? AND id<? ORDER BY id DESC LIMIT 1",
-                    (project_id, term["term_key"], int(new_row["id"])),
-                ).fetchone() if new_row else None
-            if new_row is not None and older is not None and str(older["normalized_value"]) != str(new_row["normalized_value"]):
-                conflict_id = _create_conflict(older, new_row)
-                if conflict_id is not None:
+            if new_row is None:
+                continue
+            inserted += 1
+            previous, current, following = _adjacent_observations(project_id, term["term_key"], int(new_row["id"]))
+            for neighbor in (previous, following):
+                if current is None or neighbor is None:
+                    continue
+                if str(current["normalized_value"]) == str(neighbor["normalized_value"]):
+                    continue
+                conflict_id = _create_conflict(current, neighbor)
+                if conflict_id is not None and conflict_id not in generated:
                     generated.append(conflict_id)
 
     return {"observations": inserted, "conflicts": len(generated), "generated_event_ids": generated}
@@ -388,9 +363,7 @@ def refresh(limit: int = 2500) -> dict[str, Any]:
         last_id = int(row["value"]) if row and str(row["value"]).isdigit() else 0
         events = conn.execute("SELECT id FROM events WHERE id>? ORDER BY id ASC LIMIT ?", (last_id, safe_limit)).fetchall()
 
-    processed = 0
-    observations = 0
-    conflicts = 0
+    processed = observations = conflicts = 0
     generated: list[int] = []
     newest = last_id
     for row in events:
@@ -418,30 +391,51 @@ def refresh(limit: int = 2500) -> dict[str, Any]:
     }
 
 
-def project_terms(project_id: str) -> list[dict[str, Any]]:
+def latest_observations(project_id: str, term_keys: set[str] | None = None) -> list[dict[str, Any]]:
     with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT o.* FROM term_observations o
-            JOIN (
-                SELECT term_key,MAX(id) AS max_id FROM term_observations
-                WHERE project_id=? GROUP BY term_key
-            ) latest ON latest.max_id=o.id
-            ORDER BY o.term_key
-            """,
-            (project_id,),
-        ).fetchall()
+        if term_keys:
+            placeholders = ",".join("?" for _ in term_keys)
+            rows = conn.execute(
+                f"SELECT * FROM term_observations WHERE project_id=? AND term_key IN ({placeholders})",
+                (project_id, *tuple(sorted(term_keys))),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM term_observations WHERE project_id=?", (project_id,)).fetchall()
+    by_term: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        key = str(row["term_key"])
+        current = by_term.get(key)
+        if current is None or _chronology_key(row) > _chronology_key(current):
+            by_term[key] = row
     return [
         {
+            "id": int(row["id"]),
+            "project_id": str(row["project_id"]),
             "term_key": str(row["term_key"]),
             "display_name": str(row["display_name"]),
             "value": str(row["value_text"]),
+            "normalized_value": str(row["normalized_value"]),
             "occurred_at": str(row["occurred_at"]),
             "source_kind": str(row["source_kind"]),
             "source_event_id": int(row["source_event_id"]),
             "confidence": float(row["confidence"]),
         }
-        for row in rows
+        for row in sorted(by_term.values(), key=lambda item: str(item["term_key"]))
+    ]
+
+
+def project_terms(project_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "term_key": item["term_key"],
+            "display_name": item["display_name"],
+            "value": item["value"],
+            "occurred_at": item["occurred_at"],
+            "source_kind": item["source_kind"],
+            "source_event_id": item["source_event_id"],
+            "confidence": item["confidence"],
+        }
+        for item in latest_observations(project_id)
     ]
 
 
@@ -457,6 +451,7 @@ def status() -> dict[str, Any]:
         "deterministic": True,
         "cross_source_conflicts": True,
         "source_provenance_retained": True,
+        "chronology_uses_occurred_at": True,
         "claims_authoritative_truth": False,
         "supported_terms": sorted(_TERM_PATTERNS),
     }

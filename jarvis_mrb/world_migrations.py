@@ -124,12 +124,12 @@ def _migration_2_relations_and_intentions() -> None:
 
 
 def _migration_3_terms_and_document_lineage() -> None:
-    from jarvis_mrb.world_document_versions import _connect as document_connect
+    from jarvis_mrb.world_document_versions import repair_pair_chronology, status as document_status
     from jarvis_mrb.world_terms import repair_conflict_chronology, status as terms_status
     terms_status()
     repair_conflict_chronology()
-    conn = document_connect()
-    conn.close()
+    document_status()
+    repair_pair_chronology()
 
 
 def _migration_4_executive_and_verification() -> None:
@@ -152,10 +152,9 @@ _MIGRATIONS: tuple[tuple[int, str, Callable[[], None]], ...] = (
 def run_migrations(*, backup: bool = True) -> dict[str, Any]:
     """Bring the additive world-model schema to the single supported target version.
 
-    Migrations are idempotent. Version is advanced only after a step returns without
-    error. Existing user data is backed up once before an upgrade when requested.
-    SQLite WAL mode is enabled for the shared world database so background readers and
-    writers do not unnecessarily block each other.
+    Migrations are idempotent. Version advances only after a step completes. Existing
+    user data is backed up once before an upgrade when requested. WAL mode is enabled
+    for the shared world database to reduce reader/writer contention.
     """
     before = current_version()
     if before > TARGET_SCHEMA_VERSION:

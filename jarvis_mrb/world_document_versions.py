@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import PurePath
 from typing import Any
 
@@ -33,6 +34,7 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS document_version_pairs (
@@ -58,6 +60,27 @@ def _loads(raw: str | None, fallback: Any) -> Any:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return fallback
+
+
+def _parse_time(raw: str | None) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        try:
+            value = parsedate_to_datetime(text)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if value.tzinfo is None:
+        value = value.astimezone()
+    return value.astimezone()
+
+
+def _event_chronology(item: dict[str, Any]) -> tuple[float, int]:
+    occurred = _parse_time(str(item.get("occurred_at") or ""))
+    return (occurred.timestamp() if occurred is not None else 0.0, int(item.get("event_id") or 0))
 
 
 def _family_key(filename: str) -> str:
@@ -145,7 +168,6 @@ def _changed_passages(old_text: str, new_text: str, limit: int = 8) -> list[dict
     new_segments = _segments(new_text)
     changes: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-
     for new in new_segments:
         old, similarity = _best_old_segment(new, old_segments)
         if old is None or similarity < 0.58 or old == new:
@@ -161,12 +183,8 @@ def _changed_passages(old_text: str, new_text: str, limit: int = 8) -> list[dict
         seen.add(key)
         changes.append(
             {
-                "old": old[:1400],
-                "new": new[:1400],
-                "similarity": round(similarity, 3),
-                "numeric_change": numeric_change,
-                "old_numbers": old_numbers,
-                "new_numbers": new_numbers,
+                "old": old[:1400], "new": new[:1400], "similarity": round(similarity, 3),
+                "numeric_change": numeric_change, "old_numbers": old_numbers, "new_numbers": new_numbers,
             }
         )
         if len(changes) >= max(1, min(int(limit), 20)):
@@ -190,13 +208,9 @@ def _attachment_events() -> list[dict[str, Any]]:
             continue
         result.append(
             {
-                "event_id": int(row["id"]),
-                "occurred_at": str(row["occurred_at"]),
-                "title": title,
-                "text": text,
-                "metadata": metadata,
-                "source_ref": str(row["source_ref"]),
-                "family": _family_key(title),
+                "event_id": int(row["id"]), "occurred_at": str(row["occurred_at"]),
+                "title": title, "text": text, "metadata": metadata,
+                "source_ref": str(row["source_ref"]), "family": _family_key(title),
             }
         )
     return result
@@ -214,11 +228,7 @@ def _document_entity_id(source_ref: str) -> str | None:
 def _project_ids_for_event(event_id: int) -> set[str]:
     with _connect() as conn:
         rows = conn.execute(
-            """
-            SELECT ee.entity_id
-            FROM event_entities ee JOIN entities e ON e.id=ee.entity_id
-            WHERE ee.event_id=? AND e.kind='project'
-            """,
+            "SELECT ee.entity_id FROM event_entities ee JOIN entities e ON e.id=ee.entity_id WHERE ee.event_id=? AND e.kind='project'",
             (int(event_id),),
         ).fetchall()
     return {str(row["entity_id"]) for row in rows}
@@ -226,10 +236,7 @@ def _project_ids_for_event(event_id: int) -> set[str]:
 
 def _participants_for_attachment(event_id: int) -> list[tuple[str, str, float]]:
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT entity_id,role,confidence FROM event_entities WHERE event_id=?",
-            (int(event_id),),
-        ).fetchall()
+        rows = conn.execute("SELECT entity_id,role,confidence FROM event_entities WHERE event_id=?", (int(event_id),)).fetchall()
     result: list[tuple[str, str, float]] = []
     for row in rows:
         role = str(row["role"])
@@ -253,18 +260,13 @@ def _lineage_score(older: dict[str, Any], newer: dict[str, Any]) -> float:
     new_thread = str(new_meta.get("thread_id") or "")
     if old_thread and new_thread and old_thread == new_thread:
         score += 1.5
-
-    shared_projects = _project_ids_for_event(int(older["event_id"])) & _project_ids_for_event(int(newer["event_id"]))
-    if shared_projects:
+    if _project_ids_for_event(int(older["event_id"])) & _project_ids_for_event(int(newer["event_id"])):
         score += 1.5
-
     old_tokens = _content_tokens(str(older["text"]))
     new_tokens = _content_tokens(str(newer["text"]))
     if old_tokens and new_tokens:
         union = old_tokens | new_tokens
-        jaccard = len(old_tokens & new_tokens) / max(1, len(union))
-        score += min(2.0, jaccard * 3.0)
-
+        score += min(2.0, (len(old_tokens & new_tokens) / max(1, len(union))) * 3.0)
     old_subject = re.sub(r"^(?:re|fw|fwd):\s*", "", str(old_meta.get("email_subject") or "").lower())
     new_subject = re.sub(r"^(?:re|fw|fwd):\s*", "", str(new_meta.get("email_subject") or "").lower())
     if old_subject and new_subject and old_subject == new_subject:
@@ -280,22 +282,15 @@ def _best_predecessor(members: list[dict[str, Any]], newer_index: int) -> tuple[
     for older in reversed(candidates):
         score = _lineage_score(older, newer)
         if score > best_score:
-            best = older
-            best_score = score
-    # A same-thread or same-project match clears this easily. Otherwise the text
-    # itself must be substantially overlapping before two generic filenames are
-    # treated as versions of the same document.
+            best, best_score = older, score
     return (best, best_score) if best is not None and best_score >= 1.15 else (None, best_score)
 
 
 def _record_supersession(new_doc: str | None, old_doc: str | None, event_id: int, confidence: float) -> None:
     if not new_doc or not old_doc or new_doc == old_doc:
         return
-    # Ensure relationship tables exist before writing a high-confidence deterministic
-    # lineage edge. The comparison event itself remains the supporting evidence.
     try:
         from jarvis_mrb.world_linker import status as linker_status
-
         linker_status()
     except Exception:
         return
@@ -327,24 +322,54 @@ def _record_supersession(new_doc: str | None, old_doc: str | None, event_id: int
         conn.commit()
 
 
+def repair_pair_chronology() -> dict[str, int]:
+    """Remove legacy pairs whose predecessor/successor direction followed ingestion ID."""
+    events = {int(item["event_id"]): item for item in _attachment_events()}
+    with _connect() as conn:
+        rows = conn.execute("SELECT older_event_id,newer_event_id FROM document_version_pairs").fetchall()
+    repaired = 0
+    for row in rows:
+        older_id = int(row["older_event_id"])
+        newer_id = int(row["newer_event_id"])
+        older = events.get(older_id)
+        newer = events.get(newer_id)
+        if older is None or newer is None or _event_chronology(older) <= _event_chronology(newer):
+            continue
+
+        # The legacy pair created the opposite supersession edge: the row's `newer`
+        # document (actually older in source time) superseded the row's `older` one.
+        wrong_subject = _document_entity_id(str(newer["source_ref"]))
+        wrong_object = _document_entity_id(str(older["source_ref"]))
+        with _connect() as conn:
+            conn.execute(
+                "DELETE FROM document_version_pairs WHERE older_event_id=? AND newer_event_id=?",
+                (older_id, newer_id),
+            )
+            if wrong_subject and wrong_object:
+                conn.execute(
+                    "UPDATE entity_relations SET state='retired',last_seen_at=? WHERE subject_id=? AND predicate='supersedes' AND object_id=? AND state='current'",
+                    (datetime.now().astimezone().isoformat(), wrong_subject, wrong_object),
+                )
+            conn.commit()
+        repaired += 1
+    return {"repaired": repaired}
+
+
 def refresh(limit_pairs: int = 50) -> dict[str, Any]:
-    """Compare likely predecessor/successor Gmail attachments within each file family."""
+    """Compare likely predecessor/successor attachments in real source chronology."""
     events = _attachment_events()
     families: dict[str, list[dict[str, Any]]] = {}
     for item in events:
         if item["family"]:
             families.setdefault(str(item["family"]), []).append(item)
 
-    compared = 0
-    changed = 0
-    numeric_changes = 0
-    rejected_lineage = 0
+    compared = changed = numeric_changes = rejected_lineage = 0
     generated_events: list[int] = []
 
     for family, members in families.items():
         if len(members) < 2:
             continue
-        members.sort(key=lambda item: int(item["event_id"]))
+        members.sort(key=_event_chronology)
         for newer_index in range(1, len(members)):
             newer = members[newer_index]
             older, lineage_score = _best_predecessor(members, newer_index)
@@ -406,7 +431,7 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
                     "changes": passages,
                     "numeric_change_count": number_count,
                 },
-                evidence="Deterministic local lineage check and comparison of extracted Gmail attachment text; numeric/date changes are prioritized.",
+                evidence="Deterministic local lineage check and comparison of extracted Gmail attachment text. Version direction is based on source occurred_at with event ID only as a tie-breaker; numeric/date changes are prioritized.",
                 confidence=confidence,
                 participants=participants,
             )
@@ -421,20 +446,14 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
                 conn.commit()
             if compared >= max(1, min(int(limit_pairs), 200)):
                 return {
-                    "families": len(families),
-                    "pairs_compared": compared,
-                    "pairs_with_changes": changed,
-                    "numeric_change_passages": numeric_changes,
-                    "lineage_candidates_rejected": rejected_lineage,
+                    "families": len(families), "pairs_compared": compared, "pairs_with_changes": changed,
+                    "numeric_change_passages": numeric_changes, "lineage_candidates_rejected": rejected_lineage,
                     "generated_event_ids": generated_events,
                 }
 
     return {
-        "families": len(families),
-        "pairs_compared": compared,
-        "pairs_with_changes": changed,
-        "numeric_change_passages": numeric_changes,
-        "lineage_candidates_rejected": rejected_lineage,
+        "families": len(families), "pairs_compared": compared, "pairs_with_changes": changed,
+        "numeric_change_passages": numeric_changes, "lineage_candidates_rejected": rejected_lineage,
         "generated_event_ids": generated_events,
     }
 
@@ -452,7 +471,9 @@ def status() -> dict[str, Any]:
         "version_pairs_with_changes": changes,
         "numeric_date_change_detection": True,
         "lineage_uses_thread_project_and_text_overlap": True,
+        "chronology_uses_occurred_at": True,
         "supersession_edges": True,
+        "legacy_reversed_pair_repair": True,
         "deterministic_text_comparison": True,
         "executes_documents": False,
     }

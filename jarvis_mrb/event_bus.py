@@ -4,6 +4,7 @@ import asyncio
 import threading
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 
@@ -66,7 +67,41 @@ def emit_thinking(active: bool) -> None:
     )
 
 
+def _record_proactive_occurrence(message: str, cue: str, severity: str) -> None:
+    """Best-effort durable record of a meaningful unsolicited Jarvis alert.
+
+    Thinking/cue traffic is deliberately not persisted. A proactive alert, however,
+    changes what the user has been told and is therefore part of the assistant's
+    temporal world history.
+    """
+    try:
+        from jarvis_mrb.world_model import SELF_ID, record_event
+
+        occurrence = uuid.uuid4().hex
+        record_event(
+            "attention.proactive",
+            str(message)[:3000],
+            source_kind="proactive_monitor",
+            source_ref=occurrence,
+            occurred_at=datetime.now().astimezone().isoformat(),
+            payload={
+                "message": str(message)[:6000],
+                "cue": str(cue)[:120],
+                "severity": str(severity)[:80],
+                "occurrence_id": occurrence,
+            },
+            evidence="Jarvis emitted this proactive alert to the companion event channel.",
+            confidence=1.0,
+            participants=[(SELF_ID, "recipient", 1.0)],
+            event_key=f"proactive:{occurrence}",
+        )
+    except Exception:
+        # Alert delivery must never depend on world-model persistence.
+        pass
+
+
 def emit_proactive(message: str, *, cue: str = "attention", severity: str = "info") -> None:
+    _record_proactive_occurrence(message, cue, severity)
     companion_events.publish(
         {
             "type": "proactive_alert",

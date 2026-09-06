@@ -169,9 +169,11 @@ def _remember_exchange(session_id: str, user_text: str, assistant_text: str) -> 
     # temporarily unavailable. Semantic episodic memory remains a compatibility
     # retrieval layer and can fail independently without losing the world event.
     try:
+        from jarvis_mrb.world_linker import link_event
         from jarvis_mrb.world_model import record_conversation_turn
 
-        record_conversation_turn(session_id, user_text, assistant_text)
+        event_id = record_conversation_turn(session_id, user_text, assistant_text)
+        link_event(event_id)
     except Exception:
         pass
 
@@ -223,16 +225,19 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
 def memory_context(query: str, limit: int = 3) -> str:
     pieces: list[str] = []
 
-    # The world model is cheap, local SQLite retrieval and can contribute relevant
-    # entity/event/commitment context even when the user did not use an explicit
-    # retrospective word such as "remember". This is what lets people, projects,
-    # places and commitments carry across formerly separate feature silos.
+    # World retrieval is local SQLite and runs on every backend turn. It supplies
+    # direct matches plus graph-neighbor context so a query about a person can also
+    # surface the projects, meetings, documents and obligations connected to them.
     try:
+        from jarvis_mrb.world_linker import related_context
         from jarvis_mrb.world_model import context_for_query
 
         world = context_for_query(query, limit=max(4, limit * 2))
         if world:
             pieces.append(world)
+        connected = related_context(query, limit=max(4, limit * 2))
+        if connected:
+            pieces.append(connected)
     except Exception:
         pass
 
@@ -245,17 +250,25 @@ def memory_context(query: str, limit: int = 3) -> str:
                 + "\n".join(items)
             )
 
-    return "\n\n".join(pieces)[:16000]
+    return "\n\n".join(pieces)[:18000]
 
 
 def status() -> dict[str, object]:
     with _connect() as conn:
         count = int(conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0])
         embedded = int(conn.execute("SELECT COUNT(*) FROM episodes WHERE dimensions>0").fetchone()[0])
+    linker: dict[str, object] = {}
+    try:
+        from jarvis_mrb.world_linker import status as linker_status
+
+        linker = linker_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "world-model-first + episodic-on-demand",
+        "retrieval_mode": "world-model + relation-traversal + episodic-on-demand",
+        "world_linker": linker,
     }

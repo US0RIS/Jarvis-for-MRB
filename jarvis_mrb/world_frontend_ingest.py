@@ -5,7 +5,7 @@ from typing import Any
 from jarvis_mrb.world_model import SELF_ID, assert_belief, ingest_frontend_snapshot as ingest_core_snapshot, record_event
 
 
-def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, int]:
+def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Merge bounded iPhone metadata into the common PC world graph.
 
     The iPhone contract deliberately excludes biometric feature prints, raw camera
@@ -14,7 +14,7 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, int]:
     excluded channels.
     """
     data = dict(snapshot or {})
-    counts = ingest_core_snapshot(data)
+    counts: dict[str, Any] = ingest_core_snapshot(data)
     counts.setdefault("events", 0)
     counts.setdefault("receipts", 0)
     counts.setdefault("mode", 0)
@@ -90,5 +90,16 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, int]:
             participants=[(SELF_ID, "requester", 1.0)],
         )
         counts["receipts"] += 1
+
+    # A phone-side change such as adding a goal or Waiting-On item should become
+    # traversable immediately rather than waiting for the 15-minute knowledge-index
+    # refresh. The linker is incremental, so this normally processes only these new
+    # events and stays cheap enough for the companion path.
+    try:
+        from jarvis_mrb.world_linker import refresh_links
+
+        counts["linker"] = refresh_links(limit=500)
+    except Exception as exc:
+        counts["linker"] = {"error": str(exc)[:300]}
 
     return counts

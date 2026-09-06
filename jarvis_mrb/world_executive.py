@@ -168,6 +168,13 @@ def refresh_intentions() -> dict[str, int]:
                 "INSERT OR REPLACE INTO intention_entities(intention_id,entity_id,role,confidence) VALUES(?,?,?,?)",
                 (intention_id, goal_id, "goal", 1.0),
             )
+            # Project links are a materialized view of current evidence. Rebuild them
+            # each refresh so an old project association cannot survive after its
+            # underlying relation is retired or corrected.
+            conn.execute(
+                "DELETE FROM intention_entities WHERE intention_id=? AND role='project'",
+                (intention_id,),
+            )
             upserted += 1
 
             # Only active intentions should acquire current project/dependency links.
@@ -197,6 +204,10 @@ def refresh_intentions() -> dict[str, int]:
 
         for intention in intentions:
             intention_id = str(intention["id"])
+            # Commitment links are also a current materialization. Clear them before
+            # deterministic relinking so a still-pending but no-longer-related task
+            # cannot remain attached to an objective forever.
+            conn.execute("DELETE FROM intention_commitments WHERE intention_id=?", (intention_id,))
             entity_rows = conn.execute(
                 "SELECT entity_id,role FROM intention_entities WHERE intention_id=?",
                 (intention_id,),

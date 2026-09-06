@@ -294,7 +294,6 @@ def _recent_changes(conn: sqlite3.Connection, project_ids: list[str]) -> list[di
         occurred = _parse_time(str(row["occurred_at"] or ""))
         if occurred is not None and (now - occurred).total_seconds() > 14 * 86400:
             continue
-        # Active term conflicts already have a stronger blocker representation.
         if str(row["event_type"]) == "term.changed_or_conflicted":
             continue
         result.append(
@@ -385,6 +384,34 @@ def _proposal_for(candidate: dict[str, Any], projects: list[str]) -> tuple[str, 
     return ("", {}, "")
 
 
+def _decision_view(candidate: dict[str, Any], projects: list[str]) -> dict[str, Any]:
+    tool, args, tool_rationale = _proposal_for(candidate, projects)
+    risk = ""
+    needs_confirmation = False
+    if tool:
+        decision = permission_decision(tool)
+        if decision.allowed:
+            risk = str(decision.risk)
+            needs_confirmation = bool(decision.needs_confirmation)
+        else:
+            tool = ""
+            args = {}
+            tool_rationale = "The relevant tool is currently denied by permission policy."
+
+    summary = str(candidate.get("title") or candidate.get("detail") or "Review active objective")[:1200]
+    rationale_parts = [str(candidate.get("evidence") or "").strip(), tool_rationale.strip()]
+    rationale = " ".join(part for part in rationale_parts if part)[:2200]
+    return {
+        "summary": summary,
+        "rationale": rationale,
+        "tool": tool,
+        "arguments": args,
+        "risk": risk,
+        "requires_confirmation": needs_confirmation,
+        "confidence": max(0.0, min(float(candidate.get("confidence") or 0.8), 1.0)),
+    }
+
+
 def _persist_attention(conn: sqlite3.Connection, intention_id: str, candidate: dict[str, Any]) -> str:
     key = _stable_key(intention_id, candidate.get("kind"), candidate.get("source_ref"))
     now = _now()
@@ -436,27 +463,16 @@ def _persist_decision(
     candidate: dict[str, Any],
     projects: list[str],
 ) -> dict[str, Any]:
-    tool, args, tool_rationale = _proposal_for(candidate, projects)
-    risk = ""
-    needs_confirmation = False
-    if tool:
-        decision = permission_decision(tool)
-        if decision.allowed:
-            risk = str(decision.risk)
-            needs_confirmation = bool(decision.needs_confirmation)
-        else:
-            tool = ""
-            args = {}
-            tool_rationale = "The relevant tool is currently denied by permission policy."
-
-    summary = str(candidate.get("title") or candidate.get("detail") or "Review active objective")[:1200]
-    rationale_parts = [str(candidate.get("evidence") or "").strip(), tool_rationale.strip()]
-    rationale = " ".join(part for part in rationale_parts if part)[:2200]
+    view = _decision_view(candidate, projects)
+    summary = str(view["summary"])
     decision_id = "decision:" + _stable_key(intention_id, attention_key or "none", summary)[:40]
     now = _now()
     existing = conn.execute("SELECT created_at FROM executive_decisions WHERE id=?", (decision_id,)).fetchone()
     created = str(existing["created_at"]) if existing else now
-    conn.execute("UPDATE executive_decisions SET status='superseded',updated_at=? WHERE intention_id=? AND status='current' AND id!=?", (now, intention_id, decision_id))
+    conn.execute(
+        "UPDATE executive_decisions SET status='superseded',updated_at=? WHERE intention_id=? AND status='current' AND id!=?",
+        (now, intention_id, decision_id),
+    )
     conn.execute(
         """
         INSERT INTO executive_decisions(
@@ -482,27 +498,18 @@ def _persist_decision(
             attention_key,
             str(candidate.get("kind") or "review"),
             summary,
-            rationale,
-            tool,
-            json.dumps(args, ensure_ascii=False, sort_keys=True),
-            risk,
-            1 if needs_confirmation else 0,
-            max(0.0, min(float(candidate.get("confidence") or 0.8), 1.0)),
+            str(view["rationale"]),
+            str(view["tool"]),
+            json.dumps(view["arguments"], ensure_ascii=False, sort_keys=True),
+            str(view["risk"]),
+            1 if view["requires_confirmation"] else 0,
+            float(view["confidence"]),
             "current",
             created,
             now,
         ),
     )
-    return {
-        "id": decision_id,
-        "summary": summary,
-        "rationale": rationale,
-        "tool": tool,
-        "arguments": args,
-        "risk": risk,
-        "requires_confirmation": needs_confirmation,
-        "confidence": max(0.0, min(float(candidate.get("confidence") or 0.8), 1.0)),
-    }
+    return {"id": decision_id, **view}
 
 
 def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bool) -> dict[str, Any]:
@@ -512,8 +519,7 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
 
     candidates: list[dict[str, Any]] = []
     candidates.extend(_active_term_conflicts(conn, project_ids))
-    commitments = _commitment_items(conn, item)
-    candidates.extend(commitments)
+    candidates.extend(_commitment_items(conn, item))
     deadline = _deadline_attention(item)
     if deadline:
         candidates.append(deadline)
@@ -539,7 +545,10 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
                 }
             )
 
-    candidates.sort(key=lambda value: (float(value.get("score") or 0.0), str(value.get("title") or "")), reverse=True)
+    candidates.sort(
+        key=lambda value: (float(value.get("score") or 0.0), str(value.get("title") or "")),
+        reverse=True,
+    )
 
     open_keys: list[str] = []
     keyed_candidates: list[tuple[str | None, dict[str, Any]]] = []
@@ -557,23 +566,35 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
                 (_now(), intention_id, *tuple(open_keys)),
             )
         else:
-            conn.execute("UPDATE executive_attention SET status='stale',updated_at=? WHERE intention_id=? AND status='open'", (_now(), intention_id))
+            conn.execute(
+                "UPDATE executive_attention SET status='stale',updated_at=? WHERE intention_id=? AND status='open'",
+                (_now(), intention_id),
+            )
 
-    top_key, top_candidate = keyed_candidates[0] if keyed_candidates else (None, {
-        "kind": "review",
-        "title": str(item.get("next_action") or "Review objective status"),
-        "detail": str(item.get("title") or ""),
-        "evidence": "active explicit intention with no stronger blocker or dependency",
-        "confidence": float(item.get("confidence") or 1.0),
-    })
-    decision = _persist_decision(conn, intention_id, top_key, top_candidate, project_names) if persist else {}
+    top_key, top_candidate = keyed_candidates[0] if keyed_candidates else (
+        None,
+        {
+            "kind": "review",
+            "title": str(item.get("next_action") or "Review objective status"),
+            "detail": str(item.get("title") or ""),
+            "evidence": "active explicit intention with no stronger blocker or dependency",
+            "confidence": float(item.get("confidence") or 1.0),
+        },
+    )
+    decision = (
+        _persist_decision(conn, intention_id, top_key, top_candidate, project_names)
+        if persist
+        else _decision_view(top_candidate, project_names)
+    )
 
     blockers = [
-        candidate for _, candidate in keyed_candidates
+        candidate
+        for _, candidate in keyed_candidates
         if candidate.get("kind") in {"term_conflict", "overdue_commitment"}
     ]
     dependencies = [
-        candidate for _, candidate in keyed_candidates
+        candidate
+        for _, candidate in keyed_candidates
         if candidate.get("kind") in {"overdue_commitment", "due_commitment", "dependency"}
     ]
 
@@ -595,7 +616,11 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
         elif kind == "overdue_commitment":
             owner = str(candidate.get("owner") or "")
             action = str(candidate.get("detail") or "")
-            next_actions.append(f"Check/follow up with {owner} on {action}" if owner else f"Resolve overdue dependency: {action}")
+            next_actions.append(
+                f"Check/follow up with {owner} on {action}"
+                if owner
+                else f"Resolve overdue dependency: {action}"
+            )
         elif kind == "due_commitment":
             next_actions.append(str(candidate.get("title") or "Review due dependency"))
         elif kind == "document_change":
@@ -616,6 +641,7 @@ def _compile_item(conn: sqlite3.Connection, item: dict[str, Any], *, persist: bo
         "state": state,
         "due_at": str(item.get("due_at") or ""),
         "projects": project_names,
+        "attention": [candidate for _, candidate in keyed_candidates][:12],
         "blockers": blockers[:6],
         "dependencies": dependencies[:8],
         "recent_changes": recent_changes[:5],
@@ -629,17 +655,12 @@ def refresh() -> dict[str, int]:
 
     refresh_intentions()
     items = active_intentions(limit=50)
-    attention_count = 0
-    decisions = 0
     now = _now()
     with _connect() as conn:
         active_ids: list[str] = []
         for item in items:
             active_ids.append(str(item.get("id") or ""))
-            plan = _compile_item(conn, item, persist=True)
-            attention_count += len(plan["blockers"]) + len(plan["dependencies"])
-            if plan.get("decision"):
-                decisions += 1
+            _compile_item(conn, item, persist=True)
         if active_ids:
             placeholders = ",".join("?" for _ in active_ids)
             conn.execute(
@@ -652,13 +673,26 @@ def refresh() -> dict[str, int]:
             )
         else:
             conn.execute("UPDATE executive_attention SET status='stale',updated_at=? WHERE status='open'", (now,))
-            conn.execute("UPDATE executive_decisions SET status='superseded',updated_at=? WHERE status='current'", (now,))
+            conn.execute(
+                "UPDATE executive_decisions SET status='superseded',updated_at=? WHERE status='current'",
+                (now,),
+            )
         conn.execute(
             "INSERT INTO executive_loop_state(key,value) VALUES('last_refresh',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (now,),
         )
         conn.commit()
-    return {"active_intentions": len(items), "attention_items": attention_count, "current_decisions": decisions}
+        attention_count = int(
+            conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0]
+        )
+        decisions = int(
+            conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0]
+        )
+    return {
+        "active_intentions": len(items),
+        "attention_items": attention_count,
+        "current_decisions": decisions,
+    }
 
 
 def plans_for_query(query: str, limit: int = 4) -> list[dict[str, Any]]:
@@ -751,9 +785,15 @@ def status() -> dict[str, Any]:
 
         executive_status()
         with _connect() as conn:
-            open_attention = int(conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0])
-            current_decisions = int(conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0])
-            row = conn.execute("SELECT value FROM executive_loop_state WHERE key='last_refresh'").fetchone()
+            open_attention = int(
+                conn.execute("SELECT COUNT(*) FROM executive_attention WHERE status='open'").fetchone()[0]
+            )
+            current_decisions = int(
+                conn.execute("SELECT COUNT(*) FROM executive_decisions WHERE status='current'").fetchone()[0]
+            )
+            row = conn.execute(
+                "SELECT value FROM executive_loop_state WHERE key='last_refresh'"
+            ).fetchone()
     except Exception as exc:
         return {"installed": True, "error": str(exc)[:500]}
     return {
@@ -761,6 +801,7 @@ def status() -> dict[str, Any]:
         "persistent_attention": True,
         "persistent_decisions": True,
         "deterministic_priority": True,
+        "query_decision_projection": True,
         "permission_aware_proposals": True,
         "closed_loop_verification": False,
         "open_attention_items": open_attention,

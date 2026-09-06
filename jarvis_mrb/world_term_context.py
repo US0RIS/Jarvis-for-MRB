@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any
 
 from jarvis_mrb.world_model import DB_PATH, search as world_search
+from jarvis_mrb.world_terms import latest_observations
 
 _TERM_QUERY_ALIASES: dict[str, tuple[str, ...]] = {
     "indemnity_cap": ("indemnity cap", "indemnification cap", "cap on indemnity", "indemnity limit"),
@@ -55,9 +56,6 @@ def _project_seeds(query: str) -> list[dict[str, Any]]:
         item for item in world_search(query, limit=12)
         if item.get("type") == "entity" and item.get("kind") == "project"
     ]
-    # `world_search` may return project entities through an event match only after a
-    # direct entity result. Keep the first unique IDs and never infer a project from a
-    # generic noun phrase in the term question.
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
     for seed in seeds:
@@ -68,42 +66,19 @@ def _project_seeds(query: str) -> list[dict[str, Any]]:
     return result[:4]
 
 
-def _latest_rows(project_id: str, requested: set[str], all_terms: bool) -> list[sqlite3.Row]:
-    with _connect() as conn:
-        if requested:
-            placeholders = ",".join("?" for _ in requested)
-            rows = conn.execute(
-                f"""
-                SELECT o.* FROM term_observations o
-                JOIN (
-                    SELECT term_key,MAX(id) AS max_id
-                    FROM term_observations
-                    WHERE project_id=? AND term_key IN ({placeholders})
-                    GROUP BY term_key
-                ) latest ON latest.max_id=o.id
-                ORDER BY o.term_key
-                """,
-                (project_id, *tuple(sorted(requested))),
-            ).fetchall()
-        elif all_terms:
-            rows = conn.execute(
-                """
-                SELECT o.* FROM term_observations o
-                JOIN (
-                    SELECT term_key,MAX(id) AS max_id
-                    FROM term_observations WHERE project_id=? GROUP BY term_key
-                ) latest ON latest.max_id=o.id
-                ORDER BY o.term_key
-                LIMIT 15
-                """,
-                (project_id,),
-            ).fetchall()
-        else:
-            rows = []
-    return rows
+def _latest_rows(project_id: str, requested: set[str], all_terms: bool) -> list[dict[str, Any]]:
+    if not requested and not all_terms:
+        return []
+    rows = latest_observations(project_id, requested if requested else None)
+    return rows[:15]
 
 
-def _recent_conflict(project_id: str, term_key: str) -> sqlite3.Row | None:
+def _conflict_for_latest(project_id: str, term_key: str, latest_observation_id: int) -> sqlite3.Row | None:
+    """Return a discrepancy only when the chronologically latest observation is one side.
+
+    Historical conflicts remain provenance, but they should not be presented as the
+    current discrepancy after a later source converges on one value.
+    """
     with _connect() as conn:
         return conn.execute(
             """
@@ -111,10 +86,10 @@ def _recent_conflict(project_id: str, term_key: str) -> sqlite3.Row | None:
             FROM term_conflicts c
             JOIN term_observations newer ON newer.id=c.newer_observation_id
             JOIN events e ON e.id=c.conflict_event_id
-            WHERE newer.project_id=? AND newer.term_key=?
-            ORDER BY c.rowid DESC LIMIT 1
+            WHERE newer.project_id=? AND newer.term_key=? AND newer.id=?
+            ORDER BY e.occurred_at DESC,e.id DESC LIMIT 1
             """,
-            (project_id, term_key),
+            (project_id, term_key, int(latest_observation_id)),
         ).fetchone()
 
 
@@ -128,7 +103,7 @@ def context_for_query(query: str) -> str:
     if not projects:
         return ""
 
-    lines = ["PROJECT TERM LEDGER (explicit extracted values with source provenance; conflicting sources remain visible):"]
+    lines = ["PROJECT TERM LEDGER (explicit extracted values with source provenance; current state follows source occurrence time, not ingestion order):"]
     emitted = 0
     for project in projects:
         project_id = str(project.get("id") or "")
@@ -139,12 +114,12 @@ def context_for_query(query: str) -> str:
         lines.append(f"- {project_name}:")
         for row in rows:
             lines.append(
-                f"  - {row['display_name']}: {row['value_text']} "
+                f"  - {row['display_name']}: {row['value']} "
                 f"[source {row['source_kind']} event {row['source_event_id']}; {row['occurred_at']}; confidence {float(row['confidence']):.2f}]"
             )
-            conflict = _recent_conflict(project_id, str(row["term_key"]))
+            conflict = _conflict_for_latest(project_id, str(row["term_key"]), int(row["id"]))
             if conflict is not None:
-                lines.append(f"    recent source discrepancy: {str(conflict['summary'])[:900]}")
+                lines.append(f"    current source discrepancy: {str(conflict['summary'])[:900]}")
             emitted += 1
             if emitted >= 15:
                 return "\n".join(lines)[:9000]
@@ -157,5 +132,6 @@ def status() -> dict[str, Any]:
         "requires_explicit_term_or_all_terms_cue": True,
         "requires_project_entity_match": True,
         "shows_source_provenance": True,
-        "shows_recent_conflict": True,
+        "shows_current_conflict": True,
+        "chronology_uses_occurred_at": True,
     }

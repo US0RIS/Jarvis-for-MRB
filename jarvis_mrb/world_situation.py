@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -33,6 +35,10 @@ _STOP = {
     "my", "our", "jarvis", "please", "tell", "show", "find", "search", "me", "meeting", "before",
     "anything", "need", "know", "should", "upcoming", "next", "prep", "prepare",
 }
+
+_REFRESH_LOCK = threading.RLock()
+_LAST_REFRESH_MONOTONIC = 0.0
+_NEAR_TERM_REFRESH_SECONDS = 120.0
 
 
 def _connect() -> sqlite3.Connection:
@@ -67,7 +73,6 @@ def _parse_time(raw: str) -> datetime | None:
     text = str(raw or "").strip()
     if not text:
         return None
-    # All-day Calendar values are dates; interpret them in local time.
     try:
         if "T" not in text:
             return datetime.fromisoformat(text + "T00:00:00").astimezone()
@@ -80,6 +85,31 @@ def _parse_time(raw: str) -> datetime | None:
 def is_situation_query(query: str) -> bool:
     normalized = _normalize(query)
     return any(cue in normalized for cue in _SITUATION_CUES)
+
+
+def _refresh_near_term_if_needed() -> None:
+    """Refresh near-term Calendar context on demand, throttled to once per 2 minutes.
+
+    The normal knowledge thread runs less frequently. For a deliberate meeting-prep
+    request, stale attendee/context data is worse than paying one read-only Calendar
+    API call. Failures are ignored because the last synchronized graph remains usable.
+    """
+    global _LAST_REFRESH_MONOTONIC
+    now_mono = time.monotonic()
+    with _REFRESH_LOCK:
+        if now_mono - _LAST_REFRESH_MONOTONIC < _NEAR_TERM_REFRESH_SECONDS:
+            return
+        _LAST_REFRESH_MONOTONIC = now_mono
+    try:
+        from jarvis_mrb.world_calendar_sync import sync as sync_world_calendar
+
+        result = sync_world_calendar(days_past=2, days_future=14, limit=50)
+        if result.get("ok"):
+            from jarvis_mrb.world_linker import refresh_links
+
+            refresh_links(limit=500)
+    except Exception:
+        pass
 
 
 def _latest_calendar_events(limit: int = 120) -> list[dict[str, Any]]:
@@ -149,8 +179,6 @@ def _temporal_score(event: dict[str, Any], now: datetime) -> tuple[float, str]:
         return (3.0, "starts within 3 days")
     if -4 <= delta_hours < 0:
         return (2.0, "recent meeting")
-    # Keep more distant meetings selectable by explicit lexical match, but they
-    # should never beat the next meeting for a generic "before I go in" request.
     return (0.0, "")
 
 
@@ -185,8 +213,6 @@ def _select_event(query: str) -> tuple[dict[str, Any] | None, list[dict[str, Any
                 score += 7.0 * participant_overlap
                 reasons.append(f"query matches {participant.get('name')}")
 
-        # Generic situation requests should only consider current/recent/upcoming
-        # meetings. Explicit name matches may select a more distant calendar record.
         if generic and temporal <= 0 and overlap == 0 and not any("query matches" in r for r in reasons):
             continue
         if score > 0:
@@ -264,6 +290,52 @@ def _pending_commitments(person_ids: set[str], project_names: list[str], limit: 
     return result
 
 
+def _linked_intentions(entity_ids: set[str], commitment_ids: set[str], limit: int = 5) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit), 12))
+    intention_ids: set[str] = set()
+    try:
+        with _connect() as conn:
+            if entity_ids:
+                placeholders = ",".join("?" for _ in entity_ids)
+                for row in conn.execute(
+                    f"SELECT DISTINCT intention_id FROM intention_entities WHERE entity_id IN ({placeholders})",
+                    tuple(entity_ids),
+                ).fetchall():
+                    intention_ids.add(str(row["intention_id"]))
+            if commitment_ids:
+                placeholders = ",".join("?" for _ in commitment_ids)
+                for row in conn.execute(
+                    f"SELECT DISTINCT intention_id FROM intention_commitments WHERE commitment_id IN ({placeholders})",
+                    tuple(commitment_ids),
+                ).fetchall():
+                    intention_ids.add(str(row["intention_id"]))
+            if not intention_ids:
+                return []
+            placeholders = ",".join("?" for _ in intention_ids)
+            rows = conn.execute(
+                f"""
+                SELECT id,title,next_action,due_at,confidence
+                FROM intentions
+                WHERE status='active' AND id IN ({placeholders})
+                ORDER BY CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,due_at,updated_at DESC
+                LIMIT ?
+                """,
+                (*tuple(intention_ids), safe_limit),
+            ).fetchall()
+        return [
+            {
+                "id": str(row["id"]),
+                "title": str(row["title"]),
+                "next_action": str(row["next_action"]),
+                "due": str(row["due_at"] or ""),
+                "confidence": float(row["confidence"]),
+            }
+            for row in rows
+        ]
+    except sqlite3.Error:
+        return []
+
+
 def _recent_evidence(entity_ids: set[str], selected_event_id: int, limit: int = 10) -> list[dict[str, Any]]:
     if not entity_ids:
         return []
@@ -300,6 +372,7 @@ def _recent_evidence(entity_ids: set[str], selected_event_id: int, limit: int = 
 def compile_situation(query: str) -> dict[str, Any] | None:
     if not is_situation_query(query):
         return None
+    _refresh_near_term_if_needed()
     event, participants, reasons = _select_event(query)
     if event is None:
         return None
@@ -318,12 +391,15 @@ def compile_situation(query: str) -> dict[str, Any] | None:
     project_ids = {str(item["id"]) for item in projects}
     all_ids = base_ids | project_ids
     commitments = _pending_commitments(person_ids, [str(item["name"]) for item in projects])
+    commitment_ids = {str(item["id"]) for item in commitments}
+    intentions = _linked_intentions(all_ids, commitment_ids, limit=5)
     recent = _recent_evidence(all_ids, int(event.get("world_event_id") or 0), limit=10)
 
     return {
         "meeting": event,
         "participants": participants,
         "projects": projects,
+        "intentions": intentions,
         "commitments": commitments,
         "recent_evidence": recent,
         "selection_reasons": reasons,
@@ -354,6 +430,14 @@ def context_for_query(query: str) -> str:
     if projects:
         lines.append("- Connected projects: " + ", ".join(projects[:6]))
 
+    for item in (situation.get("intentions") or [])[:5]:
+        detail = f"- Active objective: {item.get('title')}"
+        if item.get("next_action"):
+            detail += f"; next: {item.get('next_action')}"
+        if item.get("due"):
+            detail += f"; due: {item.get('due')}"
+        lines.append(detail)
+
     for item in (situation.get("commitments") or [])[:6]:
         owner = f"{item.get('owner')}: " if item.get("owner") else ""
         due = f" (due {item.get('due')})" if item.get("due") else ""
@@ -364,7 +448,7 @@ def context_for_query(query: str) -> str:
         lines.append("RECENT CONNECTED EVIDENCE:")
         for item in evidence[:8]:
             lines.append(f"- [{item.get('time')} | {item.get('source')}] {item.get('summary')}")
-    return "\n".join(lines)[:10000]
+    return "\n".join(lines)[:12000]
 
 
 def status() -> dict[str, Any]:
@@ -381,4 +465,6 @@ def status() -> dict[str, Any]:
         "situation_compiler": True,
         "uses_attendee_identity_graph": True,
         "uses_connected_projects_commitments": True,
+        "uses_linked_intentions": True,
+        "near_term_refresh_seconds": int(_NEAR_TERM_REFRESH_SECONDS),
     }

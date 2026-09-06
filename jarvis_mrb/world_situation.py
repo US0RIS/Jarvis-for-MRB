@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from jarvis_mrb.world_model import DB_PATH, SELF_ID
@@ -74,12 +75,16 @@ def _parse_time(raw: str) -> datetime | None:
     if not text:
         return None
     try:
-        if "T" not in text:
+        if "T" not in text and re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
             return datetime.fromisoformat(text + "T00:00:00").astimezone()
         value = datetime.fromisoformat(text.replace("Z", "+00:00"))
         return value.astimezone() if value.tzinfo is not None else value.astimezone()
     except (TypeError, ValueError, OverflowError):
-        return None
+        try:
+            value = parsedate_to_datetime(text)
+            return value.astimezone() if value.tzinfo is not None else value.astimezone()
+        except (TypeError, ValueError, OverflowError):
+            return None
 
 
 def is_situation_query(query: str) -> bool:
@@ -88,12 +93,6 @@ def is_situation_query(query: str) -> bool:
 
 
 def _refresh_near_term_if_needed() -> None:
-    """Refresh near-term Calendar context on demand, throttled to once per 2 minutes.
-
-    The normal knowledge thread runs less frequently. For a deliberate meeting-prep
-    request, stale attendee/context data is worse than paying one read-only Calendar
-    API call. Failures are ignored because the last synchronized graph remains usable.
-    """
     global _LAST_REFRESH_MONOTONIC
     now_mono = time.monotonic()
     with _REFRESH_LOCK:
@@ -192,6 +191,8 @@ def _select_event(query: str) -> tuple[dict[str, Any] | None, list[dict[str, Any
     ranked: list[tuple[float, dict[str, Any], list[dict[str, Any]], list[str]]] = []
 
     for event in events:
+        if _normalize(str(event.get("status") or "confirmed")) == "cancelled":
+            continue
         event_id = int(event.get("world_event_id") or 0)
         participants = _participants(event_id) if event_id else []
         temporal, temporal_reason = _temporal_score(event, now)
@@ -207,13 +208,19 @@ def _select_event(query: str) -> tuple[dict[str, Any] | None, list[dict[str, Any
             score += 5.0 * overlap
             reasons.append("query matches meeting")
 
+        participant_match = False
         for participant in participants:
             participant_overlap = len(query_tokens & _tokens(str(participant.get("name") or "")))
             if participant_overlap:
+                participant_match = True
                 score += 7.0 * participant_overlap
                 reasons.append(f"query matches {participant.get('name')}")
 
-        if generic and temporal <= 0 and overlap == 0 and not any("query matches" in r for r in reasons):
+        start_raw = str(event.get("start") or event.get("occurred_at") or "")
+        all_day = bool(start_raw and "T" not in start_raw)
+        if generic and all_day and overlap == 0 and not participant_match:
+            continue
+        if generic and temporal <= 0 and overlap == 0 and not participant_match:
             continue
         if score > 0:
             ranked.append((score, event, participants, reasons))
@@ -340,7 +347,6 @@ def _recent_evidence(entity_ids: set[str], selected_event_id: int, limit: int = 
     if not entity_ids:
         return []
     placeholders = ",".join("?" for _ in entity_ids)
-    cutoff = (datetime.now().astimezone() - timedelta(days=45)).isoformat()
     with _connect() as conn:
         rows = conn.execute(
             f"""
@@ -349,24 +355,33 @@ def _recent_evidence(entity_ids: set[str], selected_event_id: int, limit: int = 
             JOIN events ev ON ev.id=ee.event_id
             WHERE ee.entity_id IN ({placeholders})
               AND ev.id!=?
-              AND ev.occurred_at>=?
               AND ev.event_type NOT IN ('action.tool','calendar.context_enriched','context.environment','context.conversation_mode')
             ORDER BY ev.id DESC
-            LIMIT ?
+            LIMIT 120
             """,
-            (*tuple(entity_ids), int(selected_event_id), cutoff, max(1, min(int(limit), 30))),
+            (*tuple(entity_ids), int(selected_event_id)),
         ).fetchall()
-    return [
-        {
-            "id": int(row["id"]),
-            "type": str(row["event_type"]),
-            "time": str(row["occurred_at"]),
-            "summary": str(row["summary"]),
-            "source": f"{row['source_kind']}:{row['source_ref']}",
-            "confidence": float(row["confidence"]),
-        }
-        for row in rows
-    ]
+
+    cutoff = datetime.now().astimezone() - timedelta(days=45)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        occurred = str(row["occurred_at"])
+        parsed = _parse_time(occurred)
+        if parsed is not None and parsed < cutoff:
+            continue
+        result.append(
+            {
+                "id": int(row["id"]),
+                "type": str(row["event_type"]),
+                "time": occurred,
+                "summary": str(row["summary"]),
+                "source": f"{row['source_kind']}:{row['source_ref']}",
+                "confidence": float(row["confidence"]),
+            }
+        )
+        if len(result) >= max(1, min(int(limit), 30)):
+            break
+    return result
 
 
 def compile_situation(query: str) -> dict[str, Any] | None:
@@ -456,6 +471,8 @@ def status() -> dict[str, Any]:
     now = datetime.now().astimezone()
     upcoming = 0
     for event in events:
+        if _normalize(str(event.get("status") or "confirmed")) == "cancelled":
+            continue
         start = _parse_time(str(event.get("start") or event.get("occurred_at") or ""))
         if start is not None and now - timedelta(hours=4) <= start <= now + timedelta(days=7):
             upcoming += 1
@@ -467,4 +484,7 @@ def status() -> dict[str, Any]:
         "uses_connected_projects_commitments": True,
         "uses_linked_intentions": True,
         "near_term_refresh_seconds": int(_NEAR_TERM_REFRESH_SECONDS),
+        "cancelled_events_excluded": True,
+        "generic_all_day_events_excluded": True,
+        "recent_evidence_parses_iso_and_rfc_dates": True,
     }

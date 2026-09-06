@@ -229,6 +229,7 @@ def memory_context(query: str, limit: int = 3) -> str:
     # direct matches plus graph-neighbor context so a query about a person can also
     # surface the projects, meetings, documents and obligations connected to them.
     try:
+        from jarvis_mrb.world_executive import context as executive_context
         from jarvis_mrb.world_linker import related_context
         from jarvis_mrb.world_model import context_for_query
 
@@ -238,6 +239,9 @@ def memory_context(query: str, limit: int = 3) -> str:
         connected = related_context(query, limit=max(4, limit * 2))
         if connected:
             pieces.append(connected)
+        executive = executive_context(limit=5)
+        if executive:
+            pieces.append(executive)
     except Exception:
         pass
 
@@ -250,7 +254,7 @@ def memory_context(query: str, limit: int = 3) -> str:
                 + "\n".join(items)
             )
 
-    return "\n\n".join(pieces)[:18000]
+    return "\n\n".join(pieces)[:20000]
 
 
 def status() -> dict[str, object]:
@@ -258,10 +262,17 @@ def status() -> dict[str, object]:
         count = int(conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0])
         embedded = int(conn.execute("SELECT COUNT(*) FROM episodes WHERE dimensions>0").fetchone()[0])
     linker: dict[str, object] = {}
+    executive: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
         linker = linker_status()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.world_executive import status as executive_status
+
+        executive = executive_status()
     except Exception:
         pass
     return {
@@ -269,6 +280,7 @@ def status() -> dict[str, object]:
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "world-model + relation-traversal + episodic-on-demand",
+        "retrieval_mode": "world-model + relation-traversal + persistent-intentions + episodic-on-demand",
         "world_linker": linker,
+        "world_executive": executive,
     }

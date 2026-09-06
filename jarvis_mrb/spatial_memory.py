@@ -51,15 +51,34 @@ def remember_object(
     score = max(0.0, min(float(confidence), 1.0))
     seen_at = datetime.now().astimezone().isoformat()
     with _connect() as conn:
-        conn.execute(
+        cursor = conn.execute(
             "INSERT INTO object_sightings(seen_at,object_name,location_context,scene,confidence) VALUES(?,?,?,?,?)",
             (seen_at, object_name, location, scene_text, score),
         )
+        sighting_id = int(cursor.lastrowid)
         conn.execute(
             "DELETE FROM object_sightings WHERE id NOT IN (SELECT id FROM object_sightings ORDER BY id DESC LIMIT 5000)"
         )
         conn.commit()
+
+    # Keep the proven low-latency spatial database for direct "where are my keys?"
+    # queries, while mirroring the same observation into the common temporal graph.
+    # No raw image is persisted in either path.
+    try:
+        from jarvis_mrb.world_model import record_visual_observation
+
+        record_visual_observation(
+            scene_text,
+            [object_name],
+            location_context=location,
+            confidence=score,
+            occurred_at=seen_at,
+        )
+    except Exception:
+        pass
+
     return {
+        "id": sighting_id,
         "object": object_name,
         "location": location,
         "scene": scene_text,
@@ -85,6 +104,7 @@ def find_object(name: str, limit: int = 3) -> list[dict[str, Any]]:
         ).fetchall()
     return [
         {
+            "id": int(row["id"]),
             "object": str(row["object_name"]),
             "location": str(row["location_context"]),
             "scene": str(row["scene"]),
@@ -108,4 +128,4 @@ def describe_last_seen(name: str) -> str:
 def status() -> dict[str, Any]:
     with _connect() as conn:
         count = int(conn.execute("SELECT COUNT(*) FROM object_sightings").fetchone()[0])
-    return {"sightings": count, "database": str(DB_PATH)}
+    return {"sightings": count, "database": str(DB_PATH), "world_model_mirroring": True}

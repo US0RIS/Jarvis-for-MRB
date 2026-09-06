@@ -19,6 +19,21 @@ _LAST_ALERTS: dict[str, float] = {}
 _STARTED = False
 
 
+def _install_action_audit() -> bool:
+    try:
+        from jarvis_mrb.tool_audit import install as install_tool_audit
+
+        return bool(install_tool_audit())
+    except Exception:
+        return False
+
+
+# service.py imports proactive_monitor before it starts scheduler/background threads.
+# Install the action-ingestion wrapper at import time so even startup-due jobs are
+# tracked. start() retries if module initialization happened in an unusual order.
+_AUDIT_READY = _install_action_audit()
+
+
 def _dedup(key: str, seconds: int = 3600) -> bool:
     now = time.time()
     with _LOCK:
@@ -200,21 +215,14 @@ def _loop() -> None:
 
 
 def start() -> None:
-    global _STARTED
+    global _STARTED, _AUDIT_READY
     with _LOCK:
         if _STARTED:
             return
         _STARTED = True
 
-    # The action audit is the ingestion edge for closed-loop verification. Install it
-    # synchronously before starting any proactive observers so ordinary tool calls are
-    # registered as attempts before the verifier loop begins reading outcomes.
-    try:
-        from jarvis_mrb.tool_audit import install as install_tool_audit
-
-        install_tool_audit()
-    except Exception:
-        pass
+    if not _AUDIT_READY:
+        _AUDIT_READY = _install_action_audit()
 
     try:
         from jarvis_mrb.pc_context import start as start_pc_context

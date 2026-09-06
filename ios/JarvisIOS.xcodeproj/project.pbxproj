@@ -29,9 +29,22 @@
 		200000000000000000000014 /* LocalPowerFeatures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* LocalPowerFeatures.swift */; };
 		200000000000000000000015 /* LocalProductivityFeatures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000017 /* LocalProductivityFeatures.swift */; };
 		200000000000000000000016 /* LocalIntelligenceMilestone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000018 /* LocalIntelligenceMilestone.swift */; };
+		200000000000000000000017 /* FrontendOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* FrontendOperations.swift */; };
+		200000000000000000000018 /* JarvisLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001A /* JarvisLiveActivityWidget.swift */; };
+		200000000000000000000019 /* JarvisLiveActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 006000000000000000000002 /* JarvisLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
 		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		700000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 001000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 005000000000000000000002;
+			remoteInfo = JarvisLiveActivity;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		403000000000000000000001 /* Embed Frameworks */ = {
@@ -44,10 +57,22 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		403000000000000000000002 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				200000000000000000000019 /* JarvisLiveActivity.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		006000000000000000000001 /* JarvisIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		006000000000000000000002 /* JarvisLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JarvisLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000001 /* JarvisIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisIOSApp.swift; sourceTree = "<group>"; };
 		100000000000000000000002 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		100000000000000000000003 /* JarvisAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAPIClient.swift; sourceTree = "<group>"; };
@@ -72,6 +97,9 @@
 		100000000000000000000016 /* LocalPowerFeatures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPowerFeatures.swift; sourceTree = "<group>"; };
 		100000000000000000000017 /* LocalProductivityFeatures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalProductivityFeatures.swift; sourceTree = "<group>"; };
 		100000000000000000000018 /* LocalIntelligenceMilestone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalIntelligenceMilestone.swift; sourceTree = "<group>"; };
+		100000000000000000000019 /* FrontendOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontendOperations.swift; sourceTree = "<group>"; };
+		10000000000000000000001A /* JarvisLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisLiveActivityWidget.swift; sourceTree = "<group>"; };
+		10000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,6 +112,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		401000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -91,6 +126,7 @@
 			isa = PBXGroup;
 			children = (
 				004000000000000000000001 /* JarvisIOS */,
+				004000000000000000000002 /* JarvisLiveActivity */,
 				003000000000000000000001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -99,6 +135,7 @@
 			isa = PBXGroup;
 			children = (
 				006000000000000000000001 /* JarvisIOS.app */,
+				006000000000000000000002 /* JarvisLiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -110,6 +147,7 @@
 				100000000000000000000004 /* JarvisAppModel.swift */,
 				10000000000000000000000F /* PersistentPresenceController.swift */,
 				100000000000000000000011 /* FrontendIntelligence.swift */,
+				100000000000000000000019 /* FrontendOperations.swift */,
 				100000000000000000000012 /* JarvisShortcuts.swift */,
 				100000000000000000000013 /* KnownPeople.swift */,
 				100000000000000000000014 /* FeatureGuide.swift */,
@@ -134,6 +172,15 @@
 			path = JarvisIOS;
 			sourceTree = "<group>";
 		};
+		004000000000000000000002 /* JarvisLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000001A /* JarvisLiveActivityWidget.swift */,
+				10000000000000000000001B /* Info.plist */,
+			);
+			path = JarvisLiveActivity;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -145,10 +192,12 @@
 				401000000000000000000001 /* Frameworks */,
 				402000000000000000000001 /* Resources */,
 				403000000000000000000001 /* Embed Frameworks */,
+				403000000000000000000002 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				701000000000000000000001 /* PBXTargetDependency */,
 			);
 			name = JarvisIOS;
 			packageProductDependencies = (
@@ -158,6 +207,25 @@
 			productName = JarvisIOS;
 			productReference = 006000000000000000000001 /* JarvisIOS.app */;
 			productType = "com.apple.product-type.application";
+		};
+		005000000000000000000002 /* JarvisLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 502000000000000000000002 /* Build configuration list for PBXNativeTarget "JarvisLiveActivity" */;
+			buildPhases = (
+				400000000000000000000002 /* Sources */,
+				401000000000000000000002 /* Frameworks */,
+				402000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = JarvisLiveActivity;
+			packageProductDependencies = (
+			);
+			productName = JarvisLiveActivity;
+			productReference = 006000000000000000000002 /* JarvisLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -170,6 +238,9 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					005000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					005000000000000000000002 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -191,12 +262,20 @@
 			projectRoot = "";
 			targets = (
 				005000000000000000000001 /* JarvisIOS */,
+				005000000000000000000002 /* JarvisLiveActivity */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		402000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		402000000000000000000002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -232,10 +311,27 @@
 				200000000000000000000014 /* LocalPowerFeatures.swift in Sources */,
 				200000000000000000000015 /* LocalProductivityFeatures.swift in Sources */,
 				200000000000000000000016 /* LocalIntelligenceMilestone.swift in Sources */,
+				200000000000000000000017 /* FrontendOperations.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		400000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				200000000000000000000018 /* JarvisLiveActivityWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		701000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 005000000000000000000002 /* JarvisLiveActivity */;
+			targetProxy = 700000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		500000000000000000000001 /* Debug */ = {
@@ -321,6 +417,46 @@
 			};
 			name = Release;
 		};
+		500000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JarvisLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.us0ris.JarvisMRB.LiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		500000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = JarvisLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.us0ris.JarvisMRB.LiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -338,6 +474,15 @@
 			buildConfigurations = (
 				500000000000000000000003 /* Debug */,
 				500000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		502000000000000000000002 /* Build configuration list for PBXNativeTarget "JarvisLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				500000000000000000000005 /* Debug */,
+				500000000000000000000006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -108,11 +108,7 @@ def _record_world_calendar(event: dict[str, Any], text: str) -> None:
             title=str(event.get("summary") or "(untitled event)"),
             text=text,
             occurred_at=str(event.get("start") or "") or None,
-            metadata={
-                "start": event.get("start"),
-                "end": event.get("end"),
-                "location": location,
-            },
+            metadata={"start": event.get("start"), "end": event.get("end"), "location": location},
             participants=participants,
         )
     except Exception:
@@ -123,13 +119,7 @@ def _record_world_note(relative: str, raw: str) -> None:
     try:
         from jarvis_mrb.world_model import record_knowledge_source
 
-        record_knowledge_source(
-            "note",
-            relative,
-            title=relative,
-            text=raw,
-            metadata={"path": relative},
-        )
+        record_knowledge_source("note", relative, title=relative, text=raw, metadata={"path": relative})
     except Exception:
         pass
 
@@ -144,18 +134,17 @@ def refresh() -> dict[str, Any]:
     calendar_enrichment: dict[str, Any] | None = None
     linker: dict[str, Any] | None = None
     document_versions: dict[str, Any] | None = None
+    terms: dict[str, Any] | None = None
     executive: dict[str, Any] | None = None
 
     try:
         from jarvis_mrb.world_backfill import backfill_existing_state
-
         backfill = backfill_existing_state()
     except Exception as exc:
         backfill = {"ok": False, "error": str(exc)[:500]}
 
     try:
         from jarvis_mrb.world_extended_backfill import backfill_extended_state
-
         extended_backfill = backfill_extended_state()
     except Exception as exc:
         extended_backfill = {"ok": False, "error": str(exc)[:500]}
@@ -169,8 +158,7 @@ def refresh() -> dict[str, Any]:
             text = (
                 f"Email from {email.get('sender') or email.get('from') or 'unknown'}; "
                 f"subject: {email.get('subject') or '(no subject)'}; "
-                f"date: {email.get('date') or ''}. "
-                f"{email.get('body') or ''}"
+                f"date: {email.get('date') or ''}. {email.get('body') or ''}"
             )
             _record_world_email(email, text)
             if _index_once(f"gmail:{email.get('id')}", text, kind="gmail"):
@@ -180,7 +168,6 @@ def refresh() -> dict[str, Any]:
 
     try:
         from jarvis_mrb.world_gmail_attachments import sync as sync_gmail_attachments
-
         attachment_sync = sync_gmail_attachments(limit=20)
     except Exception as exc:
         attachment_sync = {"ok": False, "messages": 0, "indexed": 0, "error": str(exc)[:500]}
@@ -205,7 +192,6 @@ def refresh() -> dict[str, Any]:
 
     try:
         from jarvis_mrb.world_calendar_sync import sync as sync_world_calendar
-
         calendar_enrichment = sync_world_calendar(days_past=30, days_future=120, limit=100)
     except Exception as exc:
         calendar_enrichment = {"ok": False, "synced": 0, "error": str(exc)[:500]}
@@ -226,19 +212,15 @@ def refresh() -> dict[str, Any]:
         if _index_once(f"note:{relative}", text, kind="note"):
             indexed += 1
 
-    # Establish people/project relations in newly ingested attachments before version
-    # analysis. Lineage can then use shared project identity in addition to Gmail
-    # thread identity and textual overlap, reducing false pairings of generic file names.
+    # First establish people/project identities on all newly ingested source events.
     try:
         from jarvis_mrb.world_linker import refresh_links
-
         linker = refresh_links(limit=3000)
     except Exception as exc:
         linker = {"error": str(exc)[:500]}
 
-    # Compare likely predecessor/successor attachments. Generated change events are
-    # immediately linked back through their sender/project participants so they can
-    # appear in the same refresh cycle's meeting-prep and proactive context.
+    # Then perform deterministic same-document version analysis. Its generated events
+    # are immediately linked so project/person context remains available this cycle.
     try:
         from jarvis_mrb.world_document_versions import refresh as refresh_document_versions
         from jarvis_mrb.world_linker import link_event
@@ -252,9 +234,24 @@ def refresh() -> dict[str, Any]:
     except Exception as exc:
         document_versions = {"error": str(exc)[:500]}
 
+    # Finally reconcile explicit high-value project terms across conversation, meeting,
+    # email and attachment sources. A mismatch creates a provenance-bearing
+    # `term.changed_or_conflicted` event; it never declares which source is true.
+    try:
+        from jarvis_mrb.world_linker import link_event
+        from jarvis_mrb.world_terms import refresh as refresh_terms
+
+        terms = refresh_terms(limit=4000)
+        for event_id in terms.get("generated_event_ids") or []:
+            try:
+                link_event(int(event_id))
+            except Exception:
+                pass
+    except Exception as exc:
+        terms = {"error": str(exc)[:500]}
+
     try:
         from jarvis_mrb.world_executive import refresh_intentions
-
         executive = refresh_intentions()
     except Exception as exc:
         executive = {"error": str(exc)[:500]}
@@ -272,6 +269,7 @@ def refresh() -> dict[str, Any]:
         "world_calendar_enrichment": calendar_enrichment,
         "world_linker": linker,
         "world_document_versions": document_versions,
+        "world_terms": terms,
         "world_executive": executive,
     }
 
@@ -281,15 +279,11 @@ def search(query: str, limit: int = 5) -> list[str]:
     result: list[str] = []
     try:
         from jarvis_mrb.world_model import search as world_search
-
         for item in world_search(query, limit=safe_limit):
             source = f" | source {item.get('source')}" if item.get("source") else ""
-            result.append(
-                f"[world {item.get('type')} | {item.get('time')}{source}] {item.get('text') or item.get('name') or ''}"
-            )
+            result.append(f"[world {item.get('type')} | {item.get('time')}{source}] {item.get('text') or item.get('name') or ''}")
     except Exception:
         pass
-
     for item in retrieve(query, limit=safe_limit):
         if item not in result:
             result.append(item)
@@ -301,7 +295,7 @@ def search(query: str, limit: int = 5) -> list[str]:
 def describe_search(query: str, limit: int = 5) -> str:
     items = search(query, limit=limit)
     if not items:
-        return "I couldn't find a matching entity, event, commitment, email, calendar item, attachment, document change, note, or prior conversation in unified local knowledge."
+        return "I couldn't find a matching entity, event, commitment, email, calendar item, attachment, document change, project term, note, or prior conversation in unified local knowledge."
     return "Relevant unified-knowledge matches: " + " | ".join(items)
 
 
@@ -313,40 +307,40 @@ def status() -> dict[str, Any]:
     relevance: dict[str, Any] = {}
     attachments: dict[str, Any] = {}
     document_versions: dict[str, Any] = {}
+    terms: dict[str, Any] = {}
     diagnostics: dict[str, Any] = {}
     try:
         from jarvis_mrb.world_linker import status as world_linker_status
-
         linker = world_linker_status()
     except Exception:
         pass
     try:
         from jarvis_mrb.world_executive import status as world_executive_status
-
         executive = world_executive_status()
     except Exception:
         pass
     try:
         from jarvis_mrb.world_relevance import status as world_relevance_status
-
         relevance = world_relevance_status()
     except Exception:
         pass
     try:
         from jarvis_mrb.world_gmail_attachments import status as attachment_status
-
         attachments = attachment_status()
     except Exception:
         pass
     try:
         from jarvis_mrb.world_document_versions import status as version_status
-
         document_versions = version_status()
     except Exception:
         pass
     try:
+        from jarvis_mrb.world_terms import status as term_status
+        terms = term_status()
+    except Exception:
+        pass
+    try:
         from jarvis_mrb.world_diagnostics import validate as validate_world
-
         diagnostics = validate_world()
     except Exception as exc:
         diagnostics = {"ok": False, "error": str(exc)[:500]}
@@ -359,5 +353,6 @@ def status() -> dict[str, Any]:
         "world_relevance": relevance,
         "world_gmail_attachments": attachments,
         "world_document_versions": document_versions,
+        "world_terms": terms,
         "world_diagnostics": diagnostics,
     }

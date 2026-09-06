@@ -120,11 +120,15 @@ final class PersistentPresenceController: ObservableObject {
     private let cuePlayer: AmbientCuePlayer
     private var reconnectTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
+    private var interactionCueTask: Task<Void, Never>?
     private var started = false
     private var locationLabel = "unknown"
     private var profileLabel = "default"
     private var announcing = false
     private var pendingAnnouncements: [(String, String)] = []
+    private var lastObservedResponse = ""
+    private var responseCompletionPending = false
+    private var welcomeInProgress = false
 
     init(appModel: JarvisAppModel) {
         self.appModel = appModel
@@ -134,6 +138,12 @@ final class PersistentPresenceController: ObservableObject {
         companion.onEvent = { [weak self] event in
             Task { @MainActor in
                 await self?.handleCompanionEvent(event)
+            }
+        }
+
+        appModel.metaGlasses.onGlassesBecameAvailable = { [weak self] in
+            Task { @MainActor in
+                await self?.welcomeBackForGlassesReturn()
             }
         }
 
@@ -182,6 +192,8 @@ final class PersistentPresenceController: ObservableObject {
         guard !started else { return }
         started = true
         companionStatus = "Connecting"
+        lastObservedResponse = appModel.lastResponse
+        responseCompletionPending = false
 
         reconnectTask = Task { [weak self] in
             guard let self else { return }
@@ -191,14 +203,20 @@ final class PersistentPresenceController: ObservableObject {
             guard let self else { return }
             await self.visionLoop()
         }
+        interactionCueTask = Task { [weak self] in
+            guard let self else { return }
+            await self.interactionCueLoop()
+        }
     }
 
     func stop() {
         started = false
         reconnectTask?.cancel()
         visionTask?.cancel()
+        interactionCueTask?.cancel()
         reconnectTask = nil
         visionTask = nil
+        interactionCueTask = nil
         cuePlayer.stopThinking()
         companion.disconnect()
         companionStatus = "Stopped"
@@ -217,7 +235,9 @@ final class PersistentPresenceController: ObservableObject {
         }
         guard let frame = appModel.metaGlasses.currentFrame,
               let jpeg = Self.sampledJPEG(from: frame, maxDimension: 640, quality: 0.45) else {
-            visionStatus = "No glasses frame available"
+            visionStatus = appModel.metaGlasses.cameraMasterEnabled
+                ? "No glasses frame available"
+                : "Camera stopped by user"
             return
         }
         do {
@@ -229,6 +249,64 @@ final class PersistentPresenceController: ObservableObject {
         } catch {
             visionStatus = "Scan failed"
             companion.disconnect()
+        }
+    }
+
+    private func interactionCueLoop() async {
+        while !Task.isCancelled && started {
+            let response = appModel.lastResponse.trimmingCharacters(in: .whitespacesAndNewlines)
+            if response != lastObservedResponse {
+                lastObservedResponse = response
+                if !response.isEmpty {
+                    responseCompletionPending = true
+                }
+            }
+
+            let stillProducingOrSpeaking = appModel.isSending
+                || appModel.speechSynthesizer.isSpeaking
+                || appModel.voiceStatus == "Speaking…"
+                || appModel.voiceStatus == "Speaking offline…"
+
+            if responseCompletionPending && !stillProducingOrSpeaking {
+                responseCompletionPending = false
+                if appModel.settings.ambientCuesEnabled {
+                    cuePlayer.play("response_complete", preferBluetooth: appModel.settings.preferBluetoothAudio)
+                }
+            }
+
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private func welcomeBackForGlassesReturn() async {
+        guard started,
+              !welcomeInProgress,
+              appModel.settings.speakResponses,
+              !appModel.isSending,
+              !appModel.speechSynthesizer.isSpeaking else { return }
+
+        welcomeInProgress = true
+        defer { welcomeInProgress = false }
+
+        // Give Bluetooth HFP a moment to settle after the DAT device returns so
+        // the greeting is more likely to route through the glasses themselves.
+        try? await Task.sleep(for: .milliseconds(650))
+        guard appModel.metaGlasses.hasEligibleDevice else { return }
+
+        let wasHandsFree = appModel.handsFreeEnabled
+        if wasHandsFree {
+            appModel.stopWakeWordMode()
+        } else if appModel.isListening || appModel.speechRecognizer.isActive {
+            _ = appModel.speechRecognizer.stopListening()
+            appModel.isListening = false
+        }
+
+        appModel.audioRouteManager.refresh()
+        await appModel.speakFrontendResponseIfEnabled("Welcome back, sir.")
+
+        if wasHandsFree {
+            try? await Task.sleep(for: .milliseconds(180))
+            await appModel.startWakeWordMode()
         }
     }
 
@@ -254,9 +332,7 @@ final class PersistentPresenceController: ObservableObject {
                     : "Connected over Tailscale"
                 await sendEnvironmentState()
             }
-            // Ambient state now drives PC audio damping and other near-real-time
-            // behavior, so update it more frequently than the old 10-second loop.
-            try? await Task.sleep(for: .seconds(companion.isConnected ? 2 : 2))
+            try? await Task.sleep(for: .seconds(2))
         }
     }
 
@@ -264,6 +340,11 @@ final class PersistentPresenceController: ObservableObject {
         while !Task.isCancelled && started {
             guard appModel.settings.passiveVisionEnabled else {
                 visionStatus = "Off"
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+            guard appModel.metaGlasses.cameraMasterEnabled else {
+                visionStatus = "Camera stopped by user"
                 try? await Task.sleep(for: .seconds(1))
                 continue
             }
@@ -348,6 +429,7 @@ final class PersistentPresenceController: ObservableObject {
         let deviceState: [String: Any] = [
             "ray_ban_meta": rayBanState,
             "passive_vision": appModel.settings.passiveVisionEnabled,
+            "camera_master_enabled": appModel.metaGlasses.cameraMasterEnabled,
             "companion_endpoint": companion.activeServerURL,
             "remote_transport": usingRemotePath,
         ]
@@ -385,7 +467,7 @@ final class PersistentPresenceController: ObservableObject {
     private func handleCompanionEvent(_ event: [String: Any]) async {
         let type = String(describing: event["type"] ?? "")
         let cue = String(describing: event["cue"] ?? "attention")
-        let message = String(describing: event["message"] ?? "")
+        let message = Self.collapseRepeatedSir(String(describing: event["message"] ?? ""))
 
         if type == "thinking_start" {
             if appModel.settings.ambientCuesEnabled {
@@ -468,7 +550,7 @@ final class PersistentPresenceController: ObservableObject {
             }
 
             await speakProactive(message)
-            appModel.lastResponse = message
+            appModel.lastResponse = Self.collapseRepeatedSir(message)
 
             if wasHandsFree {
                 try? await Task.sleep(for: .milliseconds(160))
@@ -478,25 +560,34 @@ final class PersistentPresenceController: ObservableObject {
     }
 
     private func speakProactive(_ text: String) async {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.collapseRepeatedSir(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !trimmed.isEmpty else { return }
         let spoken = trimmed.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil
             ? trimmed
             : "Sir, " + trimmed.prefix(1).lowercased() + String(trimmed.dropFirst())
+        let normalizedSpoken = Self.collapseRepeatedSir(spoken)
 
         do {
-            let audio = try await client.synthesizeSpeech(spoken)
+            let audio = try await client.synthesizeSpeech(normalizedSpoken)
             try await appModel.speechSynthesizer.speakRemoteAudio(
                 audio,
-                text: spoken,
+                text: normalizedSpoken,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         } catch {
             await appModel.speechSynthesizer.speak(
-                spoken,
+                normalizedSpoken,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         }
+    }
+
+    private static func collapseRepeatedSir(_ raw: String) -> String {
+        raw.replacingOccurrences(
+            of: #"(?i)\b(sir)\b(?:[\s,;:!\.\-–—]*\bsir\b)+"#,
+            with: "$1",
+            options: .regularExpression
+        )
     }
 
     private static func sampledJPEG(

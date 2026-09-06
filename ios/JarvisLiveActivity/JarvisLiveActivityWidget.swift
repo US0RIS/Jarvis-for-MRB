@@ -30,12 +30,12 @@ struct JarvisLiveActivityWidget: Widget {
                                 .font(.caption2.bold())
                         }
                     }
-                    Text(context.state.detail)
+                    Text(visibleDetail(for: context.state))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                     if let endsAt = context.state.endsAt {
-                        Text(timerInterval: Date()...endsAt, countsDown: true)
+                        Text(timerInterval: Date()...max(Date(), endsAt), countsDown: true)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -58,7 +58,7 @@ struct JarvisLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     if let endsAt = context.state.endsAt {
-                        Text(timerInterval: Date()...endsAt, countsDown: true)
+                        Text(timerInterval: Date()...max(Date(), endsAt), countsDown: true)
                             .font(.caption2.monospacedDigit())
                             .frame(width: 48)
                     } else if !context.state.badge.isEmpty {
@@ -68,7 +68,7 @@ struct JarvisLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(context.state.detail)
+                        Text(visibleDetail(for: context.state))
                             .font(.caption)
                             .lineLimit(2)
                         if context.state.progress > 0 {
@@ -81,7 +81,7 @@ struct JarvisLiveActivityWidget: Widget {
                 Image(systemName: symbol(for: context.state.mode))
             } compactTrailing: {
                 if let endsAt = context.state.endsAt {
-                    Text(timerInterval: Date()...endsAt, countsDown: true)
+                    Text(timerInterval: Date()...max(Date(), endsAt), countsDown: true)
                         .font(.caption2.monospacedDigit())
                         .frame(width: 36)
                 } else if !context.state.badge.isEmpty {
@@ -96,6 +96,19 @@ struct JarvisLiveActivityWidget: Widget {
             }
             .keylineTint(.white)
         }
+    }
+
+    private func visibleDetail(for state: JarvisLiveActivityAttributes.ContentState) -> String {
+        let mode = state.mode.lowercased()
+        // Live Activities may be visible while the phone is locked. Room-listening
+        // status is intentionally public/operational, but Executive, action,
+        // verification and contextual details may contain names, deal terms or other
+        // private information. Keep those details in the encrypted app UI/HUD and
+        // present only a neutral affordance on the Lock Screen/Dynamic Island.
+        if mode.contains("room listening") {
+            return state.detail
+        }
+        return "Open Jarvis for private details."
     }
 
     private func symbol(for mode: String) -> String {

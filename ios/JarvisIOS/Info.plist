@@ -52,12 +52,12 @@
         <string>external-accessory</string>
     </array>
 
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Jarvis uses the microphone for voice commands, explicit Meeting Notes, and optional room listening.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Jarvis converts spoken commands and explicitly enabled meeting or room speech to text.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Jarvis connects to your Meta Ray-Ban glasses.</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Jarvis uses the microphone for voice commands and optional quiet-speech interaction.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Jarvis converts spoken commands to text.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Jarvis uses your location to configure location-based automations and optional on-device travel context.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
@@ -92,6 +92,9 @@
         <key>MetaAppID</key>
         <string>0</string>
     </dict>
+
+    <key>NSSupportsLiveActivities</key>
+    <true/>
 
     <key>UILaunchScreen</key>
     <dict/>

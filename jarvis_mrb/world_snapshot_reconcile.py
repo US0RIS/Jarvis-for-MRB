@@ -26,16 +26,25 @@ def _ids(items: Any) -> set[str]:
 
 
 def _authoritative_ids(data: dict[str, Any], key: str) -> set[str] | None:
-    """Return IDs only when this snapshot explicitly carries a full list.
+    """Return IDs only when this snapshot explicitly carries a valid full list.
 
     Missing or malformed collections are not equivalent to authoritative emptiness.
-    This prevents an older/partial companion payload from retiring every goal,
-    Waiting-On item, or Known People enrollment merely because it omitted a field.
-    An explicit empty list remains authoritative and therefore means "none remain".
+    An explicit empty list is valid and means "none remain". A non-empty list is only
+    authoritative when every row is an object with a non-empty stable `id`; otherwise
+    the whole collection is treated as partial/unknown so one malformed row cannot
+    accidentally retire all prior state.
     """
-    if key not in data or not isinstance(data.get(key), list):
+    if key not in data:
         return None
-    return _ids(data[key])
+    items = data.get(key)
+    if not isinstance(items, list):
+        return None
+    if not items:
+        return set()
+    for item in items:
+        if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+            return None
+    return _ids(items)
 
 
 def _normalized(value: str) -> str:
@@ -233,11 +242,7 @@ def reconcile_authoritative_snapshot(snapshot: dict[str, Any]) -> dict[str, int]
             if changed:
                 retired_waiting += 1
 
-    revoked_people = (
-        _revoke_known_person_enrollment(current_people_ids)
-        if current_people_ids is not None
-        else 0
-    )
+    revoked_people = _revoke_known_person_enrollment(current_people_ids) if current_people_ids is not None else 0
 
     return {
         "retired_goals": retired_goals,

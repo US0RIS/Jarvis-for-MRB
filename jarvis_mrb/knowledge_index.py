@@ -140,6 +140,7 @@ def refresh() -> dict[str, Any]:
     errors: list[str] = []
     backfill: dict[str, Any] | None = None
     extended_backfill: dict[str, Any] | None = None
+    attachment_sync: dict[str, Any] | None = None
     calendar_enrichment: dict[str, Any] | None = None
     linker: dict[str, Any] | None = None
     executive: dict[str, Any] | None = None
@@ -177,6 +178,17 @@ def refresh() -> dict[str, Any]:
                 indexed += 1
     elif not email_result.ok:
         errors.append(email_result.message)
+
+    # Attachments are a separate read-only ingestion lane. It accepts only a passive
+    # document allowlist, parses in memory, never executes an attachment, and skips
+    # already-indexed immutable Gmail attachment IDs. Run before graph linking so a
+    # Project/person mention inside a draft can participate in this refresh cycle.
+    try:
+        from jarvis_mrb.world_gmail_attachments import sync as sync_gmail_attachments
+
+        attachment_sync = sync_gmail_attachments(limit=20)
+    except Exception as exc:
+        attachment_sync = {"ok": False, "messages": 0, "indexed": 0, "error": str(exc)[:500]}
 
     for direction, days in (("past", 60), ("future", 120)):
         calendar_result = query_calendar_events(direction=direction, days=days, limit=30)
@@ -246,6 +258,7 @@ def refresh() -> dict[str, Any]:
         "world_model_mirroring": True,
         "world_backfill": backfill,
         "world_extended_backfill": extended_backfill,
+        "world_gmail_attachments": attachment_sync,
         "world_calendar_enrichment": calendar_enrichment,
         "world_linker": linker,
         "world_executive": executive,
@@ -277,7 +290,7 @@ def search(query: str, limit: int = 5) -> list[str]:
 def describe_search(query: str, limit: int = 5) -> str:
     items = search(query, limit=limit)
     if not items:
-        return "I couldn't find a matching entity, event, commitment, email, calendar item, note, or prior conversation in unified local knowledge."
+        return "I couldn't find a matching entity, event, commitment, email, calendar item, attachment, note, or prior conversation in unified local knowledge."
     return "Relevant unified-knowledge matches: " + " | ".join(items)
 
 
@@ -287,6 +300,7 @@ def status() -> dict[str, Any]:
     linker: dict[str, Any] = {}
     executive: dict[str, Any] = {}
     relevance: dict[str, Any] = {}
+    attachments: dict[str, Any] = {}
     diagnostics: dict[str, Any] = {}
     try:
         from jarvis_mrb.world_linker import status as world_linker_status
@@ -307,6 +321,12 @@ def status() -> dict[str, Any]:
     except Exception:
         pass
     try:
+        from jarvis_mrb.world_gmail_attachments import status as attachment_status
+
+        attachments = attachment_status()
+    except Exception:
+        pass
+    try:
         from jarvis_mrb.world_diagnostics import validate as validate_world
 
         diagnostics = validate_world()
@@ -319,5 +339,6 @@ def status() -> dict[str, Any]:
         "world_linker": linker,
         "world_executive": executive,
         "world_relevance": relevance,
+        "world_gmail_attachments": attachments,
         "world_diagnostics": diagnostics,
     }

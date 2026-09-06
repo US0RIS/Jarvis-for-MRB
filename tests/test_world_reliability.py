@@ -11,6 +11,7 @@ import jarvis_mrb.world_document_versions as world_document_versions
 import jarvis_mrb.world_executive as world_executive
 import jarvis_mrb.world_executive_loop as world_executive_loop
 import jarvis_mrb.world_frontend_ingest as world_frontend_ingest
+import jarvis_mrb.world_gmail_attachments as world_gmail_attachments
 import jarvis_mrb.world_linker as world_linker
 import jarvis_mrb.world_migrations as world_migrations
 import jarvis_mrb.world_model as world_model
@@ -36,6 +37,7 @@ class WorldReliabilityTests(unittest.TestCase):
         world_migrations.DB_PATH = self.db
         world_snapshot_reconcile.DB_PATH = self.db
         world_document_versions.DB_PATH = self.db
+        world_gmail_attachments.DB_PATH = self.db
         world_model.status()
 
     def tearDown(self) -> None:

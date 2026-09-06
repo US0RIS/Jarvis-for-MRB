@@ -20,7 +20,17 @@ final class MetaGlassesManager: ObservableObject {
     /// eligibility, not a reliable on-head switch, so Jarvis deliberately does not
     /// treat every Bluetooth/DAT flap as "the user put the glasses back on." A new
     /// session requires a sustained absence and is rate-limited across app launches.
-    var onGlassesBecameAvailable: (() -> Void)?
+    /// If the return occurs during app startup before the single greeting owner is
+    /// installed, one pending signal is delivered when the handler arrives.
+    var onGlassesBecameAvailable: (() -> Void)? {
+        didSet {
+            guard onGlassesBecameAvailable != nil,
+                  pendingPresenceSignal,
+                  hasEligibleDevice else { return }
+            pendingPresenceSignal = false
+            onGlassesBecameAvailable?()
+        }
+    }
 
     private static let cameraMasterEnabledKey = "jarvis.cameraMasterEnabled"
     private static let lastPresenceSignalKey = "jarvis.meta.lastPresenceSignalEpoch"
@@ -41,6 +51,7 @@ final class MetaGlassesManager: ObservableObject {
     private var previousEligible = false
     private var unavailableSince: Date?
     private var lastPresenceSignal: Date
+    private var pendingPresenceSignal = false
 
     init() {
         // Stop Camera is a master privacy switch, not merely a request to stop
@@ -382,7 +393,11 @@ final class MetaGlassesManager: ObservableObject {
 
                 lastPresenceSignal = now
                 UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lastPresenceSignalKey)
-                onGlassesBecameAvailable?()
+                if let onGlassesBecameAvailable {
+                    onGlassesBecameAvailable()
+                } else {
+                    pendingPresenceSignal = true
+                }
             }
         }
     }

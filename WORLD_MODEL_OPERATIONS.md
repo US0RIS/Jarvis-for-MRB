@@ -6,7 +6,7 @@ This document is the deployment, verification, and rollback contract for the uni
 
 The current source tree expects world schema version **4**.
 
-The backend must not be considered operationally upgraded merely because the repository was pulled. A successful deployment requires dependency installation, schema preparation, regression tests, diagnostics, service restart, and runtime checks.
+The backend must not be considered operationally upgraded merely because the repository was pulled. A successful deployment requires dependency installation, schema preparation, regression tests, isolated fixed-endpoint acceptance, diagnostics, service restart, and runtime checks.
 
 ## Home-PC deployment sequence
 
@@ -17,6 +17,7 @@ git pull
 py -3.14 -m pip install -e .
 jarvis-world-prepare
 py -3.14 -m unittest discover -s tests -v
+jarvis-world-acceptance
 jarvis-world-check
 ```
 
@@ -26,12 +27,13 @@ jarvis-world-check
 2. A bounded pre-upgrade SQLite backup when an existing world database is present.
 3. Existing core world backfill if its completion sentinel is absent.
 4. Existing extended scheduler/background/expense/journal backfill if its completion sentinel is absent.
-5. Linker refresh.
-6. Project-term reconciliation.
-7. Document-version analysis.
-8. Persistent-intention refresh.
-9. Executive-loop refresh.
-10. Full world diagnostics.
+5. Drain the incremental world linker.
+6. Drain Project-term reconciliation.
+7. Drain document-version analysis.
+8. Link generated conflict/diff events.
+9. Persistent-intention refresh.
+10. Executive-loop refresh.
+11. Full world diagnostics.
 
 Do not use `--force-backfill` during an ordinary upgrade. It exists for deliberate recovery/reconstruction only.
 
@@ -42,6 +44,7 @@ The migration authority is `jarvis_mrb.world_migrations`.
 - Target version: `4`.
 - Version advances only after a migration step returns successfully.
 - A database claiming a schema newer than this build supports is refused.
+- A database claiming the target version but missing required structure/history is refused by startup validation rather than silently accepted.
 - Existing world data is backed up before an upgrade by default.
 - Backups are stored under `%APPDATA%\JarvisForMRB\backups`.
 - Only the three most recent pre-upgrade world backups are retained.
@@ -56,6 +59,35 @@ jarvis-world-migrate
 
 Use this only when schema migration is needed without historical preparation. Normal deployment should use `jarvis-world-prepare`.
 
+## Fixed endpoint acceptance
+
+`jarvis-world-acceptance` exercises the non-moving twelve-criterion completion contract documented in `FIXED_ENDPOINT_ACCEPTANCE.md`.
+
+It runs a synthetic Project Apollo scenario through:
+
+- iPhone-style Known People and Waiting-On state;
+- cross-source person identity resolution;
+- conversational persistent intention capture;
+- conversation term evidence;
+- Gmail-style document versions;
+- numeric document-change detection;
+- cross-source Project-term conflict detection;
+- imminent Calendar meeting context;
+- situation compilation;
+- Executive Loop priority/decision;
+- proactive prebrief generation;
+- permission boundaries;
+- action-attempt recording;
+- closed-loop independent outcome verification;
+- Known People unenrollment semantics;
+- negative graph-linking controls;
+- partial-snapshot safety;
+- final diagnostics.
+
+The command uses an isolated temporary `APPDATA` plus a temporary world database. It does not contact external services and does not read or modify deployed user state. It exits non-zero if any required fixed-endpoint check fails.
+
+This source acceptance is still not a substitute for the later real Gmail/Calendar/iPhone/device runtime checks.
+
 ## Diagnostics contract
 
 `jarvis-world-check` exits non-zero when a hard integrity invariant fails.
@@ -64,6 +96,7 @@ Hard failures include:
 
 - unsupported or incomplete schema version;
 - missing required schema tables;
+- incomplete migration history;
 - SQLite integrity failure;
 - foreign-key violations;
 - current derived relations without evidence;
@@ -74,9 +107,11 @@ Hard failures include:
 - Known People privacy revocation leaks;
 - current graph relations involving tombstoned Known People identities;
 - multiple current Executive decisions for one intention;
-- same-value project-term conflicts;
+- same-value Project-term conflicts;
 - term conflicts without their provenance event;
+- chronologically reversed term conflicts;
 - document-version pairs without a comparison event;
+- chronologically reversed document-version pairs;
 - invalid action-verification states;
 - `verified` action outcomes without a `verification.verified` event.
 
@@ -106,6 +141,17 @@ A person's textual mention next to a project does not establish `associated_with
 
 Person→project association requires structured participant evidence such as sender, recipient, attendee, organizer, assignee, owner, speaker, or participant. Legacy current person→project edges that lack such evidence are retired during migration; their source events/evidence remain in history.
 
+## Chronology safety
+
+Derived current state uses source occurrence time rather than SQLite insertion order where chronology is semantically material.
+
+- Project-term current values use parsed `occurred_at` with deterministic IDs only as tie-breakers.
+- RFC-formatted email Date values are accepted alongside ISO timestamps.
+- Executive recent-change ordering uses parsed source time.
+- Document-version direction uses parsed source time.
+- Migration can repair legacy reversed term-conflict and document-version derived state while preserving historical evidence events.
+- Malformed Executive timestamps stay unknown and use a timezone-aware 1970 floor only for deterministic sorting; the source no longer depends on platform-specific `datetime.min.astimezone()` behavior.
+
 ## Rollback
 
 If migration or post-deployment diagnostics fail:
@@ -124,29 +170,40 @@ Do not merge or manually edit SQLite rows during an ordinary rollback.
 
 These items are intentionally deferred until the source passes are complete and the backend PC/iPhone are available.
 
-### Backend
+### Backend source/isolated validation
 
 - `py -3.14 -m pip install -e .`
 - `jarvis-world-prepare`
 - `py -3.14 -m unittest discover -s tests -v`
+- `jarvis-world-acceptance`
 - `jarvis-world-check`
+
+### Backend runtime
+
 - restart `jarvis_mrb.service`;
 - verify `/health`;
+- verify the configured Kokoro TTS service rather than assuming an older Qwen3-TTS process is valid;
 - verify Gmail/Calendar connectivity;
 - verify action audit shows installed;
 - exercise at least one read verification and one independently observable write verification;
-- verify proactive loop continues after an intentionally unavailable noncritical provider.
+- verify proactive loop continues after an intentionally unavailable noncritical provider;
+- exercise representative situation/Executive queries over real private sources.
 
 ### iPhone
 
 - Build the companion app from the matching source revision in Xcode.
 - Install/run on the target iPhone.
-- Verify authenticated persistent WebSocket reconnect.
+- Verify authenticated persistent connection/reconnect and LAN/Tailscale behavior.
 - Verify semantic world-snapshot deduplication.
 - Verify an explicit empty authoritative list reconciles appropriately.
 - Verify a deliberately partial/missing-key snapshot does not retire state.
 - Confirm no biometric feature prints, enrollment images, raw camera/audio, incident media, clipboard contents, or privacy-zone coordinates cross the snapshot boundary.
+- Exercise representative local capability packs/quality-shield paths.
+- Verify Ray-Ban DAT camera and HFP voice behavior.
+- Verify the repository's pending general conversational live-scene backend compatibility work only after the matching backend has been deployed; do not infer success from source presence.
 
-### Acceptance boundary
+### Completion boundary
 
-Criterion 11 is not operationally complete until the above backend and iPhone checks actually run successfully. Source implementation can be complete before that; deployment verification cannot be claimed in advance.
+Criteria 6, 7, 11, and 12 are source-complete only when their implementation/coverage exists in the repository. The overall project is not **runtime-verified complete** until the above backend and iPhone checks actually run successfully.
+
+After the fixed twelve criteria are runtime-verified, new capabilities are post-completion enhancements rather than new completion criteria.

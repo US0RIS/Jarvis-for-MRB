@@ -9,6 +9,13 @@ from jarvis_mrb.world_model import DB_PATH
 
 TARGET_SCHEMA_VERSION = 4
 _BACKUP_RETAIN = 3
+_REQUIRED_TABLES = {
+    "entities", "external_ids", "aliases", "events", "event_entities", "beliefs", "commitments",
+    "entity_relations", "relation_evidence", "intentions", "intention_entities", "intention_commitments",
+    "term_observations", "term_conflicts", "document_version_pairs",
+    "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
+    "runtime_subsystem_health", "world_schema_meta", "world_schema_history",
+}
 
 
 def _connect() -> sqlite3.Connection:
@@ -149,13 +156,29 @@ _MIGRATIONS: tuple[tuple[int, str, Callable[[], None]], ...] = (
 )
 
 
-def run_migrations(*, backup: bool = True) -> dict[str, Any]:
-    """Bring the additive world-model schema to the single supported target version.
+def _verify_declared_schema() -> dict[str, Any]:
+    """Reject a database whose version metadata overstates its actual structure."""
+    with _connect() as conn:
+        tables = {str(row["name"]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        missing = sorted(_REQUIRED_TABLES - tables)
+        history = [int(row["version"]) for row in conn.execute("SELECT version FROM world_schema_history ORDER BY version").fetchall()]
+        integrity_row = conn.execute("PRAGMA integrity_check").fetchone()
+        integrity = str(integrity_row[0]) if integrity_row else "unknown"
+        fk_violations = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+    expected_history = list(range(1, TARGET_SCHEMA_VERSION + 1))
+    if missing:
+        raise RuntimeError("World schema metadata is current but required tables are missing: " + ", ".join(missing))
+    if history != expected_history:
+        raise RuntimeError(f"World migration history is incomplete or non-contiguous: {history}; expected {expected_history}.")
+    if integrity.lower() != "ok":
+        raise RuntimeError(f"World SQLite integrity_check failed: {integrity}")
+    if fk_violations:
+        raise RuntimeError(f"World schema has {fk_violations} foreign-key violation(s).")
+    return {"missing_tables": [], "history": history, "integrity": integrity, "foreign_key_violations": fk_violations}
 
-    Migrations are idempotent. Version advances only after a step completes. Existing
-    user data is backed up once before an upgrade when requested. WAL mode is enabled
-    for the shared world database to reduce reader/writer contention.
-    """
+
+def run_migrations(*, backup: bool = True) -> dict[str, Any]:
+    """Bring the shared world model to the one schema version supported by this build."""
     before = current_version()
     if before > TARGET_SCHEMA_VERSION:
         raise RuntimeError(
@@ -184,6 +207,7 @@ def run_migrations(*, backup: bool = True) -> dict[str, Any]:
 
     if version != TARGET_SCHEMA_VERSION:
         raise RuntimeError(f"World migration stopped at v{version}; expected v{TARGET_SCHEMA_VERSION}.")
+    verification = _verify_declared_schema()
 
     return {
         "before": before,
@@ -192,6 +216,7 @@ def run_migrations(*, backup: bool = True) -> dict[str, Any]:
         "applied": applied,
         "backup": backup_path,
         "ready": True,
+        "schema_verification": verification,
     }
 
 
@@ -208,10 +233,11 @@ def status() -> dict[str, Any]:
                 ]
     except sqlite3.Error:
         pass
+    expected_history = list(range(1, TARGET_SCHEMA_VERSION + 1))
     return {
         "current": version,
         "target": TARGET_SCHEMA_VERSION,
-        "ready": version == TARGET_SCHEMA_VERSION,
+        "ready": version == TARGET_SCHEMA_VERSION and [int(item["version"]) for item in history] == expected_history,
         "history": history,
         "backup_retention": _BACKUP_RETAIN,
     }

@@ -40,6 +40,22 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
     @Published private(set) var travelMode: TravelMode = .driving
     @Published private(set) var lastRerouteAt: Date?
 
+    private static var retainedController: JarvisNavigationController?
+
+    @discardableResult
+    static func install(appModel: JarvisAppModel) -> JarvisNavigationController {
+        if let retainedController {
+            retainedController.start()
+            return retainedController
+        }
+        let controller = JarvisNavigationController(appModel: appModel)
+        retainedController = controller
+        controller.start()
+        return controller
+    }
+
+    static var current: JarvisNavigationController? { retainedController }
+
     private struct PendingGuidance {
         let text: String
         let createdAt: Date
@@ -181,7 +197,7 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         currentStepIndex = 0
         minDistanceToCurrentStep = .greatestFiniteMagnitude
         preparedStepIndex = announceFirstStepInResponse && !steps.isEmpty ? 0 : nil
-        immediateStepIndex = nil
+        immediateStepIndex = announceFirstStepInResponse && !steps.isEmpty ? 0 : nil
         offRouteSamples = 0
         distanceRemainingMeters = route.distance
         expectedArrival = Date().addingTimeInterval(route.expectedTravelTime)
@@ -412,7 +428,8 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
                     self.pendingGuidance = nil
                     continue
                 }
-                if self.appModel.isSending || self.appModel.isListening || self.appModel.speechSynthesizer.isSpeaking {
+                let pushToTalkBusy = self.appModel.isListening && !self.appModel.handsFreeEnabled
+                if self.appModel.isSending || pushToTalkBusy || self.appModel.speechSynthesizer.isSpeaking {
                     try? await Task.sleep(for: .milliseconds(250))
                     continue
                 }
@@ -455,10 +472,9 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
 
     private func approximateRemainingDistance(from location: CLLocation, route: MKRoute) -> CLLocationDistance {
         guard !steps.isEmpty, currentStepIndex < steps.count else {
-            return CLLocation(
-                latitude: route.polyline.coordinate.latitude,
-                longitude: route.polyline.coordinate.longitude
-            ).distance(from: location)
+            let destination = route.steps.last.flatMap { Self.finalCoordinate(of: $0.polyline) }
+                ?? route.polyline.coordinate
+            return CLLocation(latitude: destination.latitude, longitude: destination.longitude).distance(from: location)
         }
         let current = Self.distanceToEnd(of: steps[currentStepIndex], from: location)
         let after = steps.dropFirst(currentStepIndex + 1).reduce(0.0) { $0 + $1.distance }

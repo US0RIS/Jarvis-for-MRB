@@ -25,6 +25,7 @@ def _parse_time(raw: str) -> datetime | None:
 
 def _meaningful_recent_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     allowed_prefixes = (
+        "term.changed_or_conflicted",
         "document.version_changed",
         "knowledge.gmail",
         "knowledge.note",
@@ -34,13 +35,19 @@ def _meaningful_recent_evidence(items: list[dict[str, Any]]) -> list[dict[str, A
         "journal.generated",
         "expense.captured",
     )
-    result: list[dict[str, Any]] = []
-    for item in items:
-        event_type = str(item.get("type") or "")
-        if not event_type.startswith(allowed_prefixes):
-            continue
-        result.append(item)
-    return result
+    return [
+        item for item in items
+        if str(item.get("type") or "").startswith(allowed_prefixes)
+    ]
+
+
+def _evidence_priority(item: dict[str, Any]) -> int:
+    event_type = str(item.get("type") or "")
+    if event_type.startswith("term.changed_or_conflicted"):
+        return 0
+    if event_type.startswith("document.version_changed"):
+        return 1
+    return 2
 
 
 def build(event_id: str, summary: str) -> dict[str, Any] | None:
@@ -63,11 +70,26 @@ def build(event_id: str, summary: str) -> dict[str, Any] | None:
     commitments = list(situation.get("commitments") or [])
     intentions = list(situation.get("intentions") or [])
     recent = _meaningful_recent_evidence(list(situation.get("recent_evidence") or []))
+    recent.sort(key=_evidence_priority)
 
     facts: list[str] = []
     severity = "info"
 
+    # A provenance-bearing disagreement in an explicit project term is more urgent
+    # than a generic task reminder: it can change the substance of the meeting. It is
+    # phrased as a conflict/change, never as a declaration that one source is true.
+    for item in recent:
+        if not str(item.get("type") or "").startswith("term.changed_or_conflicted"):
+            continue
+        summary_text = _compact(str(item.get("summary") or ""), 200)
+        if summary_text:
+            facts.append(f"Term discrepancy: {summary_text}")
+            severity = "warning"
+            break
+
     for item in commitments[:2]:
+        if len(facts) >= 2:
+            break
         owner = str(item.get("owner") or "").strip()
         action = _compact(str(item.get("action") or ""), 150)
         if not action:
@@ -89,11 +111,9 @@ def build(event_id: str, summary: str) -> dict[str, Any] | None:
                 break
 
     if len(facts) < 2:
-        # Changed document versions are deliberately ranked before ordinary recent
-        # records because a fresh draft change is often the most actionable thing to
-        # know before a meeting. The source event is deterministic diff evidence.
-        recent.sort(key=lambda item: 0 if str(item.get("type") or "").startswith("document.version_changed") else 1)
-        for item in recent[:2]:
+        for item in recent:
+            if str(item.get("type") or "").startswith("term.changed_or_conflicted"):
+                continue
             summary_text = _compact(str(item.get("summary") or ""), 175)
             if not summary_text:
                 continue
@@ -118,6 +138,7 @@ def build(event_id: str, summary: str) -> dict[str, Any] | None:
         "has_intentions": bool(intentions),
         "has_recent_evidence": bool(recent),
         "has_document_change": any(str(item.get("type") or "").startswith("document.version_changed") for item in recent),
+        "has_term_conflict": any(str(item.get("type") or "").startswith("term.changed_or_conflicted") for item in recent),
     }
 
 
@@ -126,6 +147,7 @@ def status() -> dict[str, Any]:
         "enabled": True,
         "deterministic": True,
         "requires_actionable_world_context": True,
+        "prioritizes_cross_source_term_conflicts": True,
         "prioritizes_document_version_changes": True,
         "max_facts": 2,
         "max_message_chars": 430,

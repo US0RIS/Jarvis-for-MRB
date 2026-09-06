@@ -217,7 +217,15 @@ def memory_context(query: str, limit: int = 3) -> str:
         from jarvis_mrb.world_linker import related_context
         from jarvis_mrb.world_model import context_for_query
         from jarvis_mrb.world_relevance import context_for_query as relevant_executive_context
+        from jarvis_mrb.world_situation import context_for_query as situation_context
 
+        # Situational context is highly selective and comes first: for meeting-prep
+        # requests it identifies the actual current/next calendar event and gathers
+        # graph-connected people/projects/obligations before the broader retrieval
+        # layers add supporting records.
+        situation = situation_context(query)
+        if situation:
+            pieces.append(situation)
         world = context_for_query(query, limit=max(4, limit * 2))
         if world:
             pieces.append(world)
@@ -238,7 +246,7 @@ def memory_context(query: str, limit: int = 3) -> str:
                 + "\n".join(items)
             )
 
-    return "\n\n".join(pieces)[:20000]
+    return "\n\n".join(pieces)[:24000]
 
 
 def status() -> dict[str, object]:
@@ -248,6 +256,7 @@ def status() -> dict[str, object]:
     linker: dict[str, object] = {}
     executive: dict[str, object] = {}
     relevance: dict[str, object] = {}
+    situation: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
@@ -266,13 +275,20 @@ def status() -> dict[str, object]:
         relevance = relevance_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_situation import status as situation_status
+
+        situation = situation_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "query-aware world-model + relation-traversal + selective persistent-intentions + episodic-on-demand",
+        "retrieval_mode": "situation-aware + query-aware world-model + relation-traversal + selective persistent-intentions + episodic-on-demand",
         "world_linker": linker,
         "world_executive": executive,
         "world_relevance": relevance,
+        "world_situation": situation,
     }

@@ -49,6 +49,17 @@ _DEFAULT_STATE: dict[str, Any] = {
     "updated_at": None,
 }
 
+_WORLD_CONTEXT_KEYS = {
+    "location",
+    "active_profile",
+    "project_focus",
+    "devices",
+    "audio",
+    "health",
+    "preferences",
+    "meeting",
+}
+
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(base)
@@ -76,12 +87,33 @@ def get_state() -> dict[str, Any]:
 def update_state(patch: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(patch, dict):
         raise ValueError("Environment state patch must be an object.")
+
+    # The iPhone may attach an explicit metadata-only world snapshot to its normal
+    # authenticated environment update. Consume that snapshot into the world model,
+    # but never duplicate it into environment_state.json. In particular, the
+    # snapshot contract excludes biometric feature prints and raw camera/audio data.
+    working_patch = copy.deepcopy(patch)
+    frontend_world_snapshot = working_patch.pop("world_snapshot", None)
+
     with _LOCK:
-        state = _deep_merge(get_state(), patch)
+        state = _deep_merge(get_state(), working_patch)
         state["updated_at"] = datetime.now().astimezone().isoformat()
         APP_DIR.mkdir(parents=True, exist_ok=True)
         STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-        return state
+
+    # World-model mirroring is intentionally best-effort. A graph/database problem
+    # must never prevent the live companion state from being updated.
+    try:
+        from jarvis_mrb.world_model import ingest_frontend_snapshot, record_environment_snapshot
+
+        if isinstance(frontend_world_snapshot, dict):
+            ingest_frontend_snapshot(frontend_world_snapshot)
+        if any(key in working_patch for key in _WORLD_CONTEXT_KEYS):
+            record_environment_snapshot(state)
+    except Exception:
+        pass
+
+    return state
 
 
 def set_value(key: str, value: Any) -> dict[str, Any]:

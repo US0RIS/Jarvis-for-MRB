@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import jarvis_mrb.tool_audit as tool_audit
 import jarvis_mrb.world_executive as world_executive
 import jarvis_mrb.world_executive_loop as world_executive_loop
 import jarvis_mrb.world_intent_capture as world_intent_capture
@@ -32,9 +34,13 @@ class WorldVerificationTests(unittest.TestCase):
         world_executive_loop.status()
         world_verification.status()
         self.original_observe = world_verification._observe
+        with tool_audit._LOCK:
+            tool_audit._STAGED_EXECUTIVE.clear()
 
     def tearDown(self) -> None:
         world_verification._observe = self.original_observe
+        with tool_audit._LOCK:
+            tool_audit._STAGED_EXECUTIVE.clear()
         self.temp.cleanup()
 
     def _rows(self, sql: str, params: tuple[object, ...] = ()) -> list[sqlite3.Row]:
@@ -91,9 +97,11 @@ class WorldVerificationTests(unittest.TestCase):
             action_event_id=action_event,
             executive_decision_id=decision_id,
         )
-        row = self._rows("SELECT status,verifier FROM action_verifications WHERE id=?", (verification_id,))[0]
+        row = self._rows("SELECT status,verifier,expected_json FROM action_verifications WHERE id=?", (verification_id,))[0]
         self.assertEqual(str(row["status"]), "pending")
         self.assertEqual(str(row["verifier"]), "gmail_sent_message")
+        expected = json.loads(str(row["expected_json"]))
+        self.assertGreater(int(expected.get("not_before_unix") or 0), 0)
 
         plan = world_executive_loop.plans_for_query("What should I do about Project Apollo?", limit=1)[0]
         self.assertEqual(plan["state"], "awaiting_verification")
@@ -157,7 +165,7 @@ class WorldVerificationTests(unittest.TestCase):
         self.assertEqual(plan["decision"]["tool"], "")
         self.assertIn("Verified outcome failed", str(plan["decision"]["summary"]))
 
-    def test_timeout_is_explicit_not_success(self) -> None:
+    def test_timeout_gets_final_observation_before_becoming_timeout(self) -> None:
         _, decision_id = self._goal_and_decision()
         verification_id = world_verification.register_execution(
             "gmail.send",
@@ -173,6 +181,10 @@ class WorldVerificationTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
+        world_verification._observe = lambda verifier, expected: (
+            "pending",
+            "No causal read-back match is visible.",
+        )
         outcome = world_verification.check_one(verification_id, force=True)
         self.assertIsNotNone(outcome)
         assert outcome is not None
@@ -181,6 +193,31 @@ class WorldVerificationTests(unittest.TestCase):
             len(self._rows("SELECT 1 FROM events WHERE event_type='verification.timed_out'")),
             1,
         )
+
+    def test_expired_deadline_still_accepts_final_independent_success(self) -> None:
+        _, decision_id = self._goal_and_decision()
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
+            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            action_event_id=self._action_event(),
+            executive_decision_id=decision_id,
+        )
+        expired = (datetime.now().astimezone() - timedelta(seconds=1)).isoformat()
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("UPDATE action_verifications SET deadline_at=?,next_check_at=? WHERE id=?", (expired, expired, verification_id))
+            conn.commit()
+        finally:
+            conn.close()
+        world_verification._observe = lambda verifier, expected: (
+            "verified",
+            "Final read-back independently found the expected state.",
+        )
+        outcome = world_verification.check_one(verification_id, force=True)
+        self.assertIsNotNone(outcome)
+        assert outcome is not None
+        self.assertEqual(outcome["status"], "verified")
 
     def test_unverifiable_write_never_becomes_verified_from_receipt(self) -> None:
         action_event = self._action_event(tool="custom.run", ok=True)
@@ -207,6 +244,54 @@ class WorldVerificationTests(unittest.TestCase):
         self.assertEqual(str(row["status"]), "failed")
         self.assertEqual(str(row["verifier"]), "tool_return")
         self.assertIn("Tool returned failure", str(row["last_evidence"]))
+
+    def test_temporary_state_verifier_uses_storage_normalized_key(self) -> None:
+        normalized = tool_audit._verification_args(
+            "state.temp_set",
+            {"key": "Current Focus", "value": "Apollo", "ttl_minutes": 60},
+        )
+        self.assertEqual(normalized["key"], "current_focus")
+
+    def test_executive_correlation_requires_exact_tool_and_arguments(self) -> None:
+        _, decision_id = self._goal_and_decision()
+        expected_args = {"query": "Project Apollo indemnity cap", "limit": 5}
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                "UPDATE executive_decisions SET proposed_tool=?,proposed_args_json=? WHERE id=?",
+                ("knowledge.search", json.dumps(expected_args, sort_keys=True), decision_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertEqual(tool_audit._executive_decision_id("knowledge.search", expected_args), decision_id)
+        altered = {"query": "Project Apollo indemnity cap", "limit": 8}
+        self.assertEqual(tool_audit._executive_decision_id("knowledge.search", altered), "")
+
+    def test_staged_confirmation_keeps_exact_decision_after_supersession(self) -> None:
+        _, decision_id = self._goal_and_decision()
+        args = {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send schedules."}
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                "UPDATE executive_decisions SET proposed_tool=?,proposed_args_json=? WHERE id=?",
+                ("gmail.send", json.dumps(args, sort_keys=True), decision_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        tool_audit._stage_executive_decision("gmail.send", args)
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("UPDATE executive_decisions SET status='superseded' WHERE id=?", (decision_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.assertEqual(tool_audit._consume_staged_decision("gmail.send", args), decision_id)
+        self.assertEqual(tool_audit._consume_staged_decision("gmail.send", args), "")
 
 
 if __name__ == "__main__":

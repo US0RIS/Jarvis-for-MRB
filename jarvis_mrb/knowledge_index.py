@@ -55,6 +55,24 @@ def _index_once(source_key: str, text: str, *, kind: str) -> bool:
     return True
 
 
+def _provider_success(name: str) -> None:
+    try:
+        from jarvis_mrb.runtime_health import record_success
+        record_success(f"knowledge.{name}")
+    except Exception:
+        pass
+
+
+def _provider_failure(name: str, error: object, errors: list[str]) -> None:
+    message = str(error or "unknown provider failure")[:1000]
+    errors.append(f"{name}: {message}")
+    try:
+        from jarvis_mrb.runtime_health import record_failure
+        record_failure(f"knowledge.{name}", message)
+    except Exception:
+        pass
+
+
 def _record_world_email(email: dict[str, Any], text: str) -> None:
     try:
         from jarvis_mrb.world_model import ensure_entity, record_knowledge_source
@@ -89,6 +107,8 @@ def _record_world_email(email: dict[str, Any], text: str) -> None:
             participants=participants,
         )
     except Exception:
+        # Semantic mirroring is separately diagnosed by the world-model pipeline. An
+        # individual email can still be indexed episodically if graph mirroring fails.
         pass
 
 
@@ -125,6 +145,13 @@ def _record_world_note(relative: str, raw: str) -> None:
 
 
 def refresh() -> dict[str, Any]:
+    """Refresh independent knowledge providers without allowing one to stop the rest.
+
+    Every provider/sub-pipeline reports its own durable runtime-health state. The
+    aggregate `ok` bit is false if any requested provider failed, even when later
+    providers succeeded. This makes partial refreshes visible instead of silently
+    claiming a healthy cycle.
+    """
     indexed = 0
     scanned = 0
     errors: list[str] = []
@@ -141,83 +168,132 @@ def refresh() -> dict[str, Any]:
     try:
         from jarvis_mrb.world_backfill import backfill_existing_state
         backfill = backfill_existing_state()
+        if bool(backfill.get("ok", True)):
+            _provider_success("world_backfill")
+        else:
+            _provider_failure("world_backfill", "; ".join(str(item) for item in backfill.get("errors", [])) or "backfill returned not-ok", errors)
     except Exception as exc:
         backfill = {"ok": False, "error": str(exc)[:500]}
+        _provider_failure("world_backfill", exc, errors)
 
     try:
         from jarvis_mrb.world_extended_backfill import backfill_extended_state
         extended_backfill = backfill_extended_state()
+        if bool(extended_backfill.get("ok", True)):
+            _provider_success("world_extended_backfill")
+        else:
+            _provider_failure("world_extended_backfill", "; ".join(str(item) for item in extended_backfill.get("errors", [])) or "extended backfill returned not-ok", errors)
     except Exception as exc:
         extended_backfill = {"ok": False, "error": str(exc)[:500]}
+        _provider_failure("world_extended_backfill", exc, errors)
 
-    email_result = query_emails(query="in:anywhere newer_than:30d", limit=10)
-    if email_result.ok and email_result.data:
-        for email in email_result.data.get("emails", []):
-            if not isinstance(email, dict):
-                continue
-            scanned += 1
-            text = (
-                f"Email from {email.get('sender') or email.get('from') or 'unknown'}; "
-                f"subject: {email.get('subject') or '(no subject)'}; "
-                f"date: {email.get('date') or ''}. {email.get('body') or ''}"
-            )
-            _record_world_email(email, text)
-            if _index_once(f"gmail:{email.get('id')}", text, kind="gmail"):
-                indexed += 1
-    elif not email_result.ok:
-        errors.append(email_result.message)
+    try:
+        email_result = query_emails(query="in:anywhere newer_than:30d", limit=10)
+        if email_result.ok:
+            for email in (email_result.data or {}).get("emails", []):
+                if not isinstance(email, dict):
+                    continue
+                scanned += 1
+                text = (
+                    f"Email from {email.get('sender') or email.get('from') or 'unknown'}; "
+                    f"subject: {email.get('subject') or '(no subject)'}; "
+                    f"date: {email.get('date') or ''}. {email.get('body') or ''}"
+                )
+                try:
+                    _record_world_email(email, text)
+                    if _index_once(f"gmail:{email.get('id')}", text, kind="gmail"):
+                        indexed += 1
+                except Exception as exc:
+                    _provider_failure("gmail_item", exc, errors)
+            _provider_success("gmail")
+        else:
+            _provider_failure("gmail", email_result.message, errors)
+    except Exception as exc:
+        _provider_failure("gmail", exc, errors)
 
     try:
         from jarvis_mrb.world_gmail_attachments import sync as sync_gmail_attachments
         attachment_sync = sync_gmail_attachments(limit=20)
+        if bool(attachment_sync.get("ok")):
+            _provider_success("gmail_attachments")
+        else:
+            _provider_failure("gmail_attachments", attachment_sync.get("error") or "attachment sync returned not-ok", errors)
     except Exception as exc:
         attachment_sync = {"ok": False, "messages": 0, "indexed": 0, "error": str(exc)[:500]}
+        _provider_failure("gmail_attachments", exc, errors)
 
     for direction, days in (("past", 60), ("future", 120)):
-        calendar_result = query_calendar_events(direction=direction, days=days, limit=30)
-        if calendar_result.ok and calendar_result.data:
-            for event in calendar_result.data.get("events", []):
-                if not isinstance(event, dict):
-                    continue
-                scanned += 1
-                text = (
-                    f"Calendar event: {event.get('summary') or '(untitled)'}; "
-                    f"start: {event.get('start') or ''}; end: {event.get('end') or ''}; "
-                    f"location: {event.get('location') or ''}."
-                )
-                _record_world_calendar(event, text)
-                if _index_once(f"calendar:{event.get('id')}", text, kind="calendar"):
-                    indexed += 1
-        elif not calendar_result.ok:
-            errors.append(calendar_result.message)
+        provider = f"calendar_{direction}"
+        try:
+            calendar_result = query_calendar_events(direction=direction, days=days, limit=30)
+            if calendar_result.ok:
+                for event in (calendar_result.data or {}).get("events", []):
+                    if not isinstance(event, dict):
+                        continue
+                    scanned += 1
+                    text = (
+                        f"Calendar event: {event.get('summary') or '(untitled)'}; "
+                        f"start: {event.get('start') or ''}; end: {event.get('end') or ''}; "
+                        f"location: {event.get('location') or ''}."
+                    )
+                    try:
+                        _record_world_calendar(event, text)
+                        if _index_once(f"calendar:{event.get('id')}", text, kind="calendar"):
+                            indexed += 1
+                    except Exception as exc:
+                        _provider_failure(f"{provider}_item", exc, errors)
+                _provider_success(provider)
+            else:
+                _provider_failure(provider, calendar_result.message, errors)
+        except Exception as exc:
+            _provider_failure(provider, exc, errors)
 
     try:
         from jarvis_mrb.world_calendar_sync import sync as sync_world_calendar
         calendar_enrichment = sync_world_calendar(days_past=30, days_future=120, limit=100)
+        if bool(calendar_enrichment.get("ok", True)) and "error" not in calendar_enrichment:
+            _provider_success("calendar_enrichment")
+        else:
+            _provider_failure("calendar_enrichment", calendar_enrichment.get("error") or "calendar enrichment returned not-ok", errors)
     except Exception as exc:
         calendar_enrichment = {"ok": False, "synced": 0, "error": str(exc)[:500]}
+        _provider_failure("calendar_enrichment", exc, errors)
 
-    NOTES_DIR.mkdir(parents=True, exist_ok=True)
-    for path in sorted(NOTES_DIR.glob("**/*")):
-        if not path.is_file() or path.suffix.lower() not in {".txt", ".md", ".json", ".log"}:
-            continue
-        try:
-            raw = path.read_text(encoding="utf-8", errors="replace")[:80_000]
-        except OSError as exc:
-            errors.append(f"Could not read {path.name}: {exc}")
-            continue
-        scanned += 1
-        relative = path.relative_to(NOTES_DIR).as_posix()
-        text = f"Local note {relative}:\n{raw}"
-        _record_world_note(relative, raw)
-        if _index_once(f"note:{relative}", text, kind="note"):
-            indexed += 1
+    note_errors_before = len(errors)
+    try:
+        NOTES_DIR.mkdir(parents=True, exist_ok=True)
+        for path in sorted(NOTES_DIR.glob("**/*")):
+            if not path.is_file() or path.suffix.lower() not in {".txt", ".md", ".json", ".log"}:
+                continue
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")[:80_000]
+                scanned += 1
+                relative = path.relative_to(NOTES_DIR).as_posix()
+                text = f"Local note {relative}:\n{raw}"
+                _record_world_note(relative, raw)
+                if _index_once(f"note:{relative}", text, kind="note"):
+                    indexed += 1
+            except OSError as exc:
+                _provider_failure("notes_item", f"Could not read {path.name}: {exc}", errors)
+            except Exception as exc:
+                _provider_failure("notes_item", f"{path.name}: {exc}", errors)
+        if len(errors) == note_errors_before:
+            _provider_success("notes")
+        else:
+            _provider_failure("notes", "one or more local note items failed", errors)
+    except Exception as exc:
+        _provider_failure("notes", exc, errors)
 
     try:
         from jarvis_mrb.world_linker import refresh_links
         linker = refresh_links(limit=3000)
+        if "error" in linker:
+            _provider_failure("world_linker", linker.get("error"), errors)
+        else:
+            _provider_success("world_linker")
     except Exception as exc:
         linker = {"error": str(exc)[:500]}
+        _provider_failure("world_linker", exc, errors)
 
     try:
         from jarvis_mrb.world_document_versions import refresh as refresh_document_versions
@@ -227,10 +303,15 @@ def refresh() -> dict[str, Any]:
         for event_id in document_versions.get("generated_event_ids") or []:
             try:
                 link_event(int(event_id))
-            except Exception:
-                pass
+            except Exception as exc:
+                _provider_failure("document_version_link", exc, errors)
+        if "error" in document_versions:
+            _provider_failure("document_versions", document_versions.get("error"), errors)
+        else:
+            _provider_success("document_versions")
     except Exception as exc:
         document_versions = {"error": str(exc)[:500]}
+        _provider_failure("document_versions", exc, errors)
 
     try:
         from jarvis_mrb.world_linker import link_event
@@ -240,16 +321,26 @@ def refresh() -> dict[str, Any]:
         for event_id in terms.get("generated_event_ids") or []:
             try:
                 link_event(int(event_id))
-            except Exception:
-                pass
+            except Exception as exc:
+                _provider_failure("term_event_link", exc, errors)
+        if "error" in terms:
+            _provider_failure("world_terms", terms.get("error"), errors)
+        else:
+            _provider_success("world_terms")
     except Exception as exc:
         terms = {"error": str(exc)[:500]}
+        _provider_failure("world_terms", exc, errors)
 
     try:
         from jarvis_mrb.world_executive import refresh_intentions
         executive = refresh_intentions()
+        if "error" in executive:
+            _provider_failure("world_executive", executive.get("error"), errors)
+        else:
+            _provider_success("world_executive")
     except Exception as exc:
         executive = {"error": str(exc)[:500]}
+        _provider_failure("world_executive", exc, errors)
 
     # Knowledge ingestion is a major world-state transition. Recompute persistent
     # attention and the current decision only after source linking, document-version
@@ -258,16 +349,27 @@ def refresh() -> dict[str, Any]:
     try:
         from jarvis_mrb.world_executive_loop import refresh as refresh_executive_loop
         executive_loop = refresh_executive_loop()
+        if "error" in executive_loop:
+            _provider_failure("executive_loop", executive_loop.get("error"), errors)
+        else:
+            _provider_success("executive_loop")
     except Exception as exc:
         executive_loop = {"error": str(exc)[:500]}
+        _provider_failure("executive_loop", exc, errors)
 
+    attachment_backlog = bool((attachment_sync or {}).get("backlog_remaining"))
     return {
         "ok": not errors,
+        "partial": bool(errors),
         "scanned": scanned,
         "indexed": indexed,
-        "errors": errors[:5],
+        "errors": errors[:12],
+        "error_count": len(errors),
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
+        "provider_failures_isolated": True,
+        "attachment_backlog_remaining": attachment_backlog,
+        "recommended_retry_seconds": 30 if attachment_backlog else 15 * 60,
         "world_backfill": backfill,
         "world_extended_backfill": extended_backfill,
         "world_gmail_attachments": attachment_sync,
@@ -360,6 +462,7 @@ def status() -> dict[str, Any]:
         "indexed_sources": sources,
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
+        "provider_failures_isolated": True,
         "world_linker": linker,
         "world_executive": executive,
         "world_executive_loop": executive_loop,

@@ -7,9 +7,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import jarvis_mrb.world_executive as world_executive
+import jarvis_mrb.world_frontend_ingest as frontend_ingest
 import jarvis_mrb.world_gmail_attachments as attachments
+import jarvis_mrb.world_linker as world_linker
 import jarvis_mrb.world_model as world_model
 import jarvis_mrb.world_prebrief as world_prebrief
+import jarvis_mrb.world_snapshot_reconcile as snapshot_reconcile
 
 
 class WorldIngestionReliabilityTests(unittest.TestCase):
@@ -21,6 +25,9 @@ class WorldIngestionReliabilityTests(unittest.TestCase):
         world_model.DB_PATH = self.db
         attachments.DB_PATH = self.db
         world_prebrief.DB_PATH = self.db
+        world_linker.DB_PATH = self.db
+        world_executive.DB_PATH = self.db
+        snapshot_reconcile.DB_PATH = self.db
         world_model.status()
 
     def tearDown(self) -> None:
@@ -88,6 +95,66 @@ class WorldIngestionReliabilityTests(unittest.TestCase):
         self.assertEqual(status["scanned_pdf_ocr"], "explicitly unsupported_needs_ocr")
         self.assertTrue(status["resumable_pagination"])
         self.assertTrue(status["xlsx_passive_text"])
+
+    def test_advisory_current_person_presence_never_becomes_durable_identity_state(self) -> None:
+        snapshot = {
+            "schema_version": 2,
+            "presence": {
+                "current_person": {
+                    "person_id": "known-daniel",
+                    "name": "Daniel Reed",
+                    "matched_at": "2026-09-06T18:15:12-07:00",
+                    "advisory": True,
+                }
+            },
+        }
+        result = frontend_ingest.ingest_frontend_snapshot(snapshot)
+        self.assertEqual(result["current_person_presence"], 1)
+
+        conn = sqlite3.connect(self.db)
+        conn.row_factory = sqlite3.Row
+        try:
+            event = conn.execute(
+                "SELECT event_type,payload_json,confidence FROM events WHERE event_type='person.present_observed'"
+            ).fetchone()
+            self.assertIsNotNone(event)
+            payload = json.loads(str(event["payload_json"]))
+            self.assertEqual(payload["person_id"], "known-daniel")
+            self.assertTrue(payload["advisory"])
+            self.assertEqual(payload["expires_after_seconds"], 12)
+            self.assertNotIn("distance", payload)
+            self.assertNotIn("threshold", payload)
+            self.assertLess(float(event["confidence"]), 1.0)
+            durable = conn.execute(
+                "SELECT COUNT(*) FROM beliefs WHERE predicate IN ('currently_with','identity','present_person') AND state='current'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(int(durable), 0)
+
+        # Biometric-derived score fields are outside the bridge contract. A malformed
+        # sender cannot smuggle them through the presence lane.
+        result = frontend_ingest.ingest_frontend_snapshot(
+            {
+                "schema_version": 2,
+                "presence": {
+                    "current_person": {
+                        "person_id": "known-daniel",
+                        "name": "Daniel Reed",
+                        "matched_at": "2026-09-06T18:16:12-07:00",
+                        "advisory": True,
+                        "distance": 0.123,
+                    }
+                },
+            }
+        )
+        self.assertEqual(result["current_person_presence"], 0)
+        conn = sqlite3.connect(self.db)
+        try:
+            count = int(conn.execute("SELECT COUNT(*) FROM events WHERE event_type='person.present_observed'").fetchone()[0])
+        finally:
+            conn.close()
+        self.assertEqual(count, 1)
 
     def test_prebrief_suppresses_document_diff_already_explained_by_term_conflict(self) -> None:
         apollo = world_model.ensure_entity("project", "Project Apollo")

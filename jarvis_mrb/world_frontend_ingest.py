@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from jarvis_mrb.world_model import SELF_ID, assert_belief, ingest_frontend_snapshot as ingest_core_snapshot, record_event
+from jarvis_mrb.world_model import (
+    SELF_ID,
+    assert_belief,
+    ensure_entity,
+    ingest_frontend_snapshot as ingest_core_snapshot,
+    record_event,
+)
 
 
 def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -10,18 +16,20 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     The iPhone contract deliberately excludes biometric feature prints, raw camera
     frames, raw microphone buffers, incident media, clipboard contents and privacy
-    zone coordinates. This function must not attempt to reconstruct or request those
-    excluded channels.
+    zone coordinates. Advisory current-person presence may cross this bridge only as
+    enrolled-person ID/name/time metadata; the biometric comparison itself stays on
+    device and never becomes a durable identity belief.
     """
     data = dict(snapshot or {})
     counts: dict[str, Any] = ingest_core_snapshot(data)
     counts.setdefault("events", 0)
     counts.setdefault("receipts", 0)
     counts.setdefault("mode", 0)
+    counts.setdefault("current_person_presence", 0)
 
-    # Goal Manager and Waiting-On are authoritative full lists. If a row that Jarvis
-    # previously knew about is absent, retire its *current* operational state while
-    # preserving the historical events that prove it once existed.
+    # Goal Manager, Waiting-On and Known People enrollment are authoritative full
+    # collections only when each collection is present and valid. Missing/malformed
+    # collections are partial snapshots and cannot retire anything.
     try:
         from jarvis_mrb.world_snapshot_reconcile import reconcile_authoritative_snapshot
 
@@ -50,6 +58,54 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             evidence="Current iPhone Jarvis mode",
         )
         counts["mode"] = 1
+
+    # Known People matching is closed-set and advisory. A fresh match is useful
+    # situational context, but it is deliberately represented as an expiring temporal
+    # observation rather than `currently_with`/identity state that could outlive the
+    # camera evidence. No distance, threshold, feature print or image is accepted.
+    presence = data.get("presence")
+    current_person = presence.get("current_person") if isinstance(presence, dict) else None
+    if isinstance(current_person, dict):
+        person_id = str(current_person.get("person_id") or "").strip()[:200]
+        person_name = " ".join(str(current_person.get("name") or "").split())[:300]
+        matched_at = str(current_person.get("matched_at") or "").strip()[:100]
+        advisory = current_person.get("advisory") is True
+        forbidden = {"distance", "threshold", "feature_print", "feature_prints", "image", "raw_image"}
+        if person_id and person_name and matched_at and advisory and not (forbidden & set(current_person)):
+            entity_id = ensure_entity(
+                "person",
+                person_name,
+                external_namespace="iphone_known_person",
+                external_id=person_id,
+                confidence=0.85,
+            )
+            # Bucket duplicate fresh observations to one event per minute per person.
+            # The timestamp remains in the payload/evidence while the explicit event
+            # key prevents a continuously visible face from generating thousands of
+            # nearly identical world events.
+            minute_bucket = matched_at[:16]
+            record_event(
+                "person.present_observed",
+                f"iPhone advisory presence match: {person_name}",
+                source_kind="iphone_known_person_presence",
+                source_ref=f"{person_id}:{minute_bucket}",
+                occurred_at=matched_at,
+                payload={
+                    "person_id": person_id,
+                    "name": person_name,
+                    "matched_at": matched_at,
+                    "advisory": True,
+                    "expires_after_seconds": 12,
+                },
+                evidence=(
+                    "Fresh closed-set Known People match produced on iPhone. Advisory only; "
+                    "no biometric feature data, match distance, threshold or image copied."
+                ),
+                confidence=0.75,
+                participants=[(SELF_ID, "observer", 1.0), (entity_id, "present_person", 0.75)],
+                event_key=f"iphone-known-person-presence:{person_id}:{minute_bucket}",
+            )
+            counts["current_person_presence"] = 1
 
     raw_events = data.get("events")
     for item in raw_events if isinstance(raw_events, list) else []:

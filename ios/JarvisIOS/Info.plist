@@ -50,6 +50,7 @@
         <string>audio</string>
         <string>bluetooth-peripheral</string>
         <string>external-accessory</string>
+        <string>location</string>
     </array>
 
     <key>NSMicrophoneUsageDescription</key>
@@ -59,9 +60,9 @@
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Jarvis connects to your Meta Ray-Ban glasses.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Jarvis uses your location to configure location-based automations and optional on-device travel context.</string>
+    <string>Jarvis uses your location for location-based automations, travel context, destination search, route calculation, and active turn-by-turn navigation.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Jarvis uses a home geofence to trigger automations and switch between home and mobile profiles.</string>
+    <string>Jarvis uses background location only for explicitly configured geofences and while an active Jarvis turn-by-turn route needs continued guidance when the app is not on screen.</string>
     <key>NSMotionUsageDescription</key>
     <string>Jarvis can optionally use motion activity to provide on-device walking, running, cycling, driving, or stationary context.</string>
     <key>NSLocalNetworkUsageDescription</key>

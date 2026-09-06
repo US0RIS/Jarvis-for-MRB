@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
-from jarvis_mrb.world_model import DB_PATH, SELF_ID
+from jarvis_mrb.world_model import DB_PATH
 
 
 def _now() -> str:
@@ -111,6 +111,15 @@ def _text_mentions(text: str, aliases: list[str]) -> bool:
     return False
 
 
+def _intention_status(goal_status: str) -> str:
+    normalized = _normalize(goal_status).replace(" ", "_")
+    if normalized in {"completed", "done", "resolved"}:
+        return "completed"
+    if normalized in {"retired", "deleted", "removed", "cancelled", "canceled", "inactive"}:
+        return "retired"
+    return "active"
+
+
 def refresh_intentions() -> dict[str, int]:
     now = _now()
     upserted = 0
@@ -119,16 +128,14 @@ def refresh_intentions() -> dict[str, int]:
 
     with _connect() as conn:
         goals = conn.execute("SELECT id,canonical_name,first_seen_at FROM entities WHERE kind='goal'").fetchall()
-        live_ids: set[str] = set()
 
         for goal in goals:
             goal_id = str(goal["id"])
-            status = str(_current_belief(conn, goal_id, "status", "active") or "active")
+            goal_status = str(_current_belief(conn, goal_id, "status", "active") or "active")
             next_action = str(_current_belief(conn, goal_id, "next_action", "") or "")[:1500]
             due_at = _current_belief(conn, goal_id, "due_at", None)
             intention_id = f"goal:{goal_id}"
-            live_ids.add(intention_id)
-            clean_status = "completed" if status == "completed" else "active"
+            clean_status = _intention_status(goal_status)
 
             existing = conn.execute("SELECT created_at FROM intentions WHERE id=?", (intention_id,)).fetchone()
             created = str(existing["created_at"]) if existing else str(goal["first_seen_at"] or now)
@@ -163,9 +170,10 @@ def refresh_intentions() -> dict[str, int]:
             )
             upserted += 1
 
-            # Project links come only from evidence-backed world relations. This lets
-            # an explicit goal inherit the relevant project context without guessing
-            # a project from vaguely similar wording.
+            # Only active intentions should acquire current project/dependency links.
+            if clean_status != "active":
+                continue
+
             project_rows = conn.execute(
                 """
                 SELECT r.object_id,r.confidence
@@ -183,14 +191,6 @@ def refresh_intentions() -> dict[str, int]:
                     (intention_id, str(project["object_id"]), "project", float(project["confidence"])),
                 )
                 linked_entities += 1
-
-        # Goals that were deleted from the frontend should not remain active forever.
-        # We retain their historical intention row but retire it rather than deleting
-        # provenance. Completed goals remain explicitly completed.
-        for row in conn.execute("SELECT id,status FROM intentions WHERE source_kind='explicit_goal'").fetchall():
-            iid = str(row["id"])
-            if iid not in live_ids and str(row["status"]) == "active":
-                conn.execute("UPDATE intentions SET status='retired',updated_at=? WHERE id=?", (now, iid))
 
         pending = conn.execute("SELECT * FROM commitments WHERE status='pending'").fetchall()
         intentions = conn.execute("SELECT * FROM intentions WHERE status='active'").fetchall()
@@ -240,10 +240,13 @@ def refresh_intentions() -> dict[str, int]:
                 )
                 linked_commitments += 1
 
-        # Remove stale links to commitments that are no longer pending. Their source
-        # commitments remain in the world history, so no evidence is destroyed.
+        # Current executive links disappear when either side ceases to be current;
+        # source commitments and intention rows remain for provenance/history.
         conn.execute(
             "DELETE FROM intention_commitments WHERE commitment_id IN (SELECT id FROM commitments WHERE status!='pending')"
+        )
+        conn.execute(
+            "DELETE FROM intention_commitments WHERE intention_id IN (SELECT id FROM intentions WHERE status!='active')"
         )
         conn.commit()
 
@@ -347,6 +350,14 @@ def context(limit: int = 6) -> str:
 def status() -> dict[str, int]:
     with _connect() as conn:
         active = int(conn.execute("SELECT COUNT(*) FROM intentions WHERE status='active'").fetchone()[0])
+        retired = int(conn.execute("SELECT COUNT(*) FROM intentions WHERE status='retired'").fetchone()[0])
+        completed = int(conn.execute("SELECT COUNT(*) FROM intentions WHERE status='completed'").fetchone()[0])
         total = int(conn.execute("SELECT COUNT(*) FROM intentions").fetchone()[0])
         links = int(conn.execute("SELECT COUNT(*) FROM intention_commitments").fetchone()[0])
-    return {"active_intentions": active, "intentions": total, "linked_commitments": links}
+    return {
+        "active_intentions": active,
+        "retired_intentions": retired,
+        "completed_intentions": completed,
+        "intentions": total,
+        "linked_commitments": links,
+    }

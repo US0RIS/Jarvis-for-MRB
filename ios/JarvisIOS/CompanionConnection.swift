@@ -7,6 +7,7 @@ final class CompanionConnection: ObservableObject {
 
     var onEvent: (([String: Any]) -> Void)?
 
+    private static weak var activeConnection: CompanionConnection?
     private let session = URLSession(configuration: .default)
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -34,6 +35,7 @@ final class CompanionConnection: ObservableObject {
 
         let task = session.webSocketTask(with: request)
         socket = task
+        Self.activeConnection = self
         activeServerURL = base
         status = "Connecting"
         task.resume()
@@ -52,6 +54,9 @@ final class CompanionConnection: ObservableObject {
         receiveTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        if Self.activeConnection === self {
+            Self.activeConnection = nil
+        }
         status = "Disconnected"
     }
 
@@ -62,6 +67,17 @@ final class CompanionConnection: ObservableObject {
 
     func sendEnvironment(_ state: [String: Any]) async throws {
         try await sendJSON(["type": "environment", "state": state])
+    }
+
+    /// Publish an explicit metadata-only snapshot from iPhone-local Jarvis stores
+    /// over the already-authenticated persistent companion socket. This deliberately
+    /// reuses the existing connection rather than creating a second socket whose
+    /// lifecycle could make the backend think the phone disconnected.
+    static func sendWorldSnapshot(_ snapshot: [String: Any]) async throws {
+        guard let activeConnection, activeConnection.isConnected else {
+            throw URLError(.notConnectedToInternet)
+        }
+        try await activeConnection.sendEnvironment(["world_snapshot": snapshot])
     }
 
     private func sendJSON(_ object: [String: Any]) async throws {
@@ -91,6 +107,9 @@ final class CompanionConnection: ObservableObject {
                 if !Task.isCancelled {
                     status = "Disconnected"
                     socket = nil
+                    if Self.activeConnection === self {
+                        Self.activeConnection = nil
+                    }
                 }
                 return
             }

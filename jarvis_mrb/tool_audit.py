@@ -113,6 +113,14 @@ def _consume_staged_decision(tool: str, args: dict[str, Any]) -> str:
         return ""
 
 
+def _verification_args(tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Normalize only values whose storage authority normalizes them before write."""
+    result = dict(args or {})
+    if str(tool) == "state.temp_set":
+        result["key"] = str(result.get("key") or "").strip().lower().replace(" ", "_")[:100]
+    return result
+
+
 def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
     if str(tool).startswith("world."):
         return
@@ -141,7 +149,7 @@ def _record(tool: str, args: dict[str, Any], reply: Any) -> None:
         executive_decision_id = _consume_staged_decision(tool, args) or _executive_decision_id(tool, args)
         register_execution(
             str(tool),
-            dict(args or {}),
+            _verification_args(tool, args),
             reply,
             action_event_id=int(action_event_id),
             executive_decision_id=executive_decision_id,
@@ -207,4 +215,5 @@ def status() -> dict[str, Any]:
         "executive_decision_correlation": "exact persisted tool+arguments; one-shot staged confirmation cache",
         "staged_executive_confirmations": staged,
         "staged_confirmation_ttl_seconds": _STAGED_TTL_SECONDS,
+        "verification_input_normalization": ["state.temp_set.key"],
     }

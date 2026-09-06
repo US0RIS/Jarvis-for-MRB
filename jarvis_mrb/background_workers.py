@@ -53,6 +53,48 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _mirror_task(task: dict[str, Any], *, event_type: str) -> None:
+    """Best-effort world mirror; background_tasks.sqlite3 remains queue authority."""
+    try:
+        from jarvis_mrb.world_model import SELF_ID, assert_belief, ensure_entity, record_event
+
+        task_id = int(task["id"])
+        prompt = " ".join(str(task.get("prompt") or "").split())[:5000]
+        status = str(task.get("status") or "unknown")[:80]
+        entity_id = ensure_entity(
+            "work_item",
+            f"Background task {task_id}: {prompt[:400]}",
+            external_namespace="background_task",
+            external_id=str(task_id),
+            attributes={"prompt": prompt, "session_id": str(task.get("session_id") or "")[:128]},
+            confidence=1.0,
+        )
+        payload: dict[str, Any] = {
+            "task_id": task_id,
+            "prompt": prompt,
+            "session_id": str(task.get("session_id") or "")[:128],
+            "status": status,
+        }
+        if task.get("result"):
+            payload["result"] = str(task.get("result"))[:12000]
+        if task.get("error"):
+            payload["error"] = str(task.get("error"))[:4000]
+        event_id = record_event(
+            event_type,
+            f"Background task {task_id} {status}: {prompt[:1000]}",
+            source_kind="background_worker",
+            source_ref=f"task:{task_id}:{event_type}:{task.get('updated_at') or ''}",
+            occurred_at=str(task.get("updated_at") or task.get("created_at") or "") or None,
+            payload=payload,
+            evidence="Jarvis background-worker lifecycle record.",
+            confidence=1.0,
+            participants=[(SELF_ID, "requester", 1.0), (entity_id, "work_item", 1.0)],
+        )
+        assert_belief(entity_id, "status", value=status, source_event_id=event_id)
+    except Exception:
+        pass
+
+
 def submit(prompt: str, session_id: str = "default") -> dict[str, Any]:
     text = prompt.strip()
     if not text:
@@ -65,9 +107,11 @@ def submit(prompt: str, session_id: str = "default") -> dict[str, Any]:
         )
         task_id = int(cursor.lastrowid)
         conn.commit()
+    task = get_task(task_id)
+    _mirror_task(task, event_type="work.queued")
     _POOL.submit(_run, task_id)
     emit_cue("task_started")
-    return get_task(task_id)
+    return task
 
 
 def _cancelled(task_id: int) -> bool:
@@ -92,6 +136,7 @@ def _run(task_id: int) -> None:
         conn.commit()
         prompt = str(row["prompt"])
         session_id = str(row["session_id"])
+    _mirror_task(get_task(task_id), event_type="work.started")
 
     try:
         from jarvis_mrb.conversation import recent_messages
@@ -128,10 +173,9 @@ def _run(task_id: int) -> None:
             conn.commit()
         if _cancelled(task_id):
             return
+        completed = get_task(task_id)
+        _mirror_task(completed, event_type="work.completed")
 
-        # Completion is an interruption cue, not an audiobook. Keep the unsolicited
-        # spoken payload short; the complete result stays in the task database and
-        # can be requested conversationally.
         concise = result.replace("\n", " ").strip()
         if len(concise) > 360:
             concise = concise[:357].rsplit(" ", 1)[0] + "..."
@@ -153,6 +197,7 @@ def _run(task_id: int) -> None:
                 (message, datetime.now().astimezone().isoformat(), task_id),
             )
             conn.commit()
+        _mirror_task(get_task(task_id), event_type="work.failed")
         companion_events.publish(
             {
                 "type": "background_failed",
@@ -196,4 +241,7 @@ def cancel(task_id: int) -> dict[str, Any]:
                 (datetime.now().astimezone().isoformat(), task_id),
             )
             conn.commit()
-    return get_task(task_id)
+    task = get_task(task_id)
+    if task["status"] == "cancelled":
+        _mirror_task(task, event_type="work.cancelled")
+    return task

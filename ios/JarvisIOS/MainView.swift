@@ -6,6 +6,8 @@ struct MainView: View {
     @EnvironmentObject private var persistentPresence: PersistentPresenceController
     @EnvironmentObject private var meetingCapture: MeetingCaptureController
     @EnvironmentObject private var frontend: FrontendIntelligenceController
+    @EnvironmentObject private var localProductivity: LocalProductivityController
+    @EnvironmentObject private var localPower: LocalPowerFeaturesController
     @State private var showingSettings = false
 
     var body: some View {
@@ -26,6 +28,13 @@ struct MainView: View {
             .navigationTitle("Jarvis")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink {
+                        FrontendOperationsView()
+                    } label: {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                    }
+                    .accessibilityLabel("Jarvis Operations")
+
                     NavigationLink {
                         FeatureGuideView()
                     } label: {
@@ -48,6 +57,15 @@ struct MainView: View {
                 Text(appModel.errorMessage ?? "")
             }
             .onOpenURL { url in Task { await appModel.metaGlasses.handleURL(url) } }
+            .task {
+                await FrontendOperationsController.shared.start(
+                    appModel: appModel,
+                    persistentPresence: persistentPresence,
+                    meetingCapture: meetingCapture,
+                    productivity: localProductivity,
+                    localPower: localPower
+                )
+            }
         }
     }
 
@@ -65,6 +83,7 @@ struct MainView: View {
                         Task {
                             await appModel.checkConnection()
                             await frontend.probeConnections()
+                            await FrontendOperationsController.shared.refreshReadiness()
                         }
                     }
                     .buttonStyle(.bordered)
@@ -72,6 +91,8 @@ struct MainView: View {
                 LabeledContent("Companion", value: persistentPresence.companionStatus)
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Route probe", value: frontend.connectivityStatus)
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Operations", value: FrontendOperationsController.shared.status)
                     .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
@@ -100,19 +121,19 @@ struct MainView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(appModel.handsFreeEnabled || meetingCapture.isActive)
+                    .disabled(appModel.handsFreeEnabled || meetingCapture.isActive || FrontendOperationsController.shared.roomListening.isActive)
 
                     Toggle("Hands-free Jarvis", isOn: Binding(
                         get: { appModel.handsFreeEnabled },
                         set: { enabled in Task { await appModel.setHandsFreeEnabled(enabled) } }
                     ))
                     .labelsHidden()
-                    .disabled(meetingCapture.isActive)
+                    .disabled(meetingCapture.isActive || FrontendOperationsController.shared.roomListening.isActive)
                 }
 
                 HStack(spacing: 8) {
                     Image(systemName: appModel.handsFreeEnabled ? "waveform.circle.fill" : "waveform.circle")
-                    Text(meetingCapture.isActive ? "Meeting capture owns the microphone" : appModel.voiceStatus).font(.callout)
+                    Text(meetingCapture.isActive ? "Meeting capture owns the microphone" : (FrontendOperationsController.shared.roomListening.isActive ? "Room Listening owns the microphone" : appModel.voiceStatus)).font(.callout)
                 }
 
                 LabeledContent("Audio route", value: appModel.audioRouteManager.routeSummary)
@@ -134,7 +155,7 @@ struct MainView: View {
                     Text("No Bluetooth hands-free microphone is currently available, so Jarvis is using the iPhone audio route.")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                if appModel.isListening && !meetingCapture.isActive {
+                if appModel.isListening && !meetingCapture.isActive && !FrontendOperationsController.shared.roomListening.isActive {
                     SpeechTranscriptView(recognizer: appModel.speechRecognizer, wakeMode: appModel.handsFreeEnabled)
                 }
                 if !appModel.lastHeardCommand.isEmpty {
@@ -181,7 +202,12 @@ struct MainView: View {
                         .buttonStyle(.bordered)
                     } else {
                         Button("Start Meeting Notes") {
-                            Task { await meetingCapture.start() }
+                            Task {
+                                if FrontendOperationsController.shared.roomListening.isActive {
+                                    _ = await FrontendOperationsController.shared.roomListening.stop()
+                                }
+                                await meetingCapture.start()
+                            }
                         }
                         .buttonStyle(.borderedProminent)
 
@@ -219,7 +245,7 @@ struct MainView: View {
                     .font(.caption)
                 }
 
-                Text("Meeting transcription is explicit opt-in and visibly active. Room capture deliberately uses the iPhone built-in microphone rather than the wearer-focused Ray-Ban HFP microphone, improving pickup of other people when the phone is placed in the room. The iPhone keeps its own local transcript buffer, pause/resume state and bookmarks. If the PC is unreachable, capture can continue locally and be synchronized later. It does not identify speakers by voiceprint or infer emotion/stress. Use recording only where permitted and with appropriate participant notice/consent.")
+                Text("Meeting transcription is explicit opt-in and visibly active. Room capture deliberately uses the iPhone built-in microphone rather than the wearer-focused Ray-Ban HFP microphone, improving pickup of other people when the phone is placed in the room. A route watchdog reasserts that input if iOS changes it. The iPhone keeps its own local transcript buffer, pause/resume state and bookmarks. If the PC is unreachable, capture can continue locally and be synchronized later. It does not identify speakers by voiceprint or infer emotion/stress. Use recording only where permitted and with appropriate participant notice/consent.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

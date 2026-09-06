@@ -185,6 +185,12 @@ def _remember_exchange(session_id: str, user_text: str, assistant_text: str) -> 
             from jarvis_mrb.world_executive import refresh_intentions
 
             refresh_intentions()
+            try:
+                from jarvis_mrb.world_executive_loop import refresh as refresh_executive_loop
+
+                refresh_executive_loop()
+            except Exception:
+                pass
         except Exception:
             pass
     except Exception:
@@ -264,14 +270,39 @@ def memory_context(query: str, limit: int = 3) -> str:
         except Exception:
             pass
 
+        # Direct project-term questions should resolve from the structured ledger
+        # rather than relying on fuzzy event retrieval. The provider itself requires
+        # both an explicit term cue and a concrete project entity match.
         try:
-            from jarvis_mrb.world_relevance import context_for_query as relevant_executive_context
+            from jarvis_mrb.world_term_context import context_for_query as term_context
 
-            executive = relevant_executive_context(query, limit=4)
-            if executive:
-                pieces.append(executive)
+            terms = term_context(query)
+            if terms:
+                pieces.append(terms)
         except Exception:
             pass
+
+        executive_loop = ""
+        try:
+            from jarvis_mrb.world_executive_loop import context_for_query as loop_context
+
+            executive_loop = loop_context(query, limit=3)
+            if executive_loop:
+                pieces.append(executive_loop)
+        except Exception:
+            executive_loop = ""
+
+        # The older relevance view remains a narrow fallback for queries that match
+        # an intention but are not asking for operational status/next actions.
+        if not executive_loop:
+            try:
+                from jarvis_mrb.world_relevance import context_for_query as relevant_executive_context
+
+                executive = relevant_executive_context(query, limit=4)
+                if executive:
+                    pieces.append(executive)
+            except Exception:
+                pass
 
     if should_retrieve_memory(query):
         items = retrieve(query, limit=limit)
@@ -290,10 +321,12 @@ def status() -> dict[str, object]:
         embedded = int(conn.execute("SELECT COUNT(*) FROM episodes WHERE dimensions>0").fetchone()[0])
     linker: dict[str, object] = {}
     executive: dict[str, object] = {}
+    executive_loop: dict[str, object] = {}
     relevance: dict[str, object] = {}
     situation: dict[str, object] = {}
     intent_capture: dict[str, object] = {}
     terms: dict[str, object] = {}
+    term_context: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
@@ -304,6 +337,12 @@ def status() -> dict[str, object]:
         from jarvis_mrb.world_executive import status as executive_status
 
         executive = executive_status()
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.world_executive_loop import status as executive_loop_status
+
+        executive_loop = executive_loop_status()
     except Exception:
         pass
     try:
@@ -330,21 +369,31 @@ def status() -> dict[str, object]:
         terms = terms_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_term_context import status as term_context_status
+
+        term_context = term_context_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "routed: situation OR structured-world/relations/selective-intentions; episodic recall independently on-demand",
+        "retrieval_mode": "routed: situation OR structured-world/relations/term-ledger/executive-loop; episodic recall independently on-demand",
         "context_router": {
             "situation_short_circuits_broad_context": True,
             "provider_failures_isolated": True,
             "episodic_recall_independent": True,
+            "structured_term_queries": True,
+            "persistent_executive_loop": True,
         },
         "world_linker": linker,
         "world_executive": executive,
+        "world_executive_loop": executive_loop,
         "world_relevance": relevance,
         "world_situation": situation,
         "world_intent_capture": intent_capture,
         "world_terms": terms,
+        "world_term_context": term_context,
     }

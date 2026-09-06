@@ -21,12 +21,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
-    return bool(
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (table,),
-        ).fetchone()
-    )
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone())
 
 
 def current_version() -> int:
@@ -36,9 +31,7 @@ def current_version() -> int:
         with _connect() as conn:
             if not _table_exists(conn, "world_schema_meta"):
                 return 0
-            row = conn.execute(
-                "SELECT value FROM world_schema_meta WHERE key='schema_version'"
-            ).fetchone()
+            row = conn.execute("SELECT value FROM world_schema_meta WHERE key='schema_version'").fetchone()
         return int(row["value"]) if row and str(row["value"]).isdigit() else 0
     except sqlite3.Error:
         return 0
@@ -76,11 +69,7 @@ def _backup_before_upgrade(from_version: int) -> str:
         target.close()
         source.close()
 
-    backups = sorted(
-        backup_dir.glob("world_model.pre-v*.sqlite3"),
-        key=lambda item: item.stat().st_mtime,
-        reverse=True,
-    )
+    backups = sorted(backup_dir.glob("world_model.pre-v*.sqlite3"), key=lambda item: item.stat().st_mtime, reverse=True)
     for old in backups[_BACKUP_RETAIN:]:
         try:
             old.unlink()
@@ -111,8 +100,7 @@ def _record_version(version: int, description: str) -> None:
     now = datetime.now().astimezone().isoformat()
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO world_schema_meta(key,value) VALUES('schema_version',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO world_schema_meta(key,value) VALUES('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(version),),
         )
         conn.execute(
@@ -124,14 +112,12 @@ def _record_version(version: int, description: str) -> None:
 
 def _migration_1_core() -> None:
     from jarvis_mrb.world_model import status as world_status
-
     world_status()
 
 
 def _migration_2_relations_and_intentions() -> None:
     from jarvis_mrb.world_executive import status as executive_status
     from jarvis_mrb.world_linker import repair_person_project_relations, status as linker_status
-
     linker_status()
     executive_status()
     repair_person_project_relations()
@@ -140,25 +126,25 @@ def _migration_2_relations_and_intentions() -> None:
 def _migration_3_terms_and_document_lineage() -> None:
     from jarvis_mrb.world_document_versions import _connect as document_connect
     from jarvis_mrb.world_terms import status as terms_status
-
     terms_status()
     conn = document_connect()
     conn.close()
 
 
 def _migration_4_executive_and_verification() -> None:
+    from jarvis_mrb.runtime_health import status as runtime_status
     from jarvis_mrb.world_executive_loop import status as executive_loop_status
     from jarvis_mrb.world_verification import status as verification_status
-
     executive_loop_status()
     verification_status()
+    runtime_status()
 
 
 _MIGRATIONS: tuple[tuple[int, str, Callable[[], None]], ...] = (
     (1, "Core world entities/events/beliefs/commitments", _migration_1_core),
     (2, "Evidence relations, intentions, and strong person/project semantics", _migration_2_relations_and_intentions),
     (3, "Cross-source term ledger and document lineage", _migration_3_terms_and_document_lineage),
-    (4, "Persistent Executive Loop and closed-loop action verification", _migration_4_executive_and_verification),
+    (4, "Executive Loop, closed-loop verification, and runtime subsystem health", _migration_4_executive_and_verification),
 )
 
 
@@ -197,9 +183,7 @@ def run_migrations(*, backup: bool = True) -> dict[str, Any]:
         applied.append(target)
 
     if version != TARGET_SCHEMA_VERSION:
-        raise RuntimeError(
-            f"World migration stopped at v{version}; expected v{TARGET_SCHEMA_VERSION}."
-        )
+        raise RuntimeError(f"World migration stopped at v{version}; expected v{TARGET_SCHEMA_VERSION}.")
 
     return {
         "before": before,
@@ -217,15 +201,9 @@ def status() -> dict[str, Any]:
     try:
         with _connect() as conn:
             if _table_exists(conn, "world_schema_history"):
-                rows = conn.execute(
-                    "SELECT version,applied_at,description FROM world_schema_history ORDER BY version"
-                ).fetchall()
+                rows = conn.execute("SELECT version,applied_at,description FROM world_schema_history ORDER BY version").fetchall()
                 history = [
-                    {
-                        "version": int(row["version"]),
-                        "applied_at": str(row["applied_at"]),
-                        "description": str(row["description"]),
-                    }
+                    {"version": int(row["version"]), "applied_at": str(row["applied_at"]), "description": str(row["description"])}
                     for row in rows
                 ]
     except sqlite3.Error:

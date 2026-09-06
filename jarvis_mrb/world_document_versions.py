@@ -15,6 +15,10 @@ _VERSION_WORDS = {
     "redline", "blackline", "markup", "marked", "execution", "executed", "signed",
     "copy", "new", "latest", "working",
 }
+_STOP = {
+    "the", "and", "for", "with", "from", "that", "this", "shall", "will", "into", "upon",
+    "such", "any", "each", "other", "agreement", "section", "party", "parties",
+}
 _NUMBER_RE = re.compile(
     r"(?<!\w)(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:%|percent|bps?|x|days?|months?|years?)?(?!\w)",
     flags=re.IGNORECASE,
@@ -64,7 +68,6 @@ def _family_key(filename: str) -> str:
     stem = re.sub(r"\b20\d{2}[-_. ]\d{1,2}[-_. ]\d{1,2}\b", " ", stem)
     stem = re.sub(r"\b\d{1,2}[-_. ]\d{1,2}[-_. ]20\d{2}\b", " ", stem)
     tokens = [token for token in re.findall(r"[a-z0-9]+", stem) if token not in _VERSION_WORDS]
-    # Do not let an over-aggressive normalizer collapse unrelated generic files.
     if len(tokens) < 2:
         tokens = re.findall(r"[a-z0-9]+", path.stem.lower())
     return " ".join(tokens[:20])[:300]
@@ -81,8 +84,6 @@ def _segments(text: str) -> list[str]:
         if len(value) <= 900:
             segments.append(value)
             continue
-        # Long extracted paragraphs are chunked on semicolons/numbered clauses while
-        # preserving enough local text for high-overlap version matching.
         subparts = re.split(r"(?<=;)\s+|(?=\(\w{1,3}\)\s)|(?=\d+\.\s)", value)
         buffer = ""
         for sub in subparts:
@@ -102,9 +103,11 @@ def _numbers(text: str) -> list[str]:
     values = [" ".join(match.group(0).split()) for match in _NUMBER_RE.finditer(text)]
     values.extend(" ".join(match.group(0).split()) for match in _DATE_RE.finditer(text))
     result: list[str] = []
+    seen: set[str] = set()
     for value in values:
         normalized = value.lower()
-        if normalized not in {item.lower() for item in result}:
+        if normalized not in seen:
+            seen.add(normalized)
             result.append(value)
     return result[:20]
 
@@ -145,15 +148,11 @@ def _changed_passages(old_text: str, new_text: str, limit: int = 8) -> list[dict
 
     for new in new_segments:
         old, similarity = _best_old_segment(new, old_segments)
-        if old is None or similarity < 0.58:
-            continue
-        if old == new:
+        if old is None or similarity < 0.58 or old == new:
             continue
         old_numbers = _numbers(old)
         new_numbers = _numbers(new)
         numeric_change = old_numbers != new_numbers and bool(old_numbers or new_numbers)
-        # For non-numeric edits require very high structural similarity so this does
-        # not mislabel merely related clauses as versions of the same clause.
         if not numeric_change and similarity < 0.82:
             continue
         key = (old[:220], new[:220])
@@ -178,9 +177,7 @@ def _changed_passages(old_text: str, new_text: str, limit: int = 8) -> list[dict
 
 def _attachment_events() -> list[dict[str, Any]]:
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM events WHERE event_type='knowledge.gmail_attachment' ORDER BY id ASC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM events WHERE event_type='knowledge.gmail_attachment' ORDER BY id ASC").fetchall()
     result: list[dict[str, Any]] = []
     for row in rows:
         payload = _loads(str(row["payload_json"] or "{}"), {})
@@ -214,6 +211,19 @@ def _document_entity_id(source_ref: str) -> str | None:
     return str(row["entity_id"]) if row else None
 
 
+def _project_ids_for_event(event_id: int) -> set[str]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT ee.entity_id
+            FROM event_entities ee JOIN entities e ON e.id=ee.entity_id
+            WHERE ee.event_id=? AND e.kind='project'
+            """,
+            (int(event_id),),
+        ).fetchall()
+    return {str(row["entity_id"]) for row in rows}
+
+
 def _participants_for_attachment(event_id: int) -> list[tuple[str, str, float]]:
     with _connect() as conn:
         rows = conn.execute(
@@ -228,8 +238,97 @@ def _participants_for_attachment(event_id: int) -> list[tuple[str, str, float]]:
     return result
 
 
+def _content_tokens(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9]{3,}", str(text or "").lower()[:25_000])
+        if token not in _STOP and not token.isdigit()
+    }
+
+
+def _lineage_score(older: dict[str, Any], newer: dict[str, Any]) -> float:
+    score = 0.0
+    old_meta = older.get("metadata") if isinstance(older.get("metadata"), dict) else {}
+    new_meta = newer.get("metadata") if isinstance(newer.get("metadata"), dict) else {}
+    old_thread = str(old_meta.get("thread_id") or "")
+    new_thread = str(new_meta.get("thread_id") or "")
+    if old_thread and new_thread and old_thread == new_thread:
+        score += 1.5
+
+    shared_projects = _project_ids_for_event(int(older["event_id"])) & _project_ids_for_event(int(newer["event_id"]))
+    if shared_projects:
+        score += 1.5
+
+    old_tokens = _content_tokens(str(older["text"]))
+    new_tokens = _content_tokens(str(newer["text"]))
+    if old_tokens and new_tokens:
+        union = old_tokens | new_tokens
+        jaccard = len(old_tokens & new_tokens) / max(1, len(union))
+        score += min(2.0, jaccard * 3.0)
+
+    old_subject = re.sub(r"^(?:re|fw|fwd):\s*", "", str(old_meta.get("email_subject") or "").lower())
+    new_subject = re.sub(r"^(?:re|fw|fwd):\s*", "", str(new_meta.get("email_subject") or "").lower())
+    if old_subject and new_subject and old_subject == new_subject:
+        score += 0.4
+    return score
+
+
+def _best_predecessor(members: list[dict[str, Any]], newer_index: int) -> tuple[dict[str, Any] | None, float]:
+    newer = members[newer_index]
+    candidates = members[max(0, newer_index - 6):newer_index]
+    best: dict[str, Any] | None = None
+    best_score = 0.0
+    for older in reversed(candidates):
+        score = _lineage_score(older, newer)
+        if score > best_score:
+            best = older
+            best_score = score
+    # A same-thread or same-project match clears this easily. Otherwise the text
+    # itself must be substantially overlapping before two generic filenames are
+    # treated as versions of the same document.
+    return (best, best_score) if best is not None and best_score >= 1.15 else (None, best_score)
+
+
+def _record_supersession(new_doc: str | None, old_doc: str | None, event_id: int, confidence: float) -> None:
+    if not new_doc or not old_doc or new_doc == old_doc:
+        return
+    # Ensure relationship tables exist before writing a high-confidence deterministic
+    # lineage edge. The comparison event itself remains the supporting evidence.
+    try:
+        from jarvis_mrb.world_linker import status as linker_status
+
+        linker_status()
+    except Exception:
+        return
+    now = datetime.now().astimezone().isoformat()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id,confidence FROM entity_relations WHERE subject_id=? AND predicate='supersedes' AND object_id=?",
+            (new_doc, old_doc),
+        ).fetchone()
+        if row:
+            relation_id = int(row["id"])
+            conn.execute(
+                "UPDATE entity_relations SET confidence=?,state='current',last_seen_at=? WHERE id=?",
+                (max(float(row["confidence"]), confidence), now, relation_id),
+            )
+        else:
+            cursor = conn.execute(
+                "INSERT INTO entity_relations(subject_id,predicate,object_id,confidence,state,first_seen_at,last_seen_at,evidence_count) VALUES(?,?,?,?,?,?,?,0)",
+                (new_doc, "supersedes", old_doc, confidence, "current", now, now),
+            )
+            relation_id = int(cursor.lastrowid)
+        before = conn.total_changes
+        conn.execute(
+            "INSERT OR IGNORE INTO relation_evidence(relation_id,event_id,confidence,explanation) VALUES(?,?,?,?)",
+            (relation_id, int(event_id), confidence, "Deterministic document-family lineage and local text comparison."),
+        )
+        if conn.total_changes > before:
+            conn.execute("UPDATE entity_relations SET evidence_count=evidence_count+1 WHERE id=?", (relation_id,))
+        conn.commit()
+
+
 def refresh(limit_pairs: int = 50) -> dict[str, Any]:
-    """Compare consecutive Gmail attachments that look like versions of one file."""
+    """Compare likely predecessor/successor Gmail attachments within each file family."""
     events = _attachment_events()
     families: dict[str, list[dict[str, Any]]] = {}
     for item in events:
@@ -239,13 +338,19 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
     compared = 0
     changed = 0
     numeric_changes = 0
+    rejected_lineage = 0
     generated_events: list[int] = []
 
     for family, members in families.items():
         if len(members) < 2:
             continue
         members.sort(key=lambda item: int(item["event_id"]))
-        for older, newer in zip(members, members[1:]):
+        for newer_index in range(1, len(members)):
+            newer = members[newer_index]
+            older, lineage_score = _best_predecessor(members, newer_index)
+            if older is None:
+                rejected_lineage += 1
+                continue
             with _connect() as conn:
                 existing = conn.execute(
                     "SELECT comparison_event_id FROM document_version_pairs WHERE older_event_id=? AND newer_event_id=?",
@@ -253,6 +358,7 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
                 ).fetchone()
             if existing:
                 continue
+
             compared += 1
             passages = _changed_passages(str(older["text"]), str(newer["text"]), limit=8)
             number_count = sum(1 for item in passages if item["numeric_change"])
@@ -267,7 +373,6 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
                 participants.append((new_doc, "new_version", 1.0))
             participants.extend(_participants_for_attachment(int(newer["event_id"])))
 
-            comparison_event_id: int | None = None
             if passages:
                 changed += 1
                 headline = next((item for item in passages if item["numeric_change"]), passages[0])
@@ -276,49 +381,42 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
                     new_values = ", ".join(headline["new_numbers"][:5]) or "none"
                     summary = (
                         f"New version of {newer['title']} changes numeric/date terms: "
-                        f"{old_values} -> {new_values}. "
-                        f"Changed passage: {headline['new'][:700]}"
+                        f"{old_values} -> {new_values}. Changed passage: {headline['new'][:700]}"
                     )
                 else:
                     summary = f"New version of {newer['title']} contains changed language: {headline['new'][:900]}"
+                event_type = "document.version_changed"
+                confidence = 0.93 if number_count else 0.82
+            else:
+                summary = f"New version of {newer['title']} appears textually equivalent in the compared passages."
+                event_type = "document.version_equivalent"
+                confidence = 0.78
 
-                comparison_event_id = record_event(
-                    "document.version_changed",
-                    summary,
-                    source_kind="document_diff",
-                    source_ref=f"{older['source_ref']}->{newer['source_ref']}",
-                    occurred_at=str(newer["occurred_at"]),
-                    payload={
-                        "family": family,
-                        "older": {
-                            "event_id": older["event_id"],
-                            "title": older["title"],
-                            "source_ref": older["source_ref"],
-                        },
-                        "newer": {
-                            "event_id": newer["event_id"],
-                            "title": newer["title"],
-                            "source_ref": newer["source_ref"],
-                        },
-                        "changes": passages,
-                        "numeric_change_count": number_count,
-                    },
-                    evidence="Deterministic local comparison of extracted text from two Gmail attachment versions; numeric/date changes are prioritized.",
-                    confidence=0.9 if number_count else 0.78,
-                    participants=participants,
-                )
-                generated_events.append(comparison_event_id)
+            comparison_event_id = record_event(
+                event_type,
+                summary,
+                source_kind="document_diff",
+                source_ref=f"{older['source_ref']}->{newer['source_ref']}",
+                occurred_at=str(newer["occurred_at"]),
+                payload={
+                    "family": family,
+                    "lineage_score": round(lineage_score, 3),
+                    "older": {"event_id": older["event_id"], "title": older["title"], "source_ref": older["source_ref"]},
+                    "newer": {"event_id": newer["event_id"], "title": newer["title"], "source_ref": newer["source_ref"]},
+                    "changes": passages,
+                    "numeric_change_count": number_count,
+                },
+                evidence="Deterministic local lineage check and comparison of extracted Gmail attachment text; numeric/date changes are prioritized.",
+                confidence=confidence,
+                participants=participants,
+            )
+            generated_events.append(comparison_event_id)
+            _record_supersession(new_doc, old_doc, comparison_event_id, min(0.98, 0.82 + min(lineage_score, 2.0) * 0.06))
 
             with _connect() as conn:
                 conn.execute(
                     "INSERT INTO document_version_pairs(older_event_id,newer_event_id,family_key,comparison_event_id,compared_at) VALUES(?,?,?,?,?)",
-                    (
-                        int(older["event_id"]),
-                        int(newer["event_id"]),
-                        family,
-                        comparison_event_id,
-                        datetime.now().astimezone().isoformat(),
-                    ),
+                    (int(older["event_id"]), int(newer["event_id"]), family, comparison_event_id, datetime.now().astimezone().isoformat()),
                 )
                 conn.commit()
             if compared >= max(1, min(int(limit_pairs), 200)):
@@ -327,6 +425,7 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
                     "pairs_compared": compared,
                     "pairs_with_changes": changed,
                     "numeric_change_passages": numeric_changes,
+                    "lineage_candidates_rejected": rejected_lineage,
                     "generated_event_ids": generated_events,
                 }
 
@@ -335,6 +434,7 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
         "pairs_compared": compared,
         "pairs_with_changes": changed,
         "numeric_change_passages": numeric_changes,
+        "lineage_candidates_rejected": rejected_lineage,
         "generated_event_ids": generated_events,
     }
 
@@ -342,11 +442,17 @@ def refresh(limit_pairs: int = 50) -> dict[str, Any]:
 def status() -> dict[str, Any]:
     with _connect() as conn:
         pairs = int(conn.execute("SELECT COUNT(*) FROM document_version_pairs").fetchone()[0])
-        changes = int(conn.execute("SELECT COUNT(*) FROM document_version_pairs WHERE comparison_event_id IS NOT NULL").fetchone()[0])
+        changes = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM document_version_pairs p JOIN events e ON e.id=p.comparison_event_id WHERE e.event_type='document.version_changed'"
+            ).fetchone()[0]
+        )
     return {
         "compared_version_pairs": pairs,
         "version_pairs_with_changes": changes,
         "numeric_date_change_detection": True,
+        "lineage_uses_thread_project_and_text_overlap": True,
+        "supersession_edges": True,
         "deterministic_text_comparison": True,
         "executes_documents": False,
     }

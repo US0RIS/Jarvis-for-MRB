@@ -95,9 +95,6 @@ def _check_calendar() -> None:
         if 3 <= minutes <= 8:
             _prefetch_for_event(event_id, summary)
 
-        # In the useful preparation window, prefer a world-grounded pre-brief over a
-        # generic countdown. The pre-brief exists only when the meeting has actionable
-        # connected context, so ordinary calendar events remain quiet and predictable.
         if 12 < minutes <= 35:
             prebrief = _contextual_prebrief(event_id, summary)
             if prebrief:
@@ -107,7 +104,6 @@ def _check_calendar() -> None:
                         cue="attention",
                         severity=str(prebrief.get("severity") or "info"),
                     )
-                # Do not follow a contextual brief with a redundant generic reminder.
                 continue
 
         if minutes <= 12:
@@ -209,6 +205,16 @@ def start() -> None:
         if _STARTED:
             return
         _STARTED = True
+
+    # The action audit is the ingestion edge for closed-loop verification. Install it
+    # synchronously before starting any proactive observers so ordinary tool calls are
+    # registered as attempts before the verifier loop begins reading outcomes.
+    try:
+        from jarvis_mrb.tool_audit import install as install_tool_audit
+
+        install_tool_audit()
+    except Exception:
+        pass
 
     try:
         from jarvis_mrb.pc_context import start as start_pc_context

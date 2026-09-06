@@ -33,6 +33,7 @@ jarvis-remote-setup = "jarvis_mrb.remote_setup:main"
 jarvis-serper-setup = "jarvis_mrb.serper_setup:main"
 jarvis-world-check = "jarvis_mrb.world_check:main"
 jarvis-world-migrate = "jarvis_mrb.world_migrate:main"
+jarvis-world-prepare = "jarvis_mrb.world_prepare:main"
 
 [tool.setuptools.packages.find]
 include = ["jarvis_mrb*"]

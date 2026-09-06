@@ -6,6 +6,8 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from jarvis_mrb.conversation import ConversationMessage
+import jarvis_mrb.streaming_agent as streaming_agent
 import jarvis_mrb.world_executive as world_executive
 import jarvis_mrb.world_executive_loop as world_executive_loop
 import jarvis_mrb.world_intent_capture as world_intent_capture
@@ -227,6 +229,72 @@ class WorldExecutiveLoopTests(unittest.TestCase):
         self.assertIn("PROJECT TERM LEDGER", context)
         self.assertIn("12.5%", context)
         self.assertIn("conversation", context)
+
+    def test_streaming_history_preserves_current_internal_context_without_old_topic_gravity(self) -> None:
+        history = [
+            ConversationMessage(
+                role="assistant",
+                content=(
+                    "EXECUTIVE LOOP (persistent operational state derived from explicit intentions and provenance-bearing world evidence):\n"
+                    "- OBJECTIVE: Get Project Apollo signed | state=at_risk\n"
+                    "  BLOCKERS:\n"
+                    "    - Resolve indemnity cap discrepancy"
+                ),
+            ),
+            ConversationMessage(role="user", content="Tell me about an unrelated old Porsche issue."),
+            ConversationMessage(role="assistant", content="The old Porsche issue was unrelated."),
+            ConversationMessage(role="user", content="What changed on Project Apollo?"),
+            ConversationMessage(role="assistant", content="We were discussing Apollo."),
+        ]
+
+        selected = streaming_agent._history_for_current_turn("What should I do about Project Apollo?", history)
+        self.assertEqual(len(selected), 3)
+        self.assertTrue(selected[0].content.startswith("EXECUTIVE LOOP"))
+        self.assertEqual(selected[1].content, "What changed on Project Apollo?")
+        self.assertEqual(selected[2].content, "We were discussing Apollo.")
+        self.assertNotIn("Porsche", "\n".join(item.content for item in selected))
+
+    def test_streaming_executive_gate_accepts_only_exact_compiled_proposal(self) -> None:
+        self._create_apollo_goal()
+        now = datetime.now().astimezone()
+        older = self._source_event(
+            "conversation.turn",
+            "conversation",
+            "apollo-conversation",
+            "Project Apollo indemnity cap is 10%.",
+            (now - timedelta(days=1)).isoformat(),
+        )
+        world_terms.observe_event(older)
+        newer = self._source_event(
+            "knowledge.gmail_attachment",
+            "gmail_attachment",
+            "apollo-draft",
+            "Project Apollo revised agreement states the indemnity cap is 15%.",
+            now.isoformat(),
+        )
+        term_result = world_terms.observe_event(newer)
+        for event_id in term_result.get("generated_event_ids") or []:
+            world_linker.link_event(int(event_id))
+        world_executive_loop.refresh()
+
+        query = "What should I do about Project Apollo?"
+        decision = world_executive_loop.next_decision(query)
+        self.assertIsNotNone(decision)
+        assert decision is not None
+        tool = str(decision["tool"])
+        arguments = dict(decision["arguments"])
+
+        self.assertTrue(streaming_agent._executive_tool_is_justified(tool, arguments, query))
+        wrong_arguments = dict(arguments)
+        wrong_arguments["query"] = "Project Borealis indemnity cap"
+        self.assertFalse(streaming_agent._executive_tool_is_justified(tool, wrong_arguments, query))
+        self.assertFalse(
+            streaming_agent._executive_tool_is_justified(
+                "gmail.send",
+                {"recipient": "daniel@example.com", "body": "Please send it.", "subject": "Apollo"},
+                query,
+            )
+        )
 
 
 if __name__ == "__main__":

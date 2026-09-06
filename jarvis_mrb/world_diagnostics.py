@@ -19,10 +19,16 @@ def validate() -> dict[str, Any]:
     # first diagnostic call after an upgrade.
     from jarvis_mrb.world_executive import status as executive_status
     from jarvis_mrb.world_linker import status as linker_status
+    from jarvis_mrb.world_prebrief import status as prebrief_status
+    from jarvis_mrb.world_relevance import status as relevance_status
+    from jarvis_mrb.world_situation import status as situation_status
 
     core = world_status()
     linker = linker_status()
     executive = executive_status()
+    relevance = relevance_status()
+    situation = situation_status()
+    prebrief = prebrief_status()
     problems: list[str] = []
     warnings: list[str] = []
 
@@ -42,8 +48,6 @@ def validate() -> dict[str, Any]:
         if linker_lag > 500:
             warnings.append(f"World linker is {linker_lag} events behind.")
 
-        # Current explicit-goal belief should agree with its intention status. A
-        # mismatch means the executive layer is stale or a migration was interrupted.
         mismatch_rows = conn.execute(
             """
             SELECT e.id,e.canonical_name,b.value_json,i.status
@@ -79,24 +83,21 @@ def validate() -> dict[str, Any]:
         if stale_links:
             problems.append(f"Stale current intention/commitment links: {stale_links}")
 
-        relation_without_evidence = int(
+        relation_without_evidence = len(
             conn.execute(
                 """
-                SELECT COUNT(*)
+                SELECT r.id
                 FROM entity_relations r
                 LEFT JOIN relation_evidence re ON re.relation_id=r.id
                 WHERE r.state='current'
                 GROUP BY r.id
                 HAVING COUNT(re.event_id)=0
                 """
-            ).fetchall().__len__()
+            ).fetchall()
         )
         if relation_without_evidence:
             problems.append(f"Current derived relations without evidence: {relation_without_evidence}")
 
-        # Privacy boundary: the iPhone->PC world snapshot contract explicitly bans
-        # these raw/sensitive channels. Search only iPhone-origin world events; a hit
-        # should trigger manual inspection, not automatic deletion.
         privacy_terms = (
             "feature_prints",
             "featureprints",
@@ -116,6 +117,52 @@ def validate() -> dict[str, Any]:
         )
         if privacy_hits:
             problems.append(f"Potential prohibited raw iPhone payloads in world events: {privacy_hits}")
+
+        # A revoked Known People enrollment must no longer own the iPhone external
+        # identity. Otherwise the next text mention could reanimate a face identity the
+        # user explicitly removed on-device.
+        stale_revoked_identity = int(
+            conn.execute(
+                """
+                SELECT COUNT(DISTINCT b.subject_id)
+                FROM beliefs b
+                JOIN external_ids x ON x.entity_id=b.subject_id AND x.namespace='iphone_known_person'
+                WHERE b.predicate='known_person_enrollment'
+                  AND b.state='current'
+                  AND b.value_json='\"revoked\"'
+                """
+            ).fetchone()[0]
+        )
+        if stale_revoked_identity:
+            problems.append(f"Revoked Known People entities still bound to iPhone enrollment IDs: {stale_revoked_identity}")
+
+        revoked_alias_leaks = int(
+            conn.execute(
+                """
+                SELECT COUNT(DISTINCT b.subject_id)
+                FROM beliefs b
+                JOIN aliases a ON a.entity_id=b.subject_id AND a.source='iphone_known_person'
+                WHERE b.predicate='known_person_enrollment'
+                  AND b.state='current'
+                  AND b.value_json='\"revoked\"'
+                """
+            ).fetchone()[0]
+        )
+        if revoked_alias_leaks:
+            problems.append(f"Revoked Known People entities still expose enrollment aliases: {revoked_alias_leaks}")
+
+        tombstone_relation_leaks = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM entity_relations r
+                JOIN entities e ON (e.id=r.subject_id OR e.id=r.object_id)
+                WHERE r.state='current' AND e.normalized_name LIKE 'former enrolled person %'
+                """
+            ).fetchone()[0]
+        )
+        if tombstone_relation_leaks:
+            problems.append(f"Current graph relations still reference tombstoned Known People identities: {tombstone_relation_leaks}")
 
         disputed = int(conn.execute("SELECT COUNT(*) FROM beliefs WHERE state='disputed'").fetchone()[0])
         if disputed:
@@ -141,12 +188,18 @@ def validate() -> dict[str, Any]:
         "core": core,
         "linker": linker,
         "executive": executive,
+        "relevance": relevance,
+        "situation": situation,
+        "prebrief": prebrief,
         "tool_audit": audit,
         "linker_lag_events": linker_lag,
         "goal_intention_mismatches": goal_mismatches,
         "stale_intention_commitment_links": stale_links,
         "relations_without_evidence": relation_without_evidence,
         "privacy_boundary_hits": privacy_hits,
+        "revoked_known_people_with_stale_ids": stale_revoked_identity,
+        "revoked_known_people_with_alias_leaks": revoked_alias_leaks,
+        "tombstone_relation_leaks": tombstone_relation_leaks,
         "problems": problems,
         "warnings": warnings,
     }

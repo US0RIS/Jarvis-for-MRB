@@ -11,6 +11,7 @@ struct JarvisIOSApp: App {
     @StateObject private var knownPeople: KnownPeopleController
     @StateObject private var localPower: LocalPowerFeaturesController
     @StateObject private var localProductivity: LocalProductivityController
+    @StateObject private var localIntelligence: LocalIntelligenceMilestoneController
 
     init() {
         do {
@@ -35,6 +36,13 @@ struct JarvisIOSApp: App {
             knownPeople: people,
             power: power
         )
+        let intelligence = LocalIntelligenceMilestoneController(
+            appModel: model,
+            frontend: frontend,
+            knownPeople: people,
+            power: power,
+            productivity: productivity
+        )
         frontend.attach(persistentPresence: presence, meetingCapture: meeting)
 
         _appModel = StateObject(wrappedValue: model)
@@ -44,25 +52,40 @@ struct JarvisIOSApp: App {
         _knownPeople = StateObject(wrappedValue: people)
         _localPower = StateObject(wrappedValue: power)
         _localProductivity = StateObject(wrappedValue: productivity)
+        _localIntelligence = StateObject(wrappedValue: intelligence)
     }
 
     var body: some Scene {
         WindowGroup {
-            MainView()
-                .environmentObject(appModel)
-                .environmentObject(persistentPresence)
-                .environmentObject(meetingCapture)
-                .environmentObject(frontendIntelligence)
-                .environmentObject(knownPeople)
-                .environmentObject(localPower)
-                .environmentObject(localProductivity)
-                .task {
-                    await persistentPresence.start()
-                    await frontendIntelligence.start()
-                    await knownPeople.start(appModel: appModel)
-                    await localPower.start()
-                    localProductivity.start()
-                }
+            TabView {
+                MainView()
+                    .tabItem {
+                        Label("Jarvis", systemImage: "waveform.circle.fill")
+                    }
+
+                LocalIntelligenceMilestoneView()
+                    .tabItem {
+                        Label("Local", systemImage: "brain.head.profile")
+                    }
+            }
+            .environmentObject(appModel)
+            .environmentObject(persistentPresence)
+            .environmentObject(meetingCapture)
+            .environmentObject(frontendIntelligence)
+            .environmentObject(knownPeople)
+            .environmentObject(localPower)
+            .environmentObject(localProductivity)
+            .environmentObject(localIntelligence)
+            .task {
+                await persistentPresence.start()
+                await frontendIntelligence.start()
+                await knownPeople.start(appModel: appModel)
+                await localPower.start()
+                localProductivity.start()
+                // Start last so local-first routing becomes the outermost frontend
+                // command layer while preserving every earlier local handler.
+                await localIntelligence.start()
+            }
         }
     }
 }

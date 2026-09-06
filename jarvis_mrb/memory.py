@@ -23,11 +23,6 @@ MAX_EPISODES = int(os.environ.get("JARVIS_MAX_EPISODES", "10000"))
 _POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jarvis-memory")
 _INIT_LOCK = threading.RLock()
 
-# Long-term semantic retrieval is intentionally on-demand. Running an embedding
-# model synchronously before *every* voice turn added noticeable latency and even
-# penalized deterministic fast-path commands. Recent conversation is always supplied
-# separately; the vector store is only needed when the wording indicates older
-# context may matter.
 _RECALL_PATTERNS = (
     r"\bremember\b",
     r"\brecall\b",
@@ -165,14 +160,11 @@ def remember_text(content: str, *, session_id: str = "default", kind: str = "con
 
 
 def _remember_exchange(session_id: str, user_text: str, assistant_text: str) -> None:
-    # The event graph stores the provenance-bearing turn even if embeddings are
-    # temporarily unavailable. Semantic episodic memory remains a compatibility
-    # retrieval layer and can fail independently without losing the world event.
     try:
         from jarvis_mrb.world_linker import link_event
-        from jarvis_mrb.world_model import record_conversation_turn
+        from jarvis_mrb.world_occurrence import record_conversation_occurrence
 
-        event_id = record_conversation_turn(session_id, user_text, assistant_text)
+        event_id = record_conversation_occurrence(session_id, user_text, assistant_text)
         link_event(event_id)
     except Exception:
         pass
@@ -186,9 +178,6 @@ def remember_exchange_async(session_id: str, user_text: str, assistant_text: str
     content = f"User: {user_text.strip()}\nJarvis: {assistant_text.strip()}".strip()
     if not content:
         return
-    # Embedding and world-model persistence run off the voice thread and default to
-    # CPU, so neither can evict the resident 8B planner from the RTX GPU during the
-    # user's next utterance.
     _POOL.submit(_remember_exchange, session_id, user_text, assistant_text)
 
 
@@ -224,10 +213,6 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
 
 def memory_context(query: str, limit: int = 3) -> str:
     pieces: list[str] = []
-
-    # World retrieval is local SQLite and runs on every backend turn. It supplies
-    # direct matches plus graph-neighbor context so a query about a person can also
-    # surface the projects, meetings, documents and obligations connected to them.
     try:
         from jarvis_mrb.world_executive import context as executive_context
         from jarvis_mrb.world_linker import related_context
@@ -245,7 +230,6 @@ def memory_context(query: str, limit: int = 3) -> str:
     except Exception:
         pass
 
-    # Expensive embedding retrieval remains on-demand to preserve voice latency.
     if should_retrieve_memory(query):
         items = retrieve(query, limit=limit)
         if items:

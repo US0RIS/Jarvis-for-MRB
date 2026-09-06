@@ -219,7 +219,7 @@ struct MainView: View {
                     .font(.caption)
                 }
 
-                Text("Meeting transcription is explicit opt-in and visibly active. The iPhone now keeps its own local transcript buffer, pause/resume state and bookmarks. If the PC is unreachable, capture can continue locally and be synchronized later. It does not identify speakers by voiceprint or infer emotion/stress. Use recording only where permitted and with appropriate participant notice/consent.")
+                Text("Meeting transcription is explicit opt-in and visibly active. Room capture deliberately uses the iPhone built-in microphone rather than the wearer-focused Ray-Ban HFP microphone, improving pickup of other people when the phone is placed in the room. The iPhone keeps its own local transcript buffer, pause/resume state and bookmarks. If the PC is unreachable, capture can continue locally and be synchronized later. It does not identify speakers by voiceprint or infer emotion/stress. Use recording only where permitted and with appropriate participant notice/consent.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -367,15 +367,15 @@ final class MeetingCaptureController: ObservableObject {
             do {
                 let response = try await client.startMeeting(title: title)
                 meetingID = response.meetingID
-                status = "Recording locally • session \(response.meetingID)"
+                status = "Recording locally • session \(response.meetingID) • iPhone room mic"
             } catch {
                 guard appModel.settings.offlineMeetingCaptureEnabled else { throw error }
                 meetingID = nil
                 syncPending = true
-                status = "Recording locally • PC unavailable"
+                status = "Recording locally • PC unavailable • iPhone room mic"
             }
 
-            try recognizer.startListening(preferBluetooth: appModel.settings.preferBluetoothAudio)
+            try recognizer.startRoomListening()
             isActive = true
             isPaused = false
             captureTask = Task { [weak self] in
@@ -404,10 +404,10 @@ final class MeetingCaptureController: ObservableObject {
     func resume() async {
         guard isActive, isPaused else { return }
         do {
-            try recognizer.startListening(preferBluetooth: appModel.settings.preferBluetoothAudio)
+            try recognizer.startRoomListening()
             currentChunkStartedAt = Date()
             isPaused = false
-            status = meetingID.map { "Recording locally • session \($0)" } ?? "Recording locally • PC unavailable"
+            status = meetingID.map { "Recording locally • session \($0) • iPhone room mic" } ?? "Recording locally • PC unavailable • iPhone room mic"
         } catch {
             status = "Could not resume microphone: \(error.localizedDescription)"
         }
@@ -501,11 +501,11 @@ final class MeetingCaptureController: ObservableObject {
                 await persistCurrentChunk()
                 guard isActive, !isPaused else { continue }
                 do {
-                    try recognizer.startListening(preferBluetooth: appModel.settings.preferBluetoothAudio)
+                    try recognizer.startRoomListening()
                     currentChunkStartedAt = Date()
                     liveTranscript = ""
-                    if let id = meetingID { status = "Recording locally • session \(id)" }
-                    else { status = "Recording locally • PC unavailable" }
+                    if let id = meetingID { status = "Recording locally • session \(id) • iPhone room mic" }
+                    else { status = "Recording locally • PC unavailable • iPhone room mic" }
                 } catch {
                     status = "Microphone interrupted • retrying"
                     try? await Task.sleep(for: .seconds(1))

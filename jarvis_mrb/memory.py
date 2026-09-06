@@ -160,17 +160,25 @@ def remember_text(content: str, *, session_id: str = "default", kind: str = "con
 
 
 def _remember_exchange(session_id: str, user_text: str, assistant_text: str) -> None:
-    # The conversation occurrence and any explicit durable objective are both world
-    # events. Link them immediately so a declaration such as "we're trying to get
-    # Project Apollo signed by Friday" becomes a goal->project relation before the
-    # next turn. This path runs on the existing memory worker, not the voice thread.
+    # Conversation occurrence, explicit durable objectives, and high-value project
+    # terms are all derived on the existing memory worker. This means a spoken term
+    # such as "Project Apollo's indemnity cap is 10%" is provenance-bearing before a
+    # later draft can disagree with it, without adding latency to the voice response.
     try:
         from jarvis_mrb.world_intent_capture import capture as capture_explicit_intentions
         from jarvis_mrb.world_linker import link_event
         from jarvis_mrb.world_occurrence import record_conversation_occurrence
+        from jarvis_mrb.world_terms import observe_event as observe_terms
 
         event_id = record_conversation_occurrence(session_id, user_text, assistant_text)
         link_event(event_id)
+        term_result = observe_terms(event_id)
+        for generated_id in term_result.get("generated_event_ids") or []:
+            try:
+                link_event(int(generated_id))
+            except Exception:
+                pass
+
         for goal_event_id in capture_explicit_intentions(user_text, session_id=session_id):
             link_event(goal_event_id)
         try:
@@ -225,13 +233,6 @@ def retrieve(query: str, limit: int = 3) -> list[str]:
 
 
 def memory_context(query: str, limit: int = 3) -> str:
-    """Assemble private context through independent relevance lanes.
-
-    Situation requests use one compiled meeting packet instead of stacking global
-    world/goal context on top. Ordinary entity questions use structured world + graph
-    relations + selective intentions. Retrospective language independently adds the
-    slower semantic episodic lane. One failed provider never suppresses the others.
-    """
     pieces: list[str] = []
     situation = ""
 
@@ -292,6 +293,7 @@ def status() -> dict[str, object]:
     relevance: dict[str, object] = {}
     situation: dict[str, object] = {}
     intent_capture: dict[str, object] = {}
+    terms: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
@@ -322,6 +324,12 @@ def status() -> dict[str, object]:
         intent_capture = intent_capture_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_terms import status as terms_status
+
+        terms = terms_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
@@ -338,4 +346,5 @@ def status() -> dict[str, object]:
         "world_relevance": relevance,
         "world_situation": situation,
         "world_intent_capture": intent_capture,
+        "world_terms": terms,
     }

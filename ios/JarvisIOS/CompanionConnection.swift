@@ -8,6 +8,7 @@ final class CompanionConnection: ObservableObject {
     var onEvent: (([String: Any]) -> Void)?
 
     private static weak var activeConnection: CompanionConnection?
+    private static var lastWorldSnapshotData: Data?
     private let session = URLSession(configuration: .default)
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -36,6 +37,7 @@ final class CompanionConnection: ObservableObject {
         let task = session.webSocketTask(with: request)
         socket = task
         Self.activeConnection = self
+        Self.lastWorldSnapshotData = nil
         activeServerURL = base
         status = "Connecting"
         task.resume()
@@ -56,6 +58,7 @@ final class CompanionConnection: ObservableObject {
         socket = nil
         if Self.activeConnection === self {
             Self.activeConnection = nil
+            Self.lastWorldSnapshotData = nil
         }
         status = "Disconnected"
     }
@@ -77,7 +80,16 @@ final class CompanionConnection: ObservableObject {
         guard let activeConnection, activeConnection.isConnected else {
             throw URLError(.notConnectedToInternet)
         }
-        try await activeConnection.sendEnvironment(["world_snapshot": snapshot])
+
+        // `captured_at` is useful to a caller as diagnostics but it must not turn an
+        // unchanged semantic snapshot into network traffic every five seconds.
+        var canonical = snapshot
+        canonical.removeValue(forKey: "captured_at")
+        let data = try JSONSerialization.data(withJSONObject: canonical, options: [.sortedKeys])
+        if data == lastWorldSnapshotData { return }
+
+        try await activeConnection.sendEnvironment(["world_snapshot": canonical])
+        lastWorldSnapshotData = data
     }
 
     private func sendJSON(_ object: [String: Any]) async throws {
@@ -109,6 +121,7 @@ final class CompanionConnection: ObservableObject {
                     socket = nil
                     if Self.activeConnection === self {
                         Self.activeConnection = nil
+                        Self.lastWorldSnapshotData = nil
                     }
                 }
                 return

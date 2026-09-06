@@ -69,6 +69,67 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _mirror_expense(
+    expense_id: int,
+    *,
+    captured_at: str,
+    merchant: str,
+    transaction_date: str,
+    currency: str,
+    subtotal: float | None,
+    tax: float | None,
+    tip: float | None,
+    total: float | None,
+    items: list[Any],
+) -> None:
+    try:
+        from jarvis_mrb.world_model import SELF_ID, ensure_entity, record_event
+
+        expense_entity = ensure_entity(
+            "transaction",
+            f"Expense {expense_id}: {merchant or 'unknown merchant'}",
+            external_namespace="expense",
+            external_id=str(expense_id),
+            attributes={
+                "transaction_date": transaction_date,
+                "currency": currency,
+                "total": total,
+            },
+            confidence=0.95,
+        )
+        participants: list[tuple[str, str, float]] = [
+            (SELF_ID, "payer", 1.0),
+            (expense_entity, "transaction", 1.0),
+        ]
+        if merchant:
+            merchant_entity = ensure_entity("organization", merchant, confidence=0.9)
+            participants.append((merchant_entity, "merchant", 0.9))
+        record_event(
+            "finance.expense",
+            f"Expense at {merchant or 'unknown merchant'}" + (f": {currency} {total:.2f}" if total is not None else ""),
+            source_kind="expense_tracker",
+            source_ref=f"expense:{expense_id}",
+            occurred_at=transaction_date or captured_at,
+            payload={
+                "expense_id": int(expense_id),
+                "captured_at": captured_at,
+                "transaction_date": transaction_date,
+                "merchant": merchant,
+                "currency": currency,
+                "subtotal": subtotal,
+                "tax": tax,
+                "tip": tip,
+                "total": total,
+                "items": items[:80],
+            },
+            evidence="Explicit user-requested receipt capture; values are limited to what the vision extractor reported as visible.",
+            confidence=0.9,
+            participants=participants,
+        )
+    except Exception:
+        pass
+
+
 def capture_recent_receipt() -> str:
     prompt = """Inspect the clearest recent frame containing a paper receipt or digital invoice.
 Extract only what is visibly supported. Return one JSON object and no Markdown:
@@ -107,6 +168,18 @@ Do not guess missing totals, dates, merchants, or line items. If this is not cle
         expense_id = int(cursor.lastrowid)
         conn.commit()
     export_csv()
+    _mirror_expense(
+        expense_id,
+        captured_at=captured_at,
+        merchant=merchant,
+        transaction_date=transaction_date,
+        currency=currency,
+        subtotal=subtotal,
+        tax=tax,
+        tip=tip,
+        total=total,
+        items=items,
+    )
     amount = f" {currency} {total:.2f}" if total is not None else " with no confidently readable total"
     merchant_label = merchant or "an unidentified merchant"
     return f"Logged expense {expense_id} from {merchant_label}{amount}."

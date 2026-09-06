@@ -242,6 +242,18 @@ def memory_context(query: str, limit: int = 3) -> str:
     pieces: list[str] = []
     situation = ""
 
+    # Action-outcome state is independent of the situation/world routing lanes. A
+    # question such as "did that work?" must receive the verifier's evidence even
+    # when no entity/project name is present in the utterance.
+    try:
+        from jarvis_mrb.world_verification import context_for_query as verification_context
+
+        verification = verification_context(query, limit=6)
+        if verification:
+            pieces.append(verification)
+    except Exception:
+        pass
+
     try:
         from jarvis_mrb.world_situation import context_for_query as situation_context
 
@@ -327,6 +339,7 @@ def status() -> dict[str, object]:
     intent_capture: dict[str, object] = {}
     terms: dict[str, object] = {}
     term_context: dict[str, object] = {}
+    verification: dict[str, object] = {}
     try:
         from jarvis_mrb.world_linker import status as linker_status
 
@@ -375,18 +388,25 @@ def status() -> dict[str, object]:
         term_context = term_context_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_verification import status as verification_status
+
+        verification = verification_status()
+    except Exception:
+        pass
     return {
         "episodes": count,
         "embedded": embedded,
         "embedding_model": EMBED_MODEL,
         "embedding_gpu_layers": EMBED_NUM_GPU,
-        "retrieval_mode": "routed: situation OR structured-world/relations/term-ledger/executive-loop; episodic recall independently on-demand",
+        "retrieval_mode": "routed: verification + (situation OR structured-world/relations/term-ledger/executive-loop); episodic recall independently on-demand",
         "context_router": {
             "situation_short_circuits_broad_context": True,
             "provider_failures_isolated": True,
             "episodic_recall_independent": True,
             "structured_term_queries": True,
             "persistent_executive_loop": True,
+            "closed_loop_verification": True,
         },
         "world_linker": linker,
         "world_executive": executive,
@@ -396,4 +416,5 @@ def status() -> dict[str, object]:
         "world_intent_capture": intent_capture,
         "world_terms": terms,
         "world_term_context": term_context,
+        "world_verification": verification,
     }

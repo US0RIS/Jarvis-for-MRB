@@ -10,6 +10,7 @@ import jarvis_mrb.world_executive as world_executive
 import jarvis_mrb.world_frontend_ingest as world_frontend_ingest
 import jarvis_mrb.world_linker as world_linker
 import jarvis_mrb.world_model as world_model
+import jarvis_mrb.world_occurrence as world_occurrence
 import jarvis_mrb.world_snapshot_reconcile as world_snapshot_reconcile
 
 
@@ -19,15 +20,11 @@ class WorldModelTestCase(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.db = self.base / "world_model.sqlite3"
 
-        # All world-layer modules intentionally share one SQLite database. Patch the
-        # module globals so tests never touch a developer's real Jarvis state.
         world_model.APP_DIR = self.base
         world_model.DB_PATH = self.db
         world_linker.DB_PATH = self.db
         world_executive.DB_PATH = self.db
         world_snapshot_reconcile.DB_PATH = self.db
-
-        # Initializing status creates the core schema and SELF/WORLD entities.
         world_model.status()
 
     def tearDown(self) -> None:
@@ -41,8 +38,7 @@ class WorldModelTestCase(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_cross_source_person_project_link_has_event_evidence(self) -> None:
-        project_id = world_model.ensure_entity("project", "Project Apollo", confidence=1.0)
+    def test_first_explicit_project_mention_creates_project_and_evidence_link(self) -> None:
         person_id = world_model.ensure_entity(
             "person",
             "Daniel Reed",
@@ -60,7 +56,13 @@ class WorldModelTestCase(unittest.TestCase):
         )
 
         result = world_linker.link_event(event_id)
-        self.assertGreaterEqual(result["mentions"], 1)
+        self.assertEqual(result["projects_created"], 1)
+        project_rows = self._query(
+            "SELECT id FROM entities WHERE kind='project' AND normalized_name='project apollo'"
+        )
+        self.assertEqual(len(project_rows), 1)
+        project_id = str(project_rows[0]["id"])
+
         relations = world_linker.related_entities(person_id, limit=20)
         matching = [
             item for item in relations
@@ -104,8 +106,6 @@ class WorldModelTestCase(unittest.TestCase):
         self.assertEqual(active[0]["title"], "Complete Project Apollo signing")
         self.assertEqual(active[0]["next_action"], "Review the final execution version")
 
-        # The next full snapshot omits goal-1, exactly what the iPhone sends after
-        # Local Executive deletes it. History remains, current executive state retires.
         second = dict(first)
         second["goals"] = []
         world_frontend_ingest.ingest_frontend_snapshot(second)
@@ -140,17 +140,48 @@ class WorldModelTestCase(unittest.TestCase):
             "receipts": [],
         }
         world_frontend_ingest.ingest_frontend_snapshot(first)
-        status = world_model.status()
-        self.assertEqual(status["pending_commitments"], 1)
+        self.assertEqual(world_model.status()["pending_commitments"], 1)
 
         second = dict(first)
         second["waiting"] = []
         world_frontend_ingest.ingest_frontend_snapshot(second)
-        status = world_model.status()
-        self.assertEqual(status["pending_commitments"], 0)
+        self.assertEqual(world_model.status()["pending_commitments"], 0)
         rows = self._query("SELECT status FROM commitments WHERE id='waiting:waiting-1'")
         self.assertEqual(str(rows[0]["status"]), "retired")
         self.assertGreaterEqual(len(world_model.timeline(event_type="waiting_removed")), 1)
+
+    def test_repeated_live_occurrences_remain_distinct(self) -> None:
+        first_turn = world_occurrence.record_conversation_occurrence(
+            "test-session", "What time is it?", "It is noon.", occurred_at="2026-09-06T12:00:00-07:00"
+        )
+        second_turn = world_occurrence.record_conversation_occurrence(
+            "test-session", "What time is it?", "It is noon.", occurred_at="2026-09-06T12:00:01-07:00"
+        )
+        self.assertNotEqual(first_turn, second_turn)
+
+        first_sighting = world_occurrence.record_visual_occurrence(
+            "Keys are on the desk.",
+            ["keys"],
+            location_context="office",
+            occurred_at="2026-09-06T12:01:00-07:00",
+            occurrence_ref="sighting-1",
+        )
+        second_sighting = world_occurrence.record_visual_occurrence(
+            "Keys are on the desk.",
+            ["keys"],
+            location_context="office",
+            occurred_at="2026-09-06T12:02:00-07:00",
+            occurrence_ref="sighting-2",
+        )
+        self.assertNotEqual(first_sighting, second_sighting)
+        self.assertEqual(
+            int(self._query("SELECT COUNT(*) AS n FROM events WHERE event_type='conversation.turn'")[0]["n"]),
+            2,
+        )
+        self.assertEqual(
+            int(self._query("SELECT COUNT(*) AS n FROM events WHERE event_type='perception.visual'")[0]["n"]),
+            2,
+        )
 
     def test_lower_confidence_contradiction_is_disputed_not_authoritative(self) -> None:
         object_id = world_model.ensure_entity("object", "Garage side door")

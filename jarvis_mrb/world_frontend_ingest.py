@@ -19,6 +19,16 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     counts.setdefault("receipts", 0)
     counts.setdefault("mode", 0)
 
+    # Goal Manager and Waiting-On are authoritative full lists. If a row that Jarvis
+    # previously knew about is absent, retire its *current* operational state while
+    # preserving the historical events that prove it once existed.
+    try:
+        from jarvis_mrb.world_snapshot_reconcile import reconcile_authoritative_snapshot
+
+        counts["reconcile"] = reconcile_authoritative_snapshot(data)
+    except Exception as exc:
+        counts["reconcile"] = {"error": str(exc)[:300]}
+
     mode = " ".join(str(data.get("mode") or "").split())[:120]
     if mode:
         event_id = record_event(

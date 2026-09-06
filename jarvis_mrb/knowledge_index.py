@@ -241,14 +241,38 @@ def refresh() -> dict[str, Any]:
 
 
 def search(query: str, limit: int = 5) -> list[str]:
-    return retrieve(query, limit=max(1, min(int(limit), 8)))
+    safe_limit = max(1, min(int(limit), 8))
+    result: list[str] = []
+
+    # Structured world matches come first because they carry source/time/provenance
+    # and can include people, projects, goals and commitments that are not usefully
+    # represented by a standalone embedding chunk.
+    try:
+        from jarvis_mrb.world_model import search as world_search
+
+        for item in world_search(query, limit=safe_limit):
+            source = f" | source {item.get('source')}" if item.get("source") else ""
+            result.append(
+                f"[world {item.get('type')} | {item.get('time')}{source}] {item.get('text') or item.get('name') or ''}"
+            )
+    except Exception:
+        pass
+
+    # Semantic retrieval remains valuable for fuzzy passages and older text that has
+    # not yet been promoted into structured entities/relations.
+    for item in retrieve(query, limit=safe_limit):
+        if item not in result:
+            result.append(item)
+        if len(result) >= safe_limit:
+            break
+    return result[:safe_limit]
 
 
 def describe_search(query: str, limit: int = 5) -> str:
     items = search(query, limit=limit)
     if not items:
-        return "I couldn't find a matching item in indexed mail, calendar, notes, or prior conversations."
-    return "Relevant unified-memory matches: " + " | ".join(items)
+        return "I couldn't find a matching entity, event, commitment, email, calendar item, note, or prior conversation in unified local knowledge."
+    return "Relevant unified-knowledge matches: " + " | ".join(items)
 
 
 def status() -> dict[str, Any]:
@@ -256,6 +280,7 @@ def status() -> dict[str, Any]:
         sources = int(conn.execute("SELECT COUNT(*) FROM indexed_sources").fetchone()[0])
     linker: dict[str, Any] = {}
     executive: dict[str, Any] = {}
+    diagnostics: dict[str, Any] = {}
     try:
         from jarvis_mrb.world_linker import status as world_linker_status
 
@@ -268,10 +293,17 @@ def status() -> dict[str, Any]:
         executive = world_executive_status()
     except Exception:
         pass
+    try:
+        from jarvis_mrb.world_diagnostics import validate as validate_world
+
+        diagnostics = validate_world()
+    except Exception as exc:
+        diagnostics = {"ok": False, "error": str(exc)[:500]}
     return {
         "indexed_sources": sources,
         "notes_directory": str(NOTES_DIR),
         "world_model_mirroring": True,
         "world_linker": linker,
         "world_executive": executive,
+        "world_diagnostics": diagnostics,
     }

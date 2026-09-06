@@ -216,8 +216,9 @@ class WorldReliabilityTests(unittest.TestCase):
         )
         self.assertEqual(world_migrations.current_version(), 0)
         result = world_migrations.run_migrations(backup=True)
+        expected_versions = list(range(1, world_migrations.TARGET_SCHEMA_VERSION + 1))
         self.assertEqual(result["after"], world_migrations.TARGET_SCHEMA_VERSION)
-        self.assertEqual(result["applied"], [1, 2, 3, 4])
+        self.assertEqual(result["applied"], expected_versions)
         self.assertTrue(result["backup"])
         self.assertTrue(Path(str(result["backup"])).exists())
 
@@ -226,11 +227,11 @@ class WorldReliabilityTests(unittest.TestCase):
         self.assertEqual(rerun["applied"], [])
         self.assertEqual(rerun["backup"], "")
         history = self._rows("SELECT version FROM world_schema_history ORDER BY version")
-        self.assertEqual([int(row["version"]) for row in history], [1, 2, 3, 4])
+        self.assertEqual([int(row["version"]) for row in history], expected_versions)
         tables = {str(row["name"]) for row in self._rows("SELECT name FROM sqlite_master WHERE type='table'")}
         for required in (
             "entity_relations", "intentions", "term_observations", "document_version_pairs",
-            "executive_decisions", "action_verifications", "runtime_subsystem_health",
+            "executive_decisions", "action_verifications", "runtime_subsystem_health", "gmail_attachment_sync_state",
         ):
             self.assertIn(required, tables)
 

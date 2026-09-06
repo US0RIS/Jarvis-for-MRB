@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-import time
 import uuid
 from datetime import datetime, timedelta
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 from jarvis_mrb.permissions import decide as permission_decision
@@ -154,10 +152,14 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
         }
 
     if tool == "gmail.send":
+        # AgentReply currently may not preserve GoogleResult.data. The causal Gmail
+        # search boundary prevents an earlier message to the same recipient/subject
+        # from falsely verifying this send; exact message ID wins when available.
         expected = {
             "message_id": str(data.get("message_id") or ""),
             "recipient": str(data.get("email") or args.get("recipient") or "").strip().lower(),
             "subject": str(args.get("subject") or "").strip(),
+            "not_before_unix": int((now - timedelta(seconds=10)).timestamp()),
         }
         return {
             "verifier": "gmail_sent_message",
@@ -165,7 +167,7 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
             "status": "pending",
             "next_check_at": (now + timedelta(seconds=5)).isoformat(),
             "deadline_at": (now + timedelta(minutes=10)).isoformat(),
-            "evidence": "Gmail send API accepted the message; waiting for independent read-back from Sent Mail.",
+            "evidence": "Gmail send API accepted the message; waiting for causally bounded Sent Mail read-back.",
         }
 
     if tool == "calendar.create":
@@ -359,6 +361,7 @@ def _record_world_transition(
         )
         try:
             from jarvis_mrb.world_linker import link_event
+
             link_event(event_id)
         except Exception:
             pass
@@ -446,23 +449,34 @@ def _gmail_observation(expected: dict[str, Any]) -> tuple[str, str]:
     recipient = str(expected.get("recipient") or "").strip().lower()
     subject = str(expected.get("subject") or "").strip()
     message_id = str(expected.get("message_id") or "").strip()
-    query = "in:sent newer_than:1d"
+    try:
+        not_before_unix = int(expected.get("not_before_unix") or 0)
+    except (TypeError, ValueError):
+        not_before_unix = 0
+
+    query = "in:sent"
+    if not_before_unix > 0:
+        query += f" after:{not_before_unix}"
+    else:
+        # Older rows created before causal-boundary support remain conservative.
+        query += " newer_than:1d"
     if recipient:
         query += f" to:{recipient}"
     if subject:
         escaped = subject.replace('"', "")[:160]
         query += f' subject:"{escaped}"'
+
     result = query_emails(query=query, limit=10)
     if not result.ok:
         raise RuntimeError(result.message)
     emails = list((result.data or {}).get("emails") or [])
     if message_id:
         if any(str(item.get("id") or "") == message_id for item in emails if isinstance(item, dict)):
-            return ("verified", f"Sent Mail contains Gmail message {message_id}.")
-        return ("pending", f"Gmail message {message_id} is not visible in Sent Mail yet.")
+            return ("verified", f"Sent Mail contains Gmail message {message_id} inside the causal verification window.")
+        return ("pending", f"Gmail message {message_id} is not visible in the causally bounded Sent Mail query yet.")
     if emails:
-        return ("verified", f"Sent Mail contains a message matching recipient/subject query {query!r}.")
-    return ("pending", "No independently readable Sent Mail match is visible yet.")
+        return ("verified", "Sent Mail contains a recipient/subject match created after this action was attempted.")
+    return ("pending", "No causally valid Sent Mail match is visible yet.")
 
 
 def _calendar_observation(expected: dict[str, Any]) -> tuple[str, str]:
@@ -496,7 +510,9 @@ def _calendar_observation(expected: dict[str, Any]) -> tuple[str, str]:
             continue
         if start and str(item.get("start") or "").strip() != start:
             continue
-        return ("verified", "Calendar read-back contains the created event with matching title/start.")
+        if end and str(item.get("end") or "").strip() != end:
+            continue
+        return ("verified", "Calendar read-back contains the created event with matching title/start/end.")
     return ("pending", "Created calendar event is not independently visible yet.")
 
 
@@ -638,6 +654,36 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
     }
 
 
+def _mark_pending(row: sqlite3.Row, evidence: str, *, error: str = "") -> dict[str, Any]:
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE action_verifications
+            SET attempts=attempts+1,last_checked_at=?,last_evidence=?,last_error=?,updated_at=?,next_check_at=?
+            WHERE id=?
+            """,
+            (
+                now,
+                evidence[:3000],
+                error[:2000],
+                now,
+                (_now_dt() + timedelta(seconds=45)).isoformat(),
+                str(row["id"]),
+            ),
+        )
+        conn.commit()
+    result = {
+        "id": str(row["id"]),
+        "status": "pending",
+        "tool": str(row["tool"]),
+        "evidence": evidence[:1500],
+    }
+    if error:
+        result["error"] = error[:1500]
+    return result
+
+
 def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM action_verifications WHERE id=?", (verification_id,)).fetchone()
@@ -657,58 +703,44 @@ def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | 
     if not force and next_check is not None and next_check > now:
         return None
     deadline = _parse_time(str(row["deadline_at"] or ""))
-    if deadline is not None and now >= deadline:
-        evidence = str(row["last_evidence"] or "No independent confirmation arrived before the verification deadline.")
-        _record_observation(str(row["id"]), outcome="timed_out", evidence=evidence)
-        return _transition(row, "timed_out", evidence)
+    expired = deadline is not None and now >= deadline
 
     verifier = str(row["verifier"])
     expected = _loads(str(row["expected_json"]), {})
     try:
         outcome, evidence = _observe(verifier, expected if isinstance(expected, dict) else {})
         _record_observation(str(row["id"]), outcome=outcome, evidence=evidence)
-    except Exception as exc:
-        evidence = str(row["last_evidence"] or "")
-        error = str(exc)[:2000]
-        _record_observation(str(row["id"]), outcome="observer_error", evidence=evidence, error=error)
-        with _connect() as conn:
-            conn.execute(
-                """
-                UPDATE action_verifications
-                SET attempts=attempts+1,last_checked_at=?,last_error=?,updated_at=?,next_check_at=?
-                WHERE id=?
-                """,
-                (
-                    _now(),
-                    error,
-                    _now(),
-                    (_now_dt() + timedelta(seconds=60)).isoformat(),
-                    str(row["id"]),
-                ),
+        if outcome in {"verified", "failed"}:
+            return _transition(row, outcome, evidence)
+        if expired:
+            timeout_evidence = (
+                f"Verification deadline elapsed after a final independent observation remained inconclusive. {evidence}"
             )
-            conn.commit()
-        return {"id": str(row["id"]), "status": "pending", "tool": str(row["tool"]), "error": error}
-
-    if outcome in {"verified", "failed"}:
-        return _transition(row, outcome, evidence)
-
-    with _connect() as conn:
-        conn.execute(
-            """
-            UPDATE action_verifications
-            SET attempts=attempts+1,last_checked_at=?,last_evidence=?,last_error='',updated_at=?,next_check_at=?
-            WHERE id=?
-            """,
-            (
-                _now(),
-                evidence[:3000],
-                _now(),
-                (_now_dt() + timedelta(seconds=45)).isoformat(),
-                str(row["id"]),
-            ),
+            _record_observation(str(row["id"]), outcome="timed_out", evidence=timeout_evidence)
+            return _transition(row, "timed_out", timeout_evidence)
+        return _mark_pending(row, evidence)
+    except Exception as exc:
+        error = str(exc)[:2000]
+        previous = str(row["last_evidence"] or "")
+        _record_observation(
+            str(row["id"]),
+            outcome="observer_error",
+            evidence=previous,
+            error=error,
         )
-        conn.commit()
-    return {"id": str(row["id"]), "status": "pending", "tool": str(row["tool"]), "evidence": evidence[:1500]}
+        if expired:
+            timeout_evidence = (
+                "Verification deadline elapsed and the final independent observer was unavailable or errored. "
+                + error
+            )
+            _record_observation(
+                str(row["id"]),
+                outcome="timed_out",
+                evidence=timeout_evidence,
+                error=error,
+            )
+            return _transition(row, "timed_out", timeout_evidence, error=error)
+        return _mark_pending(row, previous, error=error)
 
 
 def check_due(limit: int = 20, *, force: bool = False) -> list[dict[str, Any]]:
@@ -737,6 +769,7 @@ def check_due(limit: int = 20, *, force: bool = False) -> list[dict[str, Any]]:
             result.append(checked)
     try:
         from jarvis_mrb.world_executive_loop import refresh as refresh_executive
+
         refresh_executive()
     except Exception:
         pass
@@ -779,7 +812,7 @@ def pending_for_intention(intention_id: str, limit: int = 12) -> list[dict[str, 
     ]
 
 
-def context_for_query(query: str, limit: int = 6) -> str:
+def _is_verification_query(query: str) -> bool:
     normalized = " ".join(str(query or "").lower().split())
     cues = (
         "did it work",
@@ -796,7 +829,11 @@ def context_for_query(query: str, limit: int = 6) -> str:
         "what happened with",
         "outcome",
     )
-    if not any(cue in normalized for cue in cues):
+    return any(cue in normalized for cue in cues)
+
+
+def context_for_query(query: str, limit: int = 6) -> str:
+    if not _is_verification_query(query):
         return ""
     with _connect() as conn:
         rows = conn.execute(
@@ -829,6 +866,8 @@ def status() -> dict[str, Any]:
         "installed": True,
         "tool_receipt_is_outcome": False,
         "independent_readback": True,
+        "causal_readback_window": True,
+        "deadline_final_observation": True,
         "persistent_pending_state": True,
         "timeout_state": True,
         "unverifiable_effects_marked_unverified": True,

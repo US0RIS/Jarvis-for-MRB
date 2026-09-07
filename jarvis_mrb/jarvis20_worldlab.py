@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,29 @@ def _one(db: Path, sql: str, params: tuple[object, ...] = ()) -> sqlite3.Row | N
         return conn.execute(sql, params).fetchone()
     finally:
         conn.close()
+
+
+def _parse_time(raw: str) -> datetime:
+    value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _temporal_rebaser(anchor_raw: str):
+    """Keep scenario chronology stable while making 'imminent/overdue' relative to now.
+
+    A generated bundle is replayable months later. We therefore preserve every offset
+    from the serialized anchor while moving the whole synthetic timeline to the moment
+    of materialization. The public/oracle files themselves remain unchanged.
+    """
+    anchor = _parse_time(anchor_raw)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+
+    def rebase(raw: str) -> str:
+        return (now + (_parse_time(raw) - anchor)).isoformat()
+
+    return rebase
 
 
 def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +75,7 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
     details: dict[str, Any] = {}
     world = public["world_fixture"]
     hidden = oracle["world"]
+    rebase = _temporal_rebaser(str(public["anchor"]))
 
     with _isolated_world() as (db, modules):
         world_model = modules["model"]
@@ -83,15 +107,15 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
                 "id": f"waiting-{public['scenario_id'].lower()}",
                 "person": primary["name"],
                 "item": waiting["item"],
-                "created_at": public["anchor"],
-                "due_at": waiting["due_at"],
+                "created_at": rebase(public["anchor"]),
+                "due_at": rebase(waiting["due_at"]),
                 "resolved_at": None,
             }],
             "people": [{
                 "id": primary["person_id"],
                 "name": primary["name"],
                 "note": "Procedural JARVIS-20 private enrollment note.",
-                "enrolled_at": public["anchor"],
+                "enrolled_at": rebase(public["anchor"]),
             }],
             "inventory": [],
             "reminders": [],
@@ -133,7 +157,7 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
             )
 
         # Explicit persistent intention.
-        objective_text = f"We're trying to {world['objective']['text'].lower()}."
+        objective_text = f"We're trying to {world['objective']['text']}."
         goal_events = world_intent_capture.capture(
             objective_text,
             session_id=f"j20:{public['scenario_id']}",
@@ -148,7 +172,7 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
             discussion["text"],
             source_kind="conversation",
             source_ref=f"j20:{public['scenario_id']}:discussion",
-            occurred_at=discussion["occurred_at"],
+            occurred_at=rebase(discussion["occurred_at"]),
             payload={
                 "session_id": f"j20:{public['scenario_id']}",
                 "user": discussion["text"],
@@ -160,7 +184,6 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
         world_linker.link_event(discussion_event)
 
         # Old/new Gmail-style attachment lineage.
-        document_event_ids: list[int] = []
         for key, source_ref in (("older_document", "old"), ("newer_document", "new")):
             document = sources[key]
             event_id = world_model.record_knowledge_source(
@@ -168,7 +191,7 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
                 f"j20-{public['scenario_id']}:{source_ref}",
                 title=document["filename"],
                 text=document["text"],
-                occurred_at=document["occurred_at"],
+                occurred_at=rebase(document["occurred_at"]),
                 metadata={
                     "message_id": f"j20-{public['scenario_id']}-{source_ref}",
                     "thread_id": f"j20-thread-{public['scenario_id']}",
@@ -178,7 +201,6 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
                 },
                 participants=[(email_id, "sender", 1.0)],
             )
-            document_event_ids.append(event_id)
             world_linker.link_event(event_id)
 
         version_result = world_document_versions.refresh(limit_pairs=30)
@@ -206,17 +228,19 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
         ]
         if distractors:
             participants.append((distractor_ids[distractors[0]["person_id"]], "attendee", 1.0))
+        meeting_start = rebase(meeting["start"])
+        meeting_end = rebase(meeting["end"])
         calendar_event = world_model.record_event(
             "calendar.context_enriched",
             f"Calendar context: {meeting['title']} — {meeting['description']}",
             source_kind="calendar_enriched",
             source_ref=f"j20-cal-{public['scenario_id']}",
-            occurred_at=meeting["start"],
+            occurred_at=meeting_start,
             payload={
                 "calendar_event_id": f"j20-cal-{public['scenario_id']}",
                 "title": meeting["title"],
-                "start": meeting["start"],
-                "end": meeting["end"],
+                "start": meeting_start,
+                "end": meeting_end,
                 "location": "JARVIS-20 Synthetic Conference Room",
                 "status": "confirmed",
                 "description": meeting["description"],
@@ -284,7 +308,7 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
         _check(
             checks,
             7,
-            "generic pre-meeting query surfaces generated project/person/dependency/term context",
+            "generic pre-meeting query surfaces generated project/person/dependency context",
             all(token.lower() in situation.lower() for token in situation_tokens),
             {"required_tokens": situation_tokens, "context": situation[:5000]},
         )
@@ -371,6 +395,7 @@ def run_world_variant(public: dict[str, Any], oracle: dict[str, Any]) -> dict[st
         "mutates_user_data": False,
         "uses_external_services": False,
         "awards_behavioral_score": False,
+        "temporal_replay_policy": "preserve_offsets_rebased_to_materialization_time",
         "tests": by_test,
         "checks": checks,
         "failed_checks": [row["name"] for row in failed],

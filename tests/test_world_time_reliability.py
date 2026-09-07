@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 
 import jarvis_mrb.world_executive_loop as world_executive_loop
 
@@ -21,7 +21,13 @@ class ExecutiveTimeReliabilityTests(unittest.TestCase):
         floor = world_executive_loop._TIME_FLOOR
         self.assertIsInstance(floor, datetime)
         self.assertIsNotNone(floor.tzinfo)
-        self.assertEqual(floor.year, 1970)
+        # _TIME_FLOOR is the Unix epoch as an absolute instant.  In time zones west
+        # of UTC (for example Pacific time) its local calendar representation is
+        # December 31, 1969, so asserting floor.year == 1970 is not portable.
+        self.assertEqual(
+            floor.astimezone(timezone.utc),
+            datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
 
 
 if __name__ == "__main__":

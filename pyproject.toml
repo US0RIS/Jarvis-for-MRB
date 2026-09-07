@@ -37,6 +37,7 @@ jarvis-world-migrate = "jarvis_mrb.world_migrate:main"
 jarvis-world-prepare = "jarvis_mrb.world_prepare:main"
 jarvis-world-acceptance = "jarvis_mrb.world_acceptance_check:main"
 jarvis-cover-score = "jarvis_mrb.cover_universal_cli:main"
+jarvis-20 = "jarvis_mrb.jarvis20_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["jarvis_mrb*"]

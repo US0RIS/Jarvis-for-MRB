@@ -1,15 +1,16 @@
 """Jarvis for MRB.
 
-The world-model modules historically use ``with sqlite3.connect(...)`` as a
+Several Jarvis modules historically use ``with sqlite3.connect(...)`` as a
 transaction-and-lifetime boundary. Python's standard sqlite3 connection context
 manager commits or rolls back on exit, but deliberately does *not* close the file
 handle. That is easy to miss on Unix because an open SQLite file can still be
-unlinked; on Windows it leaves temporary world databases locked and, in a long-lived
+unlinked; on Windows it leaves temporary databases locked and, in a long-lived
 Jarvis process, can retain unnecessary handles until garbage collection.
 
-Keep the compatibility behavior narrowly scoped to Jarvis's world-model database
-name. Other SQLite users in this process retain the standard library semantics.
-New code should still prefer explicit connection ownership where practical.
+Keep the compatibility behavior narrowly scoped to Jarvis-owned databases whose
+existing callers rely on context-manager lifetime: the world model and Research
+Receipt audit store. Other SQLite users in this process retain the standard library
+semantics. New code should still prefer explicit connection ownership where practical.
 """
 
 from __future__ import annotations
@@ -20,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 __version__ = "0.1.0"
+
+_JARVIS_CONTEXT_OWNED_DATABASES = {
+    "world_model.sqlite3",
+    "search_integrity.sqlite3",
+}
 
 
 class _JarvisWorldConnection(sqlite3.Connection):
@@ -40,20 +46,19 @@ _ORIGINAL_SQLITE_CONNECT = getattr(sqlite3, "_jarvis_original_connect")
 
 
 def _world_model_connect(database: Any, *args: Any, **kwargs: Any) -> sqlite3.Connection:
-    """Inject closing context semantics only for Jarvis world_model.sqlite3 files."""
+    """Inject closing context semantics only for explicitly owned Jarvis DB files."""
     try:
         database_name = Path(os.fspath(database)).name.lower()
     except (TypeError, ValueError):
         database_name = ""
 
-    if database_name == "world_model.sqlite3" and "factory" not in kwargs:
+    if database_name in _JARVIS_CONTEXT_OWNED_DATABASES and "factory" not in kwargs:
         kwargs["factory"] = _JarvisWorldConnection
     return _ORIGINAL_SQLITE_CONNECT(database, *args, **kwargs)
 
 
-# Submodules import the shared sqlite3 module object, so installing this once at
-# package import fixes all existing world-model _connect() helpers without changing
-# unrelated databases.
+# Submodules import the shared sqlite3 module object, so installing this once fixes
+# existing Jarvis context-managed connections without changing unrelated databases.
 if not getattr(sqlite3.connect, "_jarvis_world_close_guard", False):
     setattr(_world_model_connect, "_jarvis_world_close_guard", True)
     sqlite3.connect = _world_model_connect

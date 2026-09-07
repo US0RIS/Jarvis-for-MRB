@@ -146,6 +146,19 @@ final class JarvisAppModel: ObservableObject {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        // The Personal Notecard is an explicit local fact source. Handle direct
+        // additions, lookups, and answers to a fact Jarvis just requested before
+        // any planner or external service sees the utterance.
+        if let notecardResponse = PersonalNotecardStore.shared.handleCommand(text) {
+            await finishLocalResponse(
+                notecardResponse,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone Personal Notecard"
+            )
+            return
+        }
+
         // Navigation is a first-class iPhone capability. Route it before the generic
         // frontend stack and before the PC so a spoken "Jarvis, take me to ..." can
         // resolve a place and begin guidance even when the Windows agent is offline.
@@ -170,6 +183,10 @@ final class JarvisAppModel: ObservableObject {
             )
             return
         }
+
+        // Only facts selected as relevant to this particular command cross into the
+        // reasoning path. The full notecard is never attached wholesale.
+        let requestText = PersonalNotecardStore.shared.contextualizedCommand(text)
 
         guard !isSending else { return }
         isSending = true
@@ -208,7 +225,7 @@ final class JarvisAppModel: ObservableObject {
         var interrupted = false
 
         do {
-            for try await event in client.streamCommandEvents(text) {
+            for try await event in client.streamCommandEvents(requestText) {
                 switch event {
                 case .start(let model, let reason):
                     modelLabel = model ?? "backend"
@@ -314,7 +331,7 @@ final class JarvisAppModel: ObservableObject {
             }
         } catch {
             do {
-                let response = try await client.command(text)
+                let response = try await client.command(requestText)
                 if firstResponseAt == nil { firstResponseAt = Date() }
                 if modelLabel == "—" { modelLabel = "backend" }
                 fullResponse = response.message
@@ -341,7 +358,7 @@ final class JarvisAppModel: ObservableObject {
                 conversationalFollowUpDeadline = nil
                 if Self.isConnectivityError(error),
                    let offlineResponseHandler,
-                   let localResponse = await offlineResponseHandler(text),
+                   let localResponse = await offlineResponseHandler(requestText),
                    !localResponse.isEmpty {
                     if firstResponseAt == nil { firstResponseAt = Date() }
                     modelLabel = "Apple on-device"
@@ -985,8 +1002,18 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         }
 
         guard let request = Self.navigationRequest(from: command) else { return nil }
-        let destinationQuery = request.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        var destinationQuery = request.destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !destinationQuery.isEmpty else { return "Tell me the destination after ‘take me to’." }
+
+        // "Home" is a stable personal alias, not a MapKit search term. Resolve it
+        // only from the explicit Personal Notecard and ask rather than guessing.
+        if Self.isHomeDestination(destinationQuery) {
+            guard let home = PersonalNotecardStore.shared.homeAddress else {
+                return PersonalNotecardStore.shared.requestHomeAddress()
+            }
+            destinationQuery = home
+        }
+
         status = "Resolving \(destinationQuery)…"
         guard let origin = await currentLocation() else { return locationUnavailableMessage() }
 
@@ -1358,6 +1385,19 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
     }
 
     private static func navigationRequest(from normalizedCommand: String) -> (destination: String, mode: TravelMode)? {
+        let directHome: [(String, TravelMode)] = [
+            ("take me home", .driving),
+            ("drive me home", .driving),
+            ("get me home", .driving),
+            ("navigate home", .driving),
+            ("directions home", .driving),
+            ("walk me home", .walking),
+            ("walk home", .walking),
+        ]
+        if let match = directHome.first(where: { normalizedCommand == $0.0 }) {
+            return ("home", match.1)
+        }
+
         let patterns: [(String, TravelMode)] = [
             ("take me to ", .driving), ("navigate me to ", .driving), ("navigate to ", .driving),
             ("drive me to ", .driving), ("drive to ", .driving), ("get me to ", .driving),
@@ -1374,6 +1414,10 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         let n = normalize(raw)
         return navigationRequest(from: n) != nil || isStopCommand(n) || isStatusCommand(n)
             || isNextTurnCommand(n) || isMapsHandoffCommand(n) || isRerouteCommand(n)
+    }
+
+    private static func isHomeDestination(_ raw: String) -> Bool {
+        ["home", "my home", "home address", "my home address"].contains(normalizeName(raw))
     }
 
     private static func isStopCommand(_ n: String) -> Bool {

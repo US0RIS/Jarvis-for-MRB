@@ -12,9 +12,14 @@ class AuditedSearchRoutingTests(unittest.TestCase):
         self.assertTrue(_requires_audited_web("Compare all available alternatives and rank them"))
         self.assertTrue(_requires_audited_web("Show me the latest research receipt"))
 
-    def test_stable_how_to_is_not_forced_to_web(self) -> None:
+    def test_private_or_stable_reasoning_is_not_forced_to_public_web(self) -> None:
         self.assertFalse(_requires_audited_web("What is the best way to solve a quadratic equation?"))
         self.assertFalse(_requires_audited_web("Explain photosynthesis"))
+        self.assertFalse(_requires_audited_web("Compare these two drafts from my email"))
+        self.assertFalse(_requires_audited_web("Recommend what I should do based on my calendar"))
+
+    def test_explicit_web_request_can_override_private_context_exclusion(self) -> None:
+        self.assertTrue(_requires_audited_web("Search the web and compare these two drafts from my email"))
 
     def test_guard_allows_audited_web_intent(self) -> None:
         self.assertTrue(_tool_is_justified("web.search", "Recommend the best option for me"))

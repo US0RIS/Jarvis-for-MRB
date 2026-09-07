@@ -4,7 +4,7 @@ import re
 import sqlite3
 from typing import Any
 
-from jarvis_mrb.world_model import DB_PATH, search as world_search
+import jarvis_mrb.world_model as world_model
 from jarvis_mrb.world_terms import latest_observations
 
 _TERM_QUERY_ALIASES: dict[str, tuple[str, ...]] = {
@@ -32,7 +32,9 @@ _ALL_TERMS_CUES = (
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    # Keep query-time retrieval bound to the same authoritative world database as the
+    # ledger itself. Isolated worlds rebind world_model.DB_PATH at runtime.
+    conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -109,8 +111,6 @@ def _direct_project_seeds(query: str) -> list[dict[str, Any]]:
         if not matching:
             continue
         best = max(matching, key=len)
-        # Prefer the most specific direct phrase; stable name/id tie-breakers keep the
-        # result deterministic if two project aliases overlap.
         matches.append((len(best), str(item["name"]), str(item["id"]), best))
 
     matches.sort(key=lambda value: (value[0], value[1], value[2]), reverse=True)
@@ -129,7 +129,7 @@ def _direct_project_seeds(query: str) -> list[dict[str, Any]]:
 def _project_seeds(query: str) -> list[dict[str, Any]]:
     direct = _direct_project_seeds(query)
     fallback = [
-        item for item in world_search(query, limit=12)
+        item for item in world_model.search(query, limit=12)
         if item.get("type") == "entity" and item.get("kind") == "project"
     ]
     result: list[dict[str, Any]] = []
@@ -208,6 +208,7 @@ def status() -> dict[str, Any]:
         "requires_explicit_term_or_all_terms_cue": True,
         "requires_project_entity_match": True,
         "direct_project_resolution_before_generic_search": True,
+        "dynamic_world_db_binding": True,
         "shows_source_provenance": True,
         "shows_current_conflict": True,
         "chronology_uses_occurred_at": True,

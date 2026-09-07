@@ -51,14 +51,90 @@ def _requested_term_keys(query: str) -> set[str]:
     return result
 
 
+def _phrase_in_query(query: str, phrase: str) -> bool:
+    """Match an entity phrase as a token-bounded span rather than a loose substring."""
+    normalized_phrase = _normalize(phrase)
+    if len(normalized_phrase) < 4:
+        return False
+    return bool(
+        re.search(
+            rf"(?<![a-z0-9_]){re.escape(normalized_phrase)}(?![a-z0-9_])",
+            query,
+        )
+    )
+
+
+def _direct_project_seeds(query: str) -> list[dict[str, Any]]:
+    """Resolve projects named in the query without depending on generic search rank.
+
+    A direct term question such as "what's the indemnity cap on Project Apollo?"
+    should not lose its project merely because many high-scoring events or commitments
+    crowd the project entity out of world_search's top-N results. Inspect the bounded
+    project-entity namespace first and use names/aliases as deterministic query spans.
+    """
+    normalized = _normalize(query)
+    matches: list[tuple[int, str, str, str]] = []
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT e.id,e.canonical_name,e.normalized_name,a.normalized_alias
+            FROM entities e
+            LEFT JOIN aliases a ON a.entity_id=e.id
+            WHERE e.kind='project'
+            ORDER BY e.last_seen_at DESC
+            LIMIT 500
+            """
+        ).fetchall()
+
+    by_project: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        project_id = str(row["id"])
+        item = by_project.setdefault(
+            project_id,
+            {
+                "id": project_id,
+                "name": str(row["canonical_name"]),
+                "phrases": set(),
+            },
+        )
+        for raw in (row["normalized_name"], row["normalized_alias"]):
+            phrase = _normalize(str(raw or ""))
+            if phrase:
+                item["phrases"].add(phrase)
+                if phrase.startswith("project ") and len(phrase) > len("project ") + 3:
+                    item["phrases"].add(phrase[len("project "):])
+
+    for item in by_project.values():
+        matching = [phrase for phrase in item["phrases"] if _phrase_in_query(normalized, phrase)]
+        if not matching:
+            continue
+        best = max(matching, key=len)
+        # Prefer the most specific direct phrase; stable name/id tie-breakers keep the
+        # result deterministic if two project aliases overlap.
+        matches.append((len(best), str(item["name"]), str(item["id"]), best))
+
+    matches.sort(key=lambda value: (value[0], value[1], value[2]), reverse=True)
+    return [
+        {
+            "type": "entity",
+            "id": project_id,
+            "kind": "project",
+            "name": name,
+            "text": f"project {name}",
+        }
+        for _, name, project_id, _ in matches[:4]
+    ]
+
+
 def _project_seeds(query: str) -> list[dict[str, Any]]:
-    seeds = [
+    direct = _direct_project_seeds(query)
+    fallback = [
         item for item in world_search(query, limit=12)
         if item.get("type") == "entity" and item.get("kind") == "project"
     ]
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for seed in seeds:
+    for seed in [*direct, *fallback]:
         entity_id = str(seed.get("id") or "")
         if entity_id and entity_id not in seen:
             seen.add(entity_id)
@@ -131,6 +207,7 @@ def status() -> dict[str, Any]:
         "query_aware": True,
         "requires_explicit_term_or_all_terms_cue": True,
         "requires_project_entity_match": True,
+        "direct_project_resolution_before_generic_search": True,
         "shows_source_provenance": True,
         "shows_current_conflict": True,
         "chronology_uses_occurred_at": True,

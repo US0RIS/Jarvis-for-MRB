@@ -9,6 +9,7 @@ from pathlib import Path
 import jarvis_mrb.world_linker as world_linker
 import jarvis_mrb.world_model as world_model
 import jarvis_mrb.world_situation as world_situation
+import jarvis_mrb.world_term_context as world_term_context
 import jarvis_mrb.world_terms as world_terms
 
 
@@ -21,6 +22,7 @@ class WorldTermLedgerTests(unittest.TestCase):
         world_model.DB_PATH = self.db
         world_linker.DB_PATH = self.db
         world_terms.DB_PATH = self.db
+        world_term_context.DB_PATH = self.db
         world_situation.DB_PATH = self.db
         world_model.status()
         world_linker.status()
@@ -127,6 +129,50 @@ class WorldTermLedgerTests(unittest.TestCase):
         )
         result = world_terms.observe_event(event_id)
         self.assertEqual(result["observations"], 0)
+
+    def test_direct_term_query_resolves_project_even_when_generic_search_is_crowded(self) -> None:
+        now = datetime.now().astimezone()
+        old_event = self._source_event(
+            "conversation.turn",
+            "conversation",
+            "crowded-old",
+            "Project Apollo indemnity cap is 10%.",
+            (now - timedelta(hours=2)).isoformat(),
+        )
+        world_terms.observe_event(old_event)
+        new_event = self._source_event(
+            "knowledge.gmail_attachment",
+            "gmail_attachment",
+            "crowded-new",
+            "Project Apollo revised draft says the indemnity cap is 15%.",
+            (now - timedelta(hours=1)).isoformat(),
+        )
+        world_terms.observe_event(new_event)
+
+        # Create enough high-scoring events to crowd a low-scoring project entity out
+        # of the generic world_search top-N window. Direct term lookup must still bind
+        # the explicitly named project before consulting that ranked fallback.
+        for index in range(30):
+            world_model.record_event(
+                "conversation.turn",
+                f"Distractor {index}: Project Apollo indemnity cap discussion placeholder.",
+                source_kind="conversation",
+                source_ref=f"crowded-distractor-{index}",
+                occurred_at=(now + timedelta(seconds=index)).isoformat(),
+                payload={"text": "Project Apollo indemnity cap discussion placeholder"},
+            )
+
+        generic_projects = [
+            item for item in world_model.search("What's the indemnity cap on Project Apollo?", limit=12)
+            if item.get("type") == "entity" and item.get("kind") == "project"
+        ]
+        self.assertEqual(generic_projects, [])
+
+        context = world_term_context.context_for_query("What's the indemnity cap on Project Apollo?")
+        self.assertIn("Project Apollo", context)
+        self.assertIn("15%", context)
+        self.assertIn("current source discrepancy", context)
+        self.assertIn("10%", context)
 
     def test_meeting_situation_surfaces_project_term_conflict(self) -> None:
         now = datetime.now().astimezone()

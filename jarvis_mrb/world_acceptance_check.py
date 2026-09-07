@@ -33,10 +33,15 @@ def main() -> None:
             else:
                 os.environ["APPDATA"] = old_appdata
 
+    # Command output is a machine-readable protocol consumed by tests and deployment
+    # tooling. Keep it ASCII-safe so Windows consoles/pipes using cp1252 cannot fail on
+    # otherwise harmless Unicode evidence text (for example a right-arrow character).
+    # JSON consumers transparently decode the escaped Unicode sequence back to the
+    # original value.
     print(
         json.dumps(
             result,
-            ensure_ascii=False,
+            ensure_ascii=True,
             indent=None if args.compact else 2,
             sort_keys=True,
             default=str,

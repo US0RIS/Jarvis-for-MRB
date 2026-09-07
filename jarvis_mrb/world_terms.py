@@ -7,7 +7,8 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from jarvis_mrb.world_model import DB_PATH, record_event
+import jarvis_mrb.world_model as world_model
+from jarvis_mrb.world_model import record_event
 
 _TERM_PATTERNS: dict[str, tuple[str, tuple[str, ...]]] = {
     "indemnity_cap": ("indemnity cap", (r"\bindemn(?:ity|ification)\s+cap\b.{0,100}?({VALUE})", r"\bcap\s+on\s+indemn(?:ity|ification)\b.{0,100}?({VALUE})")),
@@ -44,7 +45,10 @@ _IGNORED_EVENT_PREFIXES = (
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    # Resolve the authoritative world DB at connection time. Importing DB_PATH by
+    # value makes isolated acceptance/tests/digital-twin worlds vulnerable to stale
+    # paths after another temporary world is torn down.
+    conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(
@@ -452,6 +456,7 @@ def status() -> dict[str, Any]:
         "cross_source_conflicts": True,
         "source_provenance_retained": True,
         "chronology_uses_occurred_at": True,
+        "dynamic_world_db_binding": True,
         "claims_authoritative_truth": False,
         "supported_terms": sorted(_TERM_PATTERNS),
     }

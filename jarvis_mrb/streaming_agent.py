@@ -66,7 +66,7 @@ Tool restraint is a hard requirement:
 - smart.open/smart.close are only for explicit app/site control requests.
 - Current-time/date and timezone-conversion questions should normally be answered directly using Current local date/time plus timezone knowledge. Never inspect or launch the Clock app for them.
 - Arithmetic, definitions, explanations, writing, reasoning, general knowledge, and conversational questions normally require no tool.
-- Use web.search only when freshness/current public information materially matters or the user explicitly asks you to search/look something up online. Do not search the web merely to answer stable general knowledge.
+- Use web.search when freshness/current public information materially matters or the user explicitly asks you to search/look something up online. High-selection-risk requests such as best/recommend/rank/compare/exhaustive research are intercepted deterministically before this planner and run through audited research.
 - Use private-data tools only when the requested answer actually depends on that private source (mail, calendar, PC state, stored memory, vision, etc.).
 - Before selecting a tool, silently ask: 'Would this tool return information or perform an action that I cannot already provide from the prompt and my knowledge?' If no, tool=null.
 Examples:
@@ -108,7 +108,7 @@ sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.comm
 custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
 
 Routing rules:
-- web.search: current/recent/public information or explicit online lookup. Use a self-contained query; Jarvis will refine conversational wording automatically.
+- web.search: current/recent/public information or explicit online lookup. Use a self-contained query; Jarvis will refine conversational wording automatically. Selection-risk requests are deterministically upgraded to audited multi-query research by the execution layer.
 - vision.recall: something visible within the preceding 30 seconds, including a passing sign or transient screen. The image cache is memory-only and auto-expires.
 - vision.ocr_clipboard: only when the user explicitly asks to copy visible text, an error code, terminal output, or a serial/model number to the PC clipboard.
 - expense.capture: only when the user explicitly asks to log a visible receipt/invoice. expense.list/export operate on the local expense database/CSV.
@@ -193,6 +193,41 @@ def _explicit_app_control_or_status(text: str) -> bool:
     return any(word in n for word in app_words + action_words)
 
 
+def _requires_audited_web(text: str) -> bool:
+    """Deterministically identify requests where shallow search creates selection risk.
+
+    This sits before the LLM planner, so the planner cannot silently answer a 'best'
+    or recommendation question from memory and thereby bypass the Research Receipt.
+    Stable how-to questions such as 'best way to boil an egg' stay on the ordinary
+    reasoning path unless they also explicitly request comparison/research.
+    """
+    n = " " + re.sub(r"\s+", " ", text.strip().lower()) + " "
+    receipt_cues = (
+        " research receipt ", " search receipt ", " show me how you searched ",
+        " prove you searched ", " verify your search ", " audit the search ",
+    )
+    if any(cue in n for cue in receipt_cues):
+        return True
+
+    strong = (
+        " recommend ", " recommends ", " recommendation ", " recommendations ",
+        " compare ", " comparison ", " alternatives ", " options ", " shortlist ",
+        " exhaustive ", " exhaustively ", " rigorous ", " rigorously ", " thoroughly ",
+        " all available ", " every option ", " don't miss ", " do not miss ",
+        " closest match ", " top choice ", " top pick ", " rank them ", " rank the ",
+    )
+    if any(cue in n for cue in strong):
+        return True
+
+    if " best " in n:
+        how_to = (
+            " best way to ", " best method to ", " best approach to ",
+            " best practice for ", " best practices for ",
+        )
+        return not any(cue in n for cue in how_to)
+    return False
+
+
 def _tool_is_justified(tool: str, text: str) -> bool:
     """Reject obviously semantic-mismatch tool calls before they can make answers worse.
 
@@ -234,7 +269,7 @@ def _tool_is_justified(tool: str, text: str) -> bool:
             " recent ", " this week ", " this month ", " live ", " online ",
         )
         explicit = (" search ", " look up ", " lookup ", " google ", " web ", " internet ")
-        return any(cue in n for cue in freshness + explicit)
+        return _requires_audited_web(text) or any(cue in n for cue in freshness + explicit)
 
     if t.startswith("vision.") or t.startswith("expense."):
         return any(cue in n for cue in (
@@ -372,6 +407,14 @@ def stream_natural_language(
         yield _respectful(
             AgentReply(True, f"Planner model: {active_model}; thinking off; keep-alive {active_keep_alive}")
         ).message
+        return
+
+    # Selection/completeness-risk questions bypass the LLM planner. This makes
+    # audited research an execution invariant rather than an optional planner choice.
+    if _requires_audited_web(stripped):
+        reply = _respectful(execute_tool("web.search", {"query": stripped, "num": 10}))
+        if reply.message and reply.message != "__EXIT__":
+            yield reply.message
         return
 
     fast = _fast_path(stripped)

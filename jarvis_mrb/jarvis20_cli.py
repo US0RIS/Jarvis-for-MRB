@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from jarvis_mrb.jarvis20 import history, plan, run_preflight, save_scored_run, score_run, score_template
+from jarvis_mrb.jarvis20_fuzz import run_world_fuzz
 from jarvis_mrb.jarvis20_variants import generate_variant_bundle, validate_variant_bundle, write_variant_bundle
 from jarvis_mrb.jarvis20_worldlab import run_world_variant
 
@@ -57,6 +58,12 @@ def main() -> int:
     world_parser.add_argument("public", type=Path)
     world_parser.add_argument("oracle", type=Path)
     world_parser.add_argument("--strict", action="store_true", help="Return nonzero if any generated-world check fails")
+
+    fuzz_parser = sub.add_parser("fuzz-world", help="Generate and preflight many randomized worlds for tests 5-10")
+    fuzz_parser.add_argument("--seed-prefix", required=True)
+    fuzz_parser.add_argument("--count", type=int, default=20)
+    fuzz_parser.add_argument("--anchor", help="Optional ISO-8601 anchor shared by every generated world")
+    fuzz_parser.add_argument("--strict", action="store_true", help="Return nonzero if any generated world fails")
 
     score_parser = sub.add_parser("score", help="Score a completed JARVIS-20 JSON score sheet")
     score_parser.add_argument("file", type=Path)
@@ -136,6 +143,19 @@ def main() -> int:
             result = run_world_variant(public, oracle)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             print(f"JARVIS-20 world preflight failed: {exc}")
+            return 2
+        _print(result)
+        return 1 if args.strict and not result.get("ok") else 0
+
+    if args.command == "fuzz-world":
+        try:
+            result = run_world_fuzz(
+                args.seed_prefix,
+                count=args.count,
+                anchor=_parse_anchor(args.anchor),
+            )
+        except (ValueError, OSError) as exc:
+            print(f"JARVIS-20 world fuzz failed: {exc}")
             return 2
         _print(result)
         return 1 if args.strict and not result.get("ok") else 0

@@ -32,6 +32,9 @@ class WorldChronologyTests(unittest.TestCase):
         world_linker.status()
         world_executive.status()
         world_terms.status()
+        # The repair test intentionally injects a legacy pair directly, so initialize
+        # the document-version module's owned schema before that fixture is inserted.
+        world_document_versions.status()
 
     def tearDown(self) -> None:
         self.temp.cleanup()

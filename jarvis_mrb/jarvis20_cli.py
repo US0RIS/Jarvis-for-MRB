@@ -8,6 +8,7 @@ from typing import Any
 
 from jarvis_mrb.jarvis20 import history, plan, run_preflight, save_scored_run, score_run, score_template
 from jarvis_mrb.jarvis20_variants import generate_variant_bundle, validate_variant_bundle, write_variant_bundle
+from jarvis_mrb.jarvis20_worldlab import run_world_variant
 
 
 def _print(value: Any) -> None:
@@ -18,6 +19,13 @@ def _parse_anchor(raw: str | None) -> datetime | None:
     if not raw:
         return None
     return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+
+def _load_object(path: Path, label: str) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain one JSON object")
+    return value
 
 
 def main() -> int:
@@ -44,6 +52,11 @@ def main() -> int:
     validate_parser = sub.add_parser("validate-variant", help="Validate a generated scenario and optional hidden oracle")
     validate_parser.add_argument("public", type=Path)
     validate_parser.add_argument("--oracle", type=Path)
+
+    world_parser = sub.add_parser("world-preflight", help="Materialize a procedural world in an isolated DB and check tests 5-10 prerequisites")
+    world_parser.add_argument("public", type=Path)
+    world_parser.add_argument("oracle", type=Path)
+    world_parser.add_argument("--strict", action="store_true", help="Return nonzero if any generated-world check fails")
 
     score_parser = sub.add_parser("score", help="Score a completed JARVIS-20 JSON score sheet")
     score_parser.add_argument("file", type=Path)
@@ -107,14 +120,8 @@ def main() -> int:
 
     if args.command == "validate-variant":
         try:
-            public = json.loads(args.public.read_text(encoding="utf-8"))
-            if not isinstance(public, dict):
-                raise ValueError("public variant must contain one JSON object")
-            oracle = None
-            if args.oracle:
-                oracle = json.loads(args.oracle.read_text(encoding="utf-8"))
-                if not isinstance(oracle, dict):
-                    raise ValueError("oracle must contain one JSON object")
+            public = _load_object(args.public, "public variant")
+            oracle = _load_object(args.oracle, "oracle") if args.oracle else None
             result = validate_variant_bundle(public, oracle)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             print(f"JARVIS-20 variant validation failed: {exc}")
@@ -122,11 +129,20 @@ def main() -> int:
         _print(result)
         return 0 if result["ok"] else 1
 
+    if args.command == "world-preflight":
+        try:
+            public = _load_object(args.public, "public variant")
+            oracle = _load_object(args.oracle, "oracle")
+            result = run_world_variant(public, oracle)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(f"JARVIS-20 world preflight failed: {exc}")
+            return 2
+        _print(result)
+        return 1 if args.strict and not result.get("ok") else 0
+
     if args.command == "score":
         try:
-            source = json.loads(args.file.read_text(encoding="utf-8"))
-            if not isinstance(source, dict):
-                raise ValueError("score file must contain one JSON object")
+            source = _load_object(args.file, "score file")
             report = score_run(source)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             print(f"JARVIS-20 score failed: {exc}")

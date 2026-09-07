@@ -116,6 +116,40 @@ It currently exercises these generated-world prerequisites:
 
 This command is a **preflight**, not a behavioral score. It proves the underlying world machinery can survive randomized fixtures. It does not prove the actual conversational/device experience deserves 2/3 or 3/3.
 
+## Batch fuzzing
+
+The same world lab can run many generated scenarios in one pass:
+
+```powershell
+jarvis-20 fuzz-world `
+  --seed-prefix nightly-world `
+  --count 50 `
+  --strict
+```
+
+For exact replay across machines/builds, add a shared anchor:
+
+```powershell
+jarvis-20 fuzz-world `
+  --seed-prefix regression-world `
+  --count 100 `
+  --anchor 2031-04-05T15:30:00Z `
+  --strict
+```
+
+The report includes:
+
+- total generated worlds;
+- number and rate that passed all generated-world checks;
+- pass/fail counts for each of tests 5-10;
+- the exact seed of every failed world;
+- project and term family for each failure;
+- failed check names.
+
+A failed seed can be regenerated exactly with `jarvis-20 generate` using the same seed and anchor. This is the primary anti-overfitting mechanism for world-model engineering: a patch should improve a large distribution of worlds, not merely the scenario that motivated the patch.
+
+Batch fuzzing still awards **zero JARVIS-20 behavioral points**. It is regression evidence underneath the real score.
+
 ## Temporal replay
 
 A scenario can be replayed long after it was generated.

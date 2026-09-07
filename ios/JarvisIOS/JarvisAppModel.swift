@@ -122,7 +122,18 @@ final class JarvisAppModel: ObservableObject {
         )
         if settings.speakResponses && !localResponse.isEmpty {
             if fromHandsFree { voiceStatus = "Speaking…" }
-            await speakOneResponse(localResponse)
+            if routeReason == "iPhone MapKit turn-by-turn navigation" {
+                // Navigation speech must never wait on the PC/Tailscale TTS path.
+                // AVSpeechSynthesizer keeps route acknowledgements available even
+                // when the Windows backend is unreachable.
+                await speechSynthesizer.speak(
+                    localResponse,
+                    preferBluetooth: settings.preferBluetoothAudio,
+                    whisper: false
+                )
+            } else {
+                await speakOneResponse(localResponse)
+            }
         }
         if fromHandsFree {
             confirmationFollowUpDeadline = nil
@@ -904,6 +915,8 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
     private struct PendingGuidance {
         let text: String
         let createdAt: Date
+        let routeRevision: Int
+        let stepIndex: Int?
     }
 
     private unowned let appModel: JarvisAppModel
@@ -916,6 +929,7 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
     private var preparedStepIndex: Int?
     private var immediateStepIndex: Int?
     private var offRouteSamples = 0
+    private var routeRevision = 0
     private var rerouteTask: Task<Void, Never>?
     private var guidanceTask: Task<Void, Never>?
     private var pendingGuidance: PendingGuidance?
@@ -979,23 +993,41 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         do {
             let destination = try await resolveDestination(destinationQuery, near: origin)
             status = "Calculating route to \(destination.name ?? destinationQuery)…"
-            let route = try await calculateRoute(from: origin, to: destination, mode: request.mode)
-            activate(route: route, destination: destination, mode: request.mode, announceFirstStepInResponse: true)
-            let eta = Date().addingTimeInterval(route.expectedTravelTime)
-            expectedArrival = eta
-            let resolved = destinationAddress.isEmpty ? destinationName : "\(destinationName), \(destinationAddress)"
-            let first = nextInstruction.isEmpty ? "" : " First direction: \(nextInstruction)."
-            return "Starting \(request.mode.rawValue) navigation to \(resolved). \(Self.distancePhrase(route.distance)), about \(Self.durationPhrase(route.expectedTravelTime)). ETA \(Self.timePhrase(eta)).\(first)"
+            do {
+                let route = try await calculateRoute(from: origin, to: destination, mode: request.mode)
+                activate(route: route, destination: destination, mode: request.mode, announceFirstStepInResponse: true)
+                let eta = Date().addingTimeInterval(route.expectedTravelTime)
+                expectedArrival = eta
+                let resolved = destinationAddress.isEmpty ? destinationName : "\(destinationName), \(destinationAddress)"
+                let first = nextInstruction.isEmpty ? "" : " First direction: \(nextInstruction)."
+                return "Starting \(request.mode.rawValue) navigation to \(resolved). \(Self.distancePhrase(route.distance)), about \(Self.durationPhrase(route.expectedTravelTime)). ETA \(Self.timePhrase(eta)).\(first)"
+            } catch {
+                // A concrete destination has been resolved, so Apple Maps is a
+                // safe continuity fallback if Jarvis's own route calculation fails.
+                destination.openInMaps(launchOptions: [
+                    MKLaunchOptionsDirectionsModeKey: request.mode.mapsLaunchMode,
+                    MKLaunchOptionsShowsTrafficKey: request.mode == .driving,
+                ])
+                status = "Opened \(destination.name ?? destinationQuery) in Apple Maps"
+                return "I found \(destination.name ?? destinationQuery), but could not calculate the route inside Jarvis, so I opened turn-by-turn directions in Apple Maps instead."
+            }
         } catch let error as NavigationError {
             status = error.localizedDescription
             return error.localizedDescription
         } catch {
             status = "Navigation unavailable: \(error.localizedDescription)"
-            return "I could not calculate a route to \(destinationQuery) right now."
+            return "I could not find a usable destination for \(destinationQuery) right now."
         }
     }
 
     private func activate(route: MKRoute, destination: MKMapItem, mode: TravelMode, announceFirstStepInResponse: Bool) {
+        if guidanceTask != nil {
+            guidanceTask?.cancel()
+            guidanceTask = nil
+            appModel.speechSynthesizer.stopSpeaking()
+        }
+        pendingGuidance = nil
+        routeRevision += 1
         activeRoute = route
         activeDestination = destination
         travelMode = mode
@@ -1024,8 +1056,10 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
     }
 
     private func stopNavigation(speakArrival: Bool) {
+        routeRevision += 1
         rerouteTask?.cancel()
         rerouteTask = nil
+        if guidanceTask != nil { appModel.speechSynthesizer.stopSpeaking() }
         guidanceTask?.cancel()
         guidanceTask = nil
         pendingGuidance = nil
@@ -1121,11 +1155,14 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         }
 
         distanceRemainingMeters = max(0, approximateRemainingDistance(from: location, route: route))
-        if location.speed >= 0 {
-            expectedArrival = Date().addingTimeInterval(distanceRemainingMeters / max(location.speed, travelMode == .driving ? 8 : 1.2))
+        if route.distance > 1 {
+            let remainingFraction = min(1, max(0, distanceRemainingMeters / route.distance))
+            expectedArrival = Date().addingTimeInterval(max(30, route.expectedTravelTime * remainingFraction))
         }
         let offRouteDistance = Self.distance(from: location.coordinate, to: route.polyline)
-        let allowedDeviation = max(90, location.horizontalAccuracy * 2.2)
+        let allowedDeviation: CLLocationDistance = travelMode == .walking
+            ? max(35, location.horizontalAccuracy * 2.0)
+            : max(90, location.horizontalAccuracy * 2.2)
         offRouteSamples = offRouteDistance > allowedDeviation ? offRouteSamples + 1 : 0
         if offRouteSamples >= 3 {
             scheduleReroute(from: location)
@@ -1141,11 +1178,14 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         let immediateThreshold = immediateThreshold(speed: max(0, location.speed), mode: travelMode)
         if preparedStepIndex != currentStepIndex, distance <= prepareThreshold, distance > immediateThreshold * 1.15 {
             preparedStepIndex = currentStepIndex
-            queueGuidance("In \(Self.distancePhrase(distance)), \(Self.lowercasedInstruction(nextInstruction)).")
+            queueGuidance(
+                "In \(Self.distancePhrase(distance)), \(Self.lowercasedInstruction(nextInstruction)).",
+                stepIndex: currentStepIndex
+            )
         }
         if immediateStepIndex != currentStepIndex, distance <= immediateThreshold {
             immediateStepIndex = currentStepIndex
-            queueGuidance(nextInstruction)
+            queueGuidance(nextInstruction, stepIndex: currentStepIndex)
         }
         let passedManeuver = minDistanceToCurrentStep <= max(35, location.horizontalAccuracy * 1.2)
             && distance >= minDistanceToCurrentStep + max(35, location.horizontalAccuracy)
@@ -1179,17 +1219,24 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
         }
     }
 
-    private func queueGuidance(_ raw: String) {
+    private func queueGuidance(_ raw: String, stepIndex: Int? = nil) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, appModel.settings.speakResponses else { return }
-        pendingGuidance = PendingGuidance(text: text, createdAt: Date())
+        pendingGuidance = PendingGuidance(
+            text: text,
+            createdAt: Date(),
+            routeRevision: routeRevision,
+            stepIndex: stepIndex
+        )
         guard guidanceTask == nil else { return }
         guidanceTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.guidanceTask = nil }
             while !Task.isCancelled {
                 guard let pending = self.pendingGuidance else { return }
-                if Date().timeIntervalSince(pending.createdAt) > 18 {
+                if pending.routeRevision != self.routeRevision
+                    || pending.stepIndex.map({ $0 != self.currentStepIndex }) == true
+                    || Date().timeIntervalSince(pending.createdAt) > 18 {
                     self.pendingGuidance = nil
                     continue
                 }
@@ -1211,7 +1258,13 @@ final class JarvisNavigationController: NSObject, ObservableObject, CLLocationMa
             _ = appModel.speechRecognizer.stopListening()
             appModel.isListening = false
         }
-        await appModel.speakFrontendResponseIfEnabled(text)
+        // Maneuver prompts always use on-device speech. Network TTS latency is not
+        // acceptable for time-sensitive navigation instructions.
+        await appModel.speechSynthesizer.speak(
+            text,
+            preferBluetooth: appModel.settings.preferBluetoothAudio,
+            whisper: false
+        )
         if wasHandsFree {
             try? await Task.sleep(for: .milliseconds(180))
             await appModel.startWakeWordMode()

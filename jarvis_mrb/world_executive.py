@@ -120,6 +120,47 @@ def _intention_status(goal_status: str) -> str:
     return "active"
 
 
+def _unambiguous_owner_project_link(
+    conn: sqlite3.Connection,
+    owner_id: str,
+    project_ids: list[str],
+) -> tuple[bool, float]:
+    """Use structured owner→project evidence only when it is unambiguous.
+
+    A Waiting-On item such as "final funds-flow memo" may omit the project name even
+    when Jarvis has structured evidence that its owner participates in that project.
+    We may bridge that gap only when the owner has exactly one current strong project
+    association in the world and it is one of this intention's project entities. If
+    there are multiple current project associations, ambiguity wins and Jarvis does
+    not guess.
+    """
+    if not owner_id or not project_ids:
+        return False, 0.0
+    rows = conn.execute(
+        """
+        SELECT r.object_id,r.confidence
+        FROM entity_relations r
+        JOIN entities e ON e.id=r.object_id AND e.kind='project'
+        WHERE r.subject_id=?
+          AND r.predicate='associated_with_project'
+          AND r.state='current'
+          AND r.confidence>=0.75
+        ORDER BY r.confidence DESC,r.object_id
+        """,
+        (owner_id,),
+    ).fetchall()
+    by_project: dict[str, float] = {}
+    for row in rows:
+        project_id = str(row["object_id"])
+        by_project[project_id] = max(by_project.get(project_id, 0.0), float(row["confidence"]))
+    if len(by_project) != 1:
+        return False, 0.0
+    only_project, relation_confidence = next(iter(by_project.items()))
+    if only_project not in set(project_ids):
+        return False, 0.0
+    return True, min(0.78, relation_confidence)
+
+
 def refresh_intentions() -> dict[str, int]:
     now = _now()
     upserted = 0
@@ -236,12 +277,21 @@ def refresh_intentions() -> dict[str, int]:
                         confidence = max(confidence, 0.86)
                         role = "goal_dependency"
 
-                # Conservative fallback for specific multi-token overlap. Require at
-                # least two meaningful tokens so generic words do not merge unrelated
-                # obligations into an intention.
+                # Conservative lexical fallback for specific multi-token overlap.
                 action_tokens = {token for token in re.findall(r"[a-z0-9][a-z0-9_-]+", _normalize(action)) if len(token) >= 4}
                 if len(title_tokens & action_tokens) >= 2:
                     confidence = max(confidence, 0.72)
+
+                # Cross-source fallback: a generic Waiting-On item can still belong to
+                # an objective when its owner has exactly one strong structured project
+                # association and that project is the intention's project. Never use
+                # this when the owner participates in multiple current projects.
+                if confidence < 0.70:
+                    owner_id = str(commitment["owner_id"] or "")
+                    owner_matches, owner_confidence = _unambiguous_owner_project_link(conn, owner_id, project_ids)
+                    if owner_matches:
+                        confidence = max(confidence, owner_confidence)
+                        role = "owner_project_dependency"
 
                 if confidence < 0.70:
                     continue

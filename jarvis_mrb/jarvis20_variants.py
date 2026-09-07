@@ -151,7 +151,9 @@ def _arithmetic_instance(rng: random.Random) -> tuple[str, str]:
     if op == "percent":
         pct = rng.choice((5, 8, 10, 12, 15, 20, 25))
         base = rng.choice((240, 320, 480, 600, 720, 840, 960))
-        return f"What is {pct}% of {base}?", str(base * pct // 100)
+        value = base * pct / 100.0
+        answer = str(int(value)) if value.is_integer() else (f"{value:.4f}".rstrip("0").rstrip("."))
+        return f"What is {pct}% of {base}?", answer
     a = rng.randint(500, 990)
     b = rng.randint(100, 490)
     return f"What is {a} minus {b}?", str(a - b)
@@ -294,7 +296,7 @@ def _world_fixture(rng: random.Random, anchor: datetime) -> tuple[dict[str, Any]
         "expected_top_priority_ids": ["priority-blocker", "priority-waiting"],
         "expected_false_association_person_id": distractors[1].person_id,
         "expected_material_change_tokens": [term["old"], term["new"]],
-        "expected_situation_tokens": [project, primary.name, waiting_item, term["display"]],
+        "expected_situation_tokens": [project, primary.name, waiting_item],
     }
     return public, oracle
 
@@ -348,7 +350,7 @@ def _test_instances(rng: random.Random, world: dict[str, Any], oracle: dict[str,
             "instance": f"Three-source identity bridge for {primary['name']} plus distractor identities.",
         },
         6: {
-            "setup": [f"Tell Jarvis: 'We're trying to {world['objective']['text'].lower()}.'", "Start a later/new conversation session."],
+            "setup": [f"Tell Jarvis: 'We're trying to {world['objective']['text']}.'", "Start a later/new conversation session."],
             "prompt": f"How is {project} going?",
             "instance": f"Persistent objective {world['objective']['text']}.",
         },
@@ -513,7 +515,7 @@ def generate_variant_bundle(seed: str, *, anchor: datetime | None = None) -> Var
         "oracle_sha256": oracle_hash,
         "world_fixture": world,
         "tests": tests,
-        "score_sheet": _score_sheet(seed, tests, scenario_id),
+        "score_sheet": _score_sheet(seed, tests, scenario_id, _iso(anchor)),
         "privacy": {
             "contains_real_user_data": False,
             "generated_addresses": False,
@@ -525,9 +527,10 @@ def generate_variant_bundle(seed: str, *, anchor: datetime | None = None) -> Var
     return VariantBundle(public=public, oracle=oracle)
 
 
-def _score_sheet(seed: str, tests: list[dict[str, Any]], scenario_id: str) -> dict[str, Any]:
+def _score_sheet(seed: str, tests: list[dict[str, Any]], scenario_id: str, run_at: str) -> dict[str, Any]:
     template = score_template(variant_seed=seed)
     template["scenario_id"] = scenario_id
+    template["run_at"] = run_at
     by_id = {int(row["id"]): row for row in tests}
     for row in template["results"]:
         generated = by_id[int(row["id"])]

@@ -149,10 +149,20 @@ def _migration_4_executive_and_verification() -> None:
 
 
 def _migration_5_ingestion_reliability() -> None:
-    # Status is deliberately side-effect-limited to creating the additive state table;
-    # it never connects to Gmail or alters semantic world data during migration.
-    from jarvis_mrb.world_gmail_attachments import status as attachment_status
-    attachment_status()
+    # The attachment module historically cached DB_PATH at import time. Isolated
+    # acceptance/fuzz worlds deliberately rebind the migration DB, so bind the
+    # attachment-state initializer to this migration's active database explicitly.
+    # Restore afterward so a temporary world can never leak into later runtime work.
+    import jarvis_mrb.world_gmail_attachments as attachments
+
+    original_db_path = attachments.DB_PATH
+    try:
+        attachments.DB_PATH = DB_PATH
+        # Status is deliberately side-effect-limited to creating the additive state
+        # table; it never connects to Gmail or alters semantic world data during migration.
+        attachments.status()
+    finally:
+        attachments.DB_PATH = original_db_path
 
 
 _MIGRATIONS: tuple[tuple[int, str, Callable[[], None]], ...] = (

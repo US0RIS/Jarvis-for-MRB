@@ -66,7 +66,7 @@ Tool restraint is a hard requirement:
 - smart.open/smart.close are only for explicit app/site control requests.
 - Current-time/date and timezone-conversion questions should normally be answered directly using Current local date/time plus timezone knowledge. Never inspect or launch the Clock app for them.
 - Arithmetic, definitions, explanations, writing, reasoning, general knowledge, and conversational questions normally require no tool.
-- Use web.search when freshness/current public information materially matters or the user explicitly asks you to search/look something up online. High-selection-risk requests such as best/recommend/rank/compare/exhaustive research are intercepted deterministically before this planner and run through audited research.
+- Use web.search when freshness/current public information materially matters or the user explicitly asks you to search/look something up online. High-selection-risk requests such as best/recommend/rank/compare/exhaustive research are intercepted deterministically before this planner and run through audited research when they concern external options rather than private/in-context material.
 - Use private-data tools only when the requested answer actually depends on that private source (mail, calendar, PC state, stored memory, vision, etc.).
 - Before selecting a tool, silently ask: 'Would this tool return information or perform an action that I cannot already provide from the prompt and my knowledge?' If no, tool=null.
 Examples:
@@ -108,7 +108,7 @@ sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.comm
 custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
 
 Routing rules:
-- web.search: current/recent/public information or explicit online lookup. Use a self-contained query; Jarvis will refine conversational wording automatically. Selection-risk requests are deterministically upgraded to audited multi-query research by the execution layer.
+- web.search: current/recent/public information or explicit online lookup. Use a self-contained query; Jarvis will refine conversational wording automatically. External selection-risk requests are deterministically upgraded to audited multi-query research by the execution layer.
 - vision.recall: something visible within the preceding 30 seconds, including a passing sign or transient screen. The image cache is memory-only and auto-expires.
 - vision.ocr_clipboard: only when the user explicitly asks to copy visible text, an error code, terminal output, or a serial/model number to the PC clipboard.
 - expense.capture: only when the user explicitly asks to log a visible receipt/invoice. expense.list/export operate on the local expense database/CSV.
@@ -194,12 +194,11 @@ def _explicit_app_control_or_status(text: str) -> bool:
 
 
 def _requires_audited_web(text: str) -> bool:
-    """Deterministically identify requests where shallow search creates selection risk.
+    """Force audited web research only when the choice universe is external.
 
-    This sits before the LLM planner, so the planner cannot silently answer a 'best'
-    or recommendation question from memory and thereby bypass the Research Receipt.
-    Stable how-to questions such as 'best way to boil an egg' stay on the ordinary
-    reasoning path unless they also explicitly request comparison/research.
+    This sits before the LLM planner, so a model cannot silently answer a public
+    'best/recommend/rank' request from memory. Explicitly private or in-context
+    comparisons stay available to Gmail/Calendar/knowledge/local reasoning instead.
     """
     n = " " + re.sub(r"\s+", " ", text.strip().lower()) + " "
     receipt_cues = (
@@ -208,6 +207,16 @@ def _requires_audited_web(text: str) -> bool:
     )
     if any(cue in n for cue in receipt_cues):
         return True
+
+    explicit_web = (" search ", " look up ", " lookup ", " google ", " web ", " internet ", " online ")
+    private_context = (
+        " my email ", " my e-mail ", " my inbox ", " my calendar ", " my notes ",
+        " my records ", " my data ", " this document ", " this draft ", " this file ",
+        " attached file ", " attachment ", " these two drafts ", " these two documents ",
+        " our conversation ", " what i sent ", " what i uploaded ",
+    )
+    if any(cue in n for cue in private_context) and not any(cue in n for cue in explicit_web):
+        return False
 
     strong = (
         " recommend ", " recommends ", " recommendation ", " recommendations ",

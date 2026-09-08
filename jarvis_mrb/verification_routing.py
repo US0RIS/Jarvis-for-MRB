@@ -84,6 +84,20 @@ def _latest_verification(text: str) -> sqlite3.Row | None:
         conn.close()
 
 
+def _verification_by_id(verification_id: str) -> sqlite3.Row | None:
+    from jarvis_mrb.world_model import DB_PATH
+
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            "SELECT * FROM action_verifications WHERE id=?",
+            (str(verification_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
 def _repair_calendar_expectation(row: sqlite3.Row) -> bool:
     if str(row["tool"]) != "calendar.create":
         return False
@@ -126,6 +140,101 @@ def _repair_calendar_expectation(row: sqlite3.Row) -> bool:
     return True
 
 
+def _fresh_check(verification_id: str) -> dict[str, Any] | None:
+    """Perform a fresh observer pass, including for a prior timeout.
+
+    ``world_verification.check_one`` intentionally treats terminal states as immutable
+    during background polling. That is correct for autonomous deadline processing, but
+    an explicit user question such as "Did that work?" is different: a timeout means
+    Jarvis failed to establish the outcome *by the deadline*, not that the real-world
+    effect is forever unknowable. If independent evidence becomes visible later, the
+    explicit query should be allowed to move timed_out -> verified/failed while keeping
+    the earlier timeout event in world history.
+    """
+    from jarvis_mrb import world_verification
+
+    result = world_verification.check_one(verification_id, force=True)
+    row = _verification_by_id(verification_id)
+    if row is None or str(row["status"] or "") != "timed_out":
+        return result
+
+    try:
+        expected = json.loads(str(row["expected_json"] or "{}"))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        expected = {}
+    if not isinstance(expected, dict):
+        expected = {}
+
+    verifier = str(row["verifier"] or "")
+    now = datetime.now().astimezone().isoformat()
+    try:
+        outcome, evidence = world_verification._observe(verifier, expected)
+        world_verification._record_observation(
+            verification_id,
+            outcome=outcome,
+            evidence=evidence,
+        )
+        if outcome in {"verified", "failed"}:
+            return world_verification._transition(row, outcome, evidence)
+
+        # A late observer can remain inconclusive. Preserve the historical timeout
+        # classification, but record that a fresh user-requested check actually ran.
+        from jarvis_mrb.world_model import DB_PATH
+
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        try:
+            conn.execute(
+                """
+                UPDATE action_verifications
+                SET attempts=attempts+1,last_checked_at=?,last_evidence=?,last_error='',updated_at=?
+                WHERE id=?
+                """,
+                (now, str(evidence)[:3000], now, verification_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "id": verification_id,
+            "status": "timed_out",
+            "tool": str(row["tool"]),
+            "evidence": str(evidence)[:1500],
+        }
+    except Exception as exc:
+        error = str(exc)[:2000]
+        try:
+            world_verification._record_observation(
+                verification_id,
+                outcome="observer_error",
+                evidence=str(row["last_evidence"] or ""),
+                error=error,
+            )
+        except Exception:
+            pass
+        from jarvis_mrb.world_model import DB_PATH
+
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        try:
+            conn.execute(
+                """
+                UPDATE action_verifications
+                SET attempts=attempts+1,last_checked_at=?,last_error=?,updated_at=?
+                WHERE id=?
+                """,
+                (now, error, now, verification_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "id": verification_id,
+            "status": "timed_out",
+            "tool": str(row["tool"]),
+            "evidence": str(row["last_evidence"] or "")[:1500],
+            "error": error,
+        }
+
+
 def _human_tool(tool: str) -> str:
     return {
         "calendar.create": "calendar event",
@@ -144,7 +253,7 @@ def reply_for_query(text: str) -> str | None:
 
     This path deliberately bypasses the planner. Asking whether an action worked must
     never cause the planner to repeat the action itself. A fresh independent observer
-    is invoked when the verification is still pending.
+    is invoked even when the original verification window previously timed out.
     """
     if not is_verification_query(text):
         return None
@@ -163,9 +272,7 @@ def reply_for_query(text: str) -> str | None:
 
     verification_id = str(row["id"])
     try:
-        from jarvis_mrb.world_verification import check_one
-
-        check_one(verification_id, force=True)
+        _fresh_check(verification_id)
     except Exception:
         pass
 
@@ -189,7 +296,7 @@ def reply_for_query(text: str) -> str | None:
         return f"No. The {label} failed.{detail}".strip()
     if status == "timed_out":
         detail = f" {evidence}" if evidence else ""
-        return f"I could not independently verify the {label} before the verification deadline.{detail}".strip()
+        return f"I still could not independently verify the {label} after a fresh check.{detail}".strip()
     if status == "unverified":
         detail = f" {evidence}" if evidence else ""
         return f"The {label} returned success, but there is no independent observer for its effect, so I am not calling it verified.{detail}".strip()
@@ -234,5 +341,6 @@ def status() -> dict[str, Any]:
         "planner_bypassed_for_outcome_queries": True,
         "calendar_legacy_expectation_repair": True,
         "fresh_independent_check_on_query": True,
+        "late_timeout_recovery": True,
         "repeat_action_on_did_that_work": False,
     }

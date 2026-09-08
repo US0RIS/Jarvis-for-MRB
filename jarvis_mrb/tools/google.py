@@ -252,9 +252,6 @@ def _clean_email_text(raw_body: str, snippet: str) -> str:
     body = clean(raw_body)
     snippet_text = clean(snippet)
 
-    # Cut common newsletter/legal footers. Keep the full cleaned text in structured
-    # data only up to a reasonable size; the spoken/display message should contain
-    # the useful content, not unsubscribe boilerplate or tracking machinery.
     lower = body.lower()
     footer_positions = [
         lower.find(cue)
@@ -264,8 +261,6 @@ def _clean_email_text(raw_body: str, snippet: str) -> str:
     if footer_positions:
         body = body[: min(footer_positions)].rstrip(" -|•")
 
-    # Gmail's snippet is often a much better concise representation of newsletters
-    # and long quoted threads than the raw MIME body.
     if (len(body) > 650 or raw_body.lower().count("http") >= 2) and len(snippet_text) >= 30:
         body = snippet_text
     if not body:
@@ -284,11 +279,7 @@ def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
 
     try:
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
-        listing = service.users().messages().list(
-            userId="me",
-            q=gmail_query,
-            maxResults=safe_limit,
-        ).execute()
+        listing = service.users().messages().list(userId="me", q=gmail_query, maxResults=safe_limit).execute()
         refs = listing.get("messages", [])
 
         emails: list[dict[str, Any]] = []
@@ -297,11 +288,7 @@ def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
             message_id = str(ref.get("id") or "")
             if not message_id:
                 continue
-            message = service.users().messages().get(
-                userId="me",
-                id=message_id,
-                format="full",
-            ).execute()
+            message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
             payload = message.get("payload") or {}
             headers = _gmail_headers(payload)
             sender_raw = headers.get("from", "Unknown sender")
@@ -310,21 +297,12 @@ def query_emails(query: str | None = None, limit: int = 5) -> GoogleResult:
             if len(subject) > 120:
                 subject = subject[:117].rstrip() + "..."
             date_raw = headers.get("date", "")
-            date = _human_email_date(date_raw)
             raw_body = _plain_text_from_payload(payload).strip()
             snippet = str(message.get("snippet") or "").strip()
             body = _clean_email_text(raw_body, snippet)
             unread = "UNREAD" in set(message.get("labelIds") or [])
 
-            emails.append({
-                "id": message_id,
-                "from": sender_raw,
-                "sender": sender,
-                "subject": subject,
-                "date": date_raw,
-                "body": body,
-                "unread": unread,
-            })
+            emails.append({"id": message_id, "from": sender_raw, "sender": sender, "subject": subject, "date": date_raw, "body": body, "unread": unread})
 
         for index, email in enumerate(emails, start=1):
             excerpt = str(email["body"] or "").strip()
@@ -415,11 +393,7 @@ def query_calendar_events(
     days = max(1, min(int(days), 3650))
     try:
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
-        kwargs: dict[str, Any] = {
-            "calendarId": "primary",
-            "maxResults": limit,
-            "singleEvents": True,
-        }
+        kwargs: dict[str, Any] = {"calendarId": "primary", "maxResults": limit, "singleEvents": True}
         if query:
             kwargs["q"] = query
         if start or end:
@@ -455,21 +429,59 @@ def most_recent_calendar_event(days_back: int = 3650) -> GoogleResult:
     result = query_calendar_events(direction="past", days=days_back, limit=1)
     if result.ok and result.data and result.data.get("events"):
         event = result.data["events"][0]
-        return GoogleResult(
-            True,
-            f"Most recent event: {_human_event_time(event['start'])} — {event['summary']}.",
-            {"events": [event]},
-        )
+        return GoogleResult(True, f"Most recent event: {_human_event_time(event['start'])} — {event['summary']}.", {"events": [event]})
     return GoogleResult(True, f"No calendar events found in the last {days_back} day(s).", {"events": []})
 
 
-def create_calendar_event(summary: str, start: str, end: str, description: str | None = None) -> GoogleResult:
+def _calendar_datetime_text(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("date_time", "dateTime", "datetime", "value"):
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate).strip()
+        return ""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    wrapped = re.search(r"['\"](?:date_time|dateTime|datetime|value)['\"]\s*:\s*['\"]([^'\"]+)['\"]", text)
+    return wrapped.group(1).strip() if wrapped else text
+
+
+def _normalize_calendar_datetime(value: Any) -> tuple[str, datetime] | tuple[None, None]:
+    text = _calendar_datetime_text(value)
+    if not text:
+        return None, None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None, None
+    if parsed.tzinfo is None:
+        # Naive datetimes are interpreted in the host's configured local timezone.
+        # timestamp()/fromtimestamp() delegates DST rules to the operating system,
+        # so a future date receives the correct local UTC offset when available.
+        parsed = datetime.fromtimestamp(parsed.timestamp()).astimezone()
+    return parsed.isoformat(), parsed
+
+
+def create_calendar_event(summary: str, start: Any, end: Any, description: str | None = None) -> GoogleResult:
     creds = _load_credentials(interactive=False)
     if not creds:
         return google_status()
-    if not summary.strip() or not start.strip() or not end.strip():
-        return GoogleResult(False, "Calendar event requires summary, start, and end.")
-    body: dict[str, Any] = {"summary": summary.strip(), "start": {"dateTime": start.strip()}, "end": {"dateTime": end.strip()}}
+    summary = str(summary or "").strip()
+    start_text, start_dt = _normalize_calendar_datetime(start)
+    end_text, end_dt = _normalize_calendar_datetime(end)
+    if not summary or not start_text or not end_text or start_dt is None or end_dt is None:
+        return GoogleResult(False, "Calendar event requires a summary and valid ISO/RFC 3339 start and end times.")
+    if end_dt <= start_dt:
+        return GoogleResult(False, "Calendar event end time must be after the start time.")
+    if (end_dt - start_dt).total_seconds() < 60:
+        return GoogleResult(False, "Calendar event duration is under one minute. Refusing an ambiguous write; please specify the intended duration or exact end time.")
+
+    body: dict[str, Any] = {
+        "summary": summary,
+        "start": {"dateTime": start_text},
+        "end": {"dateTime": end_text},
+    }
     if description:
         body["description"] = description
     try:
@@ -477,4 +489,13 @@ def create_calendar_event(summary: str, start: str, end: str, description: str |
         event = service.events().insert(calendarId="primary", body=body).execute()
     except Exception as exc:
         return GoogleResult(False, f"Calendar create failed: {exc}")
-    return GoogleResult(True, f"Created calendar event {summary!r}.", {"event_id": event.get("id", ""), "html_link": event.get("htmlLink", "")})
+    return GoogleResult(
+        True,
+        f"Created calendar event {summary!r}.",
+        {
+            "event_id": event.get("id", ""),
+            "html_link": event.get("htmlLink", ""),
+            "start": start_text,
+            "end": end_text,
+        },
+    )

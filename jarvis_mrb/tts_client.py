@@ -12,6 +12,7 @@ TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "kokoro")
 TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "bm_george")
 TTS_SPEED = float(os.environ.get("JARVIS_TTS_SPEED", "1.04"))
 _TTS_LAST_HEALTHY: bool | None = None
+_TTS_PROCESS: subprocess.Popen | None = None
 
 
 def _record_health_transition(healthy: bool) -> None:
@@ -80,6 +81,11 @@ def _wsl_start_command() -> list[str] | None:
     if sys.platform != "win32":
         return None
 
+    # Keep wsl.exe attached to the long-running Uvicorn process. An earlier
+    # launcher tried to nohup/background Uvicorn and then allowed the WSL command
+    # to exit immediately; on the deployed Windows/WSL setup that left no durable
+    # server process. exec makes Uvicorn the bash child so the Windows Popen handle
+    # represents the actual lifetime of the TTS service.
     shell = r"""
 set -e
 ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"
@@ -96,41 +102,51 @@ if [ ! -s "$MODEL" ] || [ ! -s "$CONFIG" ]; then
   mkdir -p "$MODEL_DIR"
   "$PY" "$DOWNLOAD" --output "$MODEL_DIR" >> "$LOG" 2>&1
 fi
-nohup env \
+exec env \
   USE_GPU=true \
   PYTHONPATH="$ROOT:$ROOT/api" \
   MODEL_DIR=src/models \
   VOICES_DIR=src/voices/v1_0 \
   WEB_PLAYER_PATH="$ROOT/web" \
   "$PY" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 \
-  >> "$LOG" 2>&1 &
+  >> "$LOG" 2>&1
 """.strip()
     return ["wsl.exe", "bash", "-lc", shell]
 
 
 def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
+    global _TTS_PROCESS
+
     if tts_health():
         return True
     if os.environ.get("JARVIS_TTS_AUTOSTART", "1").strip().lower() in {"0", "false", "no"}:
         return False
+
     command = _wsl_start_command()
     if not command:
         return False
-    try:
-        subprocess.Popen(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        )
-    except OSError:
-        return False
+
+    # Do not launch duplicate Kokoro processes while the existing child is still
+    # warming up. If the prior child exited, replace it with a fresh attempt.
+    if _TTS_PROCESS is None or _TTS_PROCESS.poll() is not None:
+        try:
+            _TTS_PROCESS = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        except OSError:
+            _TTS_PROCESS = None
+            return False
 
     deadline = time.monotonic() + max(0.0, wait_seconds)
     while time.monotonic() < deadline:
         if tts_health():
             return True
+        if _TTS_PROCESS is not None and _TTS_PROCESS.poll() is not None:
+            return False
         time.sleep(0.15)
     return tts_health()
 

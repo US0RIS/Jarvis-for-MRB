@@ -84,9 +84,18 @@ def _wsl_start_command() -> list[str] | None:
 set -e
 ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"
 PY="$ROOT/.venv/bin/python"
+LOG="$HOME/.local/share/jarvis/kokoro-fastapi.log"
+MODEL_DIR="$ROOT/api/src/models/v1_0"
+MODEL="$MODEL_DIR/kokoro-v1_0.pth"
+CONFIG="$MODEL_DIR/config.json"
+DOWNLOAD="$ROOT/docker/scripts/download_model.py"
 if [ ! -x "$PY" ]; then exit 2; fi
-if curl -fsS http://127.0.0.1:8880/health >/dev/null 2>&1; then exit 0; fi
 cd "$ROOT"
+if [ ! -s "$MODEL" ] || [ ! -s "$CONFIG" ]; then
+  : > "$LOG"
+  mkdir -p "$MODEL_DIR"
+  "$PY" "$DOWNLOAD" --output "$MODEL_DIR" >> "$LOG" 2>&1
+fi
 nohup env \
   USE_GPU=true \
   PYTHONPATH="$ROOT:$ROOT/api" \
@@ -94,7 +103,7 @@ nohup env \
   VOICES_DIR=src/voices/v1_0 \
   WEB_PLAYER_PATH="$ROOT/web" \
   "$PY" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 \
-  > "$HOME/.local/share/jarvis/kokoro-fastapi.log" 2>&1 &
+  >> "$LOG" 2>&1 &
 """.strip()
     return ["wsl.exe", "bash", "-lc", shell]
 

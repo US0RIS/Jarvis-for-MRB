@@ -13,50 +13,77 @@ class TTSAutoStartModelRepairTests(unittest.TestCase):
         tts_client._TTS_PROCESS = None
         tts_client._TTS_MONITOR = None
         tts_client._TTS_LOG_HANDLE = None
+        tts_client._WSL_HOME = None
 
     def tearDown(self) -> None:
         tts_client._close_log_handle()
         tts_client._TTS_PROCESS = None
         tts_client._TTS_MONITOR = None
+        tts_client._WSL_HOME = None
 
-    def test_windows_wsl_preflight_uses_upstream_model_validator(self) -> None:
-        with patch.object(tts_client.sys, "platform", "win32"):
+    def test_wsl_home_uses_direct_printenv_without_shell(self) -> None:
+        completed = Mock(returncode=0, stdout="/home/tester\n")
+        with patch.object(tts_client.sys, "platform", "win32"), patch.object(
+            tts_client.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertEqual(tts_client._wsl_home(), "/home/tester")
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["wsl.exe", "--exec", "printenv", "HOME"],
+        )
+
+    def test_windows_wsl_preflight_uses_direct_upstream_model_validator(self) -> None:
+        with patch.object(tts_client, "_wsl_home", return_value="/home/tester"):
             command = tts_client._wsl_prepare_command()
 
-        self.assertIsNotNone(command)
-        assert command is not None
-        self.assertEqual(command[:3], ["wsl.exe", "bash", "-lc"])
-        shell = command[3]
-        self.assertIn('ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"', shell)
-        self.assertIn('MODEL_DIR="$ROOT/api/src/models/v1_0"', shell)
-        self.assertIn('DOWNLOAD="$ROOT/docker/scripts/download_model.py"', shell)
-        self.assertIn('exec "$PY" "$DOWNLOAD" --output "$MODEL_DIR"', shell)
-        self.assertNotIn(r'\"', shell)
+        self.assertEqual(
+            command,
+            [
+                "wsl.exe",
+                "--exec",
+                "/home/tester/.local/share/jarvis/kokoro-fastapi/.venv/bin/python",
+                "/home/tester/.local/share/jarvis/kokoro-fastapi/docker/scripts/download_model.py",
+                "--output",
+                "/home/tester/.local/share/jarvis/kokoro-fastapi/api/src/models/v1_0",
+            ],
+        )
+        self.assertNotIn("bash", command or [])
+        self.assertNotIn("-lc", command or [])
 
-    def test_windows_wsl_launcher_matches_proven_foreground_shape(self) -> None:
-        with patch.object(tts_client.sys, "platform", "win32"):
+    def test_windows_wsl_launcher_is_direct_argv_not_shell_text(self) -> None:
+        with patch.object(tts_client, "_wsl_home", return_value="/home/tester"):
             command = tts_client._wsl_start_command()
 
         self.assertIsNotNone(command)
         assert command is not None
-        self.assertEqual(command[:3], ["wsl.exe", "bash", "-lc"])
-        shell = command[3]
-        self.assertIn('ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"', shell)
-        self.assertIn('cd "$ROOT" && exec env', shell)
-        self.assertIn('USE_GPU=true', shell)
-        self.assertIn('MODEL_DIR=src/models', shell)
-        self.assertIn('VOICES_DIR=src/voices/v1_0', shell)
-        self.assertIn('"$ROOT/.venv/bin/python" -m uvicorn api.src.main:app', shell)
-        self.assertNotIn(r'\"', shell)
-        self.assertNotIn("download_model.py", shell)
-        self.assertNotIn("nohup", shell)
+        self.assertEqual(command[:3], ["wsl.exe", "--exec", "env"])
+        self.assertIn("USE_GPU=true", command)
+        self.assertIn(
+            "PYTHONPATH=/home/tester/.local/share/jarvis/kokoro-fastapi:/home/tester/.local/share/jarvis/kokoro-fastapi/api",
+            command,
+        )
+        self.assertIn("MODEL_DIR=src/models", command)
+        self.assertIn("VOICES_DIR=src/voices/v1_0", command)
+        self.assertIn(
+            "WEB_PLAYER_PATH=/home/tester/.local/share/jarvis/kokoro-fastapi/web",
+            command,
+        )
+        self.assertIn(
+            "/home/tester/.local/share/jarvis/kokoro-fastapi/.venv/bin/python",
+            command,
+        )
+        self.assertIn("api.src.main:app", command)
+        self.assertNotIn("bash", command)
+        self.assertNotIn("-lc", command)
+        self.assertFalse(any('"' in part or "'" in part for part in command))
 
     def test_prepare_runtime_requires_zero_exit(self) -> None:
         completed = Mock(returncode=0)
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             tts_client, "_runtime_log_path", return_value=Path(temp_dir) / "kokoro.log"
         ), patch.object(
-            tts_client, "_wsl_prepare_command", return_value=["wsl.exe", "bash", "-lc", "prepare"]
+            tts_client, "_wsl_prepare_command", return_value=["wsl.exe", "--exec", "prepare"]
         ), patch.object(tts_client.subprocess, "run", return_value=completed) as run:
             self.assertTrue(tts_client._prepare_wsl_runtime())
 
@@ -68,7 +95,7 @@ class TTSAutoStartModelRepairTests(unittest.TestCase):
         fake_log = Mock()
         fake_log.write = Mock()
         with patch.object(tts_client, "tts_health", return_value=False), patch.object(
-            tts_client, "_wsl_start_command", return_value=["wsl.exe", "bash", "-lc", "exec server"]
+            tts_client, "_wsl_start_command", return_value=["wsl.exe", "--exec", "server"]
         ), patch.object(tts_client, "_prepare_wsl_runtime", return_value=True) as prepare, patch.object(
             tts_client, "_close_log_handle"
         ), patch.object(tts_client, "_runtime_log_path") as log_path, patch.object(
@@ -93,7 +120,7 @@ class TTSAutoStartModelRepairTests(unittest.TestCase):
         tts_client._TTS_PROCESS = dead
 
         with patch.object(tts_client, "tts_health", return_value=False), patch.object(
-            tts_client, "_wsl_start_command", return_value=["wsl.exe", "bash", "-lc", "exec server"]
+            tts_client, "_wsl_start_command", return_value=["wsl.exe", "--exec", "server"]
         ), patch.object(tts_client, "_prepare_wsl_runtime", return_value=True) as prepare, patch.object(
             tts_client, "_close_log_handle"
         ), patch.object(tts_client, "_runtime_log_path") as log_path, patch.object(

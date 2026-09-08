@@ -445,8 +445,51 @@ def _is_contextual_reference(value: str) -> bool:
     }
 
 
+def _current_goals_reply() -> AgentReply:
+    """Answer generic current-goal questions from authoritative world state.
+
+    Goal status is not a calendar question. Keeping this deterministic avoids a
+    recent calendar exchange biasing the planner into returning events when the user
+    explicitly asks for Jarvis goals. Both the non-streaming and streaming agents use
+    this shared fast path.
+    """
+    try:
+        from jarvis_mrb.world_model import active_overview
+
+        prefix = "active goal: "
+        goals: list[str] = []
+        for raw_line in active_overview(limit=50).splitlines():
+            line = raw_line.strip()
+            if line.lower().startswith(prefix):
+                goals.append(line[len(prefix):].strip())
+    except Exception:
+        return AgentReply(False, "I couldn't read the current goal state from the world model.")
+
+    if not goals:
+        return AgentReply(True, "You have no active goals.")
+    if len(goals) == 1:
+        return AgentReply(True, f"Your current goal is {goals[0]}.")
+    return AgentReply(True, "Your current goals are: " + "; ".join(goals) + ".")
+
+
 def _fast_path(text: str) -> AgentReply | None:
     n = _normalize(text)
+    goal_query = n.rstrip("?.!")
+    if goal_query in {
+        "what are my goals",
+        "what are my current goals",
+        "what are my active goals",
+        "what goals do i have",
+        "list my goals",
+        "list my current goals",
+        "list my active goals",
+        "show my goals",
+        "show my current goals",
+        "show my active goals",
+        "current goals",
+        "active goals",
+    }:
+        return _current_goals_reply()
     if n in {"confirm", "yes send it", "send it", "yes, send it", "yes do it", "do it"}: return _confirm_pending()
     if n in {"cancel", "never mind", "nevermind", "don't do it", "do not do it", "don't send it"}: return _cancel_pending()
     if n in {"permissions", "permission status", "permissions status"}: return AgentReply(True, "Permission policy: " + policy_summary())

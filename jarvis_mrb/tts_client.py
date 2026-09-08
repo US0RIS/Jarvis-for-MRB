@@ -18,6 +18,7 @@ _TTS_LAST_HEALTHY: bool | None = None
 _TTS_PROCESS: subprocess.Popen | None = None
 _TTS_MONITOR: threading.Thread | None = None
 _TTS_LOG_HANDLE: BinaryIO | None = None
+_WSL_HOME: str | None = None
 
 
 def _record_health_transition(healthy: bool) -> None:
@@ -74,31 +75,93 @@ def tts_health() -> bool:
         return False
 
 
-def _wsl_prepare_command() -> list[str] | None:
-    """Return the model-validation/repair command proven on the deployed WSL install."""
+def _wsl_home() -> str | None:
+    """Resolve the default WSL user's home without routing through a shell.
+
+    Python's Windows argv quoting plus ``bash -lc`` caused the Kokoro launcher to
+    receive a truncated command on the deployed machine.  Resolve HOME once with
+    ``printenv`` and use direct WSL argv for every subsequent process instead.
+    """
+    global _WSL_HOME
     if sys.platform != "win32":
         return None
 
-    # These are ordinary Python strings, not raw strings. Bash must receive real
-    # quote delimiters ("), not backslash-escaped quote characters (\"). The latter
-    # become literal quote characters in variable values and corrupt paths such as
-    # ROOT, causing an immediate WSL exit before Kokoro can start.
-    shell = '''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; PY="$ROOT/.venv/bin/python"; MODEL_DIR="$ROOT/api/src/models/v1_0"; DOWNLOAD="$ROOT/docker/scripts/download_model.py"; if [ ! -x "$PY" ]; then echo "Kokoro Python missing: $PY" >&2; exit 2; fi; cd "$ROOT"; exec "$PY" "$DOWNLOAD" --output "$MODEL_DIR"'''
-    return ["wsl.exe", "bash", "-lc", shell]
+    override = os.environ.get("JARVIS_WSL_HOME", "").strip()
+    if override:
+        return override.rstrip("/")
+    if _WSL_HOME:
+        return _WSL_HOME
+
+    try:
+        completed = subprocess.run(
+            ["wsl.exe", "--exec", "printenv", "HOME"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10.0,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if completed.returncode != 0:
+        return None
+    home = completed.stdout.strip()
+    if not home.startswith("/"):
+        return None
+    _WSL_HOME = home.rstrip("/")
+    return _WSL_HOME
+
+
+def _wsl_prepare_command() -> list[str] | None:
+    """Return Kokoro's upstream model validation command as direct WSL argv."""
+    home = _wsl_home()
+    if not home:
+        return None
+
+    root = f"{home}/.local/share/jarvis/kokoro-fastapi"
+    python = f"{root}/.venv/bin/python"
+    downloader = f"{root}/docker/scripts/download_model.py"
+    model_dir = f"{root}/api/src/models/v1_0"
+    return [
+        "wsl.exe",
+        "--exec",
+        python,
+        downloader,
+        "--output",
+        model_dir,
+    ]
 
 
 def _wsl_start_command() -> list[str] | None:
-    """Return the minimal Kokoro command that has been verified manually on this PC.
-
-    Keep the long-running Uvicorn process attached to wsl.exe. Model validation is
-    deliberately a separate synchronous preflight so shell/setup failures cannot be
-    confused with Uvicorn lifetime failures.
-    """
-    if sys.platform != "win32":
+    """Return the proven Kokoro launch as direct WSL argv, with no shell parser."""
+    home = _wsl_home()
+    if not home:
         return None
 
-    shell = '''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; cd "$ROOT" && exec env USE_GPU=true PYTHONPATH="$ROOT:$ROOT/api" MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 WEB_PLAYER_PATH="$ROOT/web" "$ROOT/.venv/bin/python" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 --log-level info'''
-    return ["wsl.exe", "bash", "-lc", shell]
+    root = f"{home}/.local/share/jarvis/kokoro-fastapi"
+    python = f"{root}/.venv/bin/python"
+    return [
+        "wsl.exe",
+        "--exec",
+        "env",
+        "USE_GPU=true",
+        f"PYTHONPATH={root}:{root}/api",
+        "MODEL_DIR=src/models",
+        "VOICES_DIR=src/voices/v1_0",
+        f"WEB_PLAYER_PATH={root}/web",
+        python,
+        "-m",
+        "uvicorn",
+        "api.src.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8880",
+        "--log-level",
+        "info",
+    ]
 
 
 def _runtime_log_path() -> Path:
@@ -189,7 +252,7 @@ def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
 
     # Do not launch duplicate Kokoro processes while the existing child is warming.
     # If the prior child exited, rerun the independently observable preflight and
-    # then start the exact minimal command verified manually on the deployed PC.
+    # then start the same direct argv shape that succeeds manually.
     if _TTS_PROCESS is None or _TTS_PROCESS.poll() is not None:
         if not _prepare_wsl_runtime():
             return False

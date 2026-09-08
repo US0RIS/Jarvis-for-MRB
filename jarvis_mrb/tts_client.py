@@ -79,7 +79,11 @@ def _wsl_prepare_command() -> list[str] | None:
     if sys.platform != "win32":
         return None
 
-    shell = r'''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; PY="$ROOT/.venv/bin/python"; MODEL_DIR="$ROOT/api/src/models/v1_0"; DOWNLOAD="$ROOT/docker/scripts/download_model.py"; if [ ! -x "$PY" ]; then echo "Kokoro Python missing: $PY" >&2; exit 2; fi; cd "$ROOT"; exec "$PY" "$DOWNLOAD" --output "$MODEL_DIR"'''
+    # These are ordinary Python strings, not raw strings. Bash must receive real
+    # quote delimiters ("), not backslash-escaped quote characters (\"). The latter
+    # become literal quote characters in variable values and corrupt paths such as
+    # ROOT, causing an immediate WSL exit before Kokoro can start.
+    shell = '''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; PY="$ROOT/.venv/bin/python"; MODEL_DIR="$ROOT/api/src/models/v1_0"; DOWNLOAD="$ROOT/docker/scripts/download_model.py"; if [ ! -x "$PY" ]; then echo "Kokoro Python missing: $PY" >&2; exit 2; fi; cd "$ROOT"; exec "$PY" "$DOWNLOAD" --output "$MODEL_DIR"'''
     return ["wsl.exe", "bash", "-lc", shell]
 
 
@@ -93,7 +97,7 @@ def _wsl_start_command() -> list[str] | None:
     if sys.platform != "win32":
         return None
 
-    shell = r'''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; cd "$ROOT" && exec env USE_GPU=true PYTHONPATH="$ROOT:$ROOT/api" MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 WEB_PLAYER_PATH="$ROOT/web" "$ROOT/.venv/bin/python" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 --log-level info'''
+    shell = '''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; cd "$ROOT" && exec env USE_GPU=true PYTHONPATH="$ROOT:$ROOT/api" MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 WEB_PLAYER_PATH="$ROOT/web" "$ROOT/.venv/bin/python" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 --log-level info'''
     return ["wsl.exe", "bash", "-lc", shell]
 
 

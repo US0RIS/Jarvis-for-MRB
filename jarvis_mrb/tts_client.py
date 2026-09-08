@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import httpx
@@ -13,6 +14,7 @@ TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "bm_george")
 TTS_SPEED = float(os.environ.get("JARVIS_TTS_SPEED", "1.04"))
 _TTS_LAST_HEALTHY: bool | None = None
 _TTS_PROCESS: subprocess.Popen | None = None
+_TTS_MONITOR: threading.Thread | None = None
 
 
 def _record_health_transition(healthy: bool) -> None:
@@ -114,6 +116,30 @@ exec env \
     return ["wsl.exe", "bash", "-lc", shell]
 
 
+def _monitor_tts_child(process: subprocess.Popen, timeout_seconds: float = 120.0) -> None:
+    """Observe asynchronous Kokoro warmup and publish recovery when ready."""
+    deadline = time.monotonic() + max(1.0, timeout_seconds)
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return
+        if tts_health():
+            return
+        time.sleep(0.25)
+
+
+def _ensure_monitor(process: subprocess.Popen) -> None:
+    global _TTS_MONITOR
+    if _TTS_MONITOR is not None and _TTS_MONITOR.is_alive():
+        return
+    _TTS_MONITOR = threading.Thread(
+        target=_monitor_tts_child,
+        args=(process,),
+        name="jarvis-kokoro-health",
+        daemon=True,
+    )
+    _TTS_MONITOR.start()
+
+
 def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
     global _TTS_PROCESS
 
@@ -140,6 +166,8 @@ def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
         except OSError:
             _TTS_PROCESS = None
             return False
+
+    _ensure_monitor(_TTS_PROCESS)
 
     deadline = time.monotonic() + max(0.0, wait_seconds)
     while time.monotonic() < deadline:

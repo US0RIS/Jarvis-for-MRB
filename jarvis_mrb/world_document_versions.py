@@ -21,7 +21,8 @@ _STOP = {
     "such", "any", "each", "other", "agreement", "section", "party", "parties",
 }
 _NUMBER_RE = re.compile(
-    r"(?<!\w)(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?\s*(?:%|percent|bps?|x|days?|months?|years?)?(?!\w)",
+    r"(?<!\w)(?:(?:USD|EUR|GBP)\s*|[$€£]\s*)?\d[\d,]*(?:\.\d+)?\s*"
+    r"(?:(?:thousand|million|billion|trillion|mn|mm|bn)\b|%|percent|bps?|x|days?|months?|years?)?(?!\w)",
     flags=re.IGNORECASE,
 )
 _DATE_RE = re.compile(

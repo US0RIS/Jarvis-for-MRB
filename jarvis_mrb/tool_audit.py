@@ -114,10 +114,29 @@ def _consume_staged_decision(tool: str, args: dict[str, Any]) -> str:
 
 
 def _verification_args(tool: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Normalize only values whose storage authority normalizes them before write."""
+    """Normalize values whose storage authority canonicalizes them before a write.
+
+    Verification must describe the state that was actually written, not the planner's
+    pre-normalization representation. Calendar is especially important because planner
+    output may wrap date-times in mappings while the Google boundary emits canonical
+    RFC 3339 strings.
+    """
     result = dict(args or {})
     if str(tool) == "state.temp_set":
         result["key"] = str(result.get("key") or "").strip().lower().replace(" ", "_")[:100]
+    if str(tool) == "calendar.create":
+        try:
+            from jarvis_mrb.tools.google import _normalize_calendar_datetime
+
+            for key in ("start", "end"):
+                normalized, parsed = _normalize_calendar_datetime(result.get(key))
+                if parsed is not None and normalized:
+                    result[key] = normalized
+        except Exception:
+            # Verification remains conservative if canonicalization unexpectedly
+            # fails; world_verification will keep the result pending rather than
+            # inferring success from the tool receipt.
+            pass
     return result
 
 
@@ -162,7 +181,7 @@ def _record(tool: str, args: dict[str, Any], reply: Any, *, confirmed_execution:
 
 
 def install() -> bool:
-    """Install one process-wide audit wrapper around the canonical tool executor."""
+    """Install the process-wide audit wrapper and deterministic outcome-query route."""
     global _INSTALLED, _ORIGINAL
     with _LOCK:
         if _INSTALLED:
@@ -179,6 +198,12 @@ def install() -> bool:
         if getattr(original, "_jarvis_world_audited", False):
             _INSTALLED = True
             _ORIGINAL = original
+            try:
+                from jarvis_mrb.verification_routing import install as install_verification_routing
+
+                install_verification_routing(agent_module, streaming_agent_module)
+            except Exception:
+                pass
             return True
 
         def audited_execute_tool(
@@ -198,6 +223,16 @@ def install() -> bool:
         setattr(audited_execute_tool, "_jarvis_original_execute_tool", original)
         agent_module.execute_tool = audited_execute_tool
         streaming_agent_module.execute_tool = audited_execute_tool
+
+        try:
+            from jarvis_mrb.verification_routing import install as install_verification_routing
+
+            install_verification_routing(agent_module, streaming_agent_module)
+        except Exception:
+            # Audit installation is still authoritative; inability to install the
+            # convenience fast path must not disable execution auditing itself.
+            pass
+
         _ORIGINAL = original
         _INSTALLED = True
         return True
@@ -207,6 +242,13 @@ def status() -> dict[str, Any]:
     with _LOCK:
         _prune_staged()
         staged = len(_STAGED_EXECUTIVE)
+    routing = False
+    try:
+        from jarvis_mrb.verification_routing import status as verification_routing_status
+
+        routing = bool(verification_routing_status().get("installed"))
+    except Exception:
+        pass
     return {
         "installed": _INSTALLED,
         "has_original": _ORIGINAL is not None,
@@ -215,8 +257,9 @@ def status() -> dict[str, Any]:
         "security_result_bodies_persisted": False,
         "repeated_identical_executions_preserved": True,
         "closed_loop_verification_registered": True,
+        "verification_query_fast_path": routing,
         "executive_decision_correlation": "exact persisted tool+arguments; one-shot staged confirmation cache consumed only by bypass-confirmation execution",
         "staged_executive_confirmations": staged,
         "staged_confirmation_ttl_seconds": _STAGED_TTL_SECONDS,
-        "verification_input_normalization": ["state.temp_set.key"],
+        "verification_input_normalization": ["state.temp_set.key", "calendar.create.start", "calendar.create.end"],
     }

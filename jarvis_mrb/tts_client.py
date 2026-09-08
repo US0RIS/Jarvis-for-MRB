@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from typing import BinaryIO
 
 import httpx
 
@@ -15,16 +17,11 @@ TTS_SPEED = float(os.environ.get("JARVIS_TTS_SPEED", "1.04"))
 _TTS_LAST_HEALTHY: bool | None = None
 _TTS_PROCESS: subprocess.Popen | None = None
 _TTS_MONITOR: threading.Thread | None = None
+_TTS_LOG_HANDLE: BinaryIO | None = None
 
 
 def _record_health_transition(healthy: bool) -> None:
-    """Clear a stale startup degradation once Kokoro is observably healthy.
-
-    Startup intentionally launches TTS asynchronously, so an immediate readiness
-    probe can fail while Kokoro is still loading. Runtime health must recover when
-    a later independent health probe succeeds. We only write on a false/unknown ->
-    true transition to avoid turning every /health request into a database write.
-    """
+    """Clear a stale startup degradation once Kokoro is observably healthy."""
     global _TTS_LAST_HEALTHY
     previous = _TTS_LAST_HEALTHY
     _TTS_LAST_HEALTHY = bool(healthy)
@@ -57,8 +54,6 @@ def tts_health() -> bool:
             _record_health_transition(False)
             return False
 
-        # Qwen3-TTS health includes backend.model_id. Reject it now that Kokoro is
-        # the default runtime even though that older server may itself be healthy.
         backend = payload.get("backend")
         if isinstance(backend, dict):
             model_id = str(backend.get("model_id") or "").lower()
@@ -79,48 +74,84 @@ def tts_health() -> bool:
         return False
 
 
-def _wsl_start_command() -> list[str] | None:
+def _wsl_prepare_command() -> list[str] | None:
+    """Return the model-validation/repair command proven on the deployed WSL install."""
     if sys.platform != "win32":
         return None
 
-    # Keep wsl.exe attached to the long-running Uvicorn process. An earlier
-    # launcher tried to nohup/background Uvicorn and then allowed the WSL command
-    # to exit immediately; on the deployed Windows/WSL setup that left no durable
-    # server process. exec makes Uvicorn the bash child so the Windows Popen handle
-    # represents the actual lifetime of the TTS service.
-    shell = r"""
-set -e
-ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"
-PY="$ROOT/.venv/bin/python"
-LOG="$HOME/.local/share/jarvis/kokoro-fastapi.log"
-MODEL_DIR="$ROOT/api/src/models/v1_0"
-MODEL="$MODEL_DIR/kokoro-v1_0.pth"
-CONFIG="$MODEL_DIR/config.json"
-DOWNLOAD="$ROOT/docker/scripts/download_model.py"
-if [ ! -x "$PY" ]; then exit 2; fi
-cd "$ROOT"
-if [ ! -s "$MODEL" ] || [ ! -s "$CONFIG" ]; then
-  : > "$LOG"
-  mkdir -p "$MODEL_DIR"
-  "$PY" "$DOWNLOAD" --output "$MODEL_DIR" >> "$LOG" 2>&1
-fi
-exec env \
-  USE_GPU=true \
-  PYTHONPATH="$ROOT:$ROOT/api" \
-  MODEL_DIR=src/models \
-  VOICES_DIR=src/voices/v1_0 \
-  WEB_PLAYER_PATH="$ROOT/web" \
-  "$PY" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 \
-  >> "$LOG" 2>&1
-""".strip()
+    shell = r'''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; PY="$ROOT/.venv/bin/python"; MODEL_DIR="$ROOT/api/src/models/v1_0"; DOWNLOAD="$ROOT/docker/scripts/download_model.py"; if [ ! -x "$PY" ]; then echo "Kokoro Python missing: $PY" >&2; exit 2; fi; cd "$ROOT"; exec "$PY" "$DOWNLOAD" --output "$MODEL_DIR"'''
     return ["wsl.exe", "bash", "-lc", shell]
+
+
+def _wsl_start_command() -> list[str] | None:
+    """Return the minimal Kokoro command that has been verified manually on this PC.
+
+    Keep the long-running Uvicorn process attached to wsl.exe. Model validation is
+    deliberately a separate synchronous preflight so shell/setup failures cannot be
+    confused with Uvicorn lifetime failures.
+    """
+    if sys.platform != "win32":
+        return None
+
+    shell = r'''ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"; cd "$ROOT" && exec env USE_GPU=true PYTHONPATH="$ROOT:$ROOT/api" MODEL_DIR=src/models VOICES_DIR=src/voices/v1_0 WEB_PLAYER_PATH="$ROOT/web" "$ROOT/.venv/bin/python" -m uvicorn api.src.main:app --host 127.0.0.1 --port 8880 --log-level info'''
+    return ["wsl.exe", "bash", "-lc", shell]
+
+
+def _runtime_log_path() -> Path:
+    base = Path(os.environ.get("APPDATA") or Path.home()) / "JarvisForMRB"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "kokoro-wsl.log"
+
+
+def _prepare_wsl_runtime(timeout_seconds: float = 180.0) -> bool:
+    command = _wsl_prepare_command()
+    if not command:
+        return False
+
+    try:
+        with _runtime_log_path().open("ab", buffering=0) as log:
+            log.write(b"\n=== Jarvis Kokoro preflight ===\n")
+            completed = subprocess.run(
+                command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                timeout=max(1.0, timeout_seconds),
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                check=False,
+            )
+        return completed.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _close_log_handle() -> None:
+    global _TTS_LOG_HANDLE
+    if _TTS_LOG_HANDLE is None:
+        return
+    try:
+        _TTS_LOG_HANDLE.close()
+    except OSError:
+        pass
+    _TTS_LOG_HANDLE = None
 
 
 def _monitor_tts_child(process: subprocess.Popen, timeout_seconds: float = 120.0) -> None:
     """Observe asynchronous Kokoro warmup and publish recovery when ready."""
     deadline = time.monotonic() + max(1.0, timeout_seconds)
     while time.monotonic() < deadline:
-        if process.poll() is not None:
+        returncode = process.poll()
+        if returncode is not None:
+            try:
+                from jarvis_mrb.runtime_health import record_failure
+
+                record_failure(
+                    "tts_start",
+                    f"Kokoro WSL child exited with code {returncode}; see {_runtime_log_path()}",
+                )
+            except Exception:
+                pass
+            _close_log_handle()
             return
         if tts_health():
             return
@@ -141,7 +172,7 @@ def _ensure_monitor(process: subprocess.Popen) -> None:
 
 
 def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
-    global _TTS_PROCESS
+    global _TTS_PROCESS, _TTS_LOG_HANDLE
 
     if tts_health():
         return True
@@ -152,18 +183,25 @@ def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
     if not command:
         return False
 
-    # Do not launch duplicate Kokoro processes while the existing child is still
-    # warming up. If the prior child exited, replace it with a fresh attempt.
+    # Do not launch duplicate Kokoro processes while the existing child is warming.
+    # If the prior child exited, rerun the independently observable preflight and
+    # then start the exact minimal command verified manually on the deployed PC.
     if _TTS_PROCESS is None or _TTS_PROCESS.poll() is not None:
+        if not _prepare_wsl_runtime():
+            return False
+        _close_log_handle()
         try:
+            _TTS_LOG_HANDLE = _runtime_log_path().open("ab", buffering=0)
+            _TTS_LOG_HANDLE.write(b"\n=== Jarvis Kokoro server start ===\n")
             _TTS_PROCESS = subprocess.Popen(
                 command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=_TTS_LOG_HANDLE,
+                stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
         except OSError:
+            _close_log_handle()
             _TTS_PROCESS = None
             return False
 
@@ -180,13 +218,7 @@ def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
 
 
 def synthesize_wav(text: str) -> bytes:
-    """Synthesize one short Jarvis speech segment with Kokoro-82M.
-
-    Kokoro is intentionally used instead of Qwen3-TTS here. On an RTX 5080 the
-    82M model has negligible VRAM pressure next to the planner and its FastAPI
-    implementation is designed for sub-second first audio. The iPhone still owns
-    playback and barge-in, so changing the model does not weaken interruption.
-    """
+    """Synthesize one short Jarvis speech segment with Kokoro-82M."""
     cleaned = " ".join(text.strip().split())
     if not cleaned:
         raise ValueError("TTS text is empty")

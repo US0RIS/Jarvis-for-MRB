@@ -27,9 +27,11 @@ class TTSAutoStartModelRepairTests(unittest.TestCase):
         assert command is not None
         self.assertEqual(command[:3], ["wsl.exe", "bash", "-lc"])
         shell = command[3]
+        self.assertIn('ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"', shell)
         self.assertIn('MODEL_DIR="$ROOT/api/src/models/v1_0"', shell)
         self.assertIn('DOWNLOAD="$ROOT/docker/scripts/download_model.py"', shell)
         self.assertIn('exec "$PY" "$DOWNLOAD" --output "$MODEL_DIR"', shell)
+        self.assertNotIn(r'\"', shell)
 
     def test_windows_wsl_launcher_matches_proven_foreground_shape(self) -> None:
         with patch.object(tts_client.sys, "platform", "win32"):
@@ -39,11 +41,13 @@ class TTSAutoStartModelRepairTests(unittest.TestCase):
         assert command is not None
         self.assertEqual(command[:3], ["wsl.exe", "bash", "-lc"])
         shell = command[3]
+        self.assertIn('ROOT="$HOME/.local/share/jarvis/kokoro-fastapi"', shell)
         self.assertIn('cd "$ROOT" && exec env', shell)
         self.assertIn('USE_GPU=true', shell)
         self.assertIn('MODEL_DIR=src/models', shell)
         self.assertIn('VOICES_DIR=src/voices/v1_0', shell)
         self.assertIn('"$ROOT/.venv/bin/python" -m uvicorn api.src.main:app', shell)
+        self.assertNotIn(r'\"', shell)
         self.assertNotIn("download_model.py", shell)
         self.assertNotIn("nohup", shell)
 

@@ -11,6 +11,29 @@ TTS_URL = os.environ.get("JARVIS_TTS_URL", "http://127.0.0.1:8880").rstrip("/")
 TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "kokoro")
 TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "bm_george")
 TTS_SPEED = float(os.environ.get("JARVIS_TTS_SPEED", "1.04"))
+_TTS_LAST_HEALTHY: bool | None = None
+
+
+def _record_health_transition(healthy: bool) -> None:
+    """Clear a stale startup degradation once Kokoro is observably healthy.
+
+    Startup intentionally launches TTS asynchronously, so an immediate readiness
+    probe can fail while Kokoro is still loading. Runtime health must recover when
+    a later independent health probe succeeds. We only write on a false/unknown ->
+    true transition to avoid turning every /health request into a database write.
+    """
+    global _TTS_LAST_HEALTHY
+    previous = _TTS_LAST_HEALTHY
+    _TTS_LAST_HEALTHY = bool(healthy)
+    if healthy and previous is not True:
+        try:
+            from jarvis_mrb.runtime_health import record_success
+
+            record_success("tts_start")
+        except Exception:
+            # TTS health itself must remain usable even if runtime-health telemetry
+            # is unavailable during an early startup/migration edge case.
+            pass
 
 
 def tts_health() -> bool:
@@ -20,12 +43,15 @@ def tts_health() -> bool:
     older Qwen3-TTS server if it is still occupying port 8880 so Jarvis does not
     report a false-positive healthy voice and then fail every synthesis request.
     """
+    healthy = False
     try:
         response = httpx.get(f"{TTS_URL}/health", timeout=0.20)
         if response.status_code >= 400:
+            _record_health_transition(False)
             return False
         payload = response.json()
         if not isinstance(payload, dict):
+            _record_health_transition(False)
             return False
 
         # Qwen3-TTS health includes backend.model_id. Reject it now that Kokoro is
@@ -34,13 +60,19 @@ def tts_health() -> bool:
         if isinstance(backend, dict):
             model_id = str(backend.get("model_id") or "").lower()
             if "qwen" in model_id:
+                _record_health_transition(False)
                 return False
             if "ready" in backend:
-                return bool(backend.get("ready"))
+                healthy = bool(backend.get("ready"))
+                _record_health_transition(healthy)
+                return healthy
 
         status = str(payload.get("status") or "").lower()
-        return status in {"healthy", "ready", "ok"}
+        healthy = status in {"healthy", "ready", "ok"}
+        _record_health_transition(healthy)
+        return healthy
     except (httpx.HTTPError, ValueError):
+        _record_health_transition(False)
         return False
 
 

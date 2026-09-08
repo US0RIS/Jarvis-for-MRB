@@ -76,6 +76,11 @@ struct JarvisIOSApp: App {
                         Label("Local", systemImage: "brain.head.profile")
                     }
 
+                LocalProductivityView()
+                    .tabItem {
+                        Label("World", systemImage: "scope")
+                    }
+
                 CapabilityArchitectureView()
                     .tabItem {
                         Label("Packs", systemImage: "square.stack.3d.up.fill")
@@ -597,7 +602,6 @@ final class CapabilityArchitectureController: ObservableObject {
         }
 
         registerPacks(legacy: legacy)
-
         appModel.frontendCommandHandler = { [weak self] command in
             guard let self else { return await legacy(command) }
             return await self.router.route(command)

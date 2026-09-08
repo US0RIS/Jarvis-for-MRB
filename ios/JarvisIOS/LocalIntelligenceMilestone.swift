@@ -238,9 +238,17 @@ private enum DeterministicUtilityEngine {
         n = n.trimmingCharacters(in: CharacterSet(charactersIn: " ?.!"))
         let replacements = [
             (" multiplied by ", "*"), (" times ", "*"), (" divided by ", "/"),
-            (" plus ", "+"), (" minus ", "-")
+            (" plus ", "+"), (" minus ", "-"), ("×", "*"), ("÷", "/"), ("−", "-")
         ]
         for (from, to) in replacements { n = n.replacingOccurrences(of: from, with: to) }
+        // Speech/text input commonly renders multiplication as compact `x`/`X`
+        // (for example `17x24`). Treat x as multiplication only when it sits
+        // between numeric operands so ordinary words containing x are untouched.
+        n = n.replacingOccurrences(
+            of: #"(?<=\d)\s*x\s*(?=[+-]?\d)"#,
+            with: "*",
+            options: .regularExpression
+        )
         guard let values = captures(#"^\s*([+-]?\d+(?:\.\d+)?)\s*([+\-*/])\s*([+-]?\d+(?:\.\d+)?)\s*$"#, n, count: 3),
               let lhs = Double(values[0]), let rhs = Double(values[2]), let op = values[1].first else { return nil }
         let result: Double

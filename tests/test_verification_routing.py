@@ -41,6 +41,24 @@ class VerificationRoutingTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def _calendar_verification(self) -> str:
+        action_event_id = world_model.record_tool_execution(
+            "calendar.create",
+            {"summary": "Jarvis Live Verification"},
+            ok=True,
+            message="Created calendar event 'Jarvis Live Verification'.",
+        )
+        return world_verification.register_execution(
+            "calendar.create",
+            {
+                "summary": "Jarvis Live Verification",
+                "start": "{'date_time': '2026-09-08T23:55:00-07:00'}",
+                "end": "{'date_time': '2026-09-09T00:00:00-07:00'}",
+            },
+            SimpleNamespace(ok=True, message="Created calendar event 'Jarvis Live Verification'."),
+            action_event_id=action_event_id,
+        )
+
     def test_tool_audit_normalizes_calendar_verification_arguments(self) -> None:
         args = {
             "summary": "Jarvis Live Verification",
@@ -52,22 +70,7 @@ class VerificationRoutingTests(unittest.TestCase):
         self.assertEqual(normalized["end"], "2026-09-09T00:00:00-07:00")
 
     def test_did_that_work_repairs_legacy_calendar_expectation_and_checks_fresh(self) -> None:
-        action_event_id = world_model.record_tool_execution(
-            "calendar.create",
-            {"summary": "Jarvis Live Verification"},
-            ok=True,
-            message="Created calendar event 'Jarvis Live Verification'.",
-        )
-        verification_id = world_verification.register_execution(
-            "calendar.create",
-            {
-                "summary": "Jarvis Live Verification",
-                "start": "{'date_time': '2026-09-08T23:55:00-07:00'}",
-                "end": "{'date_time': '2026-09-09T00:00:00-07:00'}",
-            },
-            SimpleNamespace(ok=True, message="Created calendar event 'Jarvis Live Verification'."),
-            action_event_id=action_event_id,
-        )
+        verification_id = self._calendar_verification()
 
         observed: dict[str, str] = {}
 
@@ -93,6 +96,65 @@ class VerificationRoutingTests(unittest.TestCase):
         expected = json.loads(str(row["expected_json"]))
         self.assertEqual(expected["start"], "2026-09-08T23:55:00-07:00")
         self.assertEqual(expected["end"], "2026-09-09T00:00:00-07:00")
+
+    def test_explicit_query_can_recover_timed_out_verification_when_evidence_arrives_late(self) -> None:
+        verification_id = self._calendar_verification()
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                """
+                UPDATE action_verifications
+                SET status='timed_out',next_check_at=NULL,
+                    last_evidence='Verification deadline elapsed before evidence was visible.'
+                WHERE id=?
+                """,
+                (verification_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        world_verification._observe = lambda verifier, expected: (
+            "verified",
+            "Calendar read-back now contains the created event with matching title/start/end.",
+        )
+
+        reply = verification_routing.reply_for_query("Did that work?")
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertTrue(reply.startswith("Yes. I independently verified"), reply)
+
+        row = self._latest()
+        self.assertEqual(str(row["id"]), verification_id)
+        self.assertEqual(str(row["status"]), "verified")
+        self.assertIn("now contains the created event", str(row["last_evidence"]))
+
+    def test_late_inconclusive_recheck_preserves_timeout_but_records_fresh_attempt(self) -> None:
+        verification_id = self._calendar_verification()
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                "UPDATE action_verifications SET status='timed_out',next_check_at=NULL,attempts=4 WHERE id=?",
+                (verification_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        world_verification._observe = lambda verifier, expected: (
+            "pending",
+            "Created calendar event is still not independently visible.",
+        )
+
+        reply = verification_routing.reply_for_query("Did that work?")
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertTrue(reply.startswith("I still could not independently verify"), reply)
+
+        row = self._latest()
+        self.assertEqual(str(row["status"]), "timed_out")
+        self.assertEqual(int(row["attempts"]), 5)
+        self.assertIn("still not independently visible", str(row["last_evidence"]))
 
     def test_non_outcome_question_is_not_intercepted(self) -> None:
         self.assertIsNone(verification_routing.reply_for_query("Create a calendar event tomorrow."))

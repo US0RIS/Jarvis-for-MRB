@@ -38,8 +38,6 @@ class _JarvisWorldConnection(sqlite3.Connection):
             self.close()
 
 
-# Preserve the true stdlib function on the sqlite3 module itself so reloading
-# jarvis_mrb cannot accidentally capture our wrapper as the "original" and recurse.
 if not hasattr(sqlite3, "_jarvis_original_connect"):
     setattr(sqlite3, "_jarvis_original_connect", sqlite3.connect)
 _ORIGINAL_SQLITE_CONNECT = getattr(sqlite3, "_jarvis_original_connect")
@@ -57,8 +55,17 @@ def _world_model_connect(database: Any, *args: Any, **kwargs: Any) -> sqlite3.Co
     return _ORIGINAL_SQLITE_CONNECT(database, *args, **kwargs)
 
 
-# Submodules import the shared sqlite3 module object, so installing this once fixes
-# existing Jarvis context-managed connections without changing unrelated databases.
 if not getattr(sqlite3.connect, "_jarvis_world_close_guard", False):
     setattr(_world_model_connect, "_jarvis_world_close_guard", True)
     sqlite3.connect = _world_model_connect
+
+
+# Optional ForgeCAD integration. It is isolated behind a plugin so Jarvis keeps
+# starting normally even if the CAD application is not installed or its bridge is
+# temporarily unavailable. All actions still pass through Jarvis's permission path.
+if os.environ.get("JARVIS_FORGECAD_ENABLED", "1").strip().lower() not in {"0", "false", "off", "no"}:
+    try:
+        from jarvis_mrb.forgecad_plugin import install as _install_forgecad
+        _install_forgecad()
+    except Exception:
+        pass

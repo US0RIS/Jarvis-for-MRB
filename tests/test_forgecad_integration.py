@@ -12,6 +12,7 @@ def test_forgecad_tool_risks_are_native() -> None:
     assert permissions.TOOL_RISK["forgecad.status"] == "read"
     assert permissions.TOOL_RISK["forgecad.change"] == "local_write"
     assert permissions.TOOL_RISK["forgecad.analyze"] == "local_write"
+    assert permissions.TOOL_RISK["forgecad.campaign"] == "local_write"
 
 
 def test_forgecad_refuses_non_loopback_discovery(tmp_path: Path, monkeypatch) -> None:
@@ -49,3 +50,21 @@ def test_forgecad_mutation_routes_to_change(monkeypatch) -> None:
     assert reply.ok
     assert calls
     assert calls[0][1].get("always_branch") is True
+
+
+def test_forgecad_engineering_goal_routes_to_campaign(monkeypatch) -> None:
+    calls = []
+    def fake_request(method: str, path: str, **kwargs):
+        calls.append((method, path, kwargs))
+        return {
+            "executed": True,
+            "best_branch": "forge/rib-stiffening",
+            "outcomes": [{"branch":"forge/rib-stiffening"},{"branch":"forge/damped-interface"}],
+            "ranking": [{"branch":"forge/rib-stiffening","requirements":{"failed":0}}],
+        }
+    monkeypatch.setattr(forgecad, "_request", fake_request)
+    reply = agent._fast_path("In ForgeCAD, eliminate the vibration without adding more than 20 grams")
+    assert reply is not None
+    assert reply.ok
+    assert calls and calls[0][1] == "/api/jarvis/campaign"
+    assert "rib-stiffening" in reply.message

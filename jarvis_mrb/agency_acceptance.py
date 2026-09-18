@@ -964,7 +964,13 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 wv._observe = original_observe_a12
             if verified_a12 is None or verified_a12["status"] != "verified":
                 raise AssertionError("Synthetic A12 independent verification did not resolve.")
-            wm.assert_belief(entity_a12, "complete", value=True)
+            wm.assert_belief(
+                entity_a12,
+                "complete",
+                value=True,
+                source_event_id=int(verified_a12["resolved_event_id"]),
+                evidence="Synthetic A12 completion follows independent verification.",
+            )
             completed_a12 = ap.reconcile_plan(second_a12["id"])
             trace_a12.append("verified_and_satisfied")
 

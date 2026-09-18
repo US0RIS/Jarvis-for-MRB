@@ -6,6 +6,7 @@ from pathlib import Path
 
 import jarvis_mrb.desired_state as desired_state
 import jarvis_mrb.world_executive as world_executive
+import jarvis_mrb.proactive_monitor as proactive_monitor
 import jarvis_mrb.world_model as world_model
 
 
@@ -142,6 +143,24 @@ class DesiredStateTests(unittest.TestCase):
         result = desired_state.evaluate_desired_state(state["id"])
         self.assertTrue(result["satisfied"])
         self.assertIsNotNone(result["evidence"][0]["event_id"])
+
+    def test_proactive_loop_reconciles_desired_state_without_user_prompt(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Project Ambient")
+        state = desired_state.create_desired_state(
+            "Ambient project becomes ready",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "ready", "value": True}],
+            source_kind="test",
+            source_ref="ambient-project",
+        )
+        self.assertEqual(desired_state.get_desired_state(state["id"])["state"], "active")
+
+        world_model.assert_belief(entity_id, "ready", value=True)
+        proactive_monitor._check_desired_states()
+
+        updated = desired_state.get_desired_state(state["id"])
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated["state"], "satisfied")
 
     def test_blocked_and_retired_lifecycle_are_not_overridden_by_evaluation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Project Blocked")

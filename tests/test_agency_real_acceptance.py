@@ -122,7 +122,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertFalse(before["passed"])
             self.assertFalse(before["evidence"]["restart_observed"])
 
-            agency_runtime.record_boot(deployment_sha=SHA_A)
+            with patch("jarvis_mrb.agency_runtime.os.getpid", return_value=987654):
+                agency_runtime.record_boot(deployment_sha=SHA_A)
             after = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(after["passed"], after["checks"])
 
@@ -136,9 +137,11 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
     def test_a8_receipt_is_derived_from_attention_ledger(self) -> None:
         emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Attention Gate")
         with self._patch_identity():
             session = agency_real_acceptance.start_session(
                 "A8",
+                desired_state_id=state_id,
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
@@ -146,6 +149,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 agency_attention.consider(
                     kind="background",
                     message=f"Low value {index}",
+                    desired_state_id=state_id,
                     dedup_key=f"low:{index}",
                     benefit=10,
                     urgency=5,
@@ -157,6 +161,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             agency_attention.consider(
                 kind="exception",
                 message="One high-value exception",
+                desired_state_id=state_id,
                 dedup_key="high:one",
                 benefit=100,
                 urgency=90,
@@ -169,6 +174,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             agency_attention.consider(
                 kind="exception",
                 message="One high-value exception",
+                desired_state_id=state_id,
                 dedup_key="high:one",
                 benefit=100,
                 urgency=90,
@@ -301,9 +307,11 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
     def test_concurrent_finalizers_converge_on_one_immutable_receipt(self) -> None:
         emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Concurrent Attention Gate")
         with self._patch_identity():
             session = agency_real_acceptance.start_session(
                 "A8",
+                desired_state_id=state_id,
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
@@ -311,6 +319,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 agency_attention.consider(
                     kind="background",
                     message=f"Concurrent low {index}",
+                    desired_state_id=state_id,
                     dedup_key=f"concurrent-finalize-low:{index}",
                     benefit=5,
                     urgency=0,
@@ -321,6 +330,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             agency_attention.consider(
                 kind="exception",
                 message="Concurrent finalization exception",
+                desired_state_id=state_id,
                 dedup_key="concurrent-finalize-high",
                 benefit=100,
                 urgency=100,
@@ -348,9 +358,11 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertEqual(len([item for item in stored if item["gate"] == "A8"]), 1)
 
     def test_sha_change_mid_session_prevents_receipt(self) -> None:
+        state_id, _ = self._state_with_plan("SHA Attention Gate")
         with self._patch_identity(SHA_A):
             session = agency_real_acceptance.start_session(
                 "A8",
+                desired_state_id=state_id,
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
@@ -358,6 +370,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 agency_attention.consider(
                     kind="background",
                     message=f"Low {index}",
+                    desired_state_id=state_id,
                     dedup_key=f"sha-low:{index}",
                     benefit=5,
                     urgency=0,
@@ -368,6 +381,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             agency_attention.consider(
                 kind="exception",
                 message="High",
+                desired_state_id=state_id,
                 dedup_key="sha-high",
                 benefit=100,
                 urgency=100,

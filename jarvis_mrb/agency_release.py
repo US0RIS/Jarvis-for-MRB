@@ -26,10 +26,69 @@ _VALIDATION_CONTEXT: contextvars.ContextVar[str] = contextvars.ContextVar(
     "jarvis_release_validation_context",
     default="",
 )
+_REAL_RECEIPT_PROCESS_NONCE = uuid.uuid4().hex
+_REAL_RECEIPT_CONTEXT: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "jarvis_real_receipt_context",
+    default="",
+)
 
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
+
+
+def _real_receipt_context_payload(
+    *,
+    gate: str,
+    deployment_sha_value: str,
+    environment: str,
+    harness: str,
+    checks: list[dict[str, Any]],
+    evidence: dict[str, Any],
+    trace_ref: str,
+    session_id: str,
+) -> dict[str, Any]:
+    normalized_checks: list[dict[str, Any]] = []
+    for raw in checks or []:
+        if not isinstance(raw, dict):
+            continue
+        normalized_checks.append(
+            {
+                "name": " ".join(str(raw.get("name") or "").split())[:1000],
+                "passed": raw.get("passed") is True,
+                "evidence": raw.get("evidence"),
+            }
+        )
+    return {
+        "gate": str(gate or "").strip().upper(),
+        "deployment_sha": str(deployment_sha_value or "").strip().lower(),
+        "environment_fingerprint": str(environment or "").strip(),
+        "harness": " ".join(str(harness or "").split())[:300],
+        "checks": normalized_checks,
+        "evidence": dict(evidence or {}),
+        "trace_ref": str(trace_ref or "").strip()[:3000],
+        "session_id": str(session_id or "").strip()[:300],
+    }
+
+
+def _real_receipt_context_key(payload: dict[str, Any]) -> str:
+    raw = json.dumps(
+        {"nonce": _REAL_RECEIPT_PROCESS_NONCE, "payload": payload},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+@contextlib.contextmanager
+def _real_receipt_recording_context(payload: dict[str, Any]):
+    token = _REAL_RECEIPT_CONTEXT.set(_real_receipt_context_key(dict(payload)))
+    try:
+        yield
+    finally:
+        _REAL_RECEIPT_CONTEXT.reset(token)
 
 
 def _receipt_digest(
@@ -679,6 +738,20 @@ def record_real_gate_receipt(
         raise ValueError(session_error)
     if clean_harness != "agency-real-gate-session-v1":
         raise ValueError("REAL gate receipts must be minted by the live Agency gate harness.")
+    context_payload = _real_receipt_context_payload(
+        gate=clean_gate,
+        deployment_sha_value=clean_sha,
+        environment=env,
+        harness=clean_harness,
+        checks=normalized_checks,
+        evidence=clean_evidence,
+        trace_ref=trace_ref,
+        session_id=clean_session_id,
+    )
+    if _REAL_RECEIPT_CONTEXT.get() != _real_receipt_context_key(context_payload):
+        raise ValueError(
+            "REAL gate receipts may only be minted by finalize_session()."
+        )
 
     receipt_id = f"agency-real:{uuid.uuid4()}"
     recorded_at = _now()

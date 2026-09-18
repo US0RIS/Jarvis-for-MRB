@@ -29,6 +29,13 @@ _INTERNAL_EVENT_SOURCES = {
     "background_worker",
     "system",
 }
+_NON_REAL_OBSERVATION_SOURCES = _INTERNAL_EVENT_SOURCES | {
+    "conversation",
+    "conversation_goal",
+    "jarvis_intention",
+    "agency_acceptance",
+    "test",
+}
 _ALLOWED_APPROVAL_UTTERANCES = {
     "confirm", "yes send it", "send it", "yes do it", "do it", "cancel",
     "never mind", "nevermind", "don't do it", "do not do it", "don't send it",
@@ -446,8 +453,90 @@ def _external_events_for_relevant_entities(
     return [
         dict(row)
         for row in rows
-        if str(row["source_kind"] or "") not in _INTERNAL_EVENT_SOURCES
+        if str(row["source_kind"] or "") not in _NON_REAL_OBSERVATION_SOURCES
     ]
+
+
+def _real_observation_event_ids(
+    conn: sqlite3.Connection,
+    event_ids: list[int],
+    *,
+    min_event_id: int,
+) -> list[int]:
+    ids = sorted({int(value) for value in event_ids if int(value) > int(min_event_id)})
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"""
+        SELECT id,source_kind FROM events
+        WHERE id IN ({placeholders})
+        ORDER BY id
+        """,
+        tuple(ids),
+    ).fetchall()
+    return [
+        int(row["id"])
+        for row in rows
+        if str(row["source_kind"] or "") not in _NON_REAL_OBSERVATION_SOURCES
+    ]
+
+
+def _wake_evidence_real_event_ids(
+    conn: sqlite3.Connection,
+    outcome: dict[str, Any],
+    *,
+    min_event_id: int,
+) -> list[int]:
+    candidates: list[int] = []
+    event_id = outcome.get("event_id")
+    if event_id is not None:
+        try:
+            candidates.append(int(event_id))
+        except (TypeError, ValueError):
+            pass
+
+    belief_id = outcome.get("belief_id")
+    if belief_id is not None:
+        try:
+            row = conn.execute(
+                "SELECT source_event_id FROM beliefs WHERE id=?",
+                (int(belief_id),),
+            ).fetchone()
+        except (TypeError, ValueError):
+            row = None
+        if row is not None and row["source_event_id"] is not None:
+            candidates.append(int(row["source_event_id"]))
+
+    criterion = outcome.get("criterion") if isinstance(outcome.get("criterion"), dict) else {}
+    commitment_id = str(criterion.get("commitment_id") or "")
+    if commitment_id:
+        row = conn.execute(
+            "SELECT source_event_id,resolution_event_id FROM commitments WHERE id=?",
+            (commitment_id,),
+        ).fetchone()
+        if row is not None:
+            for key in ("resolution_event_id", "source_event_id"):
+                if row[key] is not None:
+                    candidates.append(int(row[key]))
+
+    entity_id = str(outcome.get("entity_id") or criterion.get("entity_id") or "")
+    if entity_id:
+        rows = conn.execute(
+            """
+            SELECT event_id FROM event_entities
+            WHERE entity_id=? AND event_id>?
+            ORDER BY event_id
+            """,
+            (entity_id, int(min_event_id)),
+        ).fetchall()
+        candidates.extend(int(row["event_id"]) for row in rows)
+
+    return _real_observation_event_ids(
+        conn,
+        candidates,
+        min_event_id=int(min_event_id),
+    )
 
 
 def _causal_replan_evidence(
@@ -737,6 +826,16 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
             (state_id, *sorted(baseline_watches)),
         ).fetchall()
     triggered = [dict(row) for row in rows if str(row["status"]) == "triggered"]
+    real_trigger_events: dict[str, list[int]] = {}
+    for row in triggered:
+        outcome = dict(_loads(str(row.get("evidence_json") or "{}"), {}))
+        real_ids = _wake_evidence_real_event_ids(
+            conn,
+            outcome,
+            min_event_id=int(session["baseline"].get("max_event_id") or 0),
+        )
+        if real_ids:
+            real_trigger_events[str(row["id"])] = real_ids
     reactivation = [
         item for item in _events_for_state(events, state_id)
         if item["event_type"] == "desired_state.reactivated"
@@ -746,7 +845,11 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
     reactivated = bool(reactivation) and desired is not None and str(desired["state"]) in {"active", "satisfied"}
     checks = [
         _check("session began with persisted dormant watch", bool(baseline_watches), sorted(baseline_watches)),
-        _check("wake condition later triggered", bool(triggered), [row["id"] for row in triggered]),
+        _check(
+            "wake condition later triggered from real observed evidence",
+            bool(real_trigger_events),
+            real_trigger_events,
+        ),
         _check("desired state reactivated", reactivated, [item["id"] for item in reactivation]),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
     ]

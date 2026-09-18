@@ -91,6 +91,7 @@ TOOL_RISK: dict[str, Risk] = {
     "custom.repairs": "read",
     "custom.apply_repair": "security",
     "agency.status": "read",
+    "agency.deliberate": "read",
     "agency.enable": "security",
     "agency.monitor": "local_write",
     "agency.disable": "local_write",

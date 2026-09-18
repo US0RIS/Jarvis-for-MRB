@@ -1334,7 +1334,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A7")
 
-    def test_a9_only_counts_gap_for_target_desired_state(self) -> None:
+    def test_a9_proves_full_gap_synthesis_enable_resolution_lifecycle(self) -> None:
         target_state, _ = self._state_with_plan("Capability Target")
         other_state, _ = self._state_with_plan("Capability Other")
 
@@ -1345,6 +1345,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
+
             agency_capability.record_gap(
                 other_state,
                 "other.missing.capability",
@@ -1353,7 +1354,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             unrelated = agency_real_acceptance.evaluate_session(session["id"])
             self.assertFalse(unrelated["passed"])
 
-            agency_capability.record_gap(
+            gap = agency_capability.record_gap(
                 target_state,
                 "target.missing.capability",
                 "The target goal needs a capability Jarvis does not have.",
@@ -1363,13 +1364,141 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 "blocked",
                 reason="Missing capability: target.missing.capability.",
             )
-            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+            with patch(
+                "jarvis_mrb.custom_tools.synthesize",
+                return_value={
+                    "name": "target_adapter",
+                    "enabled": False,
+                    "risk": "read",
+                    "allowed_hosts": ["api.example.com"],
+                },
+            ):
+                synthesized = agency_capability.synthesize_adapter(
+                    gap["id"],
+                    name="target_adapter",
+                    description="Read the missing target capability.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+            self.assertFalse(synthesized["enabled"])
+            self.assertEqual(synthesized["gap"]["status"], "proposed")
+
+            enable_event_id = world_model.record_tool_execution(
+                "custom.enable",
+                {"name": "target_adapter", "enabled": True},
+                ok=True,
+                message="User explicitly enabled target_adapter.",
+            )
+
+            enabled_catalog = [
+                {
+                    "name": "target_adapter",
+                    "enabled": True,
+                    "risk": "read",
+                    "description": "Target adapter",
+                    "allowed_hosts": ["api.example.com"],
+                }
+            ]
+            with patch(
+                "jarvis_mrb.custom_tools.list_tools",
+                return_value=enabled_catalog,
+            ):
+                reconciled = agency_capability.reconcile_gaps()
+                evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+            self.assertIn(gap["id"], reconciled["resolved"])
+            self.assertIn(target_state, reconciled["reactivated"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
             self.assertFalse(evaluation["evidence"]["fabricated_tool_availability"])
+            self.assertTrue(evaluation["evidence"]["adapter_synthesized_disabled"])
+            self.assertTrue(evaluation["evidence"]["explicit_enablement_observed"])
+            self.assertTrue(evaluation["evidence"]["capability_resolved_after_enable"])
+            self.assertTrue(evaluation["evidence"]["goal_reactivated_after_capability"])
+            self.assertTrue(evaluation["evidence"]["adapter_execution_still_confirmed"])
+            self.assertNotIn(
+                enable_event_id,
+                [
+                    item["event_id"]
+                    for item in evaluation["manual_orchestration_events"]
+                ],
+            )
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A9")
+
+    def test_a9_does_not_whitelist_unrelated_foreground_custom_action(self) -> None:
+        target_state, _ = self._state_with_plan("Capability Manual Guard")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A9",
+                desired_state_id=target_state,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            gap = agency_capability.record_gap(
+                target_state,
+                "target.missing.capability",
+                "Need target adapter.",
+            )
+            desired_state.set_state(
+                target_state,
+                "blocked",
+                reason="Missing capability: target.missing.capability.",
+            )
+            with patch(
+                "jarvis_mrb.custom_tools.synthesize",
+                return_value={
+                    "name": "target_adapter",
+                    "enabled": False,
+                    "risk": "read",
+                    "allowed_hosts": ["api.example.com"],
+                },
+            ):
+                agency_capability.synthesize_adapter(
+                    gap["id"],
+                    name="target_adapter",
+                    description="Target adapter.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+
+            unrelated_event_id = world_model.record_tool_execution(
+                "custom.enable",
+                {"name": "unrelated_adapter", "enabled": True},
+                ok=True,
+                message="Unrelated foreground action.",
+            )
+            world_model.record_tool_execution(
+                "custom.enable",
+                {"name": "target_adapter", "enabled": True},
+                ok=True,
+                message="Enabled target adapter.",
+            )
+            with patch(
+                "jarvis_mrb.custom_tools.list_tools",
+                return_value=[
+                    {
+                        "name": "target_adapter",
+                        "enabled": True,
+                        "risk": "read",
+                        "allowed_hosts": ["api.example.com"],
+                    }
+                ],
+            ):
+                agency_capability.reconcile_gaps()
+                evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+            self.assertFalse(evaluation["passed"])
+            manual_ids = {
+                item["event_id"]
+                for item in evaluation["manual_orchestration_events"]
+            }
+            self.assertIn(unrelated_event_id, manual_ids)
 
     def test_a11_inferred_autonomy_preference_cannot_bypass_real_approval_boundary(self) -> None:
         entity_id = world_model.ensure_entity("project", "Preference Authority Gate")

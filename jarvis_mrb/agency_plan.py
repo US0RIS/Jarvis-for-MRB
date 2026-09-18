@@ -1144,13 +1144,12 @@ def list_pending_approvals(*, plan_id: str | None = None, limit: int = 50) -> li
     return result
 
 
-def _approval_action_fingerprint(tool: str, arguments: dict[str, Any]) -> str:
+def _approval_display_id(step_id: str, tool: str) -> str:
     raw = json.dumps(
-        {"tool": str(tool), "arguments": dict(arguments or {})},
+        {"step_id": str(step_id), "tool": str(tool)},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
-        default=str,
     )
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
 
@@ -1159,7 +1158,7 @@ def describe_pending_approval(item: dict[str, Any]) -> str:
     """Render enough detail for informed consent without leaking arbitrary payloads."""
     tool = str(item.get("tool") or "protected action")
     args = dict(item.get("resolved_arguments") or {})
-    fingerprint = _approval_action_fingerprint(tool, args)
+    fingerprint = _approval_display_id(str(item.get("id") or ""), tool)
 
     if tool == "gmail.send":
         recipient = str(args.get("recipient") or "").strip() or "<unspecified recipient>"

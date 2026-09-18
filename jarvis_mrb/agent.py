@@ -433,7 +433,15 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
             item = set_custom_tool_enabled(str(args.get("name") or ""), bool(args.get("enabled", True)))
         except ValueError as exc:
             return AgentReply(False, str(exc))
-        return AgentReply(True, f"Custom tool {item['name']} is now {'enabled' if item['enabled'] else 'disabled'}.")
+        resumed: list[str] = []
+        if bool(item.get("enabled")):
+            try:
+                from jarvis_mrb.agency_capability import reconcile_gaps
+                resumed = list(reconcile_gaps().get("reactivated") or [])
+            except Exception:
+                resumed = []
+        suffix = f" Reactivated {len(resumed)} blocked Agency goal(s)." if resumed else ""
+        return AgentReply(True, f"Custom tool {item['name']} is now {'enabled' if item['enabled'] else 'disabled'}.{suffix}")
     if tool == "custom.run":
         try:
             result = run_custom_tool(str(args.get("name") or ""), dict(args.get("arguments") or {}))

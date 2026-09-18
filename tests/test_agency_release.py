@@ -73,8 +73,10 @@ def evidence_for(gate: str) -> dict:
         "A7": {
             "parallel_workers": 4,
             "parallel_overlap_observed": True,
+            "required_epistemic_roles_present": True,
             "provenance_structurally_bounded": True,
             "material_disagreement_preserved": True,
+            "synthesis_after_workers": True,
         },
         "A8": {
             "low_value_changes": 10,
@@ -472,6 +474,12 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["next_step_surfaced_or_executed"] = False
         with self.assertRaisesRegex(ValueError, "next_step_surfaced_or_executed"):
             agency_release._validate_gate_evidence("A6", evidence, "")
+
+    def test_a7_receipt_rejects_partial_role_coverage(self) -> None:
+        evidence = evidence_for("A7")
+        evidence["required_epistemic_roles_present"] = False
+        with self.assertRaisesRegex(ValueError, "required_epistemic_roles_present"):
+            agency_release._validate_gate_evidence("A7", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

@@ -691,6 +691,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
             "replan_after_injected_change",
             "final_desired_state_satisfied",
             "final_satisfaction_followed_verified_action",
+            "final_satisfaction_derived_from_verified_action",
         ):
             _require_true(evidence, key, gate)
         clean_trace = str(trace_ref or "").strip()

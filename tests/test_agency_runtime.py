@@ -420,6 +420,50 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertTrue(all(len(items) == 2 for items in seen_by_cycle))
         self.assertEqual(first["candidate_pool"], 5)
 
+    def test_tick_all_bounds_new_planning_attempts_per_cycle(self) -> None:
+        state_ids: list[str] = []
+        for index in range(5):
+            _, state_id = self._make_state(f"Planning Budget {index}")
+            state_ids.append(state_id)
+
+        agency_runtime.set_mode("active")
+        planner_calls: list[str] = []
+
+        def planner(prompt: str) -> dict:
+            planner_calls.append(prompt)
+            return {
+                "summary": "One safe observation",
+                "nodes": [
+                    {
+                        "id": "observe",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "planning budget"},
+                        "depends_on": [],
+                    }
+                ],
+                "missing_capability": None,
+            }
+
+        result = agency_runtime.tick_all(
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            planner=planner,
+            max_actions=0,
+            max_plans=2,
+            limit=5,
+        )
+
+        self.assertEqual(result["planning_budget"], 2)
+        self.assertEqual(result["planning_attempts"], 2)
+        self.assertEqual(len(planner_calls), 2)
+        self.assertEqual(
+            sum(
+                1
+                for state_id in state_ids
+                if agency_plan.current_plan(state_id) is not None
+            ),
+            2,
+        )
+
     def test_satisfied_goals_do_not_displace_active_goals_from_evaluation_window(self) -> None:
         active_ids: list[str] = []
         for index in range(3):

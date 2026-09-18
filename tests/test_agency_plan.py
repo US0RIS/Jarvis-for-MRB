@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -494,6 +495,56 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(denied["steps"][0]["status"], "blocked")
         self.assertEqual(untouched["status"], "awaiting_approval")
         self.assertEqual(untouched["steps"][0]["status"], "awaiting_approval")
+
+    def test_verification_event_carries_agency_desired_state_context(self) -> None:
+        _, state_id = self._state_for_project("Project Verification Context")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Verification context action",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        step_id = plan["steps"][0]["id"]
+        action_event_id = world_model.record_tool_execution(
+            "calendar.create",
+            {"summary": "Verification context action"},
+            ok=True,
+            message="accepted",
+        )
+
+        event_id = world_verification._record_world_transition(
+            "verification:context-test",
+            status="verified",
+            tool="calendar.create",
+            evidence="Independent calendar read-back matched.",
+            action_event_id=action_event_id,
+            executive_decision_id="",
+            agency_step_id=step_id,
+        )
+        self.assertIsNotNone(event_id)
+
+        conn = sqlite3.connect(self.db)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT summary,payload_json,source_kind FROM events WHERE id=?",
+                (event_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertIn("Project Verification Context ready", row["summary"])
+        payload = json.loads(row["payload_json"])
+        self.assertEqual(payload["desired_state_id"], state_id)
+        self.assertEqual(payload["agency_step_id"], step_id)
+        self.assertEqual(row["source_kind"], "jarvis_verifier")
 
     def test_new_generation_supersedes_old_plan_without_destroying_history(self) -> None:
         _, state_id = self._state_for_project("Project Replan")

@@ -657,6 +657,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_true(evidence, "dormant_state_observed", gate)
         _require_true(evidence, "wake_condition_changed", gate)
         _require_true(evidence, "reactivated_without_goal_restatement", gate)
+        _require_true(evidence, "next_step_surfaced_or_executed", gate)
     elif gate == "A7":
         _require_int_at_least(evidence, "parallel_workers", 2, gate)
         _require_true(evidence, "parallel_overlap_observed", gate)

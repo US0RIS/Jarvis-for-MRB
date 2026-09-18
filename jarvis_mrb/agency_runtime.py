@@ -792,15 +792,24 @@ def reactivate(desired_state_id: str) -> dict[str, Any]:
 
 
 def describe() -> str:
+    from jarvis_mrb.agency_capability import list_gaps
     from jarvis_mrb.agency_plan import current_plan
     from jarvis_mrb.desired_state import list_desired_states
 
     states = list_desired_states(limit=50)
     if not states:
         return "Agency has no persistent desired states."
+    open_gaps = list_gaps(open_only=True)
+    gaps_by_state: dict[str, list[dict[str, Any]]] = {}
+    for gap in open_gaps:
+        state_id = str(gap.get("desired_state_id") or "")
+        if state_id:
+            gaps_by_state.setdefault(state_id, []).append(gap)
+
     parts: list[str] = []
     for state in states:
-        plan = current_plan(str(state["id"]), include_steps=True)
+        state_id = str(state["id"])
+        plan = current_plan(state_id, include_steps=True)
         plan_text = "no plan"
         if plan:
             open_steps = [
@@ -811,7 +820,20 @@ def describe() -> str:
             plan_text = f"plan {plan.get('status')} generation {plan.get('generation')}"
             if next_step:
                 plan_text += f", next {next_step.get('step_key')}={next_step.get('status')}:{next_step.get('tool')}"
-        parts.append(f"{state['title']} [{state['state']}; {plan_text}]")
+
+        extras: list[str] = []
+        blocked_reason = " ".join(str(state.get("blocked_reason") or "").split())
+        if blocked_reason:
+            extras.append(f"blocked reason: {blocked_reason[:500]}")
+        gaps = gaps_by_state.get(state_id, [])
+        if gaps:
+            rendered_gaps = ", ".join(
+                f"{gap.get('capability')} ({gap.get('id')}, {gap.get('status')})"
+                for gap in gaps[:5]
+            )
+            extras.append(f"capability gaps: {rendered_gaps}")
+        extra_text = "; " + "; ".join(extras) if extras else ""
+        parts.append(f"{state['title']} [{state['state']}; {plan_text}{extra_text}]")
     return "Agency: " + "; ".join(parts)
 
 

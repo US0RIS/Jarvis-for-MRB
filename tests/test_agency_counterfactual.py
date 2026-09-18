@@ -73,6 +73,32 @@ class AgencyCounterfactualTests(unittest.TestCase):
         self.assertIn("reversible", comparison["selection_rationale"])
         self.assertEqual(comparison["branches"][1]["cost"]["usd"], 100)
 
+    def test_selection_requires_explicit_rationale(self) -> None:
+        case = agency_counterfactual.create_case(
+            "Choose path",
+            [{"id": "a", "title": "A"}, {"id": "b", "title": "B"}],
+        )
+        with self.assertRaisesRegex(ValueError, "explicit rationale"):
+            agency_counterfactual.select_branch(
+                case["id"],
+                "a",
+                rationale="   ",
+                change_conditions=["New evidence"],
+            )
+
+    def test_selection_requires_condition_that_would_reopen_choice(self) -> None:
+        case = agency_counterfactual.create_case(
+            "Choose path",
+            [{"id": "a", "title": "A"}, {"id": "b", "title": "B"}],
+        )
+        with self.assertRaisesRegex(ValueError, "condition"):
+            agency_counterfactual.select_branch(
+                case["id"],
+                "a",
+                rationale="A is more reversible.",
+                change_conditions=[],
+            )
+
     def test_case_requires_multiple_branches(self) -> None:
         with self.assertRaises(ValueError):
             agency_counterfactual.create_case(

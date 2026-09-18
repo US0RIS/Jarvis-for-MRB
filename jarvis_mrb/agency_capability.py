@@ -316,7 +316,17 @@ def reconcile_gaps() -> dict[str, Any]:
         ]
         if remaining:
             continue
+        authority = state.get("authority") if isinstance(state.get("authority"), dict) else {}
+        if authority.get("agency_enabled") is not True:
+            continue
         set_state(state_id, "active")
+        try:
+            from jarvis_mrb.agency_runtime import reset_planner_backoff
+            reset_planner_backoff(state_id)
+        except Exception:
+            # The capability/state transition is durable. Metadata reset failure may
+            # delay planning, but must not fabricate that the capability vanished.
+            pass
         resumed.append(state_id)
 
     return {

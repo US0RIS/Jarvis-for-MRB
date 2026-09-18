@@ -309,6 +309,13 @@ def reconcile_gaps() -> dict[str, Any]:
         blocked_reason = str(state.get("blocked_reason") or "").lower()
         if capability.lower() not in blocked_reason and proposed.lower() not in blocked_reason:
             continue
+
+        remaining = [
+            item for item in list_gaps(desired_state_id=state_id, open_only=True)
+            if str(item.get("id") or "") != gap_id
+        ]
+        if remaining:
+            continue
         set_state(state_id, "active")
         resumed.append(state_id)
 

@@ -413,6 +413,40 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertEqual(result["plan"]["steps"][0]["risk"], "security")
         self.assertTrue(result["plan"]["steps"][0]["requires_confirmation"])
 
+    def test_available_capability_does_not_reactivate_goal_blocked_for_unrelated_reason(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "calendar.query",
+            "Need calendar reads.",
+        )
+        desired_state.set_state(
+            state_id,
+            "blocked",
+            reason="Waiting for legal approval unrelated to calendar access.",
+        )
+
+        with patch(
+            "jarvis_mrb.agency_capability.available_tool",
+            return_value={
+                "tool": "calendar.query",
+                "known": True,
+                "available": True,
+                "implemented_for_agency": True,
+                "authority_blocked": False,
+                "agency_scope_blocked": False,
+                "requires_confirmation": False,
+                "source": "builtin",
+            },
+        ):
+            result = agency_capability.reconcile_gaps()
+
+        self.assertIn(gap["id"], result["resolved"])
+        self.assertNotIn(state_id, result["reactivated"])
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertIn("legal approval", state["blocked_reason"])
+
     def test_resolving_one_of_multiple_capability_gaps_does_not_reactivate_goal(self) -> None:
         state_id = self._state()
         first = agency_capability.record_gap(state_id, "capability.one", "Need one.")

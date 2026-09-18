@@ -1081,24 +1081,182 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
 def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
     state_id = session["desired_state_id"]
     state_events = _events_for_state(events, state_id)
-    waiting = [item for item in state_events if item["event_type"] == "agency.step.awaiting_approval"]
-    denied = [item for item in state_events if item["event_type"] == "agency.step.denied"]
-    verifications = _verification_rows_for_state(conn, state_id, session["started_at"])
-    external = [row for row in verifications if str(row.get("risk") or "") == "external_write"]
-    waiting_steps = {str((item.get("payload") or {}).get("step_id") or "") for item in waiting}
-    resumed = [row for row in external if str(row.get("agency_step_id") or "") in waiting_steps]
+    waiting = [
+        item for item in state_events
+        if item["event_type"] == "agency.step.awaiting_approval"
+    ]
+    denied = [
+        item for item in state_events
+        if item["event_type"] == "agency.step.denied"
+    ]
+    waiting_by_step: dict[str, list[int]] = {}
+    for item in waiting:
+        step_id = str((item.get("payload") or {}).get("step_id") or "")
+        if step_id:
+            waiting_by_step.setdefault(step_id, []).append(int(item["id"]))
+
+    try:
+        read_rows = conn.execute(
+            """
+            SELECT s.id,s.plan_id,s.step_key,s.tool,s.status,s.attempt_count,s.started_at
+            FROM agency_steps s
+            JOIN agency_plans p ON p.id=s.plan_id
+            WHERE p.desired_state_id=?
+              AND s.risk='read'
+              AND s.attempt_count>0
+              AND s.started_at>=?
+            ORDER BY s.started_at,s.ordinal
+            """,
+            (state_id, session["started_at"]),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        read_rows = []
+    automatic_reads = [
+        dict(row)
+        for row in read_rows
+        if str(row["status"] or "") == "verified"
+        and str(row["id"] or "") not in waiting_by_step
+    ]
+
+    verifications = _verification_rows_for_state(
+        conn,
+        state_id,
+        session["started_at"],
+    )
+    external = [
+        row for row in verifications
+        if str(row.get("risk") or "") == "external_write"
+        and bool(row.get("action_event_proof"))
+    ]
+
+    resumed_pairs: list[dict[str, Any]] = []
+    unguarded_external: list[dict[str, Any]] = []
+    for row in external:
+        step_id = str(row.get("agency_step_id") or "")
+        action_event_id = int(row.get("action_event_id") or 0)
+        prior_waiting = [
+            event_id
+            for event_id in waiting_by_step.get(step_id, [])
+            if event_id < action_event_id
+        ]
+        if prior_waiting:
+            resumed_pairs.append(
+                {
+                    "agency_step_id": step_id,
+                    "waiting_event_id": max(prior_waiting),
+                    "action_event_id": action_event_id,
+                    "verification_id": str(row.get("id") or ""),
+                    "tool": str(row.get("tool") or ""),
+                }
+            )
+        else:
+            unguarded_external.append(
+                {
+                    "agency_step_id": step_id,
+                    "action_event_id": action_event_id,
+                    "verification_id": str(row.get("id") or ""),
+                    "tool": str(row.get("tool") or ""),
+                }
+            )
+
+    denial_outcomes: list[dict[str, Any]] = []
+    for item in denied:
+        payload = item.get("payload") or {}
+        step_id = str(payload.get("step_id") or "")
+        plan_id = str(payload.get("plan_id") or "")
+        if not step_id or not plan_id:
+            continue
+        step = conn.execute(
+            "SELECT id,status,blocked_reason FROM agency_steps WHERE id=? AND plan_id=?",
+            (step_id, plan_id),
+        ).fetchone()
+        plan = conn.execute(
+            "SELECT id,generation,status,desired_state_id FROM agency_plans WHERE id=?",
+            (plan_id,),
+        ).fetchone()
+        if step is None or plan is None or str(plan["desired_state_id"]) != state_id:
+            continue
+        newer = conn.execute(
+            """
+            SELECT id,generation,status
+            FROM agency_plans
+            WHERE desired_state_id=? AND generation>?
+            ORDER BY generation DESC LIMIT 1
+            """,
+            (state_id, int(plan["generation"])),
+        ).fetchone()
+        denial_outcomes.append(
+            {
+                "event_id": int(item["id"]),
+                "step_id": step_id,
+                "step_status": str(step["status"]),
+                "blocked_reason": str(step["blocked_reason"] or ""),
+                "plan_id": plan_id,
+                "plan_status": str(plan["status"]),
+                "newer_plan": dict(newer) if newer is not None else None,
+                "path_blocked_or_replanned": bool(
+                    str(step["status"]) == "blocked"
+                    and (
+                        str(plan["status"]) == "needs_replan"
+                        or newer is not None
+                    )
+                ),
+            }
+        )
+    denial_effective = any(
+        bool(item["path_blocked_or_replanned"])
+        for item in denial_outcomes
+    )
+
     checks = [
-        _check("protected step reached approval boundary", bool(waiting), [item["id"] for item in waiting]),
-        _check("real external write was attempted after approval", bool(external), [row["id"] for row in external]),
-        _check("approval resumed the same persisted step", bool(resumed), [row["agency_step_id"] for row in resumed]),
-        _check("explicit denial case was persisted", bool(denied), [item["id"] for item in denied]),
+        _check(
+            "safe read proceeded automatically without approval",
+            bool(automatic_reads),
+            automatic_reads,
+        ),
+        _check(
+            "protected external write was attempted with audited action correlation",
+            bool(external),
+            [
+                {
+                    "verification_id": str(row.get("id") or ""),
+                    "agency_step_id": str(row.get("agency_step_id") or ""),
+                    "action_event_id": int(row.get("action_event_id") or 0),
+                    "tool": str(row.get("tool") or ""),
+                }
+                for row in external
+            ],
+        ),
+        _check(
+            "approval resumed the exact persisted step",
+            bool(resumed_pairs),
+            resumed_pairs,
+        ),
+        _check(
+            "no protected external write bypassed the approval boundary",
+            bool(external) and not unguarded_external,
+            unguarded_external,
+        ),
+        _check(
+            "explicit denial case was persisted",
+            bool(denied),
+            [int(item["id"]) for item in denied],
+        ),
+        _check(
+            "denial blocked the step and forced replan or replacement",
+            denial_effective,
+            denial_outcomes,
+        ),
     ]
     return {
         "checks": checks,
         "evidence": {
-            "protected_external_write_observed": checks[0]["passed"] and checks[1]["passed"],
+            "safe_read_auto_proceeded": checks[0]["passed"],
+            "protected_external_write_observed": checks[1]["passed"],
             "approval_resumed_same_plan": checks[2]["passed"],
-            "denial_case_observed": checks[3]["passed"],
+            "permission_boundary_not_bypassed": checks[3]["passed"],
+            "denial_case_observed": checks[4]["passed"],
+            "denial_forced_replan_or_blocked": checks[5]["passed"],
         },
     }
 

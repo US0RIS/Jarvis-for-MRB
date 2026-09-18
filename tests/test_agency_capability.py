@@ -248,6 +248,12 @@ class AgencyCapabilityTests(unittest.TestCase):
             "blocked",
             reason="Missing capability: weather.private_api.",
         )
+        agency_runtime._update_runtime(
+            state_id,
+            planner_success=False,
+            error="Capability unavailable.",
+        )
+        self.assertTrue(agency_runtime._runtime_state(state_id)["next_planning_attempt_at"])
 
         with patch(
             "jarvis_mrb.custom_tools.list_tools",
@@ -267,6 +273,7 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertIn(state_id, result["reactivated"])
         self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
         self.assertEqual(agency_capability.get_gap(gap["id"])["status"], "resolved")
+        self.assertFalse(agency_runtime._runtime_state(state_id)["next_planning_attempt_at"])
 
     def test_recovered_custom_capability_replans_but_still_requires_security_approval(self) -> None:
         state_id = self._state()

@@ -303,6 +303,33 @@ def start_session(
     return get_session(session_id) or {}
 
 
+def _session_integrity(session_id: str) -> tuple[bool, str]:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id,gate,deployment_sha,environment_fingerprint,desired_state_id,
+                   parameters_json,baseline_json,session_hash,started_at
+            FROM agency_real_gate_sessions WHERE id=?
+            """,
+            (str(session_id),),
+        ).fetchone()
+    if row is None:
+        return False, "REAL acceptance session does not exist."
+    expected = _live_session_digest(
+        session_id=str(row["id"]),
+        gate=str(row["gate"]),
+        deployment_sha_value=str(row["deployment_sha"]),
+        environment=str(row["environment_fingerprint"]),
+        desired_state_id=str(row["desired_state_id"] or ""),
+        parameters_json=str(row["parameters_json"] or "{}"),
+        baseline_json=str(row["baseline_json"] or "{}"),
+        started_at=str(row["started_at"]),
+    )
+    if str(row["session_hash"] or "") != expected:
+        return False, "REAL acceptance session integrity hash mismatch."
+    return True, ""
+
+
 def get_session(session_id: str) -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM agency_real_gate_sessions WHERE id=?", (str(session_id),)).fetchone()
@@ -1046,6 +1073,31 @@ def evaluate_session(session_id: str) -> dict[str, Any]:
     session = get_session(session_id)
     if session is None:
         raise ValueError(f"Unknown REAL gate session {session_id!r}.")
+    integrity_ok, integrity_error = _session_integrity(str(session_id))
+    if not integrity_ok:
+        evaluation = {
+            "session_id": str(session_id),
+            "gate": str(session.get("gate") or ""),
+            "passed": False,
+            "checks": [_check("REAL acceptance session integrity is valid", False, integrity_error)],
+            "evidence": {
+                "real_services": True,
+                "synthetic": False,
+                "manual_orchestration": False,
+            },
+            "manual_orchestration_events": [],
+            "evaluated_at": _now(),
+        }
+        with _connect() as conn:
+            conn.execute(
+                "UPDATE agency_real_gate_sessions SET last_evaluation_json=? WHERE id=?",
+                (
+                    json.dumps(evaluation, ensure_ascii=False, sort_keys=True, default=str),
+                    str(session_id),
+                ),
+            )
+            conn.commit()
+        return evaluation
     evaluator = _EVALUATORS.get(str(session["gate"]))
     if evaluator is None:
         raise ValueError(f"No REAL evaluator exists for {session['gate']}.")

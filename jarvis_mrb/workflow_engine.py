@@ -160,8 +160,25 @@ def _validate_plan(plan: dict[str, Any]) -> None:
             raise ValueError("Workflow node IDs must be unique and non-empty.")
         if tool not in _ALLOWED_NODE_TOOLS:
             raise ValueError(f"Workflow requested unsupported tool {tool!r}.")
-        if not isinstance(raw.get("arguments") or {}, dict):
+        arguments = raw.get("arguments") or {}
+        if not isinstance(arguments, dict):
             raise ValueError(f"Workflow node {node_id} arguments must be an object.")
+        if tool == "custom.run":
+            adapter_name = str(arguments.get("name") or "").strip()
+            adapter_arguments = arguments.get("arguments") or {}
+            if not adapter_name:
+                raise ValueError(f"Workflow node {node_id} custom.run requires an adapter name.")
+            if not isinstance(adapter_arguments, dict):
+                raise ValueError(f"Workflow node {node_id} custom.run arguments must be an object.")
+            enabled_names = {
+                str(item.get("name") or "")
+                for item in _enabled_custom_tool_catalog()
+                if str(item.get("name") or "")
+            }
+            if adapter_name not in enabled_names:
+                raise ValueError(
+                    f"Workflow requested unavailable custom adapter {adapter_name!r}."
+                )
         deps = raw.get("depends_on") or []
         if not isinstance(deps, list):
             raise ValueError(f"Workflow node {node_id} depends_on must be a list.")

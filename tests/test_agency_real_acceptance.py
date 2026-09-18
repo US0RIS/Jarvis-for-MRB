@@ -1639,6 +1639,9 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(
                 evaluation["evidence"]["final_satisfaction_followed_verified_action"]
             )
+            self.assertTrue(
+                evaluation["evidence"]["final_satisfaction_derived_from_verified_action"]
+            )
 
             causal = next(
                 item["evidence"]

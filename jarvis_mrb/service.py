@@ -353,6 +353,9 @@ def startup() -> None:
         if not bool(agency.get("ok")):
             raise RuntimeError("; ".join(str(item) for item in agency.get("errors", [])) or "Agency initialization failed.")
         record_runtime_success("agency")
+        from jarvis_mrb.agency_release import deployment_sha as agency_deployment_sha
+        from jarvis_mrb.agency_runtime import record_boot as record_agency_boot
+        record_agency_boot(deployment_sha=agency_deployment_sha())
     except Exception as exc:
         record_runtime_failure("agency", exc)
         raise

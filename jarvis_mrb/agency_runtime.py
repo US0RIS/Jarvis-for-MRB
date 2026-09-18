@@ -440,6 +440,48 @@ def tick_all(
     }
 
 
+def _normalize(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def find_desired_state(query: str) -> dict[str, Any] | None:
+    from jarvis_mrb.desired_state import list_desired_states
+
+    needle = _normalize(query)
+    if not needle:
+        return None
+    states = list_desired_states(include_retired=False, limit=200)
+    exact = [
+        item for item in states
+        if _normalize(str(item.get("id") or "")) == needle
+        or _normalize(str(item.get("title") or "")) == needle
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    partial = [
+        item for item in states
+        if needle in _normalize(str(item.get("title") or ""))
+        or needle in _normalize(str(item.get("id") or ""))
+    ]
+    return partial[0] if len(partial) == 1 else None
+
+
+def activate_matching(query: str) -> dict[str, Any]:
+    state = find_desired_state(query)
+    if state is None:
+        raise ValueError("Agency could not uniquely identify that desired state.")
+    return reactivate(str(state["id"]))
+
+
+def pause_matching(query: str) -> dict[str, Any]:
+    from jarvis_mrb.desired_state import set_state
+
+    state = find_desired_state(query)
+    if state is None:
+        raise ValueError("Agency could not uniquely identify that desired state.")
+    return set_state(str(state["id"]), "paused")
+
+
 def reactivate(desired_state_id: str) -> dict[str, Any]:
     from jarvis_mrb.desired_state import set_state
 

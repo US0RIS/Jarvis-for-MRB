@@ -80,6 +80,81 @@ class AgencySelfModelTests(unittest.TestCase):
         self.assertIn("materially better", item["value"]["corrected"])
         self.assertIn("repeated choices", item["value"]["reason"])
 
+    def test_inferred_preference_cannot_supersede_explicit_user_preference(self) -> None:
+        explicit = agency_self_model.upsert(
+            "preference",
+            "travel_quality",
+            "prefer the materially better experience",
+            confidence=0.9,
+            source_kind="explicit_user",
+            source_ref="user:explicit",
+        )
+        current_after_inference = agency_self_model.upsert(
+            "preference",
+            "travel_quality",
+            "always choose cheapest",
+            confidence=1.0,
+            source_kind="inferred_behavior",
+            source_ref="inference:later",
+        )
+
+        self.assertEqual(current_after_inference["id"], explicit["id"])
+        self.assertEqual(
+            agency_self_model.get("preference", "travel_quality")["value"],
+            "prefer the materially better experience",
+        )
+        history = agency_self_model.list_entries(
+            kind="preference",
+            include_superseded=True,
+        )
+        inferred = next(
+            item for item in history
+            if item["source_ref"] == "inference:later"
+        )
+        self.assertEqual(inferred["state"], "superseded")
+
+    def test_explicit_user_preference_supersedes_prior_inference(self) -> None:
+        inferred = agency_self_model.upsert(
+            "preference",
+            "restaurant_noise",
+            "quiet is probably preferred",
+            confidence=0.95,
+            source_kind="inferred",
+            source_ref="inference:first",
+        )
+        explicit = agency_self_model.upsert(
+            "preference",
+            "restaurant_noise",
+            "moderate noise is fine",
+            confidence=0.7,
+            source_kind="explicit_user",
+            source_ref="user:later",
+        )
+
+        self.assertNotEqual(explicit["id"], inferred["id"])
+        self.assertEqual(explicit["value"], "moderate noise is fine")
+        self.assertEqual(explicit["source_kind"], "explicit_user")
+
+    def test_weaker_inference_does_not_replace_stronger_inference(self) -> None:
+        stronger = agency_self_model.upsert(
+            "tradeoff",
+            "time_vs_money",
+            {"prefer_time": True},
+            confidence=0.9,
+            source_kind="inferred",
+            source_ref="inference:strong",
+        )
+        after = agency_self_model.upsert(
+            "tradeoff",
+            "time_vs_money",
+            {"prefer_time": False},
+            confidence=0.4,
+            source_kind="model_inference",
+            source_ref="inference:weak",
+        )
+        self.assertEqual(after["id"], stronger["id"])
+        self.assertEqual(after["value"], {"prefer_time": True})
+
     def test_high_confidence_preference_never_grants_external_write_authority(self) -> None:
         agency_self_model.upsert(
             "preference",

@@ -130,13 +130,27 @@ class AgencyReleaseTests(unittest.TestCase):
             "manual_orchestration_events": [],
             "evaluated_at": "2030-01-01T00:00:00+00:00",
         }
+        parameters_json = "{}"
+        baseline_json = "{}"
+        started_at = "2030-01-01T00:00:00+00:00"
+        session_hash = agency_release._live_session_digest(
+            session_id=session_id,
+            gate=gate,
+            deployment_sha_value=sha,
+            environment=env,
+            desired_state_id="",
+            parameters_json=parameters_json,
+            baseline_json=baseline_json,
+            started_at=started_at,
+        )
         with sqlite3.connect(self.db) as conn:
             conn.execute(
                 """
                 INSERT INTO agency_real_gate_sessions(
                     id,gate,deployment_sha,environment_fingerprint,desired_state_id,
-                    parameters_json,baseline_json,status,last_evaluation_json,receipt_id,started_at
-                ) VALUES(?,?,?,?,?,'{}','{}','running',?,'',?)
+                    parameters_json,baseline_json,session_hash,status,last_evaluation_json,
+                    receipt_id,started_at
+                ) VALUES(?,?,?,?,?,?,?,?, 'running',?,'',?)
                 """,
                 (
                     session_id,
@@ -144,8 +158,11 @@ class AgencyReleaseTests(unittest.TestCase):
                     sha,
                     env,
                     "",
+                    parameters_json,
+                    baseline_json,
+                    session_hash,
                     json.dumps(evaluation, ensure_ascii=False, sort_keys=True),
-                    "2030-01-01T00:00:00+00:00",
+                    started_at,
                 ),
             )
             conn.commit()

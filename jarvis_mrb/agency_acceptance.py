@@ -136,7 +136,17 @@ def _fake_audited_pending_write(env: dict[str, Any]) -> Callable[..., SimpleName
         if not bypass_confirmation:
             raise AssertionError("Protected acceptance action was not resumed through approval.")
         agency_step_id = current_agency_step_id()
-        reply = SimpleNamespace(ok=True, message=f"{tool} accepted by synthetic external service.")
+        reply_data: dict[str, Any] = {}
+        if tool == "calendar.create":
+            reply_data["event_id"] = f"synthetic-calendar-{agency_step_id[-12:]}"
+        elif tool == "gmail.send":
+            reply_data["message_id"] = f"synthetic-gmail-{agency_step_id[-12:]}"
+            reply_data["email"] = str(args.get("recipient") or "")
+        reply = SimpleNamespace(
+            ok=True,
+            message=f"{tool} accepted by synthetic external service.",
+            data=reply_data,
+        )
         action_event_id = world_model.record_tool_execution(
             tool,
             args,

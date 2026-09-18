@@ -347,6 +347,16 @@ def startup() -> None:
             pass
         raise
 
+    try:
+        from jarvis_mrb.agency_bootstrap import prepare as prepare_agency
+        agency = prepare_agency(sync_goals=True)
+        if not bool(agency.get("ok")):
+            raise RuntimeError("; ".join(str(item) for item in agency.get("errors", [])) or "Agency initialization failed.")
+        record_runtime_success("agency")
+    except Exception as exc:
+        record_runtime_failure("agency", exc)
+        raise
+
     _ensure_scheduler()
     _ensure_knowledge_refresh()
     _start_tts_in_background()
@@ -366,6 +376,11 @@ def health() -> dict[str, Any]:
         audit = tool_audit_status()
     except Exception as exc:
         audit = {"installed": False, "error": str(exc)[:500]}
+    try:
+        from jarvis_mrb.agency_bootstrap import status as agency_status
+        agency = agency_status()
+    except Exception as exc:
+        agency = {"ready": False, "mode": "unknown", "error": str(exc)[:500]}
 
     return {
         "status": "ok",
@@ -387,6 +402,11 @@ def health() -> dict[str, Any]:
         "scheduler": "running" if _scheduler_started else "stopped",
         "knowledge_refresh": "running" if _knowledge_started else "stopped",
         "proactive_monitor": "running" if _proactive_started else "stopped",
+        "agency": "ready" if bool(agency.get("ready")) else "degraded",
+        "agency_mode": str(agency.get("mode") or "unknown"),
+        "agency_desired_states": agency.get("desired_states") or {},
+        "agency_plans": agency.get("plans") or {},
+        "agency_steps": agency.get("steps") or {},
     }
 
 

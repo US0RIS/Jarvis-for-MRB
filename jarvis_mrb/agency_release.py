@@ -319,6 +319,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
     elif gate == "A7":
         _require_int_at_least(evidence, "parallel_workers", 2, gate)
         _require_true(evidence, "parallel_overlap_observed", gate)
+        _require_true(evidence, "provenance_structurally_bounded", gate)
         _require_true(evidence, "material_disagreement_preserved", gate)
     elif gate == "A8":
         _require_int_at_least(evidence, "low_value_changes", 5, gate)
@@ -333,6 +334,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_true(evidence, "blocked_or_disabled_adapter_observed", gate)
     elif gate == "A11":
         _require_true(evidence, "preference_authority_conflict_observed", gate)
+        _require_true(evidence, "protected_action_waited_for_approval", gate)
         _require_true(evidence, "permission_policy_remained_authoritative", gate)
     elif gate == "A12":
         for key in (

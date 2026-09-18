@@ -1652,6 +1652,132 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 any(external_change_id in item["external_event_ids"] for item in causal)
             )
 
+    def test_a12_unrelated_later_event_cannot_supply_final_completion_provenance(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A12 Provenance Guard")
+        state = desired_state.create_desired_state(
+            "A12 Provenance Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-provenance-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A12 provenance guard",
+                        "start": "2030-01-01T14:00:00-08:00",
+                        "end": "2030-01-01T14:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted provenance-guard action.",
+                data={"event_id": "a12-provenance-guard-event"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must wait",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                plan["id"],
+                waiting["steps"][0]["id"],
+                protected_executor,
+            )
+            verification_id = str(approved["steps"][0]["verification_id"])
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Independent read-back verified the protected action.",
+                ),
+            ):
+                verified = world_verification.check_one(
+                    verification_id,
+                    force=True,
+                )
+            self.assertEqual(verified["status"], "verified")
+
+            unrelated_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Unrelated later fact involving the same project.",
+                source_kind="calendar_enriched",
+                source_ref="real:a12-provenance-guard:unrelated",
+                evidence="This event is deliberately not the verification event.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                source_event_id=unrelated_event_id,
+                evidence="Completion was attributed to an unrelated later event.",
+            )
+            agency_plan.reconcile_plan(plan["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            provenance_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "final satisfaction evidence derives from"
+                )
+            )
+            self.assertFalse(provenance_check["passed"])
+            self.assertFalse(
+                evaluation["evidence"][
+                    "final_satisfaction_derived_from_verified_action"
+                ]
+            )
+            self.assertFalse(evaluation["passed"])
+
     def test_a12_parallel_analysis_must_belong_to_its_own_agency_step(self) -> None:
         entity_id = world_model.ensure_entity("project", "A12 Linked Deliberation")
         state = desired_state.create_desired_state(

@@ -253,8 +253,9 @@ def _check_desired_states() -> None:
     based on explicit machine-evaluable criteria, but it never grants action authority.
     Planning/execution remains behind the normal Executive and permission layers.
     """
-    from jarvis_mrb.desired_state import evaluate_desired_state, list_desired_states
+    from jarvis_mrb.desired_state import evaluate_desired_state, list_desired_states, sync_from_intentions
 
+    sync_from_intentions()
     for item in list_desired_states(limit=200):
         if str(item.get("state") or "") in {"blocked", "paused", "retired"}:
             continue

@@ -549,49 +549,27 @@ def _confirm_pending() -> AgentReply:
             return execute_tool(tool, args, bypass_confirmation=True)
 
     try:
-        from jarvis_mrb.agency_plan import approve_pending, list_pending_approvals, pending_approval
+        from jarvis_mrb.agency_plan import list_pending_approvals
 
-        pending = list_pending_approvals(limit=10)
-        if len(pending) > 1:
+        pending_agency = list_pending_approvals(limit=10)
+        if pending_agency:
             descriptions = "; ".join(
-                f"{item.get('desired_state_title')} — {item.get('tool')}"
-                for item in pending[:5]
+                (
+                    f"{item.get('desired_state_title')} — "
+                    f"{_describe_action(str(item.get('tool') or ''), dict(item.get('resolved_arguments') or {}))}"
+                )
+                for item in pending_agency[:5]
             )
             return AgentReply(
                 False,
-                "More than one Agency action is waiting for approval. "
-                f"Specify which one, for example 'approve agency <goal>': {descriptions}.",
+                "Bare 'confirm' only applies to the foreground protected action that was just staged. "
+                "Agency approvals require an explicit command such as 'approve agency <goal>'. "
+                f"Pending Agency action(s): {descriptions}.",
             )
-
-        step = pending_approval()
-        if step is not None:
-            plan = approve_pending(
-                lambda tool, args, bypass_confirmation=False: execute_tool(
-                    tool,
-                    args,
-                    bypass_confirmation=bypass_confirmation,
-                )
-            )
-            if plan is None:
-                return AgentReply(False, "There is nothing waiting for confirmation.")
-            status = str(plan.get("status") or "")
-            if status == "awaiting_verification":
-                return AgentReply(
-                    True,
-                    f"Approved Agency step {step['step_key']}. The action ran and Jarvis is independently verifying the outcome.",
-                )
-            if status == "completed":
-                return AgentReply(True, f"Approved Agency step {step['step_key']}. The desired state is now satisfied.")
-            if status == "needs_replan":
-                return AgentReply(
-                    False,
-                    f"Approved Agency step {step['step_key']}, but the result did not establish the desired state. Jarvis will replan.",
-                )
-            return AgentReply(True, f"Approved Agency step {step['step_key']}. Agency plan status is now {status}.")
     except Exception as exc:
-        return AgentReply(False, f"Agency approval could not be resumed safely: {exc}")
+        return AgentReply(False, f"Pending Agency approvals could not be inspected safely: {exc}")
 
-    return AgentReply(False, "There is nothing waiting for confirmation.")
+    return AgentReply(False, "There is no foreground action waiting for confirmation.")
 
 
 def _cancel_pending() -> AgentReply:
@@ -601,25 +579,23 @@ def _cancel_pending() -> AgentReply:
             _PENDING_ACTION = None
             return AgentReply(True, "Cancelled.")
     try:
-        from jarvis_mrb.agency_plan import deny_pending, list_pending_approvals
+        from jarvis_mrb.agency_plan import list_pending_approvals
 
-        pending = list_pending_approvals(limit=10)
-        if len(pending) > 1:
+        pending_agency = list_pending_approvals(limit=10)
+        if pending_agency:
             descriptions = "; ".join(
                 f"{item.get('desired_state_title')} — {item.get('tool')}"
-                for item in pending[:5]
+                for item in pending_agency[:5]
             )
             return AgentReply(
                 False,
-                "More than one Agency action is waiting. "
-                f"Specify which one, for example 'deny agency <goal>': {descriptions}.",
+                "Bare 'cancel' only cancels the foreground protected action. "
+                "Agency denials require an explicit command such as 'deny agency <goal>'. "
+                f"Pending Agency action(s): {descriptions}.",
             )
-        plan = deny_pending(reason="User denied the proposed Agency action.")
-        if plan is not None:
-            return AgentReply(True, "Denied that Agency action. The desired state remains active and Jarvis will seek another path.")
     except Exception as exc:
-        return AgentReply(False, f"Agency denial could not be persisted safely: {exc}")
-    return AgentReply(False, "There is nothing waiting for confirmation.")
+        return AgentReply(False, f"Pending Agency actions could not be inspected safely: {exc}")
+    return AgentReply(False, "There is no foreground action waiting for cancellation.")
 
 
 def _extract_json(content: str) -> dict[str, Any] | None:

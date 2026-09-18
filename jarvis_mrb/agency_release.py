@@ -24,11 +24,120 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _receipt_digest(
+    *,
+    gate: str,
+    deployment_sha_value: str,
+    environment: str,
+    harness: str,
+    checks_json: str,
+    evidence_json: str,
+    trace_ref: str,
+    session_id: str,
+    recorded_at: str,
+) -> str:
+    payload = {
+        "gate": str(gate),
+        "deployment_sha": str(deployment_sha_value),
+        "environment_fingerprint": str(environment),
+        "harness": str(harness),
+        "checks_json": str(checks_json),
+        "evidence_json": str(evidence_json),
+        "trace_ref": str(trace_ref),
+        "session_id": str(session_id),
+        "recorded_at": str(recorded_at),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='agency_real_gate_receipts'"
+    ).fetchone()
+    if row is None:
+        return
+    sql = " ".join(str(row["sql"] or "").lower().split())
+    columns = {
+        str(item["name"])
+        for item in conn.execute("PRAGMA table_info(agency_real_gate_receipts)").fetchall()
+    }
+    needs_rebuild = (
+        "unique(gate,deployment_sha,environment_fingerprint)" in sql.replace(" ", "")
+        or "session_id" not in columns
+        or "receipt_hash" not in columns
+    )
+    if not needs_rebuild:
+        return
+
+    legacy_rows = conn.execute(
+        "SELECT * FROM agency_real_gate_receipts ORDER BY recorded_at,id"
+    ).fetchall()
+    conn.executescript(
+        """
+        DROP TRIGGER IF EXISTS agency_real_gate_receipts_immutable_update;
+        DROP TRIGGER IF EXISTS agency_real_gate_receipts_immutable_delete;
+        DROP INDEX IF EXISTS idx_agency_real_gate_receipts_release;
+        DROP INDEX IF EXISTS idx_agency_real_gate_receipts_session;
+        ALTER TABLE agency_real_gate_receipts RENAME TO agency_real_gate_receipts_legacy;
+        CREATE TABLE agency_real_gate_receipts (
+            id TEXT PRIMARY KEY,
+            gate TEXT NOT NULL,
+            deployment_sha TEXT NOT NULL,
+            environment_fingerprint TEXT NOT NULL,
+            harness TEXT NOT NULL,
+            checks_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            trace_ref TEXT NOT NULL DEFAULT '',
+            session_id TEXT NOT NULL DEFAULT '',
+            receipt_hash TEXT NOT NULL,
+            recorded_at TEXT NOT NULL
+        );
+        """
+    )
+    for legacy in legacy_rows:
+        keys = set(legacy.keys())
+        gate = str(legacy["gate"])
+        sha = str(legacy["deployment_sha"])
+        env = str(legacy["environment_fingerprint"])
+        harness = str(legacy["harness"])
+        checks_json = str(legacy["checks_json"])
+        evidence_json = str(legacy["evidence_json"])
+        trace_ref = str(legacy["trace_ref"] or "")
+        session_id = str(legacy["session_id"] or "") if "session_id" in keys else ""
+        recorded_at = str(legacy["recorded_at"])
+        digest = _receipt_digest(
+            gate=gate,
+            deployment_sha_value=sha,
+            environment=env,
+            harness=harness,
+            checks_json=checks_json,
+            evidence_json=evidence_json,
+            trace_ref=trace_ref,
+            session_id=session_id,
+            recorded_at=recorded_at,
+        )
+        conn.execute(
+            """
+            INSERT INTO agency_real_gate_receipts(
+                id,gate,deployment_sha,environment_fingerprint,harness,checks_json,
+                evidence_json,trace_ref,session_id,receipt_hash,recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                str(legacy["id"]), gate, sha, env, harness, checks_json,
+                evidence_json, trace_ref, session_id, digest, recorded_at,
+            ),
+        )
+    conn.execute("DROP TABLE agency_real_gate_receipts_legacy")
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=10000")
+    _migrate_receipt_schema(conn)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS agency_real_gate_receipts (
@@ -40,11 +149,14 @@ def _connect() -> sqlite3.Connection:
             checks_json TEXT NOT NULL,
             evidence_json TEXT NOT NULL,
             trace_ref TEXT NOT NULL DEFAULT '',
-            recorded_at TEXT NOT NULL,
-            UNIQUE(gate,deployment_sha,environment_fingerprint)
+            session_id TEXT NOT NULL DEFAULT '',
+            receipt_hash TEXT NOT NULL,
+            recorded_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_agency_real_gate_receipts_release
-            ON agency_real_gate_receipts(deployment_sha,environment_fingerprint,gate);
+            ON agency_real_gate_receipts(deployment_sha,environment_fingerprint,gate,recorded_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agency_real_gate_receipts_session
+            ON agency_real_gate_receipts(session_id) WHERE session_id<>'';
 
         CREATE TABLE IF NOT EXISTS agency_release_validation_runs (
             id TEXT PRIMARY KEY,
@@ -255,6 +367,7 @@ def record_real_gate_receipt(
     evidence: dict[str, Any],
     trace_ref: str = "",
     environment: str | None = None,
+    session_id: str = "",
 ) -> dict[str, Any]:
     clean_gate = str(gate or "").strip().upper()
     if clean_gate not in REAL_GATES:
@@ -291,13 +404,28 @@ def record_real_gate_receipt(
 
     receipt_id = f"agency-real:{uuid.uuid4()}"
     recorded_at = _now()
+    clean_trace_ref = str(trace_ref or "").strip()[:3000]
+    clean_session_id = str(session_id or "").strip()[:300]
+    checks_json = json.dumps(normalized_checks, ensure_ascii=False, sort_keys=True)
+    evidence_json = json.dumps(clean_evidence, ensure_ascii=False, sort_keys=True)
+    receipt_hash = _receipt_digest(
+        gate=clean_gate,
+        deployment_sha_value=clean_sha,
+        environment=env,
+        harness=clean_harness,
+        checks_json=checks_json,
+        evidence_json=evidence_json,
+        trace_ref=clean_trace_ref,
+        session_id=clean_session_id,
+        recorded_at=recorded_at,
+    )
     with _connect() as conn:
         conn.execute(
             """
             INSERT INTO agency_real_gate_receipts(
                 id,gate,deployment_sha,environment_fingerprint,harness,checks_json,
-                evidence_json,trace_ref,recorded_at
-            ) VALUES(?,?,?,?,?,?,?,?,?)
+                evidence_json,trace_ref,session_id,receipt_hash,recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 receipt_id,
@@ -305,9 +433,11 @@ def record_real_gate_receipt(
                 clean_sha,
                 env,
                 clean_harness,
-                json.dumps(normalized_checks, ensure_ascii=False, sort_keys=True),
-                json.dumps(clean_evidence, ensure_ascii=False, sort_keys=True),
-                str(trace_ref or "").strip()[:3000],
+                checks_json,
+                evidence_json,
+                clean_trace_ref,
+                clean_session_id,
+                receipt_hash,
                 recorded_at,
             ),
         )
@@ -333,6 +463,18 @@ def get_receipt(receipt_id: str) -> dict[str, Any] | None:
         row = conn.execute(
             "SELECT * FROM agency_real_gate_receipts WHERE id=?",
             (str(receipt_id),),
+        ).fetchone()
+    return _decode_receipt(row) if row else None
+
+
+def get_receipt_for_session(session_id: str) -> dict[str, Any] | None:
+    clean = str(session_id or "").strip()
+    if not clean:
+        return None
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM agency_real_gate_receipts WHERE session_id=? ORDER BY recorded_at DESC LIMIT 1",
+            (clean,),
         ).fetchone()
     return _decode_receipt(row) if row else None
 
@@ -438,22 +580,46 @@ def release_status(
         if valid_sha
         else []
     )
-    by_gate = {str(item["gate"]): item for item in receipts}
-    invalid_receipts: dict[str, str] = {}
-    a12 = by_gate.get("A12")
-    if a12 is not None:
-        trace = Path(str(a12.get("trace_ref") or "")).expanduser()
-        if not trace.is_file():
-            invalid_receipts["A12"] = "human-readable A12 trace file is missing"
-            by_gate.pop("A12", None)
+    by_gate: dict[str, dict[str, Any]] = {}
+    invalid_receipts: dict[str, list[dict[str, str]]] = {}
+    for item in reversed(receipts):
+        gate = str(item.get("gate") or "")
+        if gate in by_gate:
+            continue
+        reason = ""
+        expected_hash = _receipt_digest(
+            gate=gate,
+            deployment_sha_value=str(item.get("deployment_sha") or ""),
+            environment=str(item.get("environment_fingerprint") or ""),
+            harness=str(item.get("harness") or ""),
+            checks_json=json.dumps(item.get("checks") or [], ensure_ascii=False, sort_keys=True),
+            evidence_json=json.dumps(item.get("evidence") or {}, ensure_ascii=False, sort_keys=True),
+            trace_ref=str(item.get("trace_ref") or ""),
+            session_id=str(item.get("session_id") or ""),
+            recorded_at=str(item.get("recorded_at") or ""),
+        )
+        if str(item.get("receipt_hash") or "") != expected_hash:
+            reason = "receipt content hash mismatch"
+        elif not item.get("checks") or not all(
+            isinstance(check, dict) and check.get("passed") is True
+            for check in (item.get("checks") or [])
+        ):
+            reason = "receipt contains missing or non-passing checks"
         else:
             try:
-                if not trace.read_text(encoding="utf-8", errors="replace").strip():
-                    invalid_receipts["A12"] = "human-readable A12 trace file is empty"
-                    by_gate.pop("A12", None)
-            except OSError:
-                invalid_receipts["A12"] = "human-readable A12 trace file is unreadable"
-                by_gate.pop("A12", None)
+                _validate_gate_evidence(
+                    gate,
+                    dict(item.get("evidence") or {}),
+                    str(item.get("trace_ref") or ""),
+                )
+            except ValueError as exc:
+                reason = str(exc)
+        if reason:
+            invalid_receipts.setdefault(gate, []).append(
+                {"receipt_id": str(item.get("id") or ""), "reason": reason[:1000]}
+            )
+            continue
+        by_gate[gate] = item
     missing_real = sorted(REAL_GATES - set(by_gate))
 
     validation = latest_validation_run(sha, environment=env) if valid_sha else None

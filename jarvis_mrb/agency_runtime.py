@@ -656,14 +656,19 @@ def tick_all(
         return {
             "mode": mode,
             "desired_states_checked": 0,
+            "candidate_pool": 0,
             "actions_executed": 0,
             "action_budget": 0,
             "results": [],
         }
 
     action_budget = max(0, min(int(max_actions), 10)) if mode == "active" else 0
+    window_limit = max(1, min(int(limit), 200))
+
+    # Load a broader pool than the per-cycle evaluation window. Otherwise a stable
+    # ORDER BY priority DESC LIMIT N permanently starves goal N+1.
     candidates: list[dict[str, Any]] = []
-    for desired in list_desired_states(limit=max(1, min(int(limit), 200))):
+    for desired in list_desired_states(limit=500):
         if str(desired.get("state") or "") not in {"active", "satisfied"}:
             continue
         authority = desired.get("authority") if isinstance(desired.get("authority"), dict) else {}
@@ -674,44 +679,82 @@ def tick_all(
     runtime_by_id: dict[str, dict[str, Any]] = {}
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT desired_state_id,last_action_at FROM agency_runtime_state"
+            """
+            SELECT desired_state_id,last_tick_at,last_action_at
+            FROM agency_runtime_state
+            """
         ).fetchall()
     for row in rows:
         runtime_by_id[str(row["desired_state_id"])] = {
-            "last_action_at": str(row["last_action_at"] or "")
+            "last_tick_at": str(row["last_tick_at"] or ""),
+            "last_action_at": str(row["last_action_at"] or ""),
         }
 
-    def action_age_key(item: dict[str, Any]) -> tuple[float, float, str]:
-        state_id = str(item.get("id") or "")
-        raw = str((runtime_by_id.get(state_id) or {}).get("last_action_at") or "")
+    def timestamp_for(state_id: str, field: str) -> float:
+        raw = str((runtime_by_id.get(state_id) or {}).get(field) or "")
         parsed = _parse_time(raw)
-        # Never-acted goals are oldest and therefore get first fair-share opportunity.
-        timestamp = parsed.timestamp() if parsed is not None else float("-inf")
-        return (-float(item.get("priority") or 0.0), timestamp, state_id)
+        return parsed.timestamp() if parsed is not None else float("-inf")
 
-    ordered: list[dict[str, Any]] = []
+    def priority(item: dict[str, Any]) -> float:
+        return float(item.get("priority") or 0.0)
+
+    selected: list[dict[str, Any]] = []
+    champion: dict[str, Any] | None = None
     if candidates:
-        max_priority = max(float(item.get("priority") or 0.0) for item in candidates)
+        max_priority = max(priority(item) for item in candidates)
         top_priority = [
             item for item in candidates
-            if float(item.get("priority") or 0.0) == max_priority
+            if priority(item) == max_priority
         ]
-        champion = min(top_priority, key=action_age_key)
-        ordered.append(champion)
+        champion = min(
+            top_priority,
+            key=lambda item: (
+                timestamp_for(str(item.get("id") or ""), "last_tick_at"),
+                str(item.get("id") or ""),
+            ),
+        )
+        selected.append(champion)
 
-        remaining = [item for item in candidates if str(item.get("id")) != str(champion.get("id"))]
+        remaining_pool = [
+            item for item in candidates
+            if str(item.get("id")) != str(champion.get("id"))
+        ]
+        remaining_pool.sort(
+            key=lambda item: (
+                timestamp_for(str(item.get("id") or ""), "last_tick_at"),
+                -priority(item),
+                str(item.get("id") or ""),
+            )
+        )
+        selected.extend(remaining_pool[: max(0, window_limit - 1)])
+
+    # Within the rotating evaluation window, allocate scarce action opportunities
+    # using a separate action-age clock. The highest-priority selected goal gets
+    # first opportunity, then longest-waiting goals get the remaining slots.
+    ordered: list[dict[str, Any]] = []
+    if selected:
+        selected_max_priority = max(priority(item) for item in selected)
+        selected_top = [
+            item for item in selected
+            if priority(item) == selected_max_priority
+        ]
+        action_champion = min(
+            selected_top,
+            key=lambda item: (
+                timestamp_for(str(item.get("id") or ""), "last_action_at"),
+                str(item.get("id") or ""),
+            ),
+        )
+        ordered.append(action_champion)
+
+        remaining = [
+            item for item in selected
+            if str(item.get("id")) != str(action_champion.get("id"))
+        ]
         remaining.sort(
             key=lambda item: (
-                (
-                    _parse_time(
-                        str((runtime_by_id.get(str(item.get("id"))) or {}).get("last_action_at") or "")
-                    ).timestamp()
-                    if _parse_time(
-                        str((runtime_by_id.get(str(item.get("id"))) or {}).get("last_action_at") or "")
-                    ) is not None
-                    else float("-inf")
-                ),
-                -float(item.get("priority") or 0.0),
+                timestamp_for(str(item.get("id") or ""), "last_action_at"),
+                -priority(item),
                 str(item.get("id") or ""),
             )
         )
@@ -733,6 +776,7 @@ def tick_all(
     return {
         "mode": mode,
         "desired_states_checked": len(results),
+        "candidate_pool": len(candidates),
         "actions_executed": actions,
         "action_budget": action_budget,
         "results": results,

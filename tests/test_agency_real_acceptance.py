@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -297,6 +298,54 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 if item["name"].startswith("parallel deliberation belonged")
             )
             self.assertTrue(linked_parallel_check["passed"])
+
+    def test_concurrent_finalizers_converge_on_one_immutable_receipt(self) -> None:
+        emitted: list[str] = []
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Concurrent low {index}",
+                    dedup_key=f"concurrent-finalize-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Concurrent finalization exception",
+                dedup_key="concurrent-finalize-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(agency_real_acceptance.finalize_session, session["id"])
+                    for _ in range(2)
+                ]
+                results = [future.result() for future in futures]
+
+        self.assertTrue(all(item["passed"] for item in results))
+        receipt_ids = {item["receipt"]["id"] for item in results}
+        self.assertEqual(len(receipt_ids), 1)
+        self.assertEqual(sum(1 for item in results if item.get("receipt_created")), 1)
+        self.assertEqual(sum(1 for item in results if item.get("receipt_reused")), 1)
+        stored = agency_release.list_real_gate_receipts(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+        )
+        self.assertEqual(len([item for item in stored if item["gate"] == "A8"]), 1)
 
     def test_sha_change_mid_session_prevents_receipt(self) -> None:
         with self._patch_identity(SHA_A):

@@ -452,6 +452,94 @@ def evaluations(desired_state_id: str, *, limit: int = 20) -> list[dict[str, Any
     return result
 
 
+def sync_from_intentions() -> dict[str, int]:
+    """Promote existing explicit Jarvis goals into Agency desired states.
+
+    The goal entity remains the authority for whether the objective is complete.
+    Agency adds the control-loop semantics; it does not create a second goal system.
+    """
+    try:
+        from jarvis_mrb.world_executive import refresh_intentions
+        refresh_intentions()
+    except Exception:
+        pass
+
+    created = 0
+    updated = 0
+    retired = 0
+    evaluated = 0
+    with _connect() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT id,title,status,source_ref
+                FROM intentions
+                WHERE source_kind='explicit_goal'
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+
+    for row in rows:
+        intention_id = str(row["id"])
+        goal_id = str(row["source_ref"] or "")
+        if not goal_id:
+            continue
+        state_id = "ds:intention:" + _stable_id(intention_id)[:24]
+        intention_status = str(row["status"] or "active")
+        existing = get_desired_state(state_id)
+
+        if existing is None and intention_status == "active":
+            create_desired_state(
+                str(row["title"]),
+                [
+                    {
+                        "kind": "belief_in",
+                        "entity_id": goal_id,
+                        "predicate": "status",
+                        "values": ["completed", "done", "resolved"],
+                    }
+                ],
+                intention_id=intention_id,
+                authority={},
+                priority=60.0,
+                source_kind="jarvis_intention",
+                source_ref=intention_id,
+                desired_state_id=state_id,
+            )
+            created += 1
+            existing = get_desired_state(state_id)
+
+        if existing is None:
+            continue
+
+        # Keep the user-facing title and authoritative goal link current without
+        # overriding an Agency pause/block decision.
+        with _connect() as conn:
+            conn.execute(
+                "UPDATE desired_states SET title=?,intention_id=?,updated_at=? WHERE id=?",
+                (str(row["title"])[:1000], intention_id, _now(), state_id),
+            )
+            conn.commit()
+        updated += 1
+
+        if intention_status == "retired":
+            set_state(state_id, "retired")
+            retired += 1
+            continue
+
+        evaluate_desired_state(state_id, persist=True)
+        evaluated += 1
+
+    return {
+        "created": created,
+        "updated": updated,
+        "retired": retired,
+        "evaluated": evaluated,
+    }
+
+
 def status() -> dict[str, Any]:
     with _connect() as conn:
         counts = {

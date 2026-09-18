@@ -318,6 +318,11 @@ def _check_desired_states() -> None:
     )
 
     sync_from_intentions()
+    try:
+        from jarvis_mrb.agency_capability import reconcile_gaps
+        reconcile_gaps()
+    except Exception as exc:
+        _health_failure("agency_capability_reconcile", exc)
     check_wake_watches()
     for item in list_desired_states(limit=200):
         if str(item.get("state") or "") in {"blocked", "paused", "retired"}:

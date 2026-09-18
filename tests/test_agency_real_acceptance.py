@@ -6,6 +6,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import jarvis_mrb.agency_attention as agency_attention
@@ -615,6 +616,221 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A11")
+
+    def test_a12_evaluator_requires_complete_causal_production_path(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A12 Production Path")
+        state = desired_state.create_desired_state(
+            "A12 Production Path complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-production-path",
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            first_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "private",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "A12 private context"},
+                    },
+                    {
+                        "id": "public",
+                        "tool": "web.search",
+                        "arguments": {"query": "A12 public evidence", "num": 5},
+                        "depends_on": ["private"],
+                    },
+                    {
+                        "id": "deliberate",
+                        "tool": "agency.deliberate",
+                        "arguments": {
+                            "question": "Which A12 path should be used?",
+                            "context": "Private: ${private.message}; Public: ${public.message}",
+                        },
+                        "depends_on": ["private", "public"],
+                    },
+                    {
+                        "id": "write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A12 first path",
+                            "start": "2030-01-01T09:00:00-08:00",
+                            "end": "2030-01-01T09:30:00-08:00",
+                        },
+                        "depends_on": ["deliberate"],
+                    },
+                ],
+                summary="A12 first causal path",
+            )
+
+            barrier = threading.Barrier(2)
+
+            def worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": "path-one" if role == "evidence" else "path-two",
+                    "claims": [
+                        {
+                            "claim": f"{role} A12 claim",
+                            "confidence": 0.65,
+                            "evidence": "Reasoning from supplied context.",
+                            "source": "reasoning",
+                        }
+                    ],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            def read_and_deliberate_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+                if tool == "agency.deliberate":
+                    result = agency_deliberation.deliberate(
+                        str(args.get("question") or ""),
+                        context=str(args.get("context") or ""),
+                        roles=["evidence", "skeptic"],
+                        worker=worker,
+                        synthesizer=lambda q, ctx, outputs, disagreements: {
+                            "answer": "Preserve both approaches.",
+                            "consensus": [],
+                            "disagreements": [{"issue": "A12 path choice"}],
+                            "unknowns": [],
+                            "recommended_next_evidence": [],
+                            "confidence": 0.55,
+                        },
+                    )
+                    return SimpleNamespace(ok=True, message=str(result["synthesis"]["answer"]))
+                return SimpleNamespace(ok=True, message=f"{tool} real-path observation")
+
+            agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
+            agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
+            agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
+
+            external_change_id = world_model.record_event(
+                "calendar.context_enriched",
+                "A12 Production Path external timing changed.",
+                source_kind="calendar_enriched",
+                source_ref="real-a12-production:change",
+                evidence="External calendar state changed after deliberation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            invalidated = agency_plan.execute_next(
+                first_plan["id"],
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("stale A12 write must not run")
+                ),
+            )
+            self.assertEqual(invalidated["status"], "needs_replan")
+
+            second_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "write-replanned",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A12 replanned write",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="A12 replanned path",
+            )
+            waiting = agency_plan.execute_next(
+                second_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            step = waiting["steps"][0]
+            self.assertEqual(step["status"], "awaiting_approval")
+
+            def protected_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+                from jarvis_mrb.tool_audit import current_agency_step_id
+
+                agency_step_id = current_agency_step_id()
+                reply = SimpleNamespace(ok=True, message="Calendar accepted A12 replanned write.")
+                action_event_id = world_model.record_tool_execution(
+                    tool,
+                    args,
+                    ok=True,
+                    message=reply.message,
+                    agency_step_id=agency_step_id,
+                )
+                world_verification.register_execution(
+                    tool,
+                    args,
+                    reply,
+                    action_event_id=action_event_id,
+                    agency_step_id=agency_step_id,
+                )
+                return reply
+
+            approved = agency_plan.approve_step(
+                second_plan["id"],
+                step["id"],
+                protected_executor,
+            )
+            verification_id = str(approved["steps"][0]["verification_id"])
+            self.assertTrue(verification_id)
+
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Independent calendar read-back found the event."),
+            ):
+                verified = world_verification.check_one(verification_id, force=True)
+            self.assertEqual(verified["status"], "verified")
+
+            conn = sqlite3.connect(self.db)
+            conn.row_factory = sqlite3.Row
+            try:
+                verification_event = conn.execute(
+                    """
+                    SELECT id FROM events
+                    WHERE event_type='verification.verified'
+                      AND source_kind='jarvis_verifier'
+                    ORDER BY id DESC LIMIT 1
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(verification_event)
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                source_event_id=int(verification_event["id"]),
+                evidence="Independent verification completed the A12 desired state.",
+            )
+            completed = agency_plan.reconcile_plan(second_plan["id"])
+            self.assertEqual(completed["status"], "completed")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(evaluation["evidence"]["private_information_retrieval"])
+            self.assertTrue(evaluation["evidence"]["public_research"])
+            self.assertTrue(evaluation["evidence"]["parallel_analysis"])
+            self.assertTrue(evaluation["evidence"]["protected_external_action"])
+            self.assertTrue(evaluation["evidence"]["independent_outcome_verification"])
+            self.assertTrue(evaluation["evidence"]["replan_after_injected_change"])
+            self.assertTrue(evaluation["evidence"]["final_desired_state_satisfied"])
+
+            causal = next(
+                item["evidence"]
+                for item in evaluation["checks"]
+                if item["name"].startswith("external reality change caused")
+            )
+            self.assertTrue(
+                any(external_change_id in item["external_event_ids"] for item in causal)
+            )
 
     def test_a12_parallel_analysis_must_belong_to_its_own_agency_step(self) -> None:
         entity_id = world_model.ensure_entity("project", "A12 Linked Deliberation")

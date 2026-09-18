@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 import sqlite3
@@ -703,6 +704,20 @@ def resolved_arguments(step_id: str) -> dict[str, Any]:
     return dict(_resolve_value(template, outputs))
 
 
+def _executor_accepts_bypass(executor: Callable[..., Any]) -> bool:
+    """Detect the adapter signature before execution; never retry an action after TypeError."""
+    try:
+        signature = inspect.signature(executor)
+    except (TypeError, ValueError):
+        # Unknown callables use the production signature. If that fails, fail closed
+        # rather than risking a second invocation after a partial side effect.
+        return True
+    parameters = signature.parameters
+    if "bypass_confirmation" in parameters:
+        return True
+    return any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+
+
 def _invoke_executor(
     step: dict[str, Any],
     executor: Callable[..., Any],
@@ -713,17 +728,17 @@ def _invoke_executor(
 
     arguments = resolved_arguments(str(step["id"]))
     with agency_step_context(str(step["id"])):
-        try:
+        if _executor_accepts_bypass(executor):
             return executor(
                 str(step["tool"]),
                 arguments,
                 bypass_confirmation=bypass_confirmation,
             )
-        except TypeError:
-            # Test/adapter executors may expose the simpler (tool,args) signature.
-            if bypass_confirmation:
-                raise
-            return executor(str(step["tool"]), arguments)
+        if bypass_confirmation:
+            raise TypeError(
+                "Approved Agency execution requires an executor that explicitly accepts bypass_confirmation."
+            )
+        return executor(str(step["tool"]), arguments)
 
 
 def _execute_step(

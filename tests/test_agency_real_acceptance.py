@@ -68,6 +68,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         desired_state.status()
         agency_plan.status()
         agency_runtime.status()
+        agency_runtime.set_mode("active")
         agency_self_model.status()
         agency_attention.status()
         agency_capability.status()

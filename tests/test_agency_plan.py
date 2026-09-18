@@ -422,6 +422,79 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(result["steps"][0]["status"], "pending")
         self.assertIn("Relevant world state changed", result["last_error"])
 
+    def test_concurrent_pending_approvals_require_disambiguation(self) -> None:
+        _, state_one = self._state_for_project("Project Approval One")
+        _, state_two = self._state_for_project("Project Approval Two")
+        plan_one = agency_plan.create_plan(
+            state_one,
+            [
+                {
+                    "id": "write-one",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Approval One",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+            summary="Handle Project Approval One",
+        )
+        plan_two = agency_plan.create_plan(
+            state_two,
+            [
+                {
+                    "id": "write-two",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Approval Two",
+                        "start": "2030-01-01T10:00:00-08:00",
+                        "end": "2030-01-01T10:30:00-08:00",
+                    },
+                }
+            ],
+            summary="Handle Project Approval Two",
+        )
+
+        agency_plan.execute_next(plan_one["id"], lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"))
+        agency_plan.execute_next(plan_two["id"], lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"))
+
+        pending = agency_plan.list_pending_approvals()
+        self.assertEqual(len(pending), 2)
+        self.assertIsNone(agency_plan.pending_approval())
+
+        one = agency_plan.matching_pending_approval("Project Approval One")
+        two = agency_plan.matching_pending_approval("Approval Two")
+        self.assertEqual(one["plan_id"], plan_one["id"])
+        self.assertEqual(two["plan_id"], plan_two["id"])
+
+        with self.assertRaises(ValueError):
+            agency_plan.matching_pending_approval("calendar.create")
+
+    def test_targeted_denial_changes_only_selected_pending_plan(self) -> None:
+        _, state_one = self._state_for_project("Project Deny One")
+        _, state_two = self._state_for_project("Project Deny Two")
+        plan_one = agency_plan.create_plan(
+            state_one,
+            [{"id": "one", "tool": "gmail.send", "arguments": {"recipient": "a@example.com", "body": "one"}}],
+            summary="Project Deny One",
+        )
+        plan_two = agency_plan.create_plan(
+            state_two,
+            [{"id": "two", "tool": "gmail.send", "arguments": {"recipient": "b@example.com", "body": "two"}}],
+            summary="Project Deny Two",
+        )
+        agency_plan.execute_next(plan_one["id"], lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"))
+        agency_plan.execute_next(plan_two["id"], lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"))
+
+        denied = agency_plan.deny_matching("Project Deny One", reason="No.")
+        untouched = agency_plan.get_plan(plan_two["id"], include_steps=True)
+
+        self.assertEqual(denied["status"], "needs_replan")
+        self.assertEqual(denied["steps"][0]["status"], "blocked")
+        self.assertEqual(untouched["status"], "awaiting_approval")
+        self.assertEqual(untouched["steps"][0]["status"], "awaiting_approval")
+
     def test_new_generation_supersedes_old_plan_without_destroying_history(self) -> None:
         _, state_id = self._state_for_project("Project Replan")
         first = agency_plan.create_plan(

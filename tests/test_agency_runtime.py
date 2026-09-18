@@ -251,6 +251,68 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertEqual(desired_state.get_desired_state(state_id)["state"], "blocked")
         self.assertIn("same failed plan", desired_state.get_desired_state(state_id)["blocked_reason"])
 
+    def test_tick_all_preserves_priority_but_rotates_second_action_fairly(self) -> None:
+        states: list[str] = []
+        for name, priority in (
+            ("Priority Champion", 100),
+            ("Fair One", 10),
+            ("Fair Two", 10),
+            ("Fair Three", 10),
+        ):
+            _entity, state_id = self._make_state(name)
+            desired_state.update_desired_state(state_id, priority=priority)
+            agency_plan.create_plan(
+                state_id,
+                [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": name}}],
+                summary=f"Observe {name}",
+            )
+            states.append(state_id)
+
+        agency_runtime.set_mode("active")
+        executed: list[str] = []
+
+        def executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+            executed.append(str(args.get("query") or ""))
+            return SimpleNamespace(ok=True, message="observed")
+
+        first = agency_runtime.tick_all(executor=executor, max_actions=2)
+        self.assertEqual(first["actions_executed"], 2)
+        self.assertIn("Priority Champion", executed)
+        first_fair = next(value for value in executed if value != "Priority Champion")
+
+        # Recreate one ready read step per goal so every goal remains actionable.
+        for index, state_id in enumerate(states):
+            agency_plan.create_plan(
+                state_id,
+                [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": ["Priority Champion", "Fair One", "Fair Two", "Fair Three"][index]}}],
+                summary="next observation",
+            )
+
+        executed.clear()
+        second = agency_runtime.tick_all(executor=executor, max_actions=2)
+        self.assertEqual(second["actions_executed"], 2)
+        self.assertIn("Priority Champion", executed)
+        second_fair = next(value for value in executed if value != "Priority Champion")
+        self.assertNotEqual(second_fair, first_fair)
+
+    def test_action_attempt_updates_last_action_at_even_outside_tick_all(self) -> None:
+        _, state_id = self._make_state("Approved Action Fairness")
+        agency_runtime.set_mode("active")
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": "fairness"}}],
+        )
+        before = agency_runtime._runtime_state(state_id)
+        self.assertFalse(before.get("last_action_at"))
+
+        agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="observed"),
+        )
+
+        after = agency_runtime._runtime_state(state_id)
+        self.assertTrue(after.get("last_action_at"))
+
     def test_existing_goals_are_imported_paused_until_explicit_activation(self) -> None:
         goal_id = world_model.ensure_entity("goal", "Ship Project Hermes")
         world_model.assert_belief(goal_id, "status", value="active")

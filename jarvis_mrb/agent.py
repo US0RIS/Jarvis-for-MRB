@@ -303,6 +303,17 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "agency.status":
         from jarvis_mrb.agency_runtime import describe as describe_agency
         return AgentReply(True, describe_agency())
+    if tool == "agency.deliberate":
+        from jarvis_mrb.agency_deliberation import deliberate
+        question = str(args.get("question") or args.get("query") or "").strip()
+        if not question:
+            return AgentReply(False, "Agency deliberation requires a question.")
+        result = deliberate(question, context=str(args.get("context") or ""))
+        synthesis = dict(result.get("synthesis") or {})
+        answer = str(synthesis.get("answer") or "").strip()
+        disagreements = result.get("disagreements") or []
+        suffix = f" Material disagreement signals: {len(disagreements)}." if disagreements else ""
+        return AgentReply(True, (answer or "Parallel deliberation completed.") + suffix)
     if tool == "agency.enable":
         from jarvis_mrb.agency_runtime import set_mode as set_agency_mode
         return AgentReply(True, f"Agency mode is now {set_agency_mode('active')}.")

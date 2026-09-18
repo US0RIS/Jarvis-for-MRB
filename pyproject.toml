@@ -39,6 +39,7 @@ jarvis-world-acceptance = "jarvis_mrb.world_acceptance_check:main"
 jarvis-cover-score = "jarvis_mrb.cover_universal_cli:main"
 jarvis-20 = "jarvis_mrb.jarvis20_cli:main"
 jarvis-agency-acceptance = "jarvis_mrb.agency_acceptance_check:main"
+jarvis-agency-release-check = "jarvis_mrb.agency_release_check:main"
 
 [tool.setuptools.packages.find]
 include = ["jarvis_mrb*"]

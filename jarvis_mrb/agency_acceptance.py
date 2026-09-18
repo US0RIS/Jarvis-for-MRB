@@ -329,20 +329,30 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                     "SELECT status FROM action_verifications WHERE id=?",
                     (verification_a4,),
                 ).fetchone()[0]
-                conn.execute(
-                    "UPDATE action_verifications SET status='verified',last_evidence='Synthetic independent read-back matched.' WHERE id=?",
-                    (verification_a4,),
+            original_observe_a4 = wv._observe
+            try:
+                wv._observe = lambda verifier, expected: (
+                    "verified",
+                    "Synthetic independent read-back matched.",
                 )
-                conn.commit()
+                verified_a4 = wv.check_one(verification_a4, force=True)
+            finally:
+                wv._observe = original_observe_a4
             after_a4 = ap.reconcile_plan(plan_a3b["id"])
             _check(
                 checks,
                 "A4",
                 "consequential action is pending after receipt and only advances after verifier",
                 before_a4 == "pending"
+                and verified_a4 is not None
+                and verified_a4["status"] == "verified"
                 and after_a4["steps"][0]["status"] == "verified"
                 and after_a4["status"] == "needs_replan",
-                {"verification_before": before_a4, "step_after": after_a4["steps"][0]["status"]},
+                {
+                    "verification_before": before_a4,
+                    "verification_after": verified_a4,
+                    "step_after": after_a4["steps"][0]["status"],
+                },
             )
 
             # Also prove failed tool execution becomes a terminal verification result.
@@ -698,12 +708,17 @@ def run_synthetic_acceptance() -> dict[str, Any]:
             )
             trace_a12.append("approved")
             verification_a12 = approved_a12["steps"][2]["verification_id"]
-            with sqlite3.connect(env["db"]) as conn:
-                conn.execute(
-                    "UPDATE action_verifications SET status='verified',last_evidence='Synthetic external state independently observed.' WHERE id=?",
-                    (verification_a12,),
+            original_observe_a12 = wv._observe
+            try:
+                wv._observe = lambda verifier, expected: (
+                    "verified",
+                    "Synthetic external state independently observed.",
                 )
-                conn.commit()
+                verified_a12 = wv.check_one(verification_a12, force=True)
+            finally:
+                wv._observe = original_observe_a12
+            if verified_a12 is None or verified_a12["status"] != "verified":
+                raise AssertionError("Synthetic A12 independent verification did not resolve.")
             wm.assert_belief(entity_a12, "complete", value=True)
             completed_a12 = ap.reconcile_plan(second_a12["id"])
             trace_a12.append("verified_and_satisfied")

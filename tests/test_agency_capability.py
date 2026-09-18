@@ -46,6 +46,7 @@ class AgencyCapabilityTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             "Project Capability complete",
             [{"kind": "belief_equals", "entity_id": entity, "predicate": "done", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref="capability-state",
         )

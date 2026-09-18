@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import jarvis_mrb.agency_plan as agency_plan
+import jarvis_mrb.agency_runtime as agency_runtime
 import jarvis_mrb.desired_state as desired_state
 import jarvis_mrb.permissions as permissions
 import jarvis_mrb.world_executive as world_executive
@@ -27,6 +28,7 @@ class AgencyPlanTests(unittest.TestCase):
         world_executive.DB_PATH = self.db
         desired_state.DB_PATH = self.db
         agency_plan.DB_PATH = self.db
+        agency_runtime.DB_PATH = self.db
         world_verification.DB_PATH = self.db
 
         permissions.APP_DIR = self.base
@@ -36,6 +38,8 @@ class AgencyPlanTests(unittest.TestCase):
         world_executive.status()
         desired_state.status()
         agency_plan.status()
+        agency_runtime.status()
+        agency_runtime.set_mode("active")
         world_verification.status()
 
     def tearDown(self) -> None:
@@ -46,10 +50,85 @@ class AgencyPlanTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             f"{name} ready",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "ready", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref=f"test:{name}",
         )
         return entity_id, str(state["id"])
+
+    def test_pausing_goal_after_approval_is_staged_prevents_execution(self) -> None:
+        _, state_id = self._state_for_project("Project Revoke Goal")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Should not run",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step = waiting["steps"][0]
+        self.assertEqual(step["status"], "awaiting_approval")
+
+        desired_state.update_authority(state_id, {"agency_enabled": False})
+        desired_state.set_state(state_id, "paused")
+        calls: list[str] = []
+        with self.assertRaises(PermissionError):
+            agency_plan.approve_step(
+                plan["id"],
+                step["id"],
+                lambda tool, args, **kwargs: calls.append(tool) or SimpleNamespace(ok=True, message="unexpected"),
+            )
+
+        self.assertEqual(calls, [])
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertEqual(persisted["status"], "awaiting_approval")
+        self.assertEqual(persisted["steps"][0]["status"], "awaiting_approval")
+
+    def test_global_mode_revocation_prevents_pending_approval_execution(self) -> None:
+        _, state_id = self._state_for_project("Project Revoke Global")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Should not run globally",
+                        "start": "2030-01-01T10:00:00-08:00",
+                        "end": "2030-01-01T10:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step = waiting["steps"][0]
+        agency_runtime.set_mode("off")
+
+        calls: list[str] = []
+        with self.assertRaises(PermissionError):
+            agency_plan.approve_step(
+                plan["id"],
+                step["id"],
+                lambda tool, args, **kwargs: calls.append(tool) or SimpleNamespace(ok=True, message="unexpected"),
+            )
+
+        self.assertEqual(calls, [])
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertEqual(persisted["status"], "awaiting_approval")
+        self.assertEqual(persisted["steps"][0]["status"], "awaiting_approval")
 
     def test_plan_persists_steps_and_dependencies(self) -> None:
         _, state_id = self._state_for_project()

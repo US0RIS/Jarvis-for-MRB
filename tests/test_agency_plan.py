@@ -334,6 +334,68 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertFalse(replay.ok)
         unchecked.assert_not_called()
 
+    def test_bare_confirm_does_not_execute_pending_agency_action(self) -> None:
+        _, state_id = self._state_for_project("Project Explicit Confirm")
+        args = {
+            "summary": "Bare confirm must not run",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "write", "tool": "calendar.create", "arguments": args}],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        self.assertEqual(waiting["status"], "awaiting_approval")
+
+        with patch.object(
+            agent,
+            "_execute_unchecked",
+            return_value=agent.AgentReply(True, "must not execute"),
+        ) as unchecked:
+            reply = agent._confirm_pending()
+
+        self.assertFalse(reply.ok)
+        self.assertIn("approve agency <goal>", reply.message)
+        self.assertIn("Bare confirm must not run", reply.message)
+        unchecked.assert_not_called()
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertEqual(persisted["status"], "awaiting_approval")
+        self.assertEqual(persisted["steps"][0]["status"], "awaiting_approval")
+
+    def test_bare_cancel_does_not_deny_pending_agency_action(self) -> None:
+        _, state_id = self._state_for_project("Project Explicit Denial")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Bare cancel must not deny",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        self.assertEqual(waiting["status"], "awaiting_approval")
+
+        reply = agent._cancel_pending()
+
+        self.assertFalse(reply.ok)
+        self.assertIn("deny agency <goal>", reply.message)
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertEqual(persisted["status"], "awaiting_approval")
+        self.assertEqual(persisted["steps"][0]["status"], "awaiting_approval")
+
     def test_pausing_goal_after_approval_is_staged_prevents_execution(self) -> None:
         _, state_id = self._state_for_project("Project Revoke Goal")
         plan = agency_plan.create_plan(

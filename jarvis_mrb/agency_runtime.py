@@ -699,11 +699,29 @@ def tick_all(
         return float(item.get("priority") or 0.0)
 
     selected: list[dict[str, Any]] = []
-    champion: dict[str, Any] | None = None
-    if candidates:
-        max_priority = max(priority(item) for item in candidates)
+    active_candidates = [
+        item for item in candidates
+        if str(item.get("state") or "") == "active"
+    ]
+    satisfied_candidates = [
+        item for item in candidates
+        if str(item.get("state") or "") == "satisfied"
+    ]
+
+    def tick_age_order(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            items,
+            key=lambda item: (
+                timestamp_for(str(item.get("id") or ""), "last_tick_at"),
+                -priority(item),
+                str(item.get("id") or ""),
+            ),
+        )
+
+    if active_candidates:
+        max_priority = max(priority(item) for item in active_candidates)
         top_priority = [
-            item for item in candidates
+            item for item in active_candidates
             if priority(item) == max_priority
         ]
         champion = min(
@@ -714,28 +732,40 @@ def tick_all(
             ),
         )
         selected.append(champion)
-
-        remaining_pool = [
-            item for item in candidates
+        active_remaining = [
+            item for item in active_candidates
             if str(item.get("id")) != str(champion.get("id"))
         ]
-        remaining_pool.sort(
-            key=lambda item: (
-                timestamp_for(str(item.get("id") or ""), "last_tick_at"),
-                -priority(item),
-                str(item.get("id") or ""),
-            )
+        selected.extend(
+            tick_age_order(active_remaining)[: max(0, window_limit - len(selected))]
         )
-        selected.extend(remaining_pool[: max(0, window_limit - 1)])
+
+    if len(selected) < window_limit and satisfied_candidates:
+        selected_ids = {str(item.get("id") or "") for item in selected}
+        satisfied_remaining = [
+            item for item in satisfied_candidates
+            if str(item.get("id") or "") not in selected_ids
+        ]
+        selected.extend(
+            tick_age_order(satisfied_remaining)[: max(0, window_limit - len(selected))]
+        )
+
+    if not selected and candidates:
+        selected.extend(tick_age_order(candidates)[:window_limit])
 
     # Within the rotating evaluation window, allocate scarce action opportunities
     # using a separate action-age clock. The highest-priority selected goal gets
     # first opportunity, then longest-waiting goals get the remaining slots.
     ordered: list[dict[str, Any]] = []
     if selected:
-        selected_max_priority = max(priority(item) for item in selected)
-        selected_top = [
+        actionable_selected = [
             item for item in selected
+            if str(item.get("state") or "") == "active"
+        ]
+        action_pool = actionable_selected or selected
+        selected_max_priority = max(priority(item) for item in action_pool)
+        selected_top = [
+            item for item in action_pool
             if priority(item) == selected_max_priority
         ]
         action_champion = min(

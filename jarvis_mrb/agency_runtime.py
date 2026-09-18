@@ -255,6 +255,27 @@ def _update_runtime(
         conn.commit()
 
 
+def reset_planner_backoff(desired_state_id: str) -> None:
+    """Clear retry delay after an external blocker has genuinely been removed."""
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO agency_runtime_state(
+                desired_state_id,consecutive_planner_failures,next_planning_attempt_at,
+                last_error,updated_at
+            ) VALUES(?,0,NULL,'',?)
+            ON CONFLICT(desired_state_id) DO UPDATE SET
+                consecutive_planner_failures=0,
+                next_planning_attempt_at=NULL,
+                last_error='',
+                updated_at=excluded.updated_at
+            """,
+            (str(desired_state_id), now),
+        )
+        conn.commit()
+
+
 def _planning_allowed(desired_state_id: str) -> bool:
     state = _runtime_state(desired_state_id)
     retry = _parse_time(str(state.get("next_planning_attempt_at") or ""))

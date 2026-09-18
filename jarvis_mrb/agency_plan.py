@@ -1221,9 +1221,59 @@ def describe_pending_approval(item: dict[str, Any]) -> str:
         key = str(args.get("key") or "").strip() or "<unspecified key>"
         return f"{tool} key {key!r}; value omitted; action {fingerprint}"
 
-    if tool in {"custom.run", "custom.synthesize", "custom.enable", "custom.apply_repair"}:
+    if tool == "custom.run":
         name = str(args.get("name") or "").strip() or "<unspecified custom tool>"
-        return f"{tool} {name!r}; payload omitted; action {fingerprint}"
+        nested = args.get("arguments")
+        argument_names = (
+            sorted(str(key) for key in nested)
+            if isinstance(nested, dict) else []
+        )
+        hosts: list[str] = []
+        try:
+            from jarvis_mrb.custom_tools import list_tools
+            match = next(
+                (
+                    candidate for candidate in list_tools()
+                    if str(candidate.get("name") or "") == name
+                ),
+                None,
+            )
+            if isinstance(match, dict):
+                hosts = [
+                    str(value)
+                    for value in (match.get("allowed_hosts") or [])
+                    if str(value).strip()
+                ]
+        except Exception:
+            hosts = []
+        return (
+            f"custom.run {name!r} against allowed host(s) {hosts!r}; "
+            f"argument names {argument_names!r}; values omitted; action {fingerprint}"
+        )
+
+    if tool == "custom.synthesize":
+        name = str(args.get("name") or "").strip() or "<unspecified custom tool>"
+        hosts = [
+            str(value)
+            for value in (args.get("allowed_hosts") or [])
+            if str(value).strip()
+        ]
+        risk = str(args.get("risk") or "read")
+        return (
+            f"custom.synthesize {name!r} for risk {risk!r}, allowed host(s) {hosts!r}; "
+            f"API specification omitted; action {fingerprint}"
+        )
+
+    if tool == "custom.enable":
+        name = str(args.get("name") or "").strip() or "<unspecified custom tool>"
+        return (
+            f"custom.enable {name!r} enabled={bool(args.get('enabled', True))}; "
+            f"action {fingerprint}"
+        )
+
+    if tool == "custom.apply_repair":
+        name = str(args.get("name") or "").strip() or "<unspecified custom tool>"
+        return f"custom.apply_repair {name!r}; repair payload omitted; action {fingerprint}"
 
     parameter_names = sorted(str(key) for key in args)
     rendered_names = ", ".join(parameter_names[:12]) if parameter_names else "none"

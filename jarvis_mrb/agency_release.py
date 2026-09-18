@@ -53,6 +53,31 @@ def _receipt_digest(
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _live_session_digest(
+    *,
+    session_id: str,
+    gate: str,
+    deployment_sha_value: str,
+    environment: str,
+    desired_state_id: str,
+    parameters_json: str,
+    baseline_json: str,
+    started_at: str,
+) -> str:
+    payload = {
+        "id": str(session_id),
+        "gate": str(gate),
+        "deployment_sha": str(deployment_sha_value),
+        "environment_fingerprint": str(environment),
+        "desired_state_id": str(desired_state_id),
+        "parameters_json": str(parameters_json),
+        "baseline_json": str(baseline_json),
+        "started_at": str(started_at),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
 def _validation_digest(
     *,
     deployment_sha_value: str,
@@ -483,6 +508,21 @@ def _validated_live_session(
         return False, "REAL acceptance session ledger is unavailable."
     if row is None:
         return False, "REAL acceptance session does not exist."
+    keys = set(row.keys())
+    if "session_hash" not in keys:
+        return False, "REAL acceptance session has no integrity hash."
+    expected_session_hash = _live_session_digest(
+        session_id=str(row["id"] or ""),
+        gate=str(row["gate"] or ""),
+        deployment_sha_value=str(row["deployment_sha"] or ""),
+        environment=str(row["environment_fingerprint"] or ""),
+        desired_state_id=str(row["desired_state_id"] or ""),
+        parameters_json=str(row["parameters_json"] or "{}"),
+        baseline_json=str(row["baseline_json"] or "{}"),
+        started_at=str(row["started_at"] or ""),
+    )
+    if str(row["session_hash"] or "") != expected_session_hash:
+        return False, "REAL acceptance session integrity hash mismatch."
     if str(row["gate"] or "") != str(gate):
         return False, "REAL acceptance session gate does not match receipt."
     if str(row["deployment_sha"] or "") != str(deployment_sha_value):

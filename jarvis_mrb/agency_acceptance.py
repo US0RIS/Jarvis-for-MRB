@@ -135,14 +135,21 @@ def _fake_audited_pending_write(env: dict[str, Any]) -> Callable[..., SimpleName
 
         if not bypass_confirmation:
             raise AssertionError("Protected acceptance action was not resumed through approval.")
+        agency_step_id = current_agency_step_id()
         reply = SimpleNamespace(ok=True, message=f"{tool} accepted by synthetic external service.")
-        action_event_id = world_model.record_tool_execution(tool, args, ok=True, message=reply.message)
+        action_event_id = world_model.record_tool_execution(
+            tool,
+            args,
+            ok=True,
+            message=reply.message,
+            agency_step_id=agency_step_id,
+        )
         world_verification.register_execution(
             tool,
             args,
             reply,
             action_event_id=action_event_id,
-            agency_step_id=current_agency_step_id(),
+            agency_step_id=agency_step_id,
         )
         return reply
 

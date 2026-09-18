@@ -1158,21 +1158,17 @@ def matching_pending_approval(query: str) -> dict[str, Any]:
     if not needle:
         raise ValueError("Approval query is empty.")
     candidates = list_pending_approvals(limit=200)
-    matches: list[dict[str, Any]] = []
+    exact: list[dict[str, Any]] = []
+    partial: list[dict[str, Any]] = []
     for item in candidates:
-        haystack = _normalize_match(
-            " ".join(
-                [
-                    str(item.get("desired_state_title") or ""),
-                    str(item.get("plan_summary") or ""),
-                    str(item.get("step_key") or ""),
-                    str(item.get("tool") or ""),
-                    json.dumps(item.get("resolved_arguments") or {}, ensure_ascii=False, sort_keys=True),
-                ]
-            )
-        )
-        if needle in haystack:
-            matches.append(item)
+        title = _normalize_match(str(item.get("desired_state_title") or ""))
+        state_id = _normalize_match(str(item.get("desired_state_id") or ""))
+        if needle in {title, state_id}:
+            exact.append(item)
+            continue
+        if needle and (needle in title or needle in state_id):
+            partial.append(item)
+    matches = exact if exact else partial
     if len(matches) == 1:
         return matches[0]
     if not matches:

@@ -65,7 +65,7 @@ from jarvis_mrb.workflow_engine import execute_workflow
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
 OLLAMA_KEEP_ALIVE = os.environ.get("JARVIS_OLLAMA_KEEP_ALIVE", "30m")
-_PENDING_ACTION: dict[str, Any] | None = None
+_PENDING_ACTION: tuple[str, dict[str, Any], str] | None = None
 _CONFIRMED_ACTION_KEY: contextvars.ContextVar[str] = contextvars.ContextVar(
     "jarvis_confirmed_action_key",
     default="",
@@ -489,8 +489,13 @@ def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool =
         return AgentReply(False, f"Permission policy denies {decision.risk} actions such as {tool}.")
     if decision.needs_confirmation:
         if not bypass_confirmation:
-            _PENDING_ACTION = {"tool": tool, "args": args}
-            return AgentReply(True, f"Ready to {_describe_action(tool, args)}. Say 'confirm' to proceed or 'cancel'.")
+            pending_args = dict(args or {})
+            _PENDING_ACTION = (
+                str(tool),
+                pending_args,
+                _confirmation_action_key(str(tool), pending_args),
+            )
+            return AgentReply(True, f"Ready to {_describe_action(tool, pending_args)}. Say 'confirm' to proceed or 'cancel'.")
         if not _bypass_confirmation_authorized(tool, args):
             return AgentReply(
                 False,
@@ -504,8 +509,13 @@ def _confirm_pending() -> AgentReply:
     if _PENDING_ACTION:
         pending = _PENDING_ACTION
         _PENDING_ACTION = None
-        tool = str(pending["tool"])
-        args = dict(pending["args"])
+        tool, stored_args, stored_key = pending
+        args = dict(stored_args)
+        if _confirmation_action_key(tool, args) != str(stored_key):
+            return AgentReply(
+                False,
+                "The pending protected action changed after confirmation was requested, so it was cancelled.",
+            )
         with _confirmed_action_context(tool, args):
             return execute_tool(tool, args, bypass_confirmation=True)
 

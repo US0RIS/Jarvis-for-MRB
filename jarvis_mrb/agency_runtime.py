@@ -501,11 +501,19 @@ def find_desired_state(query: str) -> dict[str, Any] | None:
     return partial[0] if len(partial) == 1 else None
 
 
-def activate_matching(query: str) -> dict[str, Any]:
+def activate_matching(
+    query: str,
+    *,
+    contract_compiler: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     state = find_desired_state(query)
     if state is None:
         raise ValueError("Agency could not uniquely identify that desired state.")
-    return reactivate(str(state["id"]))
+    state_id = str(state["id"])
+    from jarvis_mrb.agency_goal_compiler import ensure_observable_contract
+
+    ensure_observable_contract(state_id, compiler=contract_compiler)
+    return reactivate(state_id)
 
 
 def pause_matching(query: str) -> dict[str, Any]:

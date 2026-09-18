@@ -18,6 +18,8 @@ from jarvis_mrb.agency_release import (
     get_receipt_for_session,
     record_real_gate_receipt,
     _live_session_digest,
+    _real_receipt_context_payload,
+    _real_receipt_recording_context,
 )
 
 
@@ -1346,17 +1348,28 @@ def finalize_session(session_id: str) -> dict[str, Any]:
 
     trace_ref = _write_a12_trace(session, evaluation) if str(session["gate"]) == "A12" else ""
     receipt_created = True
+    receipt_context = _real_receipt_context_payload(
+        gate=str(session["gate"]),
+        deployment_sha_value=str(session["deployment_sha"]),
+        environment=str(session["environment_fingerprint"]),
+        harness="agency-real-gate-session-v1",
+        checks=list(evaluation["checks"]),
+        evidence=dict(evaluation["evidence"]),
+        trace_ref=trace_ref,
+        session_id=str(session["id"]),
+    )
     try:
-        receipt = record_real_gate_receipt(
-            str(session["gate"]),
-            deployment_sha_value=str(session["deployment_sha"]),
-            environment=str(session["environment_fingerprint"]),
-            harness="agency-real-gate-session-v1",
-            checks=list(evaluation["checks"]),
-            evidence=dict(evaluation["evidence"]),
-            trace_ref=trace_ref,
-            session_id=str(session["id"]),
-        )
+        with _real_receipt_recording_context(receipt_context):
+            receipt = record_real_gate_receipt(
+                str(session["gate"]),
+                deployment_sha_value=str(session["deployment_sha"]),
+                environment=str(session["environment_fingerprint"]),
+                harness="agency-real-gate-session-v1",
+                checks=list(evaluation["checks"]),
+                evidence=dict(evaluation["evidence"]),
+                trace_ref=trace_ref,
+                session_id=str(session["id"]),
+            )
     except sqlite3.IntegrityError:
         receipt_created = False
         # The partial unique session index makes concurrent finalizers converge on

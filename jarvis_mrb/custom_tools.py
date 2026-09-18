@@ -25,9 +25,20 @@ _MAX_URL_CHARS = 8000
 _MAX_REQUEST_BODY_BYTES = 65536
 _MAX_RESPONSE_BYTES = 1048576
 _SECRET_NAME_RE = re.compile(
-    r"(?:^|[-_])(auth|authorization|token|secret|api[-_]?key|password|passwd|credential|cookie|signature)(?:$|[-_])",
+    r"(?:^|[-_])(auth|authorization|token|secret|api[-_]?key|password|passwd|credential|cookie|signature|bearer|jwt)(?:$|[-_])",
     flags=re.IGNORECASE,
 )
+_FORBIDDEN_REQUEST_HEADERS = {
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "proxy-connection",
+    "proxy-authorization",
+    "upgrade",
+    "te",
+    "trailer",
+}
 
 
 def _safe_name(name: str) -> str:
@@ -167,14 +178,37 @@ def _canonical_host(value: str) -> str:
     raw = str(value or "").strip().rstrip(".")
     if not raw:
         raise ValueError("Allowed host is empty.")
-    if "://" in raw or "/" in raw or "@" in raw:
+    if "://" in raw or "/" in raw or "@" in raw or "\\" in raw:
         raise ValueError("Allowed hosts must be bare hostnames, not URLs or credentials.")
+    if any(ord(char) < 33 for char in raw):
+        raise ValueError("Allowed host contains invalid whitespace/control characters.")
+
+    literal_candidate = raw.strip("[]")
+    try:
+        literal = ipaddress.ip_address(literal_candidate)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        return str(literal)
+    if ":" in raw or "%" in raw:
+        raise ValueError("Allowed host contains an invalid port or zone identifier.")
+
     try:
         canonical = raw.encode("idna").decode("ascii").lower()
     except UnicodeError as exc:
         raise ValueError(f"Allowed host {raw!r} is not a valid hostname.") from exc
     if not canonical or len(canonical) > 253:
         raise ValueError("Allowed host is invalid.")
+    labels = canonical.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or re.fullmatch(r"[a-z0-9-]+", label) is None
+        for label in labels
+    ):
+        raise ValueError(f"Allowed host {raw!r} is not a valid DNS hostname.")
     return canonical
 
 
@@ -372,6 +406,8 @@ def _validate_plan(plan: Any, *, hosts: list[str], risk: str) -> tuple[str, str,
     url = str(plan.get("url") or "").strip()
     if not url or len(url) > _MAX_URL_CHARS:
         raise ValueError("Custom tool attempted an empty or oversized URL.")
+    if any(ord(char) < 32 for char in url):
+        raise ValueError("Custom tool URL contains control characters.")
     parsed = urlparse(url)
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("Custom tool URLs cannot embed credentials.")
@@ -401,6 +437,11 @@ def _validate_plan(plan: Any, *, hosts: list[str], risk: str) -> tuple[str, str,
         v = str(value).strip()
         if not k or len(k) > 120 or len(v) > 1000:
             continue
+        lower = k.lower()
+        if "\r" in k or "\n" in k or "\r" in v or "\n" in v:
+            raise ValueError("Custom tool headers cannot contain CR/LF characters.")
+        if lower in _FORBIDDEN_REQUEST_HEADERS:
+            raise ValueError(f"Custom tool cannot override protected HTTP header {k!r}.")
         if _SECRET_NAME_RE.search(k):
             raise ValueError("Custom tool adapters cannot embed authentication secrets.")
         headers[k] = v

@@ -68,6 +68,7 @@ def evidence_for(gate: str) -> dict:
             "dormant_state_observed": True,
             "wake_condition_changed": True,
             "reactivated_without_goal_restatement": True,
+            "next_step_surfaced_or_executed": True,
         },
         "A7": {
             "parallel_workers": 4,
@@ -465,6 +466,12 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["already_valid_work_preserved"] = False
         with self.assertRaisesRegex(ValueError, "already_valid_work_preserved"):
             agency_release._validate_gate_evidence("A5", evidence, "")
+
+    def test_a6_receipt_rejects_wake_without_actionable_continuation(self) -> None:
+        evidence = evidence_for("A6")
+        evidence["next_step_surfaced_or_executed"] = False
+        with self.assertRaisesRegex(ValueError, "next_step_surfaced_or_executed"):
+            agency_release._validate_gate_evidence("A6", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

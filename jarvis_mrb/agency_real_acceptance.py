@@ -671,7 +671,16 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if str(row.get("status") or "") == "verified"
         and str(row.get("verifier") or "") not in {"tool_return", "return_value"}
     ]
-    negative = [row for row in external if str(row.get("status") or "") in {"failed", "timed_out", "unverified"}]
+    negative = [
+        row for row in external
+        if (
+            str(row.get("status") or "") in {"timed_out", "unverified"}
+            or (
+                str(row.get("status") or "") == "failed"
+                and str(row.get("verifier") or "") not in {"tool_return", "return_value"}
+            )
+        )
+    ]
     checks = [
         _check("real external write has independently verified outcome", bool(verified), [row["id"] for row in verified]),
         _check("failure/timeout/unverified outcome was exercised", bool(negative), [row["id"] for row in negative]),

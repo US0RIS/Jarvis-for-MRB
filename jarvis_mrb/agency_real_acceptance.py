@@ -295,9 +295,25 @@ def _relevant_entity_ids(conn: sqlite3.Connection, desired_state_id: str) -> set
 def _manual_orchestration_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     flagged: list[dict[str, Any]] = []
     for event in events:
-        if str(event.get("source_kind") or "") not in {"conversation", "conversation_goal"}:
+        source_kind = str(event.get("source_kind") or "")
+        payload = event.get("payload") or {}
+
+        if event.get("event_type") == "action.tool" and source_kind == "jarvis_tool":
+            tool = str(payload.get("tool") or "")
+            agency_step_id = str(payload.get("agency_step_id") or "")
+            if not agency_step_id and tool not in {"agency.status"}:
+                flagged.append(
+                    {
+                        "event_id": int(event["id"]),
+                        "tool": tool,
+                        "reason": "audited tool execution had no Agency step correlation",
+                    }
+                )
             continue
-        user_text = " ".join(str((event.get("payload") or {}).get("user") or "").strip().lower().split())
+
+        if source_kind not in {"conversation", "conversation_goal"}:
+            continue
+        user_text = " ".join(str(payload.get("user") or "").strip().lower().split())
         if not user_text:
             continue
         if user_text in _ALLOWED_APPROVAL_UTTERANCES:
@@ -305,7 +321,13 @@ def _manual_orchestration_events(events: list[dict[str, Any]]) -> list[dict[str,
         if user_text.startswith(("approve agency ", "deny agency ", "reject agency ")):
             continue
         if user_text.startswith(_ORCHESTRATION_PREFIXES):
-            flagged.append({"event_id": int(event["id"]), "user": user_text[:500]})
+            flagged.append(
+                {
+                    "event_id": int(event["id"]),
+                    "user": user_text[:500],
+                    "reason": "user utterance appears to orchestrate an intermediate tool step",
+                }
+            )
     return flagged
 
 

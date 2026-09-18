@@ -245,6 +245,25 @@ class WorldVerificationTests(unittest.TestCase):
         self.assertEqual(str(row["verifier"]), "tool_return")
         self.assertIn("Tool returned failure", str(row["last_evidence"]))
 
+    def test_audited_tool_receipt_persists_agency_step_correlation(self) -> None:
+        step_id = "agency-step:receipt-correlation-test"
+        with tool_audit.agency_step_context(step_id):
+            tool_audit._record(
+                "knowledge.search",
+                {"query": "Apollo"},
+                SimpleNamespace(ok=True, message="Found evidence."),
+            )
+
+        row = self._rows(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='action.tool' AND source_kind='jarvis_tool'
+            ORDER BY id DESC LIMIT 1
+            """
+        )[0]
+        payload = json.loads(str(row["payload_json"]))
+        self.assertEqual(payload["agency_step_id"], step_id)
+
     def test_temporary_state_verifier_uses_storage_normalized_key(self) -> None:
         normalized = tool_audit._verification_args(
             "state.temp_set",

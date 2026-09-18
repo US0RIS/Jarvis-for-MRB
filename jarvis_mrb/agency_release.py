@@ -527,12 +527,19 @@ def environment_fingerprint() -> str:
     except OSError:
         root_path = str(source_root().expanduser().absolute())
 
+    try:
+        from jarvis_mrb.permissions import _load as load_permission_policy
+        permission_policy = dict(load_permission_policy())
+    except Exception:
+        permission_policy = {"error": "permission-policy-unavailable"}
+
     raw = json.dumps(
         {
             "installation_id": _installation_id(),
             "host_machine_identity": _host_machine_identity(),
             "database_path": db_path,
             "source_root": root_path,
+            "permission_policy": permission_policy,
             "system": platform.system(),
             "release": platform.release(),
             "machine": platform.machine(),

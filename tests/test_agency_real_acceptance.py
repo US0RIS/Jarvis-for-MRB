@@ -1412,6 +1412,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertIn(target_state, reconciled["reactivated"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
             self.assertFalse(evaluation["evidence"]["fabricated_tool_availability"])
+            self.assertTrue(evaluation["evidence"]["adapter_sandbox_validated"])
             self.assertTrue(evaluation["evidence"]["adapter_synthesized_disabled"])
             self.assertTrue(evaluation["evidence"]["explicit_enablement_observed"])
             self.assertTrue(evaluation["evidence"]["capability_resolved_after_enable"])

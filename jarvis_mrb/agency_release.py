@@ -63,6 +63,12 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_agency_release_validation_runs
             ON agency_release_validation_runs(deployment_sha,environment_fingerprint,recorded_at DESC);
 
+        CREATE TABLE IF NOT EXISTS agency_installation_identity (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            installation_id TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TRIGGER IF NOT EXISTS agency_real_gate_receipts_immutable_update
         BEFORE UPDATE ON agency_real_gate_receipts
         BEGIN
@@ -92,9 +98,29 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _installation_id() -> str:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT installation_id FROM agency_installation_identity WHERE singleton=1"
+        ).fetchone()
+        if row is not None:
+            return str(row["installation_id"])
+        installation_id = str(uuid.uuid4())
+        conn.execute(
+            """
+            INSERT INTO agency_installation_identity(singleton,installation_id,created_at)
+            VALUES(1,?,?)
+            """,
+            (installation_id, _now()),
+        )
+        conn.commit()
+        return installation_id
+
+
 def environment_fingerprint() -> str:
     raw = json.dumps(
         {
+            "installation_id": _installation_id(),
             "system": platform.system(),
             "release": platform.release(),
             "machine": platform.machine(),

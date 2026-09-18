@@ -2012,6 +2012,48 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             )
             satisfaction_after_verified_action = satisfaction_after_verified_action or linked
 
+    satisfaction_evidence_links: list[dict[str, Any]] = []
+    verified_resolved_ids = {
+        int(row.get("resolved_event_id") or 0)
+        for row in verified_external
+        if int(row.get("resolved_event_id") or 0) > 0
+    }
+    satisfied_evaluations = conn.execute(
+        """
+        SELECT id,observed_at,evidence_json
+        FROM desired_state_evaluations
+        WHERE desired_state_id=? AND satisfied=1 AND observed_at>=?
+        ORDER BY observed_at,id
+        """,
+        (state_id, session["started_at"]),
+    ).fetchall()
+    for evaluation in satisfied_evaluations:
+        outcomes = list(_loads(str(evaluation["evidence_json"] or "[]"), []))
+        evidence_event_ids: set[int] = set()
+        for outcome in outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            evidence_event_ids.update(
+                _wake_evidence_real_event_ids(
+                    conn,
+                    outcome,
+                    min_event_id=int(session["baseline"].get("max_event_id") or 0),
+                )
+            )
+        matched = sorted(evidence_event_ids & verified_resolved_ids)
+        satisfaction_evidence_links.append(
+            {
+                "evaluation_id": int(evaluation["id"]),
+                "observed_at": str(evaluation["observed_at"]),
+                "evidence_event_ids": sorted(evidence_event_ids),
+                "verified_action_event_ids": matched,
+            }
+        )
+    satisfaction_derived_from_verified_action = any(
+        bool(item["verified_action_event_ids"])
+        for item in satisfaction_evidence_links
+    )
+
     checks = [
         _check("verified private information retrieval occurred", private_seen, verified_read_tools),
         _check("verified public web research occurred", public_seen, verified_read_tools),
@@ -2038,6 +2080,11 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             satisfaction_after_verified_action,
             verified_completion_links,
         ),
+        _check(
+            "final satisfaction evidence derives from that verified protected action",
+            satisfaction_derived_from_verified_action,
+            satisfaction_evidence_links,
+        ),
     ]
     return {
         "checks": checks,
@@ -2051,6 +2098,7 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             "replan_after_injected_change": checks[5]["passed"] and checks[6]["passed"],
             "final_desired_state_satisfied": checks[7]["passed"],
             "final_satisfaction_followed_verified_action": checks[8]["passed"],
+            "final_satisfaction_derived_from_verified_action": checks[9]["passed"],
         },
     }
 

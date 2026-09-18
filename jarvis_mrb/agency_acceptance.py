@@ -214,38 +214,101 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 {"desired_state_id": state_a1, "stored_state": persisted[3] if persisted else None},
             )
 
-            # A2 — two action/observation cycles converge on machine-evaluable reality.
+            # A2 — two causal action/observation cycles converge on machine-evaluable reality.
             entity_a2, state_a2 = _make_state(env, "Acceptance A2")
             plan_a2 = ap.create_plan(
                 state_a2,
                 [
-                    {"id": "observe", "tool": "knowledge.search", "arguments": {"query": "A2 current state"}},
                     {
-                        "id": "observe_again",
-                        "tool": "fact.check",
-                        "arguments": {"claim": "A2 is ready"},
-                        "depends_on": ["observe"],
+                        "id": "write-one",
+                        "tool": "state.update",
+                        "arguments": {"key": "agency_acceptance_a2_phase", "value": 1},
+                    },
+                    {
+                        "id": "write-two",
+                        "tool": "state.update",
+                        "arguments": {"key": "agency_acceptance_a2_phase", "value": 2},
+                        "depends_on": ["write-one"],
                     },
                 ],
             )
             calls_a2: list[str] = []
 
             def exec_a2(tool: str, args: dict[str, Any], **_: Any) -> SimpleNamespace:
-                calls_a2.append(tool)
-                if tool == "fact.check":
-                    wm.assert_belief(entity_a2, "ready", value=True)
-                return SimpleNamespace(ok=True, message=f"{tool} observation")
+                from jarvis_mrb.tool_audit import current_agency_step_id
 
-            ap.execute_next(plan_a2["id"], exec_a2)
-            result_a2 = ap.execute_next(plan_a2["id"], exec_a2)
+                calls_a2.append(tool)
+                step_id = current_agency_step_id()
+                reply = SimpleNamespace(ok=True, message=f"{tool} synthetic write accepted")
+                action_event_id = wm.record_tool_execution(
+                    tool,
+                    args,
+                    ok=True,
+                    message=reply.message,
+                    agency_step_id=step_id,
+                )
+                wv.register_execution(
+                    tool,
+                    args,
+                    reply,
+                    action_event_id=action_event_id,
+                    agency_step_id=step_id,
+                )
+                return reply
+
+            first_a2 = ap.execute_next(plan_a2["id"], exec_a2)
+            first_verification_a2 = str(first_a2["steps"][0]["verification_id"])
+            original_observe_a2 = wv._observe
+            try:
+                wv._observe = lambda verifier, expected: (
+                    "verified",
+                    "Synthetic independent phase-one read-back matched.",
+                )
+                first_verified_a2 = wv.check_one(first_verification_a2, force=True)
+            finally:
+                wv._observe = original_observe_a2
+            after_first_a2 = ap.reconcile_plan(plan_a2["id"])
+
+            second_a2 = ap.execute_next(plan_a2["id"], exec_a2)
+            second_verification_a2 = str(second_a2["steps"][1]["verification_id"])
+            original_observe_a2 = wv._observe
+            try:
+                wv._observe = lambda verifier, expected: (
+                    "verified",
+                    "Synthetic independent phase-two read-back matched.",
+                )
+                second_verified_a2 = wv.check_one(second_verification_a2, force=True)
+            finally:
+                wv._observe = original_observe_a2
+
+            if second_verified_a2 is None or second_verified_a2["status"] != "verified":
+                raise AssertionError("Synthetic A2 second independent verification did not resolve.")
+            wm.assert_belief(
+                entity_a2,
+                "ready",
+                value=True,
+                source_event_id=int(second_verified_a2["resolved_event_id"]),
+                evidence="Second independently verified action completed the synthetic A2 goal.",
+            )
+            result_a2 = ap.reconcile_plan(plan_a2["id"])
             _check(
                 checks,
                 "A2",
-                "closed loop takes multiple observed steps and stops on desired state",
-                calls_a2 == ["knowledge.search", "fact.check"]
+                "closed loop performs two causal action-observation cycles and stops on desired state",
+                calls_a2 == ["state.update", "state.update"]
+                and first_verified_a2 is not None
+                and first_verified_a2["status"] == "verified"
+                and after_first_a2["status"] == "active"
+                and second_verified_a2["status"] == "verified"
                 and result_a2["status"] == "completed"
                 and ds.get_desired_state(state_a2)["state"] == "satisfied",
-                {"calls": calls_a2, "plan_status": result_a2["status"]},
+                {
+                    "calls": calls_a2,
+                    "first_verification": first_verified_a2,
+                    "after_first": after_first_a2["status"],
+                    "second_verification": second_verified_a2,
+                    "plan_status": result_a2["status"],
+                },
             )
 
             # A3 — safe reads can run, protected action persists approval, denial does not

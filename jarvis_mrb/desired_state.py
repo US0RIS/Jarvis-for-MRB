@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
 from datetime import datetime
@@ -141,6 +142,16 @@ def _validate_criterion(raw: dict[str, Any]) -> dict[str, Any]:
     return criterion
 
 
+def _clean_priority(value: float | int) -> float:
+    try:
+        priority = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Desired-state priority must be numeric.") from exc
+    if not math.isfinite(priority):
+        raise ValueError("Desired-state priority must be finite.")
+    return priority
+
+
 def _validate_criteria(criteria: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not isinstance(criteria, list) or not criteria:
         raise ValueError("A desired state requires at least one explicit success criterion.")
@@ -165,6 +176,7 @@ def create_desired_state(
         raise ValueError("Desired-state title is empty.")
     clean_criteria = _validate_criteria(criteria)
     clean_authority = dict(authority or {})
+    clean_priority = _clean_priority(priority)
     source_ref = str(source_ref or "").strip()[:1500] or f"desired-state:{_stable_id(clean_title)[:16]}"
     state_id = str(desired_state_id or "").strip() or f"ds:{_stable_id(clean_title, source_kind, source_ref)[:32]}"
     now = _now()
@@ -190,7 +202,7 @@ def create_desired_state(
                 str(intention_id) if intention_id else None,
                 json.dumps(clean_criteria, ensure_ascii=False, sort_keys=True),
                 json.dumps(clean_authority, ensure_ascii=False, sort_keys=True),
-                float(priority),
+                clean_priority,
                 str(source_kind or "user")[:100],
                 source_ref,
                 now,
@@ -212,7 +224,7 @@ def create_desired_state(
                 "title": clean_title,
                 "criteria": clean_criteria,
                 "authority": clean_authority,
-                "priority": float(priority),
+                "priority": clean_priority,
             },
             evidence="Explicit desired state with machine-evaluable success criteria.",
             confidence=1.0,
@@ -491,6 +503,45 @@ def replace_criteria(desired_state_id: str, criteria: list[dict[str, Any]]) -> d
             (json.dumps(clean, ensure_ascii=False, sort_keys=True), _now(), state_id),
         )
         conn.commit()
+    return get_desired_state(state_id) or {}
+
+
+def update_priority(desired_state_id: str, priority: float | int) -> dict[str, Any]:
+    state_id = str(desired_state_id)
+    clean_priority = _clean_priority(priority)
+    now = _now()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT title,priority FROM desired_states WHERE id=?",
+            (state_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown desired state {desired_state_id!r}.")
+        previous = float(row["priority"])
+        conn.execute(
+            "UPDATE desired_states SET priority=?,updated_at=? WHERE id=?",
+            (clean_priority, now, state_id),
+        )
+        conn.commit()
+
+    try:
+        from jarvis_mrb.world_model import record_event
+        record_event(
+            "desired_state.priority_changed",
+            f"Desired-state priority changed: {str(row['title'])[:500]} {previous:g} → {clean_priority:g}.",
+            source_kind="jarvis_desired_state",
+            source_ref=state_id,
+            occurred_at=now,
+            payload={
+                "desired_state_id": state_id,
+                "previous_priority": previous,
+                "priority": clean_priority,
+            },
+            evidence="Desired-state scheduling priority was explicitly updated.",
+            confidence=1.0,
+        )
+    except Exception:
+        pass
     return get_desired_state(state_id) or {}
 
 

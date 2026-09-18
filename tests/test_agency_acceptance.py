@@ -30,8 +30,6 @@ class AgencyAcceptanceTests(unittest.TestCase):
             "permission_path": permissions.POLICY_PATH,
             "custom_tools_app": custom_tools.APP_DIR,
             "custom_tools_dir": custom_tools.TOOLS_DIR,
-            "custom_tools_app": custom_tools.APP_DIR,
-            "custom_tools_dir": custom_tools.TOOLS_DIR,
         }
 
         run_synthetic_acceptance()
@@ -47,6 +45,8 @@ class AgencyAcceptanceTests(unittest.TestCase):
             "verification_db": world_verification.DB_PATH,
             "permission_app": permissions.APP_DIR,
             "permission_path": permissions.POLICY_PATH,
+            "custom_tools_app": custom_tools.APP_DIR,
+            "custom_tools_dir": custom_tools.TOOLS_DIR,
         }
         self.assertEqual(after, before)
 

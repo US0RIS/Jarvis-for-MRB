@@ -406,19 +406,59 @@ def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool =
 
 def _confirm_pending() -> AgentReply:
     global _PENDING_ACTION
-    if not _PENDING_ACTION:
-        return AgentReply(False, "There is nothing waiting for confirmation.")
-    pending = _PENDING_ACTION
-    _PENDING_ACTION = None
-    return execute_tool(str(pending["tool"]), dict(pending["args"]), bypass_confirmation=True)
+    if _PENDING_ACTION:
+        pending = _PENDING_ACTION
+        _PENDING_ACTION = None
+        return execute_tool(str(pending["tool"]), dict(pending["args"]), bypass_confirmation=True)
+
+    try:
+        from jarvis_mrb.agency_plan import approve_pending, pending_approval
+
+        step = pending_approval()
+        if step is not None:
+            plan = approve_pending(
+                lambda tool, args, bypass_confirmation=False: execute_tool(
+                    tool,
+                    args,
+                    bypass_confirmation=bypass_confirmation,
+                )
+            )
+            if plan is None:
+                return AgentReply(False, "There is nothing waiting for confirmation.")
+            status = str(plan.get("status") or "")
+            if status == "awaiting_verification":
+                return AgentReply(
+                    True,
+                    f"Approved Agency step {step['step_key']}. The action ran and Jarvis is independently verifying the outcome.",
+                )
+            if status == "completed":
+                return AgentReply(True, f"Approved Agency step {step['step_key']}. The desired state is now satisfied.")
+            if status == "needs_replan":
+                return AgentReply(
+                    False,
+                    f"Approved Agency step {step['step_key']}, but the result did not establish the desired state. Jarvis will replan.",
+                )
+            return AgentReply(True, f"Approved Agency step {step['step_key']}. Agency plan status is now {status}.")
+    except Exception as exc:
+        return AgentReply(False, f"Agency approval could not be resumed safely: {exc}")
+
+    return AgentReply(False, "There is nothing waiting for confirmation.")
 
 
 def _cancel_pending() -> AgentReply:
     global _PENDING_ACTION
-    if not _PENDING_ACTION:
-        return AgentReply(False, "There is nothing waiting for confirmation.")
-    _PENDING_ACTION = None
-    return AgentReply(True, "Cancelled.")
+    if _PENDING_ACTION:
+        _PENDING_ACTION = None
+        return AgentReply(True, "Cancelled.")
+    try:
+        from jarvis_mrb.agency_plan import deny_pending
+
+        plan = deny_pending(reason="User denied the proposed Agency action.")
+        if plan is not None:
+            return AgentReply(True, "Denied that Agency action. The desired state remains active and Jarvis will seek another path.")
+    except Exception as exc:
+        return AgentReply(False, f"Agency denial could not be persisted safely: {exc}")
+    return AgentReply(False, "There is nothing waiting for confirmation.")
 
 
 def _extract_json(content: str) -> dict[str, Any] | None:
@@ -493,6 +533,12 @@ def _fast_path(text: str) -> AgentReply | None:
     if n in {"confirm", "yes send it", "send it", "yes, send it", "yes do it", "do it"}: return _confirm_pending()
     if n in {"cancel", "never mind", "nevermind", "don't do it", "do not do it", "don't send it"}: return _cancel_pending()
     if n in {"permissions", "permission status", "permissions status"}: return AgentReply(True, "Permission policy: " + policy_summary())
+    if n in {"agency status", "what is agency doing", "what's agency doing", "what is jarvis working on", "what's jarvis working on"}:
+        try:
+            from jarvis_mrb.agency_runtime import describe as describe_agency
+            return AgentReply(True, describe_agency())
+        except Exception as exc:
+            return AgentReply(False, f"Agency status is unavailable: {exc}")
     m = re.fullmatch(r"set (read|local_write|external_write|destructive|security) (?:actions )?to (auto|confirm|deny)", n)
     if m: return AgentReply(True, set_policy(m.group(1), m.group(2)))
 

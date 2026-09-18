@@ -55,6 +55,37 @@ class AgentConfirmationSecurityTests(unittest.TestCase):
         self.assertNotIn("TOP SECRET INTERNAL SPEC", rendered)
         self.assertNotIn("4815", rendered)
 
+    def test_custom_run_http_status_controls_agent_success(self) -> None:
+        with patch.object(
+            agent,
+            "run_custom_tool",
+            return_value={
+                "status_code": 200,
+                "body": {"ok": True},
+            },
+        ):
+            success = agent._execute_unchecked(
+                "custom.run",
+                {"name": "private_weather", "arguments": {"city": "Pasadena"}},
+            )
+        self.assertTrue(success.ok)
+        self.assertIn("HTTP 200", success.message)
+
+        with patch.object(
+            agent,
+            "run_custom_tool",
+            return_value={
+                "status_code": 503,
+                "body": {"error": "temporarily unavailable"},
+            },
+        ):
+            failure = agent._execute_unchecked(
+                "custom.run",
+                {"name": "private_weather", "arguments": {"city": "Pasadena"}},
+            )
+        self.assertFalse(failure.ok)
+        self.assertIn("HTTP 503", failure.message)
+
     def test_custom_enable_confirmation_states_resulting_enablement(self) -> None:
         enabled = agent._describe_action(
             "custom.enable",

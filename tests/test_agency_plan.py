@@ -111,6 +111,35 @@ class AgencyPlanTests(unittest.TestCase):
         # either way the desired state, not step count, is the termination authority.
         self.assertIn(second["steps"][1]["status"], {"verified", "skipped"})
 
+    def test_downstream_arguments_resolve_persisted_dependency_outputs(self) -> None:
+        _, state_id = self._state_for_project("Project Resolve")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {"id": "research", "tool": "knowledge.search", "arguments": {"query": "Resolve"}},
+                {
+                    "id": "use",
+                    "tool": "fact.check",
+                    "arguments": {"claim": "Evidence: ${research.message}"},
+                    "depends_on": ["research"],
+                },
+            ],
+        )
+        observed: list[tuple[str, dict]] = []
+
+        def executor(tool: str, args: dict, **_: object) -> SimpleNamespace:
+            observed.append((tool, dict(args)))
+            if tool == "knowledge.search":
+                return SimpleNamespace(ok=True, message="alpha evidence")
+            return SimpleNamespace(ok=True, message="checked")
+
+        agency_plan.execute_next(plan["id"], executor)
+        agency_plan.execute_next(plan["id"], executor)
+
+        self.assertEqual(observed[0][0], "knowledge.search")
+        self.assertEqual(observed[1][0], "fact.check")
+        self.assertEqual(observed[1][1]["claim"], "Evidence: alpha evidence")
+
     def test_protected_step_waits_for_persistent_approval_without_calling_executor(self) -> None:
         _, state_id = self._state_for_project("Project Approval")
         plan = agency_plan.create_plan(

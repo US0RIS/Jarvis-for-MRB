@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
+import jarvis_mrb.agency_real_acceptance as agency_real_acceptance
 import jarvis_mrb.agency_release as agency_release
 import jarvis_mrb.world_model as world_model
 
@@ -97,6 +100,7 @@ class AgencyReleaseTests(unittest.TestCase):
         world_model.APP_DIR = self.base
         world_model.DB_PATH = self.db
         world_model.status()
+        agency_real_acceptance.status()
         agency_release.status()
 
     def tearDown(self) -> None:
@@ -104,16 +108,72 @@ class AgencyReleaseTests(unittest.TestCase):
         world_model.DB_PATH = self.original_db
         self.temp.cleanup()
 
-    def _record(self, gate: str, *, sha: str = SHA_A, env: str = ENV) -> dict:
-        return agency_release.record_real_gate_receipt(
+    def _record(
+        self,
+        gate: str,
+        *,
+        sha: str = SHA_A,
+        env: str = ENV,
+        trace_ref: str | None = None,
+        harness: str = "agency-real-gate-session-v1",
+    ) -> dict:
+        checks = [{"name": f"{gate} real acceptance", "passed": True, "evidence": "observed"}]
+        evidence = evidence_for(gate)
+        session_id = f"agency-real-session:test-{uuid.uuid4()}"
+        evaluation = {
+            "session_id": session_id,
+            "gate": gate,
+            "passed": True,
+            "checks": checks,
+            "evidence": evidence,
+            "manual_orchestration_events": [],
+            "evaluated_at": "2030-01-01T00:00:00+00:00",
+        }
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                """
+                INSERT INTO agency_real_gate_sessions(
+                    id,gate,deployment_sha,environment_fingerprint,desired_state_id,
+                    parameters_json,baseline_json,status,last_evaluation_json,receipt_id,started_at
+                ) VALUES(?,?,?,?,?,'{}','{}','running',?,'',?)
+                """,
+                (
+                    session_id,
+                    gate,
+                    sha,
+                    env,
+                    "",
+                    json.dumps(evaluation, ensure_ascii=False, sort_keys=True),
+                    "2030-01-01T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+
+        actual_trace = (
+            str(self.a12_trace) if gate == "A12" and trace_ref is None
+            else str(trace_ref or "")
+        )
+        receipt = agency_release.record_real_gate_receipt(
             gate,
             deployment_sha_value=sha,
             environment=env,
-            harness=f"real-{gate.lower()}-acceptance",
-            checks=[{"name": f"{gate} real acceptance", "passed": True, "evidence": "observed"}],
-            evidence=evidence_for(gate),
-            trace_ref=str(self.a12_trace) if gate == "A12" else "",
+            harness=harness,
+            checks=checks,
+            evidence=evidence,
+            trace_ref=actual_trace,
+            session_id=session_id,
         )
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                """
+                UPDATE agency_real_gate_sessions
+                SET status='completed',receipt_id=?,completed_at=?
+                WHERE id=?
+                """,
+                (receipt["id"], "2030-01-01T00:01:00+00:00", session_id),
+            )
+            conn.commit()
+        return receipt
 
     def test_real_gate_receipt_is_append_only(self) -> None:
         receipt = self._record("A1")
@@ -292,24 +352,8 @@ class AgencyReleaseTests(unittest.TestCase):
         older_trace.write_text("# older valid A12 trace\n", encoding="utf-8")
         newer_trace.write_text("# newer valid A12 trace\n", encoding="utf-8")
 
-        older = agency_release.record_real_gate_receipt(
-            "A12",
-            deployment_sha_value=SHA_A,
-            environment=ENV,
-            harness="real-a12-older",
-            checks=[{"name": "A12 older", "passed": True}],
-            evidence=evidence_for("A12"),
-            trace_ref=str(older_trace),
-        )
-        newer = agency_release.record_real_gate_receipt(
-            "A12",
-            deployment_sha_value=SHA_A,
-            environment=ENV,
-            harness="real-a12-newer",
-            checks=[{"name": "A12 newer", "passed": True}],
-            evidence=evidence_for("A12"),
-            trace_ref=str(newer_trace),
-        )
+        older = self._record("A12", trace_ref=str(older_trace))
+        newer = self._record("A12", trace_ref=str(newer_trace))
         newer_trace.unlink()
 
         status = agency_release.release_status(

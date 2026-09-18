@@ -977,6 +977,33 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(len([item for item in stored if item["gate"] == "A8"]), 1)
 
+    def test_a12_trace_writes_do_not_overwrite_concurrent_evidence(self) -> None:
+        session = {
+            "id": "agency-real-session:trace-race",
+            "deployment_sha": SHA_A,
+            "environment_fingerprint": ENV,
+            "desired_state_id": "desired:trace-race",
+            "started_at": "2030-01-01T00:00:00+00:00",
+        }
+        base = {
+            "session_id": session["id"],
+            "gate": "A12",
+            "passed": True,
+            "checks": [{"name": "check", "passed": True, "evidence": "one"}],
+            "evidence": {"real_services": True},
+            "manual_orchestration_events": [],
+        }
+        first_eval = {**base, "evaluated_at": "2030-01-01T00:01:00+00:00"}
+        second_eval = {**base, "evaluated_at": "2030-01-01T00:02:00+00:00"}
+
+        first_path = Path(agency_real_acceptance._write_a12_trace(session, first_eval))
+        first_bytes = first_path.read_bytes()
+        second_path = Path(agency_real_acceptance._write_a12_trace(session, second_eval))
+
+        self.assertNotEqual(first_path, second_path)
+        self.assertEqual(first_path.read_bytes(), first_bytes)
+        self.assertTrue(second_path.is_file())
+
     def test_sha_change_mid_session_prevents_receipt(self) -> None:
         state_id, _ = self._state_with_plan("SHA Attention Gate")
         with self._patch_identity(SHA_A):

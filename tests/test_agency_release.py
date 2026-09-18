@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 import jarvis_mrb.agency_real_acceptance as agency_real_acceptance
 import jarvis_mrb.agency_release as agency_release
@@ -249,6 +250,28 @@ class AgencyReleaseTests(unittest.TestCase):
         )
         with agency_release._validation_recording_context(payload):
             return agency_release.record_validation_run(**values)
+
+    def test_run_full_validation_is_only_supported_validation_minter(self) -> None:
+        (self.base / "jarvis_mrb").mkdir(exist_ok=True)
+        (self.base / "tests").mkdir(exist_ok=True)
+
+        with (
+            patch.object(agency_release, "deployment_sha", return_value=SHA_A),
+            patch.object(agency_release, "environment_fingerprint", return_value=ENV),
+            patch.object(agency_release, "_git_worktree_clean", return_value=(True, "")),
+            patch.object(agency_release, "_run_command", return_value=(True, "stage passed")),
+            patch("jarvis_mrb.world_diagnostics.validate", return_value={"ok": True}),
+        ):
+            result = agency_release.run_full_validation(root=self.base)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["recorded"])
+        run = result["validation_run"]
+        self.assertEqual(run["harness"], agency_release._VALIDATION_HARNESS)
+        self.assertTrue(result["release_status"]["validation_hash_ok"])
+        self.assertFalse(result["release_status"]["release_ready"])
+        self.assertTrue(result["release_status"]["missing_real_gates"])
+        self.assertEqual(agency_release._VALIDATION_CONTEXT.get(), "")
 
     def test_low_level_validation_writer_rejects_asserted_pass_flags(self) -> None:
         with self.assertRaisesRegex(ValueError, "run_full_validation"):

@@ -635,9 +635,12 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_true(evidence, "automatic_stop_observed", gate)
         _require_true(evidence, "goal_not_repeated", gate)
     elif gate == "A3":
+        _require_true(evidence, "safe_read_auto_proceeded", gate)
         _require_true(evidence, "protected_external_write_observed", gate)
         _require_true(evidence, "approval_resumed_same_plan", gate)
+        _require_true(evidence, "permission_boundary_not_bypassed", gate)
         _require_true(evidence, "denial_case_observed", gate)
+        _require_true(evidence, "denial_forced_replan_or_blocked", gate)
     elif gate == "A4":
         _require_true(evidence, "verified_real_write_observed", gate)
         _require_true(evidence, "failure_timeout_or_unverified_observed", gate)

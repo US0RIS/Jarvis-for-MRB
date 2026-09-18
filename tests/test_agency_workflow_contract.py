@@ -39,23 +39,55 @@ class AgencyWorkflowContractTests(unittest.TestCase):
 
     def test_enabled_custom_adapter_can_be_referenced_through_custom_run(self) -> None:
         self.assertIn("custom.run", _ALLOWED_NODE_TOOLS)
-        _validate_plan(
-            {
-                "summary": "Use enabled adapter.",
-                "nodes": [
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {"name": "private_weather", "enabled": True, "risk": "read", "description": "Weather"}
+            ],
+        ):
+            _validate_plan(
+                {
+                    "summary": "Use enabled adapter.",
+                    "nodes": [
+                        {
+                            "id": "custom",
+                            "tool": "custom.run",
+                            "arguments": {
+                                "name": "private_weather",
+                                "arguments": {"city": "Pasadena"},
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                }
+            )
+
+    def test_custom_run_rejects_invented_or_disabled_adapter(self) -> None:
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {"name": "disabled_weather", "enabled": False, "risk": "read"}
+            ],
+        ):
+            with self.assertRaisesRegex(ValueError, "unavailable custom adapter"):
+                _validate_plan(
                     {
-                        "id": "custom",
-                        "tool": "custom.run",
-                        "arguments": {
-                            "name": "private_weather",
-                            "arguments": {"city": "Pasadena"},
-                        },
-                        "depends_on": [],
+                        "summary": "Invent adapter.",
+                        "nodes": [
+                            {
+                                "id": "custom",
+                                "tool": "custom.run",
+                                "arguments": {
+                                    "name": "made_up_weather",
+                                    "arguments": {},
+                                },
+                                "depends_on": [],
+                            }
+                        ],
+                        "missing_capability": None,
                     }
-                ],
-                "missing_capability": None,
-            }
-        )
+                )
 
     def test_custom_catalog_contains_only_enabled_adapters(self) -> None:
         with patch(

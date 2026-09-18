@@ -47,7 +47,7 @@ _AGENCY_REQUIRED_COLUMNS: dict[str, set[str]] = {
         "receipt_hash", "recorded_at",
     },
     "agency_release_validation_runs": {
-        "deployment_sha", "environment_fingerprint", "compile_ok", "regression_ok",
+        "harness", "deployment_sha", "environment_fingerprint", "compile_ok", "regression_ok",
         "synthetic_ok", "diagnostics_ok", "tree_clean_before", "tree_clean_after",
         "validation_hash", "recorded_at",
     },

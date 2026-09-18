@@ -133,6 +133,58 @@ class AgencyCapabilityTests(unittest.TestCase):
             [],
         )
 
+    def test_planner_declared_missing_capability_blocks_and_records_gap(self) -> None:
+        state_id = self._state()
+        agency_runtime.set_mode("active")
+
+        result = agency_runtime.tick_desired_state(
+            state_id,
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            planner=lambda _prompt: {
+                "summary": "Cannot finish without a reservation-writing provider.",
+                "nodes": [],
+                "missing_capability": {
+                    "capability": "restaurant.reservation.create",
+                    "reason": "The goal requires creating a real reservation and no bounded Agency tool can do so.",
+                },
+            },
+        )
+
+        self.assertFalse(result["action_executed"])
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertIn("restaurant.reservation.create", state["blocked_reason"])
+        gaps = agency_capability.list_gaps(desired_state_id=state_id, open_only=True)
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(gaps[0]["capability"], "restaurant.reservation.create")
+
+    def test_planner_cannot_declare_available_agency_tool_missing(self) -> None:
+        state_id = self._state()
+        agency_runtime.set_mode("active")
+
+        result = agency_runtime.tick_desired_state(
+            state_id,
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            planner=lambda _prompt: {
+                "summary": "Bad declaration",
+                "nodes": [],
+                "missing_capability": {
+                    "capability": "web.search",
+                    "reason": "Pretend web search is unavailable.",
+                },
+            },
+        )
+
+        self.assertFalse(result["action_executed"])
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
+        self.assertEqual(
+            agency_capability.list_gaps(desired_state_id=state_id, open_only=True),
+            [],
+        )
+        runtime = agency_runtime.status()["planner_backoff"]
+        self.assertTrue(runtime)
+        self.assertIn("declared available Agency tool", runtime[0]["last_error"])
+
     def test_known_but_denied_tool_is_authority_gap_not_capability_gap(self) -> None:
         permissions.set_policy("external_write", "deny")
         info = agency_capability.available_tool("gmail.send")

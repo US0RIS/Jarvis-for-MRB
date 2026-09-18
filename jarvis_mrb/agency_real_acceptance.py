@@ -173,6 +173,16 @@ def start_session(
         desired = _desired_state_row(conn, state_id) if state_id else None
         plan = _current_plan_baseline(conn, state_id) if state_id else {}
         boot = _latest_boot_baseline(conn)
+        goal_entity_id = ""
+        if desired is not None and str(desired["intention_id"] or ""):
+            try:
+                intention_row = conn.execute(
+                    "SELECT source_ref FROM intentions WHERE id=? AND source_kind='explicit_goal'",
+                    (str(desired["intention_id"]),),
+                ).fetchone()
+                goal_entity_id = str(intention_row["source_ref"] or "") if intention_row else ""
+            except sqlite3.OperationalError:
+                goal_entity_id = ""
         baseline = {
             "max_event_id": _max_event_id(conn),
             "boot": boot,
@@ -180,6 +190,7 @@ def start_session(
             "criteria_hash": _criteria_hash(desired),
             "plan": plan,
             "active_watches": _active_watches(conn, state_id) if state_id else [],
+            "goal_entity_id": goal_entity_id,
         }
         if clean_gate in {"A1", "A2", "A3", "A4", "A5", "A6", "A12"} and desired is None:
             raise ValueError(f"{clean_gate} REAL session requires a persistent desired_state_id.")
@@ -329,18 +340,27 @@ def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list
     plan_id = str((baseline.get("plan") or {}).get("id") or "")
     plan_row = conn.execute("SELECT * FROM agency_plans WHERE id=?", (plan_id,)).fetchone() if plan_id else None
     runtime_row = conn.execute("SELECT * FROM agency_runtime_state WHERE desired_state_id=?", (state_id,)).fetchone()
-    restatements = [
-        event for event in events
-        if event["event_type"] == "goal.conversation_declared"
-        and str(event.get("source_kind") or "") == "conversation_goal"
-    ]
+    goal_entity_id = str(baseline.get("goal_entity_id") or "")
+    restatements: list[int] = []
+    if goal_entity_id:
+        restatement_rows = conn.execute(
+            """
+            SELECT DISTINCT e.id
+            FROM events e JOIN event_entities ee ON ee.event_id=e.id
+            WHERE e.id>? AND e.event_type='goal.conversation_declared'
+              AND e.source_kind='conversation_goal' AND ee.entity_id=?
+            ORDER BY e.id
+            """,
+            (int(baseline.get("max_event_id") or 0), goal_entity_id),
+        ).fetchall()
+        restatements = [int(row["id"]) for row in restatement_rows]
     checks = [
         _check("service actually restarted", bool(latest_boot) and str(latest_boot.get("id")) != baseline_boot_id, latest_boot),
         _check("same desired state survived restart", current is not None, state_id),
         _check("same plan survived restart", plan_row is not None, plan_id),
         _check("success criteria survived unchanged", current is not None and _criteria_hash(current) == str(baseline.get("criteria_hash") or "")),
         _check("runtime scheduling state survived", runtime_row is not None, dict(runtime_row) if runtime_row else None),
-        _check("goal was not conversationally restated", len(restatements) == 0, [item["id"] for item in restatements]),
+        _check("goal was not conversationally restated", len(restatements) == 0, restatements),
     ]
     return {
         "checks": checks,
@@ -452,9 +472,14 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
         external_event_ids = [int(row["id"]) for row in rows if str(row["source_kind"] or "") not in _INTERNAL_EVENT_SOURCES]
     current_plan = _current_plan_baseline(conn, state_id)
     baseline_generation = int((session["baseline"].get("plan") or {}).get("generation") or 0)
+    invalidation_ids = [int(item["id"]) for item in invalidations]
+    causal_external_ids = [
+        event_id for event_id in external_event_ids
+        if any(event_id < invalidation_id for invalidation_id in invalidation_ids)
+    ]
     checks = [
-        _check("relevant external world change was observed", bool(external_event_ids), external_event_ids),
-        _check("stale plan was invalidated", bool(invalidations), [item["id"] for item in invalidations]),
+        _check("relevant external world change preceded invalidation", bool(causal_external_ids), causal_external_ids),
+        _check("stale plan was invalidated", bool(invalidations), invalidation_ids),
         _check("new plan generation was produced", int(current_plan.get("generation") or 0) > baseline_generation, current_plan),
     ]
     return {
@@ -522,7 +547,11 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
     disagreements: list[Any] = []
     for row in deliberations:
         current_workers = conn.execute(
-            "SELECT * FROM agency_deliberation_workers WHERE deliberation_id=? ORDER BY role",
+            """
+            SELECT * FROM agency_deliberation_workers
+            WHERE deliberation_id=? AND status='completed'
+            ORDER BY role
+            """,
             (str(row["id"]),),
         ).fetchall()
         current_disagreements = list(_loads(str(row["disagreement_json"]), []))
@@ -531,9 +560,21 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             workers = list(current_workers)
             disagreements = current_disagreements
             break
+    provenance_ok = False
+    if workers:
+        provenance_ok = True
+        for worker in workers:
+            output = dict(_loads(str(worker["output_json"]), {}))
+            for claim in output.get("claims") or []:
+                if not isinstance(claim, dict) or str(claim.get("source") or "") not in {"context", "reasoning", "unknown"}:
+                    provenance_ok = False
+                    break
+            if not provenance_ok:
+                break
     checks = [
         _check("two or more independent workers completed", len(workers) >= 2, [str(row["role"]) for row in workers]),
         _check("worker execution intervals overlapped", bool(workers) and _workers_overlap(workers)),
+        _check("worker claim provenance remained structurally bounded", provenance_ok),
         _check("material disagreement was preserved", bool(disagreements), disagreements[:5]),
     ]
     return {
@@ -541,7 +582,7 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
         "evidence": {
             "parallel_workers": len(workers),
             "parallel_overlap_observed": checks[1]["passed"],
-            "material_disagreement_preserved": checks[2]["passed"],
+            "material_disagreement_preserved": checks[3]["passed"],
             "deliberation_id": str(candidate["id"]) if candidate else "",
         },
     }
@@ -655,10 +696,32 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     }
     private_seen = any(tool in private_tools for tool in tools)
     public_seen = "web.search" in tools
-    deliberations = conn.execute(
-        "SELECT id FROM agency_deliberations WHERE created_at>=? AND status IN ('completed','partial')",
-        (session["started_at"],),
-    ).fetchall()
+    deliberation_step_ids = [
+        str(row["id"]) for row in steps if str(row["tool"]) == "agency.deliberate"
+    ]
+    deliberations: list[sqlite3.Row] = []
+    parallel_analysis = False
+    if deliberation_step_ids:
+        placeholders = ",".join("?" for _ in deliberation_step_ids)
+        deliberations = conn.execute(
+            f"""
+            SELECT * FROM agency_deliberations
+            WHERE agency_step_id IN ({placeholders}) AND status IN ('completed','partial')
+            ORDER BY created_at
+            """,
+            tuple(deliberation_step_ids),
+        ).fetchall()
+        for deliberation in deliberations:
+            completed_workers = conn.execute(
+                """
+                SELECT * FROM agency_deliberation_workers
+                WHERE deliberation_id=? AND status='completed'
+                """,
+                (str(deliberation["id"]),),
+            ).fetchall()
+            if len(completed_workers) >= 2 and _workers_overlap(list(completed_workers)):
+                parallel_analysis = True
+                break
     verification_rows = _verification_rows_for_state(conn, state_id, session["started_at"])
     external = [row for row in verification_rows if str(row.get("risk") or "") == "external_write"]
     verified_external = [
@@ -674,7 +737,7 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     checks = [
         _check("private information retrieval occurred", private_seen, tools),
         _check("public web research occurred", public_seen, tools),
-        _check("parallel deliberation occurred", bool(deliberations), [str(row["id"]) for row in deliberations]),
+        _check("parallel deliberation belonged to this Agency plan and overlapped", parallel_analysis, [str(row["id"]) for row in deliberations]),
         _check("protected external action occurred", bool(external), [row["id"] for row in external]),
         _check("external action was independently verified", bool(verified_external), [row["id"] for row in verified_external]),
         _check("injected reality change caused stale-plan invalidation", bool(invalidations), [item["id"] for item in invalidations]),

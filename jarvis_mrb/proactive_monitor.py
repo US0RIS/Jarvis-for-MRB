@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
@@ -243,7 +242,7 @@ def _proactive_enabled() -> bool:
 def _check_agency_runtime() -> None:
     """Advance persistent desired states with a small action and interruption budget."""
     from jarvis_mrb.agency_attention import consider
-    from jarvis_mrb.agency_plan import resolved_arguments
+    from jarvis_mrb.agency_plan import describe_pending_approval
     from jarvis_mrb.agency_runtime import tick_all
     from jarvis_mrb.desired_state import get_desired_state
 
@@ -262,25 +261,19 @@ def _check_agency_runtime() -> None:
                 if str(step.get("status") or "") == "awaiting_approval"
             ]
             step = waiting[0] if waiting else {}
-            tool = str(step.get("tool") or "a protected action")
-            step_id = str(step.get("id") or "")
+            approval_item = dict(step)
+            approval_item["desired_state_title"] = title
             try:
-                resolved = resolved_arguments(step_id) if step_id else dict(step.get("arguments") or {})
+                from jarvis_mrb.agency_plan import resolved_arguments
+                approval_item["resolved_arguments"] = resolved_arguments(str(step.get("id") or ""))
             except Exception:
-                resolved = dict(step.get("arguments") or {})
-            rendered_args = json.dumps(
-                resolved,
-                ensure_ascii=False,
-                sort_keys=True,
-                default=str,
-            )
-            if len(rendered_args) > 900:
-                rendered_args = rendered_args[:897] + "..."
+                approval_item["resolved_arguments"] = dict(step.get("arguments") or {})
+            action_description = describe_pending_approval(approval_item)
             candidates.append(
                 {
                     "kind": "approval_required",
                     "message": (
-                        f"Agency needs your approval to continue {title}: {tool} with {rendered_args}. "
+                        f"Agency needs your approval to continue {title}: {action_description}. "
                         f"To authorize this exact pending action, say 'approve agency {title}'. "
                         f"To reject it, say 'deny agency {title}'."
                     ),

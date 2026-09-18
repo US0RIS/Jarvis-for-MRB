@@ -14,6 +14,7 @@ from jarvis_mrb.agency_acceptance import REAL_GATES
 from jarvis_mrb.agency_release import (
     deployment_sha,
     environment_fingerprint,
+    get_receipt,
     get_receipt_for_session,
     record_real_gate_receipt,
 )
@@ -903,7 +904,17 @@ def finalize_session(session_id: str) -> dict[str, Any]:
     if session is None:
         raise ValueError(f"Unknown REAL gate session {session_id!r}.")
     if str(session["status"]) == "completed":
-        return {"passed": True, "already_finalized": True, "session": session, "receipt_id": str(session.get("receipt_id") or "")}
+        receipt_id = str(session.get("receipt_id") or "")
+        receipt = get_receipt(receipt_id) if receipt_id else get_receipt_for_session(str(session["id"]))
+        return {
+            "passed": receipt is not None,
+            "already_finalized": True,
+            "receipt_created": False,
+            "receipt_reused": receipt is not None,
+            "receipt": receipt,
+            "receipt_id": str((receipt or {}).get("id") or receipt_id),
+            "session": session,
+        }
     if str(session["status"]) != "running":
         raise ValueError(f"REAL gate session is {session['status']}, not running.")
 

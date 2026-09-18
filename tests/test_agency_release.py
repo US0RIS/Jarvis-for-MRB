@@ -382,6 +382,40 @@ class AgencyReleaseTests(unittest.TestCase):
         second = self._record("A1")
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_validation_hash_detects_post_run_corruption(self) -> None:
+        for gate in sorted(agency_release.REAL_GATES):
+            self._record(gate)
+        run = agency_release.record_validation_run(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            source_root_value=str(self.base),
+            compile_ok=True,
+            regression_ok=True,
+            synthetic_ok=True,
+            diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=True,
+            regression_summary="all tests passed",
+        )
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("DROP TRIGGER agency_release_validation_runs_immutable_update")
+            conn.execute(
+                "UPDATE agency_release_validation_runs SET regression_ok=0 WHERE id=?",
+                (run["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertFalse(status["release_ready"])
+        self.assertFalse(status["validation_hash_ok"])
+
     def test_validation_record_with_dirty_tree_is_not_release_eligible(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)

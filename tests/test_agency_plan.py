@@ -131,6 +131,31 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertNotIn("SECRET-TOKEN-123", rendered)
         self.assertNotIn("Sensitive Destination", rendered)
 
+    def test_permission_policy_change_requires_security_confirmation(self) -> None:
+        self.assertEqual(permissions.decide("agency.enable").risk, "security")
+        self.assertTrue(permissions.decide("permissions.set").needs_confirmation)
+
+        staged = agent.execute_tool(
+            "permissions.set",
+            {"risk": "security", "mode": "auto"},
+        )
+        self.assertTrue(staged.ok)
+        self.assertIn("Say 'confirm'", staged.message)
+        self.assertTrue(permissions.decide("agency.enable").needs_confirmation)
+
+        confirmed = agent._confirm_pending()
+        self.assertTrue(confirmed.ok)
+        self.assertFalse(permissions.decide("agency.enable").needs_confirmation)
+
+    def test_permission_policy_change_cannot_use_naked_bypass(self) -> None:
+        reply = agent.execute_tool(
+            "permissions.set",
+            {"risk": "security", "mode": "auto"},
+            bypass_confirmation=True,
+        )
+        self.assertFalse(reply.ok)
+        self.assertTrue(permissions.decide("agency.enable").needs_confirmation)
+
     def test_naked_confirmation_bypass_is_rejected(self) -> None:
         args = {
             "summary": "Naked bypass",

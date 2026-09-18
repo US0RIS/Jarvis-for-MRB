@@ -104,6 +104,48 @@ class AgencyPlanTests(unittest.TestCase):
         unchecked.assert_called_once_with("calendar.create", args)
         self.assertIsNone(agent._PENDING_ACTION)
 
+    def test_second_protected_action_cannot_replace_pending_confirmation(self) -> None:
+        first_args = {
+            "summary": "First pending action",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        second_args = {
+            "summary": "Second pending action",
+            "start": "2030-01-01T10:00:00-08:00",
+            "end": "2030-01-01T10:30:00-08:00",
+        }
+
+        first = agent.execute_tool("calendar.create", first_args)
+        second = agent.execute_tool("calendar.create", second_args)
+
+        self.assertTrue(first.ok)
+        self.assertFalse(second.ok)
+        self.assertIn("already awaiting confirmation", second.message)
+        self.assertIsNotNone(agent._PENDING_ACTION)
+        assert agent._PENDING_ACTION is not None
+        pending_tool, pending_args, pending_key = agent._PENDING_ACTION
+        self.assertEqual(pending_tool, "calendar.create")
+        self.assertEqual(pending_args, first_args)
+        self.assertEqual(
+            pending_key,
+            agent._confirmation_action_key("calendar.create", first_args),
+        )
+
+    def test_repeated_identical_protected_action_deduplicates_without_replacing_pending(self) -> None:
+        args = {
+            "summary": "Same pending action",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        first = agent.execute_tool("calendar.create", args)
+        pending_before = agent._PENDING_ACTION
+        repeated = agent.execute_tool("calendar.create", dict(args))
+
+        self.assertTrue(first.ok)
+        self.assertTrue(repeated.ok)
+        self.assertEqual(agent._PENDING_ACTION, pending_before)
+
     def test_mutated_staged_user_confirmation_is_cancelled(self) -> None:
         args = {
             "summary": "Original pending action",

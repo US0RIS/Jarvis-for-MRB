@@ -509,18 +509,22 @@ def activate_matching(query: str) -> dict[str, Any]:
 
 
 def pause_matching(query: str) -> dict[str, Any]:
-    from jarvis_mrb.desired_state import set_state
+    from jarvis_mrb.desired_state import set_state, update_authority
 
     state = find_desired_state(query)
     if state is None:
         raise ValueError("Agency could not uniquely identify that desired state.")
-    return set_state(str(state["id"]), "paused")
+    state_id = str(state["id"])
+    update_authority(state_id, {"agency_enabled": False})
+    return set_state(state_id, "paused")
 
 
 def reactivate(desired_state_id: str) -> dict[str, Any]:
-    from jarvis_mrb.desired_state import set_state
+    from jarvis_mrb.desired_state import set_state, update_authority
 
-    state = set_state(str(desired_state_id), "active")
+    state_id = str(desired_state_id)
+    update_authority(state_id, {"agency_enabled": True})
+    state = set_state(state_id, "active")
     with _connect() as conn:
         conn.execute(
             """

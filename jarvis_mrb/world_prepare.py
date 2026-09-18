@@ -79,6 +79,7 @@ def prepare(*, backup: bool = True, force_backfill: bool = False) -> dict[str, A
         "backfill": {},
         "extended_backfill": {},
         "refresh": {},
+        "agency": {},
         "diagnostics": {},
         "errors": [],
     }
@@ -132,6 +133,17 @@ def prepare(*, backup: bool = True, force_backfill: bool = False) -> dict[str, A
             result["ok"] = False
             result["refresh"][label] = {"error": str(exc)[:1000]}
             result["errors"].append(f"{label}: {exc}")
+
+    try:
+        from jarvis_mrb.agency_bootstrap import prepare as prepare_agency
+        result["agency"] = prepare_agency(sync_goals=True)
+        if not bool(result["agency"].get("ok")):
+            result["ok"] = False
+            result["errors"].extend(str(item) for item in result["agency"].get("errors", []))
+    except Exception as exc:
+        result["ok"] = False
+        result["agency"] = {"ok": False, "error": str(exc)[:1000]}
+        result["errors"].append(f"agency: {exc}")
 
     try:
         from jarvis_mrb.world_diagnostics import validate

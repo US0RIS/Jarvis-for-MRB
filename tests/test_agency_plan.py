@@ -235,6 +235,63 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertFalse(replay.ok)
         replay_unchecked.assert_not_called()
 
+    def test_interrupted_protected_execution_is_never_replayed_automatically(self) -> None:
+        _, state_id = self._state_for_project("Project Interrupted Write")
+        args = {
+            "summary": "Interrupted write",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "write", "tool": "calendar.create", "arguments": args}],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step_id = str(waiting["steps"][0]["id"])
+        agency_plan._grant_step_approval(step_id, "calendar.create", args)
+
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                """
+                UPDATE agency_steps
+                SET status='executing',attempt_count=attempt_count+1,started_at=?
+                WHERE id=?
+                """,
+                ("2030-01-01T09:00:00-08:00", step_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        recovered = agency_plan.reconcile_plan(plan["id"])
+        self.assertEqual(recovered["status"], "needs_replan")
+        step = recovered["steps"][0]
+        self.assertEqual(step["status"], "failed")
+        self.assertEqual(step["approval_digest"], "")
+        self.assertIn("automatic replay is forbidden", step["blocked_reason"])
+        self.assertIsNone(agency_plan.next_ready_step(plan["id"]))
+
+        from jarvis_mrb.tool_audit import agency_step_context
+        with (
+            agency_step_context(step_id),
+            patch.object(
+                agent,
+                "_execute_unchecked",
+                return_value=agent.AgentReply(True, "must not replay"),
+            ) as unchecked,
+        ):
+            replay = agent.execute_tool(
+                "calendar.create",
+                args,
+                bypass_confirmation=True,
+            )
+        self.assertFalse(replay.ok)
+        unchecked.assert_not_called()
+
     def test_pausing_goal_after_approval_is_staged_prevents_execution(self) -> None:
         _, state_id = self._state_for_project("Project Revoke Goal")
         plan = agency_plan.create_plan(

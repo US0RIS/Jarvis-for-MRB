@@ -223,8 +223,25 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertEqual(state["state"], "paused")
         self.assertFalse(state["authority"]["agency_enabled"])
 
-        activated = agency_runtime.activate_matching("Ship Project Hermes")
+        activated = agency_runtime.activate_matching(
+            "Ship Project Hermes",
+            contract_compiler=lambda _prompt: {
+                "confidence": 0.95,
+                "criteria": [
+                    {
+                        "kind": "event_match",
+                        "terms_all": ["Project Hermes", "completed"],
+                        "terms_none": ["not completed", "pending"],
+                        "event_types": [],
+                        "source_kinds": ["jarvis_verifier"],
+                    }
+                ],
+                "explanation": "A future independently verified event must state Project Hermes is completed.",
+            },
+        )
         self.assertEqual(activated["state"], "active")
+        self.assertTrue(activated["authority"]["contract_compiled"])
+        self.assertEqual(activated["criteria"][0]["kind"], "event_match")
 
     def test_goal_completion_closes_imported_desired_state(self) -> None:
         goal_id = world_model.ensure_entity("goal", "Finish Project Iris")

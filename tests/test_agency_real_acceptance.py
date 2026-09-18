@@ -376,6 +376,213 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertEqual(flagged[0]["event_id"], 1)
         self.assertEqual(flagged[0]["tool"], "web.search")
 
+    def test_a4_requires_real_observation_and_terminal_event_proof(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Verification Trail Gate")
+        state = desired_state.create_desired_state(
+            "Verification Trail Gate complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-proof",
+        )
+
+        def audited_calendar_executor(
+            tool: str,
+            args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted write.",
+                data={"event_id": f"event-{step_id[-8:]}"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            positive_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "positive-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Verification positive",
+                            "start": "2030-01-01T09:00:00-08:00",
+                            "end": "2030-01-01T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                positive_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            approved = agency_plan.approve_step(
+                positive_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            positive_verification = str(approved["steps"][0]["verification_id"])
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Independent exact-ID calendar read-back succeeded."),
+            ):
+                outcome = world_verification.check_one(positive_verification, force=True)
+            self.assertEqual(outcome["status"], "verified")
+            agency_plan.reconcile_plan(positive_plan["id"])
+
+            negative_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "negative-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Verification timeout",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                negative_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            approved = agency_plan.approve_step(
+                negative_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            negative_verification = str(approved["steps"][0]["verification_id"])
+            expired = "2000-01-01T00:00:00+00:00"
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    "UPDATE action_verifications SET deadline_at=?,next_check_at=? WHERE id=?",
+                    (expired, expired, negative_verification),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("pending", "Independent observer did not find the exact event."),
+            ):
+                outcome = world_verification.check_one(negative_verification, force=True)
+            self.assertEqual(outcome["status"], "timed_out")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertTrue(evaluation["passed"], evaluation["checks"])
+        self.assertTrue(evaluation["evidence"]["verified_real_write_observed"])
+        self.assertTrue(evaluation["evidence"]["failure_timeout_or_unverified_observed"])
+
+    def test_a4_status_flip_without_observation_trail_does_not_count_as_verified(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Forged Verification Gate")
+        state = desired_state.create_desired_state(
+            "Forged Verification Gate complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-forged",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Forged verification",
+                        "start": "2030-01-01T11:00:00-08:00",
+                        "end": "2030-01-01T11:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            step_id = str(waiting["steps"][0]["id"])
+
+            action_event_id = world_model.record_tool_execution(
+                "calendar.create",
+                dict(waiting["steps"][0]["arguments"]),
+                ok=True,
+                message="Audited attempt exists.",
+                agency_step_id=step_id,
+            )
+            verification_id = world_verification.register_execution(
+                "calendar.create",
+                dict(waiting["steps"][0]["arguments"]),
+                SimpleNamespace(
+                    ok=True,
+                    message="Provider accepted write.",
+                    data={"event_id": "forged-status-event"},
+                ),
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE action_verifications
+                    SET status='verified',last_evidence='forged status only'
+                    WHERE id=?
+                    """,
+                    (verification_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        verified_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("real external write has independently verified")
+        )
+        self.assertFalse(verified_check["passed"])
+        self.assertFalse(evaluation["passed"])
+
     def test_a5_requires_external_change_before_invalidation_and_new_generation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Causal Replan Gate")
         state = desired_state.create_desired_state(

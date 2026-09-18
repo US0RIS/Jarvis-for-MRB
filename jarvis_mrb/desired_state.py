@@ -502,12 +502,13 @@ def sync_from_intentions() -> dict[str, int]:
                     }
                 ],
                 intention_id=intention_id,
-                authority={},
+                authority={"agency_enabled": False, "origin": "legacy_goal"},
                 priority=60.0,
                 source_kind="jarvis_intention",
                 source_ref=intention_id,
                 desired_state_id=state_id,
             )
+            set_state(state_id, "paused")
             created += 1
             existing = get_desired_state(state_id)
 
@@ -527,6 +528,10 @@ def sync_from_intentions() -> dict[str, int]:
         if intention_status == "retired":
             set_state(state_id, "retired")
             retired += 1
+            continue
+        if intention_status == "completed":
+            set_state(state_id, "satisfied")
+            evaluated += 1
             continue
 
         evaluate_desired_state(state_id, persist=True)

@@ -335,6 +335,45 @@ def _decision_context(decision_id: str) -> tuple[str, list[str]]:
         return ("", [])
 
 
+def _agency_context(agency_step_id: str) -> tuple[str, str, list[str]]:
+    if not agency_step_id:
+        return ("", "", [])
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT p.desired_state_id,d.title,d.intention_id
+                FROM agency_steps s
+                JOIN agency_plans p ON p.id=s.plan_id
+                LEFT JOIN desired_states d ON d.id=p.desired_state_id
+                WHERE s.id=?
+                """,
+                (str(agency_step_id),),
+            ).fetchone()
+            if row is None:
+                return ("", "", [])
+            desired_state_id = str(row["desired_state_id"] or "")
+            title = str(row["title"] or "")
+            intention_id = str(row["intention_id"] or "")
+            projects: list[str] = []
+            if intention_id:
+                project_rows = conn.execute(
+                    """
+                    SELECT e.canonical_name
+                    FROM intention_entities ie
+                    JOIN entities e ON e.id=ie.entity_id
+                    WHERE ie.intention_id=? AND ie.role='project'
+                    ORDER BY ie.confidence DESC
+                    LIMIT 5
+                    """,
+                    (intention_id,),
+                ).fetchall()
+                projects = [str(item["canonical_name"]) for item in project_rows]
+            return (desired_state_id, title, projects)
+    except sqlite3.OperationalError:
+        return ("", "", [])
+
+
 def _record_world_transition(
     verification_id: str,
     *,
@@ -343,11 +382,17 @@ def _record_world_transition(
     evidence: str,
     action_event_id: int,
     executive_decision_id: str,
+    agency_step_id: str = "",
 ) -> int | None:
     try:
         from jarvis_mrb.world_model import record_event
 
         objective, projects = _decision_context(executive_decision_id)
+        desired_state_id, agency_title, agency_projects = _agency_context(agency_step_id)
+        if not objective and agency_title:
+            objective = agency_title
+        if not projects and agency_projects:
+            projects = agency_projects
         context = f" for {objective}" if objective else ""
         project_text = f" ({', '.join(projects)})" if projects else ""
         event_id = record_event(
@@ -359,6 +404,8 @@ def _record_world_transition(
                 "verification_id": verification_id,
                 "action_event_id": int(action_event_id),
                 "executive_decision_id": executive_decision_id,
+                "agency_step_id": str(agency_step_id or ""),
+                "desired_state_id": desired_state_id,
                 "tool": tool,
                 "status": status,
                 "objective": objective,
@@ -442,6 +489,7 @@ def register_execution(
         evidence=evidence,
         action_event_id=int(action_event_id),
         executive_decision_id=str(executive_decision_id or ""),
+        agency_step_id=str(agency_step_id or ""),
     )
     if event_id is not None:
         with _connect() as conn:
@@ -643,6 +691,7 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
         evidence=evidence,
         action_event_id=int(row["action_event_id"]),
         executive_decision_id=str(row["executive_decision_id"] or ""),
+        agency_step_id=str(row["agency_step_id"] or ""),
     )
     with _connect() as conn:
         conn.execute(
@@ -661,6 +710,7 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
         "tool": str(row["tool"]),
         "evidence": evidence[:1500],
         "executive_decision_id": str(row["executive_decision_id"] or ""),
+        "agency_step_id": str(row["agency_step_id"] or ""),
     }
 
 

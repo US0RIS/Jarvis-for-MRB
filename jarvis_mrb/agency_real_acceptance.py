@@ -1625,7 +1625,9 @@ def _workers_overlap(workers: list[sqlite3.Row]) -> bool:
 
 
 def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
-    question_scope = " ".join(str(session["parameters"].get("question_contains") or "").lower().split())
+    question_scope = " ".join(
+        str(session["parameters"].get("question_contains") or "").lower().split()
+    )
     deliberations = conn.execute(
         "SELECT * FROM agency_deliberations WHERE created_at>=? AND status IN ('completed','partial') ORDER BY created_at",
         (session["started_at"],),
@@ -1634,9 +1636,14 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
         row for row in deliberations
         if question_scope in " ".join(str(row["question"] or "").lower().split())
     ]
+
     candidate = None
     workers: list[sqlite3.Row] = []
     disagreements: list[Any] = []
+    provenance_ok = False
+    role_coverage = False
+    synthesis_after_workers = False
+
     for row in deliberations:
         current_workers = conn.execute(
             """
@@ -1647,35 +1654,93 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             (str(row["id"]),),
         ).fetchall()
         current_disagreements = list(_loads(str(row["disagreement_json"]), []))
-        if len(current_workers) >= 2 and _workers_overlap(list(current_workers)) and current_disagreements:
+        roles = {str(worker["role"] or "").strip().lower() for worker in current_workers}
+        role_coverage_now = bool(
+            "evidence" in roles
+            and ({"skeptic", "counterexample"} & roles)
+            and "feasibility" in roles
+            and ({"risk_cost", "cost_risk", "risk", "cost"} & roles)
+        )
+        overlap_now = len(current_workers) >= 4 and _workers_overlap(list(current_workers))
+
+        current_provenance_ok = bool(current_workers)
+        for worker_row in current_workers:
+            output = dict(_loads(str(worker_row["output_json"]), {}))
+            for claim in output.get("claims") or []:
+                if (
+                    not isinstance(claim, dict)
+                    or str(claim.get("source") or "")
+                    not in {"context", "reasoning", "unknown"}
+                ):
+                    current_provenance_ok = False
+                    break
+            if not current_provenance_ok:
+                break
+
+        completed_at = _parse_time(str(row["completed_at"] or ""))
+        worker_completed = [
+            _parse_time(str(worker_row["completed_at"] or ""))
+            for worker_row in current_workers
+        ]
+        synthesis_payload = dict(_loads(str(row["synthesis_json"]), {}))
+        synthesis_after_now = bool(
+            completed_at
+            and worker_completed
+            and all(value is not None for value in worker_completed)
+            and completed_at >= max(value for value in worker_completed if value is not None)
+            and synthesis_payload
+        )
+
+        if (
+            role_coverage_now
+            and overlap_now
+            and current_provenance_ok
+            and current_disagreements
+            and synthesis_after_now
+        ):
             candidate = row
             workers = list(current_workers)
             disagreements = current_disagreements
+            provenance_ok = current_provenance_ok
+            role_coverage = role_coverage_now
+            synthesis_after_workers = synthesis_after_now
             break
-    provenance_ok = False
-    if workers:
-        provenance_ok = True
-        for worker in workers:
-            output = dict(_loads(str(worker["output_json"]), {}))
-            for claim in output.get("claims") or []:
-                if not isinstance(claim, dict) or str(claim.get("source") or "") not in {"context", "reasoning", "unknown"}:
-                    provenance_ok = False
-                    break
-            if not provenance_ok:
-                break
+
+    roles = sorted(str(row["role"]) for row in workers)
     checks = [
-        _check("two or more independent workers completed", len(workers) >= 2, [str(row["role"]) for row in workers]),
-        _check("worker execution intervals overlapped", bool(workers) and _workers_overlap(workers)),
-        _check("worker claim provenance remained structurally bounded", provenance_ok),
-        _check("material disagreement was preserved", bool(disagreements), disagreements[:5]),
+        _check(
+            "required epistemic worker roles completed",
+            role_coverage and len(workers) >= 4,
+            roles,
+        ),
+        _check(
+            "worker execution intervals overlapped",
+            bool(workers) and _workers_overlap(workers),
+        ),
+        _check(
+            "worker claim provenance remained structurally bounded",
+            provenance_ok,
+        ),
+        _check(
+            "material disagreement was preserved",
+            bool(disagreements),
+            disagreements[:5],
+        ),
+        _check(
+            "synthesis occurred after worker outputs completed",
+            synthesis_after_workers,
+            str(candidate["id"]) if candidate else "",
+        ),
     ]
     return {
         "checks": checks,
         "evidence": {
             "parallel_workers": len(workers),
             "parallel_overlap_observed": checks[1]["passed"],
+            "required_epistemic_roles_present": checks[0]["passed"],
             "provenance_structurally_bounded": checks[2]["passed"],
             "material_disagreement_preserved": checks[3]["passed"],
+            "synthesis_after_workers": checks[4]["passed"],
             "deliberation_id": str(candidate["id"]) if candidate else "",
         },
     }

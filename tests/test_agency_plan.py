@@ -554,6 +554,43 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn("bypass_confirmation", result["steps"][0]["result_summary"])
 
+    def test_confirmed_read_only_custom_adapter_becomes_verified_without_write_verifier(self) -> None:
+        _, state_id = self._state_for_project("Project Custom Read")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "custom-read",
+                    "tool": "custom.run",
+                    "arguments": {
+                        "name": "private_weather",
+                        "arguments": {"city": "Pasadena"},
+                    },
+                }
+            ],
+        )
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {"name": "private_weather", "enabled": True, "risk": "read"}
+            ],
+        ):
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="must wait"),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+            approved = agency_plan.approve_step(
+                plan["id"],
+                waiting["steps"][0]["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="read succeeded"),
+            )
+
+        self.assertEqual(approved["steps"][0]["status"], "verified")
+        self.assertEqual(approved["steps"][0]["result_summary"], "read succeeded")
+        self.assertEqual(approved["status"], "needs_replan")
+        self.assertIn("Plan exhausted", approved["last_error"])
+
     def test_protected_step_waits_for_persistent_approval_without_calling_executor(self) -> None:
         _, state_id = self._state_for_project("Project Approval")
         plan = agency_plan.create_plan(

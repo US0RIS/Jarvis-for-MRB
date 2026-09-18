@@ -17,6 +17,7 @@ from jarvis_mrb.agency_release import (
     get_receipt,
     get_receipt_for_session,
     record_real_gate_receipt,
+    _live_session_digest,
 )
 
 
@@ -78,6 +79,7 @@ def _connect() -> sqlite3.Connection:
             desired_state_id TEXT NOT NULL DEFAULT '',
             parameters_json TEXT NOT NULL DEFAULT '{}',
             baseline_json TEXT NOT NULL,
+            session_hash TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'running',
             last_evaluation_json TEXT NOT NULL DEFAULT '{}',
             receipt_id TEXT NOT NULL DEFAULT '',
@@ -86,6 +88,61 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_agency_real_gate_sessions_status
             ON agency_real_gate_sessions(status,gate,started_at DESC);
+        """
+    )
+    columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(agency_real_gate_sessions)").fetchall()
+    }
+    if "session_hash" not in columns:
+        conn.execute(
+            "ALTER TABLE agency_real_gate_sessions ADD COLUMN session_hash TEXT NOT NULL DEFAULT ''"
+        )
+    rows = conn.execute(
+        """
+        SELECT id,gate,deployment_sha,environment_fingerprint,desired_state_id,
+               parameters_json,baseline_json,started_at,session_hash
+        FROM agency_real_gate_sessions
+        WHERE session_hash=''
+        """
+    ).fetchall()
+    for row in rows:
+        digest = _live_session_digest(
+            session_id=str(row["id"]),
+            gate=str(row["gate"]),
+            deployment_sha_value=str(row["deployment_sha"]),
+            environment=str(row["environment_fingerprint"]),
+            desired_state_id=str(row["desired_state_id"] or ""),
+            parameters_json=str(row["parameters_json"] or "{}"),
+            baseline_json=str(row["baseline_json"] or "{}"),
+            started_at=str(row["started_at"]),
+        )
+        conn.execute(
+            "UPDATE agency_real_gate_sessions SET session_hash=? WHERE id=?",
+            (digest, str(row["id"])),
+        )
+    conn.executescript(
+        """
+        CREATE TRIGGER IF NOT EXISTS agency_real_gate_sessions_immutable_identity
+        BEFORE UPDATE ON agency_real_gate_sessions
+        WHEN NEW.id IS NOT OLD.id
+          OR NEW.gate IS NOT OLD.gate
+          OR NEW.deployment_sha IS NOT OLD.deployment_sha
+          OR NEW.environment_fingerprint IS NOT OLD.environment_fingerprint
+          OR NEW.desired_state_id IS NOT OLD.desired_state_id
+          OR NEW.parameters_json IS NOT OLD.parameters_json
+          OR NEW.baseline_json IS NOT OLD.baseline_json
+          OR NEW.session_hash IS NOT OLD.session_hash
+          OR NEW.started_at IS NOT OLD.started_at
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency REAL session identity and baseline are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_real_gate_sessions_no_delete
+        BEFORE DELETE ON agency_real_gate_sessions
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency REAL sessions are append-only');
+        END;
         """
     )
     conn.commit()
@@ -217,18 +274,29 @@ def start_session(
                 raise ValueError("A11 REAL session requires parameters.tool and parameters.preference_key.")
 
         session_id = f"agency-real-session:{uuid.uuid4()}"
+        parameters_json = json.dumps(params, ensure_ascii=False, sort_keys=True)
+        baseline_json = json.dumps(baseline, ensure_ascii=False, sort_keys=True, default=str)
+        started_at = _now()
+        session_hash = _live_session_digest(
+            session_id=session_id,
+            gate=clean_gate,
+            deployment_sha_value=sha,
+            environment=env,
+            desired_state_id=state_id,
+            parameters_json=parameters_json,
+            baseline_json=baseline_json,
+            started_at=started_at,
+        )
         conn.execute(
             """
             INSERT INTO agency_real_gate_sessions(
                 id,gate,deployment_sha,environment_fingerprint,desired_state_id,
-                parameters_json,baseline_json,status,started_at
-            ) VALUES(?,?,?,?,?,?,?,'running',?)
+                parameters_json,baseline_json,session_hash,status,started_at
+            ) VALUES(?,?,?,?,?,?,?,?,'running',?)
             """,
             (
                 session_id, clean_gate, sha, env, state_id,
-                json.dumps(params, ensure_ascii=False, sort_keys=True),
-                json.dumps(baseline, ensure_ascii=False, sort_keys=True, default=str),
-                _now(),
+                parameters_json, baseline_json, session_hash, started_at,
             ),
         )
         conn.commit()

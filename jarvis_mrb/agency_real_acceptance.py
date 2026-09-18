@@ -11,7 +11,12 @@ from typing import Any, Callable
 
 import jarvis_mrb.world_model as world_model
 from jarvis_mrb.agency_acceptance import REAL_GATES
-from jarvis_mrb.agency_release import deployment_sha, environment_fingerprint, record_real_gate_receipt
+from jarvis_mrb.agency_release import (
+    deployment_sha,
+    environment_fingerprint,
+    get_receipt_for_session,
+    record_real_gate_receipt,
+)
 
 
 _INTERNAL_EVENT_SOURCES = {
@@ -907,15 +912,23 @@ def finalize_session(session_id: str) -> dict[str, Any]:
         return {"passed": False, "receipt_created": False, "session": get_session(session_id), "evaluation": evaluation}
 
     trace_ref = _write_a12_trace(session, evaluation) if str(session["gate"]) == "A12" else ""
-    receipt = record_real_gate_receipt(
-        str(session["gate"]),
-        deployment_sha_value=str(session["deployment_sha"]),
-        environment=str(session["environment_fingerprint"]),
-        harness="agency-real-gate-session-v1",
-        checks=list(evaluation["checks"]),
-        evidence=dict(evaluation["evidence"]),
-        trace_ref=trace_ref,
-    )
+    try:
+        receipt = record_real_gate_receipt(
+            str(session["gate"]),
+            deployment_sha_value=str(session["deployment_sha"]),
+            environment=str(session["environment_fingerprint"]),
+            harness="agency-real-gate-session-v1",
+            checks=list(evaluation["checks"]),
+            evidence=dict(evaluation["evidence"]),
+            trace_ref=trace_ref,
+            session_id=str(session["id"]),
+        )
+    except sqlite3.IntegrityError:
+        # The partial unique session index makes concurrent finalizers converge on
+        # one immutable receipt. Only reuse a receipt that belongs to this session.
+        receipt = get_receipt_for_session(str(session["id"]))
+        if receipt is None:
+            raise
     completed_at = _now()
     with _connect() as conn:
         conn.execute(

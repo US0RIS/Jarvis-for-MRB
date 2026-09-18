@@ -142,6 +142,32 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertFalse(evaluated["satisfied"])
         self.assertEqual(evaluated["state"], "active")
 
+    def test_compiler_cannot_authorize_internal_agency_events_as_completion_evidence(self) -> None:
+        _, state_id = self._legacy_state()
+
+        with self.assertRaises(ValueError):
+            agency_runtime.activate_matching(
+                "Complete Project Apollo",
+                contract_compiler=lambda _prompt: {
+                    "confidence": 0.99,
+                    "criteria": [
+                        {
+                            "kind": "event_match",
+                            "terms_all": ["Project Apollo", "completed"],
+                            "terms_none": [],
+                            "event_types": [],
+                            "source_kinds": ["jarvis_agency"],
+                        }
+                    ],
+                    "explanation": "Unsafe self-certifying contract.",
+                },
+            )
+
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertFalse(state["authority"]["agency_enabled"])
+        self.assertIn("non-observation source", state["blocked_reason"])
+
     def test_deterministic_fallback_requires_achieved_state_language(self) -> None:
         self.assertIsNone(
             agency_goal_compiler._fallback_contract(

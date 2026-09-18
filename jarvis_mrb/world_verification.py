@@ -104,6 +104,18 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_verification_observations_verification
             ON verification_observations(verification_id,id DESC);
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_update
+        BEFORE UPDATE ON verification_observations
+        BEGIN
+            SELECT RAISE(ABORT, 'Verification observations are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_delete
+        BEFORE DELETE ON verification_observations
+        BEGIN
+            SELECT RAISE(ABORT, 'Verification observations are append-only');
+        END;
         """
     )
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(action_verifications)").fetchall()}

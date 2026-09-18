@@ -147,7 +147,7 @@ def prepare(*, backup: bool = True, force_backfill: bool = False) -> dict[str, A
 
     try:
         from jarvis_mrb.world_diagnostics import validate
-        result["diagnostics"] = validate()
+        result["diagnostics"] = validate(require_agency=True)
         if not bool(result["diagnostics"].get("ok")):
             result["ok"] = False
             result["errors"].extend(str(item) for item in result["diagnostics"].get("problems", []))

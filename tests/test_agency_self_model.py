@@ -155,6 +155,16 @@ class AgencySelfModelTests(unittest.TestCase):
         self.assertEqual(after["id"], stronger["id"])
         self.assertEqual(after["value"], {"prefer_time": True})
 
+    def test_source_inference_classification_distinguishes_explicit_policy(self) -> None:
+        self.assertTrue(agency_self_model.is_inferred_source("inferred"))
+        self.assertTrue(agency_self_model.is_inferred_source("inferred_behavior"))
+        self.assertTrue(agency_self_model.is_inferred_source("model_inference"))
+        self.assertTrue(agency_self_model.is_inferred_source("decision_history"))
+        self.assertFalse(agency_self_model.is_inferred_source("explicit_user"))
+        self.assertFalse(agency_self_model.is_inferred_source("user_correction"))
+        self.assertFalse(agency_self_model.is_inferred_source("explicit_policy"))
+        self.assertFalse(agency_self_model.is_inferred_source("imported_context"))
+
     def test_high_confidence_preference_never_grants_external_write_authority(self) -> None:
         agency_self_model.upsert(
             "preference",

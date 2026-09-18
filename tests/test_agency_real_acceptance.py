@@ -761,12 +761,17 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             ):
                 outcome = world_verification.check_one(negative_verification, force=True)
             self.assertEqual(outcome["status"], "timed_out")
+            negative_reconciled = agency_plan.reconcile_plan(negative_plan["id"])
+            self.assertEqual(negative_reconciled["status"], "needs_replan")
 
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
 
         self.assertTrue(evaluation["passed"], evaluation["checks"])
+        self.assertTrue(evaluation["evidence"]["action_attempt_persisted"])
+        self.assertTrue(evaluation["evidence"]["expected_outcome_persisted"])
         self.assertTrue(evaluation["evidence"]["verified_real_write_observed"])
         self.assertTrue(evaluation["evidence"]["failure_timeout_or_unverified_observed"])
+        self.assertTrue(evaluation["evidence"]["verification_feedback_observed"])
 
     def test_a4_status_flip_without_observation_trail_does_not_count_as_verified(self) -> None:
         entity_id = world_model.ensure_entity("project", "Forged Verification Gate")

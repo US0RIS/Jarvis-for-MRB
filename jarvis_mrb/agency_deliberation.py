@@ -88,20 +88,52 @@ def _extract_json(text: str) -> dict[str, Any]:
             return {"conclusion": raw[:4000], "claims": [], "risks": [], "unknowns": []}
 
 
-def _normalize_worker_output(role: str, raw: Any) -> dict[str, Any]:
+def _normalize_worker_output(role: str, raw: Any, *, context: str = "") -> dict[str, Any]:
     value = dict(raw) if isinstance(raw, dict) else {"conclusion": str(raw or "")}
     claims = value.get("claims") if isinstance(value.get("claims"), list) else []
     risks = value.get("risks") if isinstance(value.get("risks"), list) else []
     unknowns = value.get("unknowns") if isinstance(value.get("unknowns"), list) else []
+    context_text = str(context or "")
+    context_lower = context_text.lower()
+
+    clean_claims: list[dict[str, Any]] = []
+    for item in claims[:30]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            confidence = max(0.0, min(float(item.get("confidence") or 0.0), 1.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        source_class = str(item.get("source") or "unknown").strip().lower()
+        if source_class not in {"context", "reasoning", "unknown"}:
+            source_class = "unknown"
+        clean_claims.append(
+            {
+                "claim": " ".join(str(item.get("claim") or "").split())[:2400],
+                "confidence": confidence,
+                "evidence": " ".join(str(item.get("evidence") or "").split())[:3000],
+                "source": source_class,
+            }
+        )
+
+    raw_sources = value.get("sources") if isinstance(value.get("sources"), list) else []
+    clean_sources: list[str] = []
+    for item in raw_sources[:30]:
+        source_id = " ".join(str(item or "").split())[:1500]
+        if not source_id:
+            continue
+        # Provenance identifiers are accepted only if they literally occur in the
+        # supplied context. The model cannot mint a new source ID by assertion.
+        if source_id.lower() in context_lower and source_id not in clean_sources:
+            clean_sources.append(source_id)
+
     return {
         "role": role,
         "conclusion": str(value.get("conclusion") or "")[:5000],
-        "claims": [item for item in claims if isinstance(item, dict)][:30],
+        "claims": clean_claims,
         "risks": [str(item)[:1200] for item in risks[:20]],
         "unknowns": [str(item)[:1200] for item in unknowns[:20]],
-        "sources": [str(item)[:1500] for item in (value.get("sources") or [])[:30]]
-        if isinstance(value.get("sources"), list)
-        else [],
+        "sources": clean_sources,
     }
 
 
@@ -145,6 +177,7 @@ Never invent a source identifier. If evidence is unavailable, say so.
     return _normalize_worker_output(
         role,
         _extract_json(str((data.get("message") or {}).get("content") or "")),
+        context=context,
     )
 
 
@@ -292,7 +325,7 @@ def deliberate(
             conn.commit()
         try:
             raw = worker_fn(role, clean_question, str(context or ""))
-            output = _normalize_worker_output(role, raw)
+            output = _normalize_worker_output(role, raw, context=str(context or ""))
             elapsed = int((time.monotonic() - worker_started) * 1000)
             return role, output, "", elapsed
         except Exception as exc:

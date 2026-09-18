@@ -13,6 +13,7 @@ def prepare(*, sync_goals: bool = True) -> dict[str, Any]:
         agency_plan,
         agency_runtime,
         agency_self_model,
+        agency_real_acceptance,
         agency_release,
         desired_state,
     )
@@ -27,6 +28,7 @@ def prepare(*, sync_goals: bool = True) -> dict[str, Any]:
         "counterfactual": {},
         "deliberation": {},
         "self_model": {},
+        "real_acceptance": {},
         "release": {},
         "goal_sync": {},
         "errors": [],
@@ -40,6 +42,7 @@ def prepare(*, sync_goals: bool = True) -> dict[str, Any]:
         ("counterfactual", agency_counterfactual),
         ("deliberation", agency_deliberation),
         ("self_model", agency_self_model),
+        ("real_acceptance", agency_real_acceptance),
         ("release", agency_release),
     )
     for label, module in modules:

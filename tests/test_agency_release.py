@@ -287,6 +287,46 @@ class AgencyReleaseTests(unittest.TestCase):
                 tree_clean_after=True,
             )
 
+    def test_installation_identity_is_immutable(self) -> None:
+        installation_id = agency_release._installation_id()
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_installation_identity SET installation_id='changed' WHERE singleton=1"
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "DELETE FROM agency_installation_identity WHERE singleton=1"
+                )
+        finally:
+            conn.close()
+
+        self.assertEqual(agency_release._installation_id(), installation_id)
+
+    def test_environment_fingerprint_binds_host_and_source_path(self) -> None:
+        with (
+            patch.object(agency_release, "_host_machine_identity", return_value="host-A"),
+            patch.object(agency_release, "source_root", return_value=self.base / "source-A"),
+        ):
+            first = agency_release.environment_fingerprint()
+
+        with (
+            patch.object(agency_release, "_host_machine_identity", return_value="host-B"),
+            patch.object(agency_release, "source_root", return_value=self.base / "source-A"),
+        ):
+            other_host = agency_release.environment_fingerprint()
+
+        with (
+            patch.object(agency_release, "_host_machine_identity", return_value="host-A"),
+            patch.object(agency_release, "source_root", return_value=self.base / "source-B"),
+        ):
+            other_source = agency_release.environment_fingerprint()
+
+        self.assertNotEqual(first, other_host)
+        self.assertNotEqual(first, other_source)
+
     def test_real_gate_receipt_is_append_only(self) -> None:
         receipt = self._record("A1")
         conn = sqlite3.connect(self.db)

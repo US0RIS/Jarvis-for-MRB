@@ -229,6 +229,24 @@ class AgencyReleaseTests(unittest.TestCase):
         self.assertFalse(other_environment["release_ready"])
         self.assertEqual(other_environment["real_gate_receipts"], {})
 
+    def test_modified_a12_trace_invalidates_bound_receipt(self) -> None:
+        receipt = self._record("A12")
+        original_hash = receipt["trace_sha256"]
+        self.a12_trace.write_text(
+            "# replaced trace\nThis no longer matches the accepted evidence.\n",
+            encoding="utf-8",
+        )
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertIn("A12", status["missing_real_gates"])
+        reasons = status["invalid_real_gate_receipts"].get("A12", [])
+        self.assertTrue(any("trace content hash mismatch" in item["reason"] for item in reasons))
+        self.assertNotEqual(agency_release._file_sha256(str(self.a12_trace)), original_hash)
+
     def test_deleted_a12_trace_invalidates_release_evidence(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)

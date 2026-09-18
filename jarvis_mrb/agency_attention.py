@@ -137,7 +137,12 @@ def consider(
         f"threshold={float(threshold):.1f}"
     )
 
+    previous_last_emitted: str | None = None
+    reserved_emit_at: str | None = None
     with _connect() as conn:
+        # Serialize the dedup decision and emission reservation. Without this,
+        # concurrent producers can both observe last_emitted_at=NULL and interrupt.
+        conn.execute("BEGIN IMMEDIATE")
         existing = conn.execute(
             "SELECT * FROM agency_attention_events WHERE attention_key=?",
             (key,),
@@ -151,6 +156,7 @@ def consider(
             emitted_count = int(existing["emitted_count"])
             first_seen = str(existing["first_seen_at"])
             last_emitted = str(existing["last_emitted_at"] or "") or None
+            previous_last_emitted = last_emitted
             previous_emit = _parse_time(last_emitted)
             if previous_emit is not None and (_now_dt() - previous_emit) < timedelta(seconds=max(0, int(dedup_seconds))):
                 duplicate = True
@@ -204,6 +210,16 @@ def consider(
                 last_emitted,
             ),
         )
+        if should_emit:
+            reserved_emit_at = now
+            conn.execute(
+                """
+                UPDATE agency_attention_events
+                SET emitted_count=emitted_count+1,last_emitted_at=?,last_seen_at=?
+                WHERE attention_key=?
+                """,
+                (reserved_emit_at, now, key),
+            )
         conn.commit()
 
     emitted = False
@@ -215,19 +231,24 @@ def consider(
                 emit_proactive(value, cue="attention", severity=str(severity or "info"))
         else:
             emitter_fn = emitter
-        emitter_fn(clean_message)
-        emitted = True
-        emitted_at = _now()
-        with _connect() as conn:
-            conn.execute(
-                """
-                UPDATE agency_attention_events
-                SET emitted_count=emitted_count+1,last_emitted_at=?,last_seen_at=?
-                WHERE attention_key=?
-                """,
-                (emitted_at, emitted_at, key),
-            )
-            conn.commit()
+        try:
+            emitter_fn(clean_message)
+            emitted = True
+        except Exception:
+            # Release only our reservation. A later observation may retry the alert.
+            if reserved_emit_at is not None:
+                with _connect() as conn:
+                    conn.execute(
+                        """
+                        UPDATE agency_attention_events
+                        SET emitted_count=CASE WHEN emitted_count>0 THEN emitted_count-1 ELSE 0 END,
+                            last_emitted_at=?
+                        WHERE attention_key=? AND last_emitted_at=?
+                        """,
+                        (previous_last_emitted, key, reserved_emit_at),
+                    )
+                    conn.commit()
+            raise
 
     return {
         "attention_key": key,

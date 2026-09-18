@@ -53,6 +53,41 @@ def _receipt_digest(
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
 
+def _validation_digest(
+    *,
+    deployment_sha_value: str,
+    environment: str,
+    source_root_value: str,
+    compile_ok: bool,
+    regression_ok: bool,
+    synthetic_ok: bool,
+    diagnostics_ok: bool,
+    tree_clean_before: bool,
+    tree_clean_after: bool,
+    regression_summary: str,
+    synthetic_summary: str,
+    diagnostics_summary: str,
+    recorded_at: str,
+) -> str:
+    payload = {
+        "deployment_sha": str(deployment_sha_value),
+        "environment_fingerprint": str(environment),
+        "source_root": str(source_root_value),
+        "compile_ok": bool(compile_ok),
+        "regression_ok": bool(regression_ok),
+        "synthetic_ok": bool(synthetic_ok),
+        "diagnostics_ok": bool(diagnostics_ok),
+        "tree_clean_before": bool(tree_clean_before),
+        "tree_clean_after": bool(tree_clean_after),
+        "regression_summary": str(regression_summary),
+        "synthetic_summary": str(synthetic_summary),
+        "diagnostics_summary": str(diagnostics_summary),
+        "recorded_at": str(recorded_at),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
 def _file_sha256(path: str) -> str:
     target = Path(str(path or "")).expanduser()
     if not target.is_file():
@@ -197,6 +232,7 @@ def _connect() -> sqlite3.Connection:
             regression_summary TEXT NOT NULL DEFAULT '',
             synthetic_summary TEXT NOT NULL DEFAULT '',
             diagnostics_summary TEXT NOT NULL DEFAULT '',
+            validation_hash TEXT NOT NULL DEFAULT '',
             recorded_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_agency_release_validation_runs
@@ -244,6 +280,10 @@ def _connect() -> sqlite3.Connection:
     if "tree_clean_after" not in validation_columns:
         conn.execute(
             "ALTER TABLE agency_release_validation_runs ADD COLUMN tree_clean_after INTEGER NOT NULL DEFAULT 0"
+        )
+    if "validation_hash" not in validation_columns:
+        conn.execute(
+            "ALTER TABLE agency_release_validation_runs ADD COLUMN validation_hash TEXT NOT NULL DEFAULT ''"
         )
     conn.commit()
     return conn
@@ -587,14 +627,33 @@ def record_validation_run(
     run_id = f"agency-validation:{uuid.uuid4()}"
     env = str(environment or environment_fingerprint())
     recorded_at = _now()
+    clean_source_root = str(source_root_value or "")[:2000]
+    clean_regression_summary = str(regression_summary or "")[-5000:]
+    clean_synthetic_summary = str(synthetic_summary or "")[-5000:]
+    clean_diagnostics_summary = str(diagnostics_summary or "")[-5000:]
+    validation_hash = _validation_digest(
+        deployment_sha_value=clean_sha,
+        environment=env,
+        source_root_value=clean_source_root,
+        compile_ok=bool(compile_ok),
+        regression_ok=bool(regression_ok),
+        synthetic_ok=bool(synthetic_ok),
+        diagnostics_ok=bool(diagnostics_ok),
+        tree_clean_before=bool(tree_clean_before),
+        tree_clean_after=bool(tree_clean_after),
+        regression_summary=clean_regression_summary,
+        synthetic_summary=clean_synthetic_summary,
+        diagnostics_summary=clean_diagnostics_summary,
+        recorded_at=recorded_at,
+    )
     with _connect() as conn:
         conn.execute(
             """
             INSERT INTO agency_release_validation_runs(
                 id,deployment_sha,environment_fingerprint,source_root,compile_ok,regression_ok,
                 synthetic_ok,diagnostics_ok,tree_clean_before,tree_clean_after,
-                regression_summary,synthetic_summary,diagnostics_summary,recorded_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                regression_summary,synthetic_summary,diagnostics_summary,validation_hash,recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 run_id,
@@ -607,9 +666,10 @@ def record_validation_run(
                 1 if diagnostics_ok else 0,
                 1 if tree_clean_before else 0,
                 1 if tree_clean_after else 0,
-                str(regression_summary or "")[-5000:],
-                str(synthetic_summary or "")[-5000:],
-                str(diagnostics_summary or "")[-5000:],
+                clean_regression_summary,
+                clean_synthetic_summary,
+                clean_diagnostics_summary,
+                validation_hash,
                 recorded_at,
             ),
         )
@@ -695,8 +755,28 @@ def release_status(
     missing_real = sorted(REAL_GATES - set(by_gate))
 
     validation = latest_validation_run(sha, environment=env) if valid_sha else None
+    validation_hash_ok = False
+    if validation:
+        expected_validation_hash = _validation_digest(
+            deployment_sha_value=str(validation.get("deployment_sha") or ""),
+            environment=str(validation.get("environment_fingerprint") or ""),
+            source_root_value=str(validation.get("source_root") or ""),
+            compile_ok=int(validation.get("compile_ok") or 0) == 1,
+            regression_ok=int(validation.get("regression_ok") or 0) == 1,
+            synthetic_ok=int(validation.get("synthetic_ok") or 0) == 1,
+            diagnostics_ok=int(validation.get("diagnostics_ok") or 0) == 1,
+            tree_clean_before=int(validation.get("tree_clean_before") or 0) == 1,
+            tree_clean_after=int(validation.get("tree_clean_after") or 0) == 1,
+            regression_summary=str(validation.get("regression_summary") or ""),
+            synthetic_summary=str(validation.get("synthetic_summary") or ""),
+            diagnostics_summary=str(validation.get("diagnostics_summary") or ""),
+            recorded_at=str(validation.get("recorded_at") or ""),
+        )
+        validation_hash_ok = str(validation.get("validation_hash") or "") == expected_validation_hash
+
     validation_ok = bool(
         validation
+        and validation_hash_ok
         and int(validation.get("compile_ok") or 0) == 1
         and int(validation.get("regression_ok") or 0) == 1
         and int(validation.get("synthetic_ok") or 0) == 1
@@ -730,6 +810,7 @@ def release_status(
         "deployment_sha_valid": valid_sha,
         "environment_fingerprint": env,
         "validation_run": validation,
+        "validation_hash_ok": validation_hash_ok,
         "current_diagnostics_ok": diagnostics_ok,
         "real_gate_receipts": {gate: by_gate[gate]["id"] for gate in sorted(by_gate)},
         "invalid_real_gate_receipts": invalid_receipts,

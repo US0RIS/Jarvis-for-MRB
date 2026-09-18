@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -46,7 +47,8 @@ def _connect() -> sqlite3.Connection:
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             completed_at TEXT,
-            last_error TEXT NOT NULL DEFAULT ''
+            last_error TEXT NOT NULL DEFAULT '',
+            relevance_hash TEXT NOT NULL DEFAULT ''
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agency_plan_generation
             ON agency_plans(desired_state_id,generation);
@@ -79,6 +81,9 @@ def _connect() -> sqlite3.Connection:
             ON agency_steps(plan_id,status,ordinal);
         """
     )
+    plan_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_plans)").fetchall()}
+    if "relevance_hash" not in plan_columns:
+        conn.execute("ALTER TABLE agency_plans ADD COLUMN relevance_hash TEXT NOT NULL DEFAULT ''")
     conn.commit()
     return conn
 
@@ -95,6 +100,7 @@ def _row_to_plan(row: sqlite3.Row) -> dict[str, Any]:
         "updated_at": str(row["updated_at"]),
         "completed_at": str(row["completed_at"] or ""),
         "last_error": str(row["last_error"] or ""),
+        "relevance_hash": str(row["relevance_hash"] or ""),
     }
 
 
@@ -119,6 +125,85 @@ def _row_to_step(row: sqlite3.Row) -> dict[str, Any]:
         "started_at": str(row["started_at"] or ""),
         "finished_at": str(row["finished_at"] or ""),
     }
+
+
+def _relevance_hash(conn: sqlite3.Connection, desired_state_id: str) -> str:
+    """Fingerprint current world facts that can materially affect one desired state."""
+    try:
+        state = conn.execute(
+            "SELECT intention_id,criteria_json FROM desired_states WHERE id=?",
+            (str(desired_state_id),),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        state = None
+    if state is None:
+        return ""
+
+    criteria = list(_loads(str(state["criteria_json"]), []))
+    entity_ids: set[str] = set()
+    commitment_ids: set[str] = set()
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            continue
+        if criterion.get("entity_id"):
+            entity_ids.add(str(criterion["entity_id"]))
+        if criterion.get("commitment_id"):
+            commitment_ids.add(str(criterion["commitment_id"]))
+
+    intention_id = str(state["intention_id"] or "")
+    if intention_id:
+        try:
+            rows = conn.execute(
+                "SELECT entity_id FROM intention_entities WHERE intention_id=?",
+                (intention_id,),
+            ).fetchall()
+            entity_ids.update(str(row["entity_id"]) for row in rows)
+            rows = conn.execute(
+                "SELECT commitment_id FROM intention_commitments WHERE intention_id=?",
+                (intention_id,),
+            ).fetchall()
+            commitment_ids.update(str(row["commitment_id"]) for row in rows)
+        except sqlite3.OperationalError:
+            pass
+
+    snapshot: dict[str, Any] = {"entities": {}, "commitments": {}}
+    for entity_id in sorted(entity_ids):
+        beliefs = conn.execute(
+            """
+            SELECT predicate,object_id,value_json,confidence
+            FROM beliefs
+            WHERE subject_id=? AND state='current'
+            ORDER BY predicate,id
+            """,
+            (entity_id,),
+        ).fetchall()
+        snapshot["entities"][entity_id] = [
+            {
+                "predicate": str(row["predicate"]),
+                "object_id": str(row["object_id"] or ""),
+                "value_json": str(row["value_json"] or ""),
+                "confidence": round(float(row["confidence"] or 0.0), 6),
+            }
+            for row in beliefs
+        ]
+
+    for commitment_id in sorted(commitment_ids):
+        row = conn.execute(
+            """
+            SELECT owner_id,action,due_at,due_text,status,confidence,updated_at
+            FROM commitments WHERE id=?
+            """,
+            (commitment_id,),
+        ).fetchone()
+        snapshot["commitments"][commitment_id] = dict(row) if row else None
+
+    raw = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def relevance_hash(desired_state_id: str) -> str:
+    with _connect() as conn:
+        return _relevance_hash(conn, str(desired_state_id))
 
 
 def _desired_state_exists(conn: sqlite3.Connection, desired_state_id: str) -> bool:
@@ -212,11 +297,12 @@ def create_plan(
             """,
             (now, state_id),
         )
+        plan_relevance_hash = _relevance_hash(conn, state_id)
         conn.execute(
             """
             INSERT INTO agency_plans(
-                id,desired_state_id,generation,summary,rationale,status,created_at,updated_at
-            ) VALUES(?,?,?,?,?,'active',?,?)
+                id,desired_state_id,generation,summary,rationale,status,created_at,updated_at,relevance_hash
+            ) VALUES(?,?,?,?,?,'active',?,?,?)
             """,
             (
                 plan_id,
@@ -226,6 +312,7 @@ def create_plan(
                 " ".join(str(rationale or "").split())[:3000],
                 now,
                 now,
+                plan_relevance_hash,
             ),
         )
 
@@ -727,6 +814,36 @@ def _execute_step(
     return reconcile_plan(str(plan["id"]))
 
 
+def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -> dict[str, Any] | None:
+    baseline = str(plan.get("relevance_hash") or "")
+    current = relevance_hash(str(plan.get("desired_state_id") or ""))
+    if not baseline or not current or baseline == current:
+        return None
+    reason = "Relevant world state changed after this plan was compiled; replan before another consequential action."
+    with _connect() as conn:
+        if pending_step_id:
+            row = conn.execute("SELECT status FROM agency_steps WHERE id=?", (pending_step_id,)).fetchone()
+            if row is not None and str(row["status"]) == "awaiting_approval":
+                _set_step_status(
+                    conn,
+                    pending_step_id,
+                    "pending",
+                    blocked_reason="",
+                    result="Approval was not consumed because relevant world state changed.",
+                )
+        _set_plan_status(conn, str(plan["id"]), "needs_replan", error=reason)
+        conn.commit()
+    _record_event(
+        "agency.plan.invalidated",
+        reason,
+        plan_id=str(plan["id"]),
+        desired_state_id=str(plan["desired_state_id"]),
+        step_id=str(pending_step_id or ""),
+        payload={"baseline_relevance_hash": baseline, "current_relevance_hash": current},
+    )
+    return get_plan(str(plan["id"]), include_steps=True)
+
+
 def execute_next(plan_id: str, executor: Callable[..., Any]) -> dict[str, Any]:
     plan = reconcile_plan(str(plan_id))
     if str(plan.get("status") or "") in PLAN_TERMINAL_STATES | {"awaiting_approval", "awaiting_verification", "needs_replan", "blocked"}:
@@ -737,6 +854,10 @@ def execute_next(plan_id: str, executor: Callable[..., Any]) -> dict[str, Any]:
         return reconcile_plan(str(plan_id))
 
     permission = permission_decision(str(step["tool"]))
+    if str(permission.risk) != "read":
+        stale = _invalidate_stale_plan(plan)
+        if stale is not None:
+            return stale
     if not permission.allowed:
         with _connect() as conn:
             reason = f"Permission policy denies {permission.risk} action {step['tool']}."
@@ -805,6 +926,10 @@ def approve_step(plan_id: str, step_id: str, executor: Callable[..., Any]) -> di
         raise ValueError("Agency step is not waiting for approval.")
 
     permission = permission_decision(str(step["tool"]))
+    if str(permission.risk) != "read":
+        stale = _invalidate_stale_plan(plan, pending_step_id=str(step_id))
+        if stale is not None:
+            return stale
     if not permission.allowed:
         return deny_step(str(plan_id), str(step_id), reason=f"Permission policy now denies {permission.risk}.")
     return _execute_step(plan, step, executor, bypass_confirmation=True)

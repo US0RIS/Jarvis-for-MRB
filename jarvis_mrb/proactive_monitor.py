@@ -239,6 +239,13 @@ def _proactive_enabled() -> bool:
         return True
 
 
+def _check_agency_runtime() -> None:
+    """Advance persistent desired states with a deliberately small action budget."""
+    from jarvis_mrb.agency_runtime import tick_all
+
+    tick_all(max_actions=2, limit=50)
+
+
 def _check_desired_states() -> None:
     """Continuously reconcile declarative desired states against the world model.
 
@@ -261,6 +268,7 @@ def check_once() -> None:
     _run_isolated("proactive_urgent_mail", _check_urgent_mail)
     _run_isolated("action_verification", _check_action_verifications)
     _run_isolated("desired_state_evaluation", _check_desired_states)
+    _run_isolated("agency_runtime", _check_agency_runtime)
 
 
 def _loop() -> None:
@@ -273,6 +281,7 @@ def _loop() -> None:
             _run_isolated("proactive_calendar", _check_calendar)
             _run_isolated("action_verification", _check_action_verifications)
             _run_isolated("desired_state_evaluation", _check_desired_states)
+            _run_isolated("agency_runtime", _check_agency_runtime)
             if cycle % 3 == 0:
                 _run_isolated("proactive_urgent_mail", _check_urgent_mail)
         cycle += 1

@@ -106,6 +106,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             f"{title} ready",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "ready", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref=f"real:{title}",
         )
@@ -294,6 +295,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             "Causal Replan Gate scheduled",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "scheduled", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a5",
         )
@@ -356,6 +358,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             "Dormant Wake Gate available",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a6",
         )
@@ -403,6 +406,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             "Internal Wake Gate available",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a6-internal",
         )
@@ -556,6 +560,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             "Preference Authority Gate scheduled",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "scheduled", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a11",
         )
@@ -615,6 +620,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         state = desired_state.create_desired_state(
             "A12 Linked Deliberation complete",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a12-linked",
         )

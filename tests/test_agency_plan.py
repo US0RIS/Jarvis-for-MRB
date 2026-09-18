@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+import jarvis_mrb.agency_plan as agency_plan
+import jarvis_mrb.desired_state as desired_state
+import jarvis_mrb.permissions as permissions
+import jarvis_mrb.world_executive as world_executive
+import jarvis_mrb.world_model as world_model
+import jarvis_mrb.world_verification as world_verification
+from jarvis_mrb.tool_audit import current_agency_step_id
+
+
+class AgencyPlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.base = Path(self.temp.name)
+        self.db = self.base / "world_model.sqlite3"
+
+        world_model.APP_DIR = self.base
+        world_model.DB_PATH = self.db
+        world_executive.DB_PATH = self.db
+        desired_state.DB_PATH = self.db
+        agency_plan.DB_PATH = self.db
+        world_verification.DB_PATH = self.db
+
+        permissions.APP_DIR = self.base
+        permissions.POLICY_PATH = self.base / "permissions.json"
+
+        world_model.status()
+        world_executive.status()
+        desired_state.status()
+        agency_plan.status()
+        world_verification.status()
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _state_for_project(self, name: str = "Project Agency") -> tuple[str, str]:
+        entity_id = world_model.ensure_entity("project", name)
+        state = desired_state.create_desired_state(
+            f"{name} ready",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "ready", "value": True}],
+            source_kind="test",
+            source_ref=f"test:{name}",
+        )
+        return entity_id, str(state["id"])
+
+    def test_plan_persists_steps_and_dependencies(self) -> None:
+        _, state_id = self._state_for_project()
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {"id": "research", "tool": "knowledge.search", "arguments": {"query": "Agency"}},
+                {
+                    "id": "check",
+                    "tool": "fact.check",
+                    "arguments": {"claim": "Agency ready"},
+                    "depends_on": ["research"],
+                },
+            ],
+            summary="Determine whether Agency is ready",
+        )
+
+        loaded = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded["status"], "active")
+        self.assertEqual([step["step_key"] for step in loaded["steps"]], ["research", "check"])
+        self.assertEqual(loaded["steps"][1]["depends_on"], [loaded["steps"][0]["id"]])
+        self.assertEqual(agency_plan.current_plan(state_id)["id"], plan["id"])
+
+    def test_safe_steps_execute_in_dependency_order_and_close_when_world_converges(self) -> None:
+        entity_id, state_id = self._state_for_project("Project Converge")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {"id": "observe", "tool": "knowledge.search", "arguments": {"query": "Converge"}},
+                {
+                    "id": "confirm",
+                    "tool": "fact.check",
+                    "arguments": {"claim": "Project Converge ready"},
+                    "depends_on": ["observe"],
+                },
+            ],
+        )
+        calls: list[str] = []
+
+        def executor(tool: str, args: dict, **_: object) -> SimpleNamespace:
+            calls.append(tool)
+            if tool == "fact.check":
+                world_model.assert_belief(entity_id, "ready", value=True)
+            return SimpleNamespace(ok=True, message=f"{tool} returned")
+
+        first = agency_plan.execute_next(plan["id"], executor)
+        self.assertEqual(calls, ["knowledge.search"])
+        self.assertEqual(first["steps"][0]["status"], "verified")
+        self.assertEqual(first["steps"][1]["status"], "pending")
+        self.assertEqual(first["status"], "active")
+
+        second = agency_plan.execute_next(plan["id"], executor)
+        self.assertEqual(calls, ["knowledge.search", "fact.check"])
+        self.assertEqual(second["status"], "completed")
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "satisfied")
+        self.assertEqual(second["steps"][0]["status"], "verified")
+        # The final step may be verified directly or skipped during convergence;
+        # either way the desired state, not step count, is the termination authority.
+        self.assertIn(second["steps"][1]["status"], {"verified", "skipped"})
+
+    def test_protected_step_waits_for_persistent_approval_without_calling_executor(self) -> None:
+        _, state_id = self._state_for_project("Project Approval")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Agency test",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        calls: list[str] = []
+
+        def executor(tool: str, args: dict, **_: object) -> SimpleNamespace:
+            calls.append(tool)
+            return SimpleNamespace(ok=True, message="unexpected")
+
+        waiting = agency_plan.execute_next(plan["id"], executor)
+        self.assertEqual(calls, [])
+        self.assertEqual(waiting["status"], "awaiting_approval")
+        self.assertEqual(waiting["steps"][0]["status"], "awaiting_approval")
+
+        recovered = agency_plan.pending_approval()
+        self.assertIsNotNone(recovered)
+        assert recovered is not None
+        self.assertEqual(recovered["id"], waiting["steps"][0]["id"])
+
+    def test_denial_moves_plan_to_replan_instead_of_losing_goal(self) -> None:
+        _, state_id = self._state_for_project("Project Denial")
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "write", "tool": "gmail.send", "arguments": {"recipient": "a@example.com", "body": "test"}}],
+        )
+        agency_plan.execute_next(plan["id"], lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"))
+        denied = agency_plan.deny_pending(reason="No email.")
+        self.assertIsNotNone(denied)
+        assert denied is not None
+        self.assertEqual(denied["status"], "needs_replan")
+        self.assertEqual(denied["steps"][0]["status"], "blocked")
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
+
+    def test_approved_step_correlates_exact_action_verification(self) -> None:
+        _, state_id = self._state_for_project("Project Verify")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Agency verification test",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step_id = str(waiting["steps"][0]["id"])
+
+        def audited_fake(tool: str, args: dict, *, bypass_confirmation: bool = False) -> SimpleNamespace:
+            self.assertTrue(bypass_confirmation)
+            self.assertEqual(current_agency_step_id(), step_id)
+            reply = SimpleNamespace(ok=True, message="Calendar event created.")
+            action_event_id = world_model.record_tool_execution(tool, args, ok=True, message=reply.message)
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
+        resumed = agency_plan.approve_step(plan["id"], step_id, audited_fake)
+        self.assertEqual(resumed["status"], "awaiting_verification")
+        self.assertEqual(resumed["steps"][0]["status"], "awaiting_verification")
+        verification_id = resumed["steps"][0]["verification_id"]
+        self.assertTrue(verification_id)
+
+        conn = sqlite3.connect(self.db)
+        try:
+            row = conn.execute(
+                "SELECT agency_step_id,status FROM action_verifications WHERE id=?",
+                (verification_id,),
+            ).fetchone()
+            self.assertEqual(row[0], step_id)
+            self.assertEqual(row[1], "pending")
+            conn.execute(
+                "UPDATE action_verifications SET status='verified',last_evidence='Observed exact event.' WHERE id=?",
+                (verification_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        reconciled = agency_plan.reconcile_plan(plan["id"])
+        self.assertEqual(reconciled["steps"][0]["status"], "verified")
+        self.assertEqual(reconciled["status"], "needs_replan")
+        self.assertIn("not yet satisfied", reconciled["last_error"])
+
+    def test_new_generation_supersedes_old_plan_without_destroying_history(self) -> None:
+        _, state_id = self._state_for_project("Project Replan")
+        first = agency_plan.create_plan(
+            state_id,
+            [{"id": "a", "tool": "knowledge.search", "arguments": {"query": "old"}}],
+            summary="Old plan",
+        )
+        second = agency_plan.create_plan(
+            state_id,
+            [{"id": "b", "tool": "knowledge.search", "arguments": {"query": "new"}}],
+            summary="New plan",
+        )
+        old = agency_plan.get_plan(first["id"])
+        self.assertEqual(old["status"], "superseded")
+        self.assertEqual(second["generation"], first["generation"] + 1)
+        self.assertEqual(len(agency_plan.list_plans(desired_state_id=state_id)), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

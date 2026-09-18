@@ -206,6 +206,69 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
         self.assertEqual(emitted, ["One high-value exception"])
 
+    def test_real_session_identity_and_baseline_are_immutable(self) -> None:
+        state_id, _ = self._state_with_plan("Immutable Session")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_real_gate_sessions SET desired_state_id='tampered' WHERE id=?",
+                    (session["id"],),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "DELETE FROM agency_real_gate_sessions WHERE id=?",
+                    (session["id"],),
+                )
+        finally:
+            conn.close()
+
+    def test_forced_real_session_tampering_fails_integrity_check_and_cannot_finalize(self) -> None:
+        state_id, _ = self._state_with_plan("Tampered Session")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("DROP TRIGGER agency_real_gate_sessions_immutable_identity")
+            conn.execute(
+                "UPDATE agency_real_gate_sessions SET baseline_json='{}' WHERE id=?",
+                (session["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with self._patch_identity():
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            self.assertIn("integrity hash mismatch", evaluation["checks"][0]["evidence"])
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+
+        self.assertFalse(finalized["passed"])
+        self.assertFalse(finalized["receipt_created"])
+        self.assertEqual(
+            agency_release.list_real_gate_receipts(
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            ),
+            [],
+        )
+
     def test_uncorrelated_audited_tool_execution_is_manual_orchestration(self) -> None:
         events = [
             {

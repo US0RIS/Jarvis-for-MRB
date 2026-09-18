@@ -232,6 +232,269 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertEqual(protected["attempt_count"], 0)
         self.assertEqual(protected["status"], "awaiting_approval")
 
+    def test_a2_requires_two_causal_independently_verified_cycles(self) -> None:
+        state = desired_state.create_desired_state(
+            "A2 two-cycle convergence",
+            [
+                {
+                    "kind": "event_match",
+                    "terms_all": ["second cycle marker"],
+                    "source_kinds": ["jarvis_verifier"],
+                    "min_event_id": 0,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a2",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "first-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A2 first cycle",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                },
+                {
+                    "id": "second-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A2 second cycle",
+                        "start": "2030-01-01T10:00:00-08:00",
+                        "end": "2030-01-01T10:30:00-08:00",
+                    },
+                    "depends_on": ["first-write"],
+                },
+            ],
+            summary="Two independently verified convergence cycles",
+        )
+
+        event_counter = 0
+
+        def protected_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+            nonlocal event_counter
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            event_counter += 1
+            reply = SimpleNamespace(
+                ok=True,
+                message=f"Calendar accepted A2 cycle {event_counter}.",
+                data={"event_id": f"a2-event-{event_counter}"},
+            )
+            agency_step_id = current_agency_step_id()
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=agency_step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=agency_step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A2",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            first_waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            self.assertEqual(first_waiting["status"], "awaiting_approval")
+            first_step = next(
+                item for item in first_waiting["steps"]
+                if item["step_key"] == "first-write"
+            )
+            first_approved = agency_plan.approve_step(
+                plan["id"],
+                first_step["id"],
+                protected_executor,
+            )
+            first_verification_id = str(
+                next(
+                    item for item in first_approved["steps"]
+                    if item["step_key"] == "first-write"
+                )["verification_id"]
+            )
+            self.assertTrue(first_verification_id)
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "First cycle marker independent readback.",
+                ),
+            ):
+                first_verified = world_verification.check_one(
+                    first_verification_id,
+                    force=True,
+                )
+            self.assertEqual(first_verified["status"], "verified")
+
+            after_first = agency_plan.reconcile_plan(plan["id"])
+            self.assertEqual(after_first["status"], "active")
+            self.assertEqual(
+                next(
+                    item for item in after_first["steps"]
+                    if item["step_key"] == "first-write"
+                )["status"],
+                "verified",
+            )
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "active",
+            )
+
+            second_waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            self.assertEqual(second_waiting["status"], "awaiting_approval")
+            second_step = next(
+                item for item in second_waiting["steps"]
+                if item["step_key"] == "second-write"
+            )
+            second_approved = agency_plan.approve_step(
+                plan["id"],
+                second_step["id"],
+                protected_executor,
+            )
+            second_verification_id = str(
+                next(
+                    item for item in second_approved["steps"]
+                    if item["step_key"] == "second-write"
+                )["verification_id"]
+            )
+            self.assertTrue(second_verification_id)
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Second cycle marker independent readback.",
+                ),
+            ):
+                second_verified = world_verification.check_one(
+                    second_verification_id,
+                    force=True,
+                )
+            self.assertEqual(second_verified["status"], "verified")
+
+            completed = agency_plan.reconcile_plan(plan["id"])
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "satisfied",
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertEqual(evaluation["evidence"]["action_observation_cycles"], 2)
+            self.assertEqual(evaluation["evidence"]["independent_observation_cycles"], 2)
+            self.assertTrue(
+                evaluation["evidence"]["second_action_followed_first_observation"]
+            )
+            self.assertTrue(
+                evaluation["evidence"]["intermediate_unsatisfied_observed"]
+            )
+            self.assertTrue(evaluation["evidence"]["automatic_stop_observed"])
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A2")
+
+    def test_a2_two_reads_cannot_masquerade_as_action_observation_cycles(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A2 Read Shortcut")
+        state = desired_state.create_desired_state(
+            "A2 Read Shortcut ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a2-read-shortcut",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read-one",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "first observation"},
+                },
+                {
+                    "id": "read-two",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "second observation"},
+                    "depends_on": ["read-one"],
+                },
+            ],
+            summary="Old A2 shortcut regression",
+        )
+        calls = 0
+
+        def read_executor(
+            _tool: str,
+            _args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                world_model.assert_belief(
+                    entity_id,
+                    "ready",
+                    value=True,
+                    evidence="Synthetic test-only final satisfaction.",
+                )
+            return SimpleNamespace(ok=True, message=f"Read observation {calls}.")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A2",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            first = agency_plan.execute_next(plan["id"], read_executor)
+            self.assertEqual(first["status"], "active")
+            second = agency_plan.execute_next(plan["id"], read_executor)
+            self.assertEqual(second["status"], "completed")
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "satisfied",
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            self.assertEqual(evaluation["evidence"]["action_observation_cycles"], 0)
+            independent_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "two or more non-read actions received independent"
+                )
+            )
+            self.assertFalse(independent_check["passed"])
+
     def test_a8_receipt_is_derived_from_attention_ledger(self) -> None:
         emitted: list[str] = []
         state_id, _ = self._state_with_plan("Attention Gate")

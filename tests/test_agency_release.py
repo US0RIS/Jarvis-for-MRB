@@ -193,6 +193,53 @@ class AgencyReleaseTests(unittest.TestCase):
             conn.commit()
         return receipt
 
+    def _validation(self, **overrides: object) -> dict:
+        values: dict[str, object] = {
+            "deployment_sha_value": SHA_A,
+            "environment": ENV,
+            "source_root_value": str(self.base),
+            "compile_ok": True,
+            "regression_ok": True,
+            "synthetic_ok": True,
+            "diagnostics_ok": True,
+            "tree_clean_before": True,
+            "tree_clean_after": True,
+            "regression_summary": "",
+            "synthetic_summary": "",
+            "diagnostics_summary": "",
+        }
+        values.update(overrides)
+        payload = agency_release._validation_context_payload(
+            deployment_sha_value=str(values["deployment_sha_value"]),
+            environment=str(values["environment"]),
+            source_root_value=str(values["source_root_value"]),
+            compile_ok=bool(values["compile_ok"]),
+            regression_ok=bool(values["regression_ok"]),
+            synthetic_ok=bool(values["synthetic_ok"]),
+            diagnostics_ok=bool(values["diagnostics_ok"]),
+            tree_clean_before=bool(values["tree_clean_before"]),
+            tree_clean_after=bool(values["tree_clean_after"]),
+            regression_summary=str(values["regression_summary"])[-5000:],
+            synthetic_summary=str(values["synthetic_summary"])[-5000:],
+            diagnostics_summary=str(values["diagnostics_summary"])[-5000:],
+        )
+        with agency_release._validation_recording_context(payload):
+            return agency_release.record_validation_run(**values)
+
+    def test_low_level_validation_writer_rejects_asserted_pass_flags(self) -> None:
+        with self.assertRaisesRegex(ValueError, "run_full_validation"):
+            agency_release.record_validation_run(
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+                source_root_value=str(self.base),
+                compile_ok=True,
+                regression_ok=True,
+                synthetic_ok=True,
+                diagnostics_ok=True,
+                tree_clean_before=True,
+                tree_clean_after=True,
+            )
+
     def test_real_gate_receipt_is_append_only(self) -> None:
         receipt = self._record("A1")
         conn = sqlite3.connect(self.db)
@@ -290,7 +337,7 @@ class AgencyReleaseTests(unittest.TestCase):
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)
 
-        agency_release.record_validation_run(
+        self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),
@@ -342,7 +389,7 @@ class AgencyReleaseTests(unittest.TestCase):
     def test_deleted_a12_trace_invalidates_release_evidence(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)
-        agency_release.record_validation_run(
+        self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),
@@ -457,7 +504,7 @@ class AgencyReleaseTests(unittest.TestCase):
         self.assertNotEqual(first["id"], second["id"])
 
     def test_validation_must_postdate_selected_real_receipts(self) -> None:
-        agency_release.record_validation_run(
+        self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),
@@ -483,7 +530,7 @@ class AgencyReleaseTests(unittest.TestCase):
             any("predates" in reason for reason in status["reasons"])
         )
 
-        agency_release.record_validation_run(
+        self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),
@@ -506,7 +553,7 @@ class AgencyReleaseTests(unittest.TestCase):
     def test_validation_hash_detects_post_run_corruption(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)
-        run = agency_release.record_validation_run(
+        run = self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),
@@ -540,7 +587,7 @@ class AgencyReleaseTests(unittest.TestCase):
     def test_validation_record_with_dirty_tree_is_not_release_eligible(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)
-        agency_release.record_validation_run(
+        self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),
@@ -563,7 +610,7 @@ class AgencyReleaseTests(unittest.TestCase):
     def test_failed_validation_run_is_not_release_eligible(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)
-        agency_release.record_validation_run(
+        self._validation(
             deployment_sha_value=SHA_A,
             environment=ENV,
             source_root_value=str(self.base),

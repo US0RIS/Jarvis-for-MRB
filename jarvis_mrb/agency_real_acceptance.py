@@ -907,11 +907,98 @@ def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list
 
 def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
     state_id = session["desired_state_id"]
-    executions = [item for item in _events_for_state(events, state_id) if item["event_type"] == "agency.step.executed"]
-    unique_steps = {
-        str((item.get("payload") or {}).get("step_id") or "")
-        for item in executions if str((item.get("payload") or {}).get("step_id") or "")
-    }
+    baseline_event_id = int(session["baseline"].get("max_event_id") or 0)
+    verification_rows = _verification_rows_for_state(conn, state_id, session["started_at"])
+    cycles = [
+        row for row in verification_rows
+        if str(row.get("risk") or "") != "read"
+        and str(row.get("status") or "") == "verified"
+        and str(row.get("verifier") or "") not in {
+            "return_value",
+            "tool_return",
+            "no_independent_verifier",
+        }
+        and bool(row.get("independent_terminal_proof"))
+        and int(row.get("action_event_id") or 0) > baseline_event_id
+        and int(row.get("resolved_event_id") or 0) > int(row.get("action_event_id") or 0)
+    ]
+    cycles.sort(key=lambda item: int(item.get("resolved_event_id") or 0))
+
+    evaluations = conn.execute(
+        """
+        SELECT id,observed_at,satisfied,state_before,state_after
+        FROM desired_state_evaluations
+        WHERE desired_state_id=? AND observed_at>=?
+        ORDER BY observed_at,id
+        """,
+        (state_id, session["started_at"]),
+    ).fetchall()
+
+    causal_pair: dict[str, Any] | None = None
+    for first_index, first in enumerate(cycles):
+        first_resolved_id = int(first.get("resolved_event_id") or 0)
+        first_event = conn.execute(
+            "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+            (first_resolved_id,),
+        ).fetchone()
+        first_time = _parse_time(
+            str(
+                (first_event["recorded_at"] if first_event else "")
+                or (first_event["occurred_at"] if first_event else "")
+                or ""
+            )
+        )
+        if first_time is None:
+            continue
+
+        for second in cycles[first_index + 1 :]:
+            second_action_id = int(second.get("action_event_id") or 0)
+            if second_action_id <= first_resolved_id:
+                continue
+            second_event = conn.execute(
+                "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+                (second_action_id,),
+            ).fetchone()
+            second_time = _parse_time(
+                str(
+                    (second_event["recorded_at"] if second_event else "")
+                    or (second_event["occurred_at"] if second_event else "")
+                    or ""
+                )
+            )
+            if second_time is None or second_time < first_time:
+                continue
+
+            between = []
+            for evaluation in evaluations:
+                if int(evaluation["satisfied"] or 0) != 0:
+                    continue
+                observed_at = _parse_time(str(evaluation["observed_at"] or ""))
+                if observed_at is None:
+                    continue
+                if first_time <= observed_at <= second_time:
+                    between.append(
+                        {
+                            "id": int(evaluation["id"]),
+                            "observed_at": str(evaluation["observed_at"]),
+                            "state_before": str(evaluation["state_before"]),
+                            "state_after": str(evaluation["state_after"]),
+                        }
+                    )
+            if between:
+                causal_pair = {
+                    "first_verification_id": str(first.get("id") or ""),
+                    "first_action_event_id": int(first.get("action_event_id") or 0),
+                    "first_resolved_event_id": first_resolved_id,
+                    "intermediate_unsatisfied_evaluations": between,
+                    "second_verification_id": str(second.get("id") or ""),
+                    "second_action_event_id": second_action_id,
+                    "second_resolved_event_id": int(second.get("resolved_event_id") or 0),
+                }
+                break
+        if causal_pair is not None:
+            break
+
     desired = _desired_state_row(conn, state_id)
     current_plan = _current_plan_baseline(conn, state_id)
     open_steps = int(conn.execute(
@@ -923,21 +1010,70 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
         """,
         (state_id,),
     ).fetchone()[0])
+
+    post_satisfaction_actions: list[dict[str, Any]] = []
+    satisfied_at = _parse_time(str(desired["satisfied_at"] or "")) if desired is not None else None
+    if satisfied_at is not None:
+        for row in verification_rows:
+            created_at = _parse_time(str(row.get("created_at") or ""))
+            if created_at is not None and created_at > satisfied_at:
+                post_satisfaction_actions.append(
+                    {
+                        "verification_id": str(row.get("id") or ""),
+                        "agency_step_id": str(row.get("agency_step_id") or ""),
+                        "tool": str(row.get("tool") or ""),
+                        "created_at": str(row.get("created_at") or ""),
+                    }
+                )
+
     restatements = _goal_restatement_ids(conn, session)
     checks = [
-        _check("two or more action/observation steps executed", len(unique_steps) >= 2, sorted(unique_steps)),
+        _check(
+            "two or more non-read actions received independent verified observations",
+            len(cycles) >= 2,
+            [
+                {
+                    "verification_id": str(row.get("id") or ""),
+                    "agency_step_id": str(row.get("agency_step_id") or ""),
+                    "tool": str(row.get("tool") or ""),
+                    "action_event_id": int(row.get("action_event_id") or 0),
+                    "resolved_event_id": int(row.get("resolved_event_id") or 0),
+                    "verifier": str(row.get("verifier") or ""),
+                }
+                for row in cycles
+            ],
+        ),
+        _check(
+            "a second action occurred only after the first independent observation",
+            causal_pair is not None,
+            causal_pair,
+        ),
+        _check(
+            "desired state was still unsatisfied after the first observation and before the second action",
+            causal_pair is not None
+            and bool(causal_pair.get("intermediate_unsatisfied_evaluations")),
+            causal_pair,
+        ),
         _check("desired state became satisfied", desired is not None and str(desired["state"]) == "satisfied"),
         _check("current plan is completed", str(current_plan.get("status") or "") == "completed", current_plan),
         _check("no open plan steps remain after convergence", open_steps == 0, open_steps),
+        _check(
+            "no further Agency action occurred after satisfaction",
+            len(post_satisfaction_actions) == 0,
+            post_satisfaction_actions,
+        ),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
     ]
     return {
         "checks": checks,
         "evidence": {
-            "action_observation_cycles": len(unique_steps),
-            "desired_state_satisfied": checks[1]["passed"],
-            "automatic_stop_observed": checks[2]["passed"] and checks[3]["passed"],
-            "goal_not_repeated": checks[4]["passed"],
+            "action_observation_cycles": len(cycles),
+            "independent_observation_cycles": len(cycles),
+            "second_action_followed_first_observation": checks[1]["passed"],
+            "intermediate_unsatisfied_observed": checks[2]["passed"],
+            "desired_state_satisfied": checks[3]["passed"],
+            "automatic_stop_observed": checks[4]["passed"] and checks[5]["passed"] and checks[6]["passed"],
+            "goal_not_repeated": checks[7]["passed"],
         },
     }
 

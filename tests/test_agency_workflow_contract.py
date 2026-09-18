@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from jarvis_mrb.workflow_engine import _ALLOWED_NODE_TOOLS, _validate_plan, execute_workflow
+from jarvis_mrb.workflow_engine import (
+    _ALLOWED_NODE_TOOLS,
+    _enabled_custom_tool_catalog,
+    _validate_plan,
+    execute_workflow,
+)
 
 
 class AgencyWorkflowContractTests(unittest.TestCase):
@@ -31,6 +36,37 @@ class AgencyWorkflowContractTests(unittest.TestCase):
             "missing_capability": None,
         }
         _validate_plan(plan)
+
+    def test_enabled_custom_adapter_can_be_referenced_through_custom_run(self) -> None:
+        self.assertIn("custom.run", _ALLOWED_NODE_TOOLS)
+        _validate_plan(
+            {
+                "summary": "Use enabled adapter.",
+                "nodes": [
+                    {
+                        "id": "custom",
+                        "tool": "custom.run",
+                        "arguments": {
+                            "name": "private_weather",
+                            "arguments": {"city": "Pasadena"},
+                        },
+                        "depends_on": [],
+                    }
+                ],
+                "missing_capability": None,
+            }
+        )
+
+    def test_custom_catalog_contains_only_enabled_adapters(self) -> None:
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {"name": "enabled_one", "enabled": True, "risk": "read", "description": "Enabled"},
+                {"name": "disabled_one", "enabled": False, "risk": "read", "description": "Disabled"},
+            ],
+        ):
+            catalog = _enabled_custom_tool_catalog()
+        self.assertEqual([item["name"] for item in catalog], ["enabled_one"])
 
     def test_explicit_missing_capability_can_replace_fake_node(self) -> None:
         _validate_plan(

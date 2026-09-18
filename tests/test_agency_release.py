@@ -35,6 +35,9 @@ def evidence_for(gate: str) -> dict:
         },
         "A2": {
             "action_observation_cycles": 2,
+            "independent_observation_cycles": 2,
+            "second_action_followed_first_observation": True,
+            "intermediate_unsatisfied_observed": True,
             "desired_state_satisfied": True,
             "automatic_stop_observed": True,
             "goal_not_repeated": True,
@@ -404,6 +407,12 @@ class AgencyReleaseTests(unittest.TestCase):
                     "manual_orchestration": False,
                 },
             )
+
+    def test_a2_receipt_rejects_step_count_without_independent_causal_cycles(self) -> None:
+        evidence = evidence_for("A2")
+        evidence["intermediate_unsatisfied_observed"] = False
+        with self.assertRaisesRegex(ValueError, "intermediate_unsatisfied_observed"):
+            agency_release._validate_gate_evidence("A2", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

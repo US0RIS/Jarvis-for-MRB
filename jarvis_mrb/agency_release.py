@@ -659,10 +659,12 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_true(evidence, "reactivated_without_goal_restatement", gate)
         _require_true(evidence, "next_step_surfaced_or_executed", gate)
     elif gate == "A7":
-        _require_int_at_least(evidence, "parallel_workers", 2, gate)
+        _require_int_at_least(evidence, "parallel_workers", 4, gate)
         _require_true(evidence, "parallel_overlap_observed", gate)
+        _require_true(evidence, "required_epistemic_roles_present", gate)
         _require_true(evidence, "provenance_structurally_bounded", gate)
         _require_true(evidence, "material_disagreement_preserved", gate)
+        _require_true(evidence, "synthesis_after_workers", gate)
     elif gate == "A8":
         _require_int_at_least(evidence, "low_value_changes", 5, gate)
         if int(evidence.get("bounded_interruptions", -1)) != 1:

@@ -241,9 +241,66 @@ def _proactive_enabled() -> bool:
 
 def _check_agency_runtime() -> None:
     """Advance persistent desired states with a deliberately small action budget."""
+    from jarvis_mrb.agency_attention import consider
     from jarvis_mrb.agency_runtime import tick_all
+    from jarvis_mrb.desired_state import get_desired_state
 
-    tick_all(max_actions=2, limit=50)
+    report = tick_all(max_actions=2, limit=50)
+    for item in report.get("results") or []:
+        state_id = str(item.get("desired_state_id") or "")
+        state = get_desired_state(state_id) or {}
+        title = str(state.get("title") or state_id or "an Agency goal")
+        status = str(item.get("status") or "")
+        plan = item.get("plan") if isinstance(item.get("plan"), dict) else {}
+
+        if status == "awaiting_approval":
+            waiting = [
+                step for step in (plan.get("steps") or [])
+                if str(step.get("status") or "") == "awaiting_approval"
+            ]
+            step = waiting[0] if waiting else {}
+            tool = str(step.get("tool") or "a protected action")
+            consider(
+                kind="approval_required",
+                message=f"Agency needs your approval to continue {title}: {tool}.",
+                desired_state_id=state_id,
+                dedup_key=f"agency-approval:{plan.get('id')}:{step.get('id')}",
+                benefit=90,
+                urgency=70,
+                confidence=1.0,
+                error_cost=0,
+                attention_cost=20,
+                severity="warning",
+                dedup_seconds=24 * 3600,
+            )
+        elif status == "blocked":
+            consider(
+                kind="blocked",
+                message=f"Agency is blocked on {title}.",
+                desired_state_id=state_id,
+                dedup_key=f"agency-blocked:{state_id}:{state.get('blocked_reason')}",
+                benefit=55,
+                urgency=20,
+                confidence=1.0,
+                error_cost=10,
+                attention_cost=25,
+                severity="info",
+                dedup_seconds=24 * 3600,
+            )
+        elif status == "satisfied":
+            consider(
+                kind="satisfied",
+                message=f"Agency satisfied {title}.",
+                desired_state_id=state_id,
+                dedup_key=f"agency-satisfied:{state_id}:{state.get('satisfied_at')}",
+                benefit=20,
+                urgency=0,
+                confidence=1.0,
+                error_cost=0,
+                attention_cost=25,
+                severity="info",
+                dedup_seconds=7 * 24 * 3600,
+            )
 
 
 def _check_desired_states() -> None:

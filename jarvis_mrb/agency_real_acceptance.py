@@ -703,7 +703,71 @@ def _verification_rows_for_state(conn: sqlite3.Connection, desired_state_id: str
         ).fetchall()
     except sqlite3.OperationalError:
         rows = []
-    return [dict(row) for row in rows]
+
+    result: list[dict[str, Any]] = []
+    for raw in rows:
+        item = dict(raw)
+        verification_id = str(item.get("id") or "")
+        step_id = str(item.get("agency_step_id") or "")
+        tool = str(item.get("tool") or "")
+        status = str(item.get("status") or "")
+        action_event_id = int(item.get("action_event_id") or 0)
+        resolved_event_id = int(item.get("resolved_event_id") or 0)
+
+        action_event = conn.execute(
+            """
+            SELECT event_type,source_kind,payload_json
+            FROM events WHERE id=?
+            """,
+            (action_event_id,),
+        ).fetchone() if action_event_id else None
+        action_payload = dict(_loads(str(action_event["payload_json"] or "{}"), {})) if action_event else {}
+        action_event_proof = bool(
+            action_event
+            and str(action_event["event_type"] or "") == "action.tool"
+            and str(action_event["source_kind"] or "") == "jarvis_tool"
+            and str(action_payload.get("agency_step_id") or "") == step_id
+            and str(action_payload.get("tool") or "") == tool
+        )
+
+        resolved_event = conn.execute(
+            """
+            SELECT event_type,source_kind,payload_json
+            FROM events WHERE id=?
+            """,
+            (resolved_event_id,),
+        ).fetchone() if resolved_event_id else None
+        resolved_payload = dict(_loads(str(resolved_event["payload_json"] or "{}"), {})) if resolved_event else {}
+        terminal_event_proof = bool(
+            resolved_event
+            and str(resolved_event["event_type"] or "") == f"verification.{status}"
+            and str(resolved_event["source_kind"] or "") == "jarvis_verifier"
+            and str(resolved_payload.get("verification_id") or "") == verification_id
+            and str(resolved_payload.get("agency_step_id") or "") == step_id
+            and str(resolved_payload.get("tool") or "") == tool
+        )
+
+        observation_proof = False
+        if status in {"verified", "failed", "timed_out"}:
+            observation_proof = conn.execute(
+                """
+                SELECT 1 FROM verification_observations
+                WHERE verification_id=? AND outcome=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (verification_id, status),
+            ).fetchone() is not None
+        elif status == "unverified":
+            observation_proof = str(item.get("verifier") or "") == "no_independent_verifier"
+
+        item["action_event_proof"] = action_event_proof
+        item["terminal_event_proof"] = terminal_event_proof
+        item["observation_proof"] = observation_proof
+        item["independent_terminal_proof"] = bool(
+            action_event_proof and terminal_event_proof and observation_proof
+        )
+        result.append(item)
+    return result
 
 
 def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -905,19 +969,29 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
 
 def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
     rows = _verification_rows_for_state(conn, session["desired_state_id"], session["started_at"])
-    external = [row for row in rows if str(row.get("risk") or "") == "external_write"]
+    external = [
+        row for row in rows
+        if str(row.get("risk") or "") == "external_write"
+        and bool(row.get("action_event_proof"))
+    ]
     verified = [
         row for row in external
         if str(row.get("status") or "") == "verified"
         and str(row.get("verifier") or "") not in {"tool_return", "return_value"}
+        and bool(row.get("independent_terminal_proof"))
     ]
     negative = [
         row for row in external
         if (
-            str(row.get("status") or "") in {"timed_out", "unverified"}
-            or (
-                str(row.get("status") or "") == "failed"
+            (
+                str(row.get("status") or "") in {"failed", "timed_out"}
                 and str(row.get("verifier") or "") not in {"tool_return", "return_value"}
+                and bool(row.get("independent_terminal_proof"))
+            )
+            or (
+                str(row.get("status") or "") == "unverified"
+                and str(row.get("verifier") or "") == "no_independent_verifier"
+                and bool(row.get("independent_terminal_proof"))
             )
         )
     ]
@@ -1280,11 +1354,16 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
                 parallel_analysis = True
                 break
     verification_rows = _verification_rows_for_state(conn, state_id, session["started_at"])
-    external = [row for row in verification_rows if str(row.get("risk") or "") == "external_write"]
+    external = [
+        row for row in verification_rows
+        if str(row.get("risk") or "") == "external_write"
+        and bool(row.get("action_event_proof"))
+    ]
     verified_external = [
         row for row in external
         if str(row.get("status") or "") == "verified"
         and str(row.get("verifier") or "") not in {"return_value", "tool_return"}
+        and bool(row.get("independent_terminal_proof"))
     ]
     causal_replan = _causal_replan_evidence(conn, session, events)
     restatements = _goal_restatement_ids(conn, session)

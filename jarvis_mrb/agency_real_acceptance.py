@@ -1553,13 +1553,28 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
         )
         if real_ids:
             real_trigger_events[str(row["id"])] = real_ids
+
+    state_events = _events_for_state(events, state_id)
     reactivation = [
-        item for item in _events_for_state(events, state_id)
+        item for item in state_events
         if item["event_type"] == "desired_state.reactivated"
     ]
     desired = _desired_state_row(conn, state_id)
     restatements = _goal_restatement_ids(conn, session)
     reactivated = bool(reactivation) and desired is not None and str(desired["state"]) in {"active", "satisfied"}
+
+    reactivation_ids = [int(item["id"]) for item in reactivation]
+    first_reactivation_id = min(reactivation_ids) if reactivation_ids else 0
+    downstream = [
+        item for item in state_events
+        if int(item["id"]) > first_reactivation_id
+        and item["event_type"] in {
+            "agency.step.executed",
+            "agency.step.awaiting_approval",
+        }
+    ] if first_reactivation_id else []
+    surfaced_or_executed = bool(downstream)
+
     checks = [
         _check("session began with persisted dormant watch", bool(baseline_watches), sorted(baseline_watches)),
         _check(
@@ -1567,7 +1582,20 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
             bool(real_trigger_events),
             real_trigger_events,
         ),
-        _check("desired state reactivated", reactivated, [item["id"] for item in reactivation]),
+        _check("desired state reactivated", reactivated, reactivation_ids),
+        _check(
+            "newly available next step surfaced or executed after reactivation",
+            surfaced_or_executed,
+            [
+                {
+                    "event_id": int(item["id"]),
+                    "event_type": str(item["event_type"]),
+                    "step_id": str((item.get("payload") or {}).get("step_id") or ""),
+                    "tool": str((item.get("payload") or {}).get("tool") or ""),
+                }
+                for item in downstream
+            ],
+        ),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
     ]
     return {
@@ -1575,9 +1603,11 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
         "evidence": {
             "dormant_state_observed": checks[0]["passed"],
             "wake_condition_changed": checks[1]["passed"],
-            "reactivated_without_goal_restatement": checks[2]["passed"] and checks[3]["passed"],
+            "reactivated_without_goal_restatement": checks[2]["passed"] and checks[4]["passed"],
+            "next_step_surfaced_or_executed": checks[3]["passed"],
         },
     }
+
 
 
 def _workers_overlap(workers: list[sqlite3.Row]) -> bool:

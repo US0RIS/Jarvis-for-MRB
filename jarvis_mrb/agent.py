@@ -191,6 +191,8 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
         return "enable active Agency mode, allowing persistent goals to execute auto-authorized steps"
     if tool == "agency.activate_goal":
         return f"activate autonomous pursuit of Agency goal {args.get('query')!r}"
+    if tool == "permissions.set":
+        return f"change {args.get('risk')!r} permission policy to {args.get('mode')!r}"
     return f"run {tool} with {args}"
 
 
@@ -391,6 +393,14 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
         except ValueError as exc:
             return AgentReply(False, str(exc))
         return AgentReply(True, f"Paused Agency pursuit of {state.get('title')}.")
+    if tool == "permissions.set":
+        risk = str(args.get("risk") or "").strip()
+        mode = str(args.get("mode") or "").strip()
+        if risk not in {"read", "local_write", "external_write", "destructive", "security"}:
+            return AgentReply(False, f"Unknown risk class: {risk}.")
+        if mode not in {"auto", "confirm", "deny"}:
+            return AgentReply(False, "Mode must be auto, confirm, or deny.")
+        return AgentReply(True, set_policy(risk, mode))
 
     if tool == "workflow.run":
         goal = str(args.get("goal") or "").strip()
@@ -714,7 +724,11 @@ def _fast_path(text: str) -> AgentReply | None:
         except Exception as exc:
             return AgentReply(False, f"Agency denial could not be processed: {exc}")
     m = re.fullmatch(r"set (read|local_write|external_write|destructive|security) (?:actions )?to (auto|confirm|deny)", n)
-    if m: return AgentReply(True, set_policy(m.group(1), m.group(2)))
+    if m:
+        return execute_tool(
+            "permissions.set",
+            {"risk": m.group(1), "mode": m.group(2)},
+        )
 
     if n in {"browser status", "opera status", "is browser control connected", "is browser control connected?"}: return execute_tool("browser.status", {})
     if n in {"list tabs", "show tabs", "what tabs are open", "what tabs are open?"}: return execute_tool("browser.list_tabs", {})

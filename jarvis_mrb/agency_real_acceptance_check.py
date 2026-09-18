@@ -58,7 +58,7 @@ def main() -> None:
         exit_code = 0 if bool(result.get("passed")) else 1
     elif args.command == "finalize":
         result = finalize_session(args.session_id)
-        exit_code = 0 if bool(result.get("receipt_created") or result.get("already_finalized")) else 1
+        exit_code = 0 if bool(result.get("passed")) else 1
     elif args.command == "list":
         result = {
             "sessions": list_sessions(

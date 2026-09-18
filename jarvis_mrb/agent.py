@@ -186,8 +186,10 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
             if str(value).strip()
         ]
         risk = str(args.get("risk") or "read")
+        gap_id = str(args.get("gap_id") or "").strip()
+        gap_text = f" for capability gap {gap_id!r}" if gap_id else ""
         return (
-            f"synthesize and sandbox-validate custom API tool {args.get('name')!r} "
+            f"synthesize and sandbox-validate custom API tool {args.get('name')!r}{gap_text} "
             f"for risk {risk!r} and allowed host(s) {hosts!r}; API specification omitted"
         )
     if tool == "custom.enable":
@@ -460,17 +462,35 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
             for item in tools
         ))
     if tool == "custom.synthesize":
+        gap_id = str(args.get("gap_id") or "").strip()
         try:
-            item = synthesize_custom_tool(
-                name=str(args.get("name") or ""),
-                description=str(args.get("description") or ""),
-                api_spec=str(args.get("api_spec") or ""),
-                allowed_hosts=[str(value) for value in (args.get("allowed_hosts") or [])],
-                risk=str(args.get("risk") or "read"),
-            )
+            if gap_id:
+                from jarvis_mrb.agency_capability import synthesize_adapter
+                synthesized = synthesize_adapter(
+                    gap_id,
+                    name=str(args.get("name") or ""),
+                    description=str(args.get("description") or ""),
+                    api_spec=str(args.get("api_spec") or ""),
+                    allowed_hosts=[str(value) for value in (args.get("allowed_hosts") or [])],
+                    risk=str(args.get("risk") or "read"),
+                )
+                item = dict(synthesized.get("tool") or {})
+            else:
+                item = synthesize_custom_tool(
+                    name=str(args.get("name") or ""),
+                    description=str(args.get("description") or ""),
+                    api_spec=str(args.get("api_spec") or ""),
+                    allowed_hosts=[str(value) for value in (args.get("allowed_hosts") or [])],
+                    risk=str(args.get("risk") or "read"),
+                )
         except ValueError as exc:
             return AgentReply(False, str(exc))
-        return AgentReply(True, f"Custom tool {item['name']} was generated and sandbox-tested. It is disabled until you explicitly enable it.")
+        gap_text = f" and linked to capability gap {gap_id}" if gap_id else ""
+        return AgentReply(
+            True,
+            f"Custom tool {item['name']} was generated and sandbox-tested{gap_text}. "
+            "It is disabled until you explicitly enable it.",
+        )
     if tool == "custom.enable":
         try:
             item = set_custom_tool_enabled(str(args.get("name") or ""), bool(args.get("enabled", True)))
@@ -894,7 +914,7 @@ background.submit {{prompt}}; background.list {{limit}}; background.status {{tas
 workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
-custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
+custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
 
 Routing rules:
 - web.search: current/recent/public information. Make the query self-contained; Jarvis refines conversational searches automatically.

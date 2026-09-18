@@ -810,14 +810,17 @@ def tick_all(
                 in {"needs_replan", "blocked", "completed"}
             )
         )
+        planning_due = bool(
+            needs_planning and _planning_allowed(state_id)
+        )
         permit_planning = bool(
             mode == "active"
             and (
-                not needs_planning
+                not planning_due
                 or planning_attempts < planning_budget
             )
         )
-        if needs_planning and permit_planning:
+        if planning_due and permit_planning:
             planning_attempts += 1
 
         result = tick_desired_state(

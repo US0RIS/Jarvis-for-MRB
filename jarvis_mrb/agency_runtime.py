@@ -298,7 +298,9 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
     return (
         "Create the smallest feasible tool plan that advances this persistent desired state. "
         "The plan is not complete until the success conditions become true in the world model. "
-        "Prefer observations before interventions, preserve reversibility, and do not assume a write succeeded merely because its API returned success.\n"
+        "Prefer observations before interventions, preserve reversibility, and do not assume a write succeeded merely because its API returned success. "
+        "When a consequential choice still has materially different plausible approaches after evidence gathering, include agency.deliberate before the consequential write so independent evidence/skeptic/feasibility/risk workers can preserve disagreement. "
+        "Do not add deliberation to routine or obvious actions merely to make the plan longer.\n"
         f"Desired state: {desired.get('title')}\n"
         f"Explicit success criteria: {json.dumps(desired.get('criteria') or [], ensure_ascii=False, sort_keys=True)}\n"
         f"Currently unmet criteria: {json.dumps(missing, ensure_ascii=False, sort_keys=True)}"

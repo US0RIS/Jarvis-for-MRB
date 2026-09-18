@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -18,6 +20,12 @@ from jarvis_mrb.agency_acceptance import REAL_GATES, SYNTHETIC_ONLY_GATES
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40,64}$", re.IGNORECASE)
+_VALIDATION_HARNESS = "agency-release-full-v1"
+_VALIDATION_PROCESS_NONCE = uuid.uuid4().hex
+_VALIDATION_CONTEXT: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "jarvis_release_validation_context",
+    default="",
+)
 
 
 def _now() -> str:
@@ -80,6 +88,7 @@ def _live_session_digest(
 
 def _validation_digest(
     *,
+    harness: str,
     deployment_sha_value: str,
     environment: str,
     source_root_value: str,
@@ -95,6 +104,7 @@ def _validation_digest(
     recorded_at: str,
 ) -> str:
     payload = {
+        "harness": str(harness),
         "deployment_sha": str(deployment_sha_value),
         "environment_fingerprint": str(environment),
         "source_root": str(source_root_value),
@@ -111,6 +121,58 @@ def _validation_digest(
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _validation_context_payload(
+    *,
+    deployment_sha_value: str,
+    environment: str,
+    source_root_value: str,
+    compile_ok: bool,
+    regression_ok: bool,
+    synthetic_ok: bool,
+    diagnostics_ok: bool,
+    tree_clean_before: bool,
+    tree_clean_after: bool,
+    regression_summary: str,
+    synthetic_summary: str,
+    diagnostics_summary: str,
+) -> dict[str, Any]:
+    return {
+        "harness": _VALIDATION_HARNESS,
+        "deployment_sha": str(deployment_sha_value),
+        "environment_fingerprint": str(environment),
+        "source_root": str(source_root_value),
+        "compile_ok": bool(compile_ok),
+        "regression_ok": bool(regression_ok),
+        "synthetic_ok": bool(synthetic_ok),
+        "diagnostics_ok": bool(diagnostics_ok),
+        "tree_clean_before": bool(tree_clean_before),
+        "tree_clean_after": bool(tree_clean_after),
+        "regression_summary": str(regression_summary),
+        "synthetic_summary": str(synthetic_summary),
+        "diagnostics_summary": str(diagnostics_summary),
+    }
+
+
+def _validation_context_key(payload: dict[str, Any]) -> str:
+    raw = json.dumps(
+        {"nonce": _VALIDATION_PROCESS_NONCE, "payload": payload},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+@contextlib.contextmanager
+def _validation_recording_context(payload: dict[str, Any]):
+    token = _VALIDATION_CONTEXT.set(_validation_context_key(dict(payload)))
+    try:
+        yield
+    finally:
+        _VALIDATION_CONTEXT.reset(token)
 
 
 def _file_sha256(path: str) -> str:
@@ -245,6 +307,7 @@ def _connect() -> sqlite3.Connection:
 
         CREATE TABLE IF NOT EXISTS agency_release_validation_runs (
             id TEXT PRIMARY KEY,
+            harness TEXT NOT NULL DEFAULT '',
             deployment_sha TEXT NOT NULL,
             environment_fingerprint TEXT NOT NULL,
             source_root TEXT NOT NULL,
@@ -298,6 +361,10 @@ def _connect() -> sqlite3.Connection:
         str(row["name"])
         for row in conn.execute("PRAGMA table_info(agency_release_validation_runs)").fetchall()
     }
+    if "harness" not in validation_columns:
+        conn.execute(
+            "ALTER TABLE agency_release_validation_runs ADD COLUMN harness TEXT NOT NULL DEFAULT ''"
+        )
     if "tree_clean_before" not in validation_columns:
         conn.execute(
             "ALTER TABLE agency_release_validation_runs ADD COLUMN tree_clean_before INTEGER NOT NULL DEFAULT 0"
@@ -741,7 +808,26 @@ def record_validation_run(
     clean_regression_summary = str(regression_summary or "")[-5000:]
     clean_synthetic_summary = str(synthetic_summary or "")[-5000:]
     clean_diagnostics_summary = str(diagnostics_summary or "")[-5000:]
+    context_payload = _validation_context_payload(
+        deployment_sha_value=clean_sha,
+        environment=env,
+        source_root_value=clean_source_root,
+        compile_ok=bool(compile_ok),
+        regression_ok=bool(regression_ok),
+        synthetic_ok=bool(synthetic_ok),
+        diagnostics_ok=bool(diagnostics_ok),
+        tree_clean_before=bool(tree_clean_before),
+        tree_clean_after=bool(tree_clean_after),
+        regression_summary=clean_regression_summary,
+        synthetic_summary=clean_synthetic_summary,
+        diagnostics_summary=clean_diagnostics_summary,
+    )
+    if _VALIDATION_CONTEXT.get() != _validation_context_key(context_payload):
+        raise ValueError(
+            "Release validation records may only be minted by run_full_validation()."
+        )
     validation_hash = _validation_digest(
+        harness=_VALIDATION_HARNESS,
         deployment_sha_value=clean_sha,
         environment=env,
         source_root_value=clean_source_root,
@@ -760,13 +846,14 @@ def record_validation_run(
         conn.execute(
             """
             INSERT INTO agency_release_validation_runs(
-                id,deployment_sha,environment_fingerprint,source_root,compile_ok,regression_ok,
+                id,harness,deployment_sha,environment_fingerprint,source_root,compile_ok,regression_ok,
                 synthetic_ok,diagnostics_ok,tree_clean_before,tree_clean_after,
                 regression_summary,synthetic_summary,diagnostics_summary,validation_hash,recorded_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 run_id,
+                _VALIDATION_HARNESS,
                 clean_sha,
                 env,
                 str(source_root_value or "")[:2000],
@@ -883,6 +970,7 @@ def release_status(
     validation_hash_ok = False
     if validation:
         expected_validation_hash = _validation_digest(
+            harness=str(validation.get("harness") or ""),
             deployment_sha_value=str(validation.get("deployment_sha") or ""),
             environment=str(validation.get("environment_fingerprint") or ""),
             source_root_value=str(validation.get("source_root") or ""),
@@ -919,6 +1007,7 @@ def release_status(
 
     validation_ok = bool(
         validation
+        and str(validation.get("harness") or "") == _VALIDATION_HARNESS
         and validation_hash_ok
         and validation_after_real_gates
         and int(validation.get("compile_ok") or 0) == 1
@@ -1041,24 +1130,48 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
         diagnostics = {"ok": False, "error": str(exc)[:2000]}
     diagnostics_ok = bool(diagnostics.get("ok"))
     tree_clean_after, tree_after_detail = _git_worktree_clean(source)
-
-    run = record_validation_run(
+    env = environment_fingerprint()
+    regression_summary = (
+        "compile:\n" + compile_output
+        + "\n\nunittest:\n" + regression_output
+        + ("\n\npost-test git status:\n" + tree_after_detail if tree_after_detail else "")
+    )[-5000:]
+    synthetic_summary = str(synthetic_output or "")[-5000:]
+    diagnostics_summary = json.dumps(
+        diagnostics,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )[-5000:]
+    context_payload = _validation_context_payload(
         deployment_sha_value=sha,
-        source_root_value=str(source),
+        environment=env,
+        source_root_value=str(source)[:2000],
         compile_ok=compile_ok,
         regression_ok=regression_ok,
         synthetic_ok=synthetic_ok,
         diagnostics_ok=diagnostics_ok,
         tree_clean_before=tree_clean_before,
         tree_clean_after=tree_clean_after,
-        regression_summary=(
-            "compile:\n" + compile_output
-            + "\n\nunittest:\n" + regression_output
-            + ("\n\npost-test git status:\n" + tree_after_detail if tree_after_detail else "")
-        ),
-        synthetic_summary=synthetic_output,
-        diagnostics_summary=json.dumps(diagnostics, ensure_ascii=False, sort_keys=True, default=str),
+        regression_summary=regression_summary,
+        synthetic_summary=synthetic_summary,
+        diagnostics_summary=diagnostics_summary,
     )
+    with _validation_recording_context(context_payload):
+        run = record_validation_run(
+            deployment_sha_value=sha,
+            source_root_value=str(source),
+            compile_ok=compile_ok,
+            regression_ok=regression_ok,
+            synthetic_ok=synthetic_ok,
+            diagnostics_ok=diagnostics_ok,
+            tree_clean_before=tree_clean_before,
+            tree_clean_after=tree_clean_after,
+            regression_summary=regression_summary,
+            synthetic_summary=synthetic_summary,
+            diagnostics_summary=diagnostics_summary,
+            environment=env,
+        )
     return {
         "ok": bool(
             compile_ok
@@ -1070,7 +1183,7 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
         ),
         "recorded": True,
         "deployment_sha": sha,
-        "environment_fingerprint": environment_fingerprint(),
+        "environment_fingerprint": env,
         "compile_ok": compile_ok,
         "regression_ok": regression_ok,
         "synthetic_ok": synthetic_ok,

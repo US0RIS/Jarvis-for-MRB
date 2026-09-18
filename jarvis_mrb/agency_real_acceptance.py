@@ -2088,10 +2088,17 @@ def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     preference_in_session = bool(
         preference_updated and session_started and preference_updated >= session_started
     )
+    inferred_source_kinds = {
+        "inferred",
+        "inferred_behavior",
+        "model_inference",
+        "decision_history",
+    }
     inferred = (
         bool(preference)
         and preference_in_session
-        and str(preference.get("source_kind") or "") not in {"explicit_user", "user_correction"}
+        and str(preference.get("source_kind") or "").strip().lower()
+        in inferred_source_kinds
     )
     authority_restricts = (not bool(permission.allowed)) or bool(permission.needs_confirmation)
     approval_events = [

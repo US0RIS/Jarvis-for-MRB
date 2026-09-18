@@ -807,7 +807,14 @@ def ingest_frontend_snapshot(snapshot: dict[str, Any]) -> dict[str, int]:
     return counts
 
 
-def record_tool_execution(tool: str, args: dict[str, Any], *, ok: bool, message: str) -> int:
+def record_tool_execution(
+    tool: str,
+    args: dict[str, Any],
+    *,
+    ok: bool,
+    message: str,
+    agency_step_id: str = "",
+) -> int:
     safe: dict[str, Any] = {}
     for key, value in dict(args or {}).items():
         lowered = str(key).lower()
@@ -827,7 +834,12 @@ def record_tool_execution(tool: str, args: dict[str, Any], *, ok: bool, message:
         f"Tool {tool} {'succeeded' if ok else 'failed'}: {' '.join(str(message or '').split())[:1000]}",
         source_kind="jarvis_tool",
         source_ref=str(tool)[:300],
-        payload={"tool": tool, "arguments": safe, "ok": bool(ok)},
+        payload={
+            "tool": tool,
+            "arguments": safe,
+            "ok": bool(ok),
+            "agency_step_id": str(agency_step_id or "")[:300],
+        },
         evidence="Jarvis tool execution receipt. Sensitive command/body/code content is omitted from this world-model event.",
         confidence=1.0,
         participants=[(SELF_ID, "requester", 1.0)],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime
@@ -589,6 +590,32 @@ def reconcile_plan(plan_id: str) -> dict[str, Any]:
     return get_plan(str(plan_id), include_steps=True) or {}
 
 
+def _resolve_value(value: Any, outputs: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        def replace(match: re.Match[str]) -> str:
+            return str(outputs.get(match.group(1), ""))
+        return re.sub(r"\$\{([A-Za-z0-9_-]+)\.message\}", replace, value)
+    if isinstance(value, list):
+        return [_resolve_value(item, outputs) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _resolve_value(item, outputs) for key, item in value.items()}
+    return value
+
+
+def resolved_arguments(step_id: str) -> dict[str, Any]:
+    with _connect() as conn:
+        step = conn.execute("SELECT * FROM agency_steps WHERE id=?", (str(step_id),)).fetchone()
+        if step is None:
+            raise ValueError(f"Unknown Agency step {step_id!r}.")
+        siblings = conn.execute(
+            "SELECT step_key,result_summary FROM agency_steps WHERE plan_id=?",
+            (str(step["plan_id"]),),
+        ).fetchall()
+    outputs = {str(row["step_key"]): str(row["result_summary"] or "") for row in siblings}
+    template = dict(_loads(str(step["arguments_json"]), {}))
+    return dict(_resolve_value(template, outputs))
+
+
 def _invoke_executor(
     step: dict[str, Any],
     executor: Callable[..., Any],
@@ -597,18 +624,19 @@ def _invoke_executor(
 ) -> Any:
     from jarvis_mrb.tool_audit import agency_step_context
 
+    arguments = resolved_arguments(str(step["id"]))
     with agency_step_context(str(step["id"])):
         try:
             return executor(
                 str(step["tool"]),
-                dict(step["arguments"]),
+                arguments,
                 bypass_confirmation=bypass_confirmation,
             )
         except TypeError:
             # Test/adapter executors may expose the simpler (tool,args) signature.
             if bypass_confirmation:
                 raise
-            return executor(str(step["tool"]), dict(step["arguments"]))
+            return executor(str(step["tool"]), arguments)
 
 
 def _execute_step(
@@ -759,6 +787,7 @@ def pending_approval(*, plan_id: str | None = None) -> dict[str, Any] | None:
     if len(rows) != 1:
         return None
     result = _row_to_step(rows[0])
+    result["resolved_arguments"] = resolved_arguments(str(result["id"]))
     result["desired_state_id"] = str(rows[0]["desired_state_id"])
     result["generation"] = int(rows[0]["generation"])
     result["plan_summary"] = str(rows[0]["plan_summary"])

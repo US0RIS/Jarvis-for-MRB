@@ -20,6 +20,30 @@ VALID_KINDS = {
 }
 
 
+_EXPLICIT_SOURCE_KINDS = {
+    "explicit_user",
+    "user_correction",
+    "explicit_policy",
+}
+_INFERRED_SOURCE_KINDS = {
+    "inferred",
+    "inferred_behavior",
+    "model_inference",
+    "decision_history",
+}
+
+
+def _source_authority(source_kind: str) -> int:
+    clean = str(source_kind or "").strip().lower()
+    if clean in _EXPLICIT_SOURCE_KINDS:
+        return 3
+    if clean in _INFERRED_SOURCE_KINDS:
+        return 1
+    # Imported/other attributed sources may inform planning, but cannot silently
+    # outrank direct user statements.
+    return 2
+
+
 def _now() -> str:
     return datetime.now().astimezone().isoformat()
 
@@ -77,20 +101,48 @@ def upsert(
     entry_id = f"self-model:{uuid.uuid4()}"
     ref = str(source_ref or "").strip()[:1000] or entry_id
 
+    incoming_source = str(source_kind or "explicit_user")[:120]
     with _connect() as conn:
-        conn.execute(
+        current = conn.execute(
             """
-            UPDATE agency_self_model_entries
-            SET state='superseded',updated_at=?
+            SELECT * FROM agency_self_model_entries
             WHERE kind=? AND entry_key=? AND state='current'
+            ORDER BY updated_at DESC LIMIT 1
             """,
-            (now, clean_kind, clean_key),
+            (clean_kind, clean_key),
+        ).fetchone()
+
+        incoming_authority = _source_authority(incoming_source)
+        current_authority = (
+            _source_authority(str(current["source_kind"]))
+            if current is not None else -1
         )
+        preserve_current = bool(
+            current is not None
+            and (
+                incoming_authority < current_authority
+                or (
+                    incoming_authority == current_authority == 1
+                    and bounded_confidence < float(current["confidence"] or 0.0)
+                )
+            )
+        )
+
+        if not preserve_current:
+            conn.execute(
+                """
+                UPDATE agency_self_model_entries
+                SET state='superseded',updated_at=?
+                WHERE kind=? AND entry_key=? AND state='current'
+                """,
+                (now, clean_kind, clean_key),
+            )
+
         conn.execute(
             """
             INSERT INTO agency_self_model_entries(
                 id,kind,entry_key,value_json,confidence,source_kind,source_ref,state,created_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,'current',?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 entry_id,
@@ -98,8 +150,9 @@ def upsert(
                 clean_key,
                 json.dumps(value, ensure_ascii=False, sort_keys=True),
                 bounded_confidence,
-                str(source_kind or "explicit_user")[:120],
+                incoming_source,
                 ref,
+                "superseded" if preserve_current else "current",
                 now,
                 now,
             ),

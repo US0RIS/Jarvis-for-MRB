@@ -5,13 +5,35 @@ import sqlite3
 import threading
 import time
 import uuid
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 _LOCK = threading.RLock()
 _INSTALLED = False
 _ORIGINAL: Callable[..., Any] | None = None
 _STAGED_EXECUTIVE: dict[str, tuple[str, float]] = {}
 _STAGED_TTL_SECONDS = 10 * 60
+_EXECUTION_CONTEXT = threading.local()
+
+
+@contextmanager
+def agency_step_context(step_id: str) -> Iterator[None]:
+    """Attach one persistent Agency step ID to tool executions in this thread.
+
+    This does not grant authority. It only gives the existing audit/verification
+    pipeline a durable correlation key so Agency can later reconcile the exact
+    action outcome with the step that caused it.
+    """
+    previous = getattr(_EXECUTION_CONTEXT, "agency_step_id", "")
+    _EXECUTION_CONTEXT.agency_step_id = str(step_id or "")
+    try:
+        yield
+    finally:
+        _EXECUTION_CONTEXT.agency_step_id = previous
+
+
+def current_agency_step_id() -> str:
+    return str(getattr(_EXECUTION_CONTEXT, "agency_step_id", "") or "")
 
 
 def _is_staged_confirmation(reply: Any) -> bool:
@@ -175,6 +197,7 @@ def _record(tool: str, args: dict[str, Any], reply: Any, *, confirmed_execution:
             reply,
             action_event_id=int(action_event_id),
             executive_decision_id=executive_decision_id,
+            agency_step_id=current_agency_step_id(),
         )
     except Exception:
         pass

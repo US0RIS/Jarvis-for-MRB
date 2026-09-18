@@ -73,6 +73,7 @@ def _connect() -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             action_event_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
             executive_decision_id TEXT NOT NULL DEFAULT '',
+            agency_step_id TEXT NOT NULL DEFAULT '',
             tool TEXT NOT NULL,
             arguments_json TEXT NOT NULL,
             verifier TEXT NOT NULL,
@@ -104,6 +105,13 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_verification_observations_verification
             ON verification_observations(verification_id,id DESC);
         """
+    )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(action_verifications)").fetchall()}
+    if "agency_step_id" not in columns:
+        conn.execute("ALTER TABLE action_verifications ADD COLUMN agency_step_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_action_verifications_agency_step "
+        "ON action_verifications(agency_step_id,status,updated_at DESC)"
     )
     conn.commit()
     return conn
@@ -377,6 +385,7 @@ def register_execution(
     *,
     action_event_id: int,
     executive_decision_id: str = "",
+    agency_step_id: str = "",
 ) -> str:
     plan = _plan(str(tool), dict(args or {}), reply)
     verification_id = f"verification:{uuid.uuid4()}"
@@ -399,15 +408,16 @@ def register_execution(
         conn.execute(
             """
             INSERT INTO action_verifications(
-                id,action_event_id,executive_decision_id,tool,arguments_json,verifier,expected_json,
+                id,action_event_id,executive_decision_id,agency_step_id,tool,arguments_json,verifier,expected_json,
                 status,attempts,next_check_at,deadline_at,last_checked_at,last_evidence,last_error,
                 created_at,updated_at,resolved_event_id
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
             """,
             (
                 verification_id,
                 int(action_event_id),
                 str(executive_decision_id or ""),
+                str(agency_step_id or ""),
                 str(tool),
                 json.dumps(safe_args, ensure_ascii=False, sort_keys=True),
                 str(plan["verifier"]),

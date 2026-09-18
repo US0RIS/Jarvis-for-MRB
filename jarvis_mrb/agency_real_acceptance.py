@@ -267,6 +267,10 @@ def start_session(
         if clean_gate == "A1":
             if not boot:
                 raise ValueError("A1 REAL session requires a recorded service boot baseline.")
+            if not str(boot.get("process_instance_id") or ""):
+                raise ValueError(
+                    "A1 REAL session requires a boot recorded by the process-instance-aware runtime."
+                )
             if not plan:
                 raise ValueError("A1 REAL session requires a persistent current plan before restart.")
         if clean_gate == "A6":
@@ -664,14 +668,16 @@ def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list
     plan_row = conn.execute("SELECT * FROM agency_plans WHERE id=?", (plan_id,)).fetchone() if plan_id else None
     runtime_row = conn.execute("SELECT * FROM agency_runtime_state WHERE desired_state_id=?", (state_id,)).fetchone()
     restatements = _goal_restatement_ids(conn, session)
-    baseline_process_id = int((baseline.get("boot") or {}).get("process_id") or 0)
-    latest_process_id = int((latest_boot or {}).get("process_id") or 0)
+    baseline_instance_id = str(
+        (baseline.get("boot") or {}).get("process_instance_id") or ""
+    )
+    latest_instance_id = str((latest_boot or {}).get("process_instance_id") or "")
     restarted = (
         bool(latest_boot)
         and str(latest_boot.get("id")) != baseline_boot_id
-        and baseline_process_id > 0
-        and latest_process_id > 0
-        and latest_process_id != baseline_process_id
+        and bool(baseline_instance_id)
+        and bool(latest_instance_id)
+        and latest_instance_id != baseline_instance_id
     )
     checks = [
         _check("service actually restarted into a new process", restarted, {"baseline": baseline.get("boot"), "latest": latest_boot}),

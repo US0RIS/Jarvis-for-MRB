@@ -479,12 +479,40 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 plan_a5["id"],
                 lambda tool, args, **kwargs: protected_calls_a5.append(tool) or SimpleNamespace(ok=True, message="wrong"),
             )
+            revised_a5 = ap.create_plan(
+                state_a5,
+                [
+                    {
+                        "id": "revised-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A5 revised",
+                            "start": "2030-01-01T12:00:00-08:00",
+                            "end": "2030-01-01T12:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="A5 revised path preserves the completed observation",
+            )
+            preserved_a5 = next(
+                step for step in stale_a5["steps"] if step["step_key"] == "read"
+            )
             _check(
                 checks,
                 "A5",
-                "relevant state change invalidates stale path before consequential action",
-                stale_a5["status"] == "needs_replan" and protected_calls_a5 == [],
-                {"status": stale_a5["status"], "protected_calls": protected_calls_a5},
+                "relevant change invalidates stale action, preserves valid work, and yields revised plan",
+                stale_a5["status"] == "needs_replan"
+                and protected_calls_a5 == []
+                and preserved_a5["status"] == "verified"
+                and preserved_a5["attempt_count"] == 1
+                and revised_a5["generation"] > plan_a5["generation"]
+                and all(step["step_key"] != "read" for step in revised_a5["steps"]),
+                {
+                    "status": stale_a5["status"],
+                    "protected_calls": protected_calls_a5,
+                    "preserved_read": preserved_a5,
+                    "revised_generation": revised_a5["generation"],
+                },
             )
 
             # A6 — blocked goal sleeps until explicit watched world condition becomes true.
@@ -497,14 +525,41 @@ def run_synthetic_acceptance() -> dict[str, Any]:
             sleeping_a6 = ds.check_wake_watches()
             wm.assert_belief(entity_a6, "prerequisite", value="available")
             waking_a6 = ds.check_wake_watches()
+            continuation_a6 = ar.tick_desired_state(
+                state_a6,
+                executor=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("Synthetic protected wake continuation must await approval.")
+                ),
+                planner=lambda _prompt: {
+                    "summary": "Act on the newly available prerequisite.",
+                    "nodes": [
+                        {
+                            "id": "continue",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": "A6 synthetic continuation",
+                                "start": "2030-01-01T12:30:00-08:00",
+                                "end": "2030-01-01T13:00:00-08:00",
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
             _check(
                 checks,
                 "A6",
-                "blocked desired state reactivates only after persisted wake condition",
+                "blocked desired state wakes and surfaces its newly feasible next step",
                 sleeping_a6["triggered"] == 0
                 and waking_a6["triggered"] == 1
-                and ds.get_desired_state(state_a6)["state"] == "active",
-                {"before": sleeping_a6, "after": waking_a6},
+                and ds.get_desired_state(state_a6)["state"] == "active"
+                and continuation_a6["status"] == "awaiting_approval",
+                {
+                    "before": sleeping_a6,
+                    "after": waking_a6,
+                    "continuation": continuation_a6["status"],
+                },
             )
 
             # A7 — independent workers actually overlap and disagreement remains visible.

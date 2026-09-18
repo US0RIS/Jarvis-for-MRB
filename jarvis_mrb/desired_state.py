@@ -417,6 +417,25 @@ def list_desired_states(*, include_retired: bool = False, limit: int = 100) -> l
     return result
 
 
+def update_authority(desired_state_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    state_id = str(desired_state_id or "").strip()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT authority_json FROM desired_states WHERE id=?",
+            (state_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown desired state {state_id!r}.")
+        authority = dict(_loads(str(row["authority_json"]), {}))
+        authority.update(dict(updates or {}))
+        conn.execute(
+            "UPDATE desired_states SET authority_json=?,updated_at=? WHERE id=?",
+            (json.dumps(authority, ensure_ascii=False, sort_keys=True), _now(), state_id),
+        )
+        conn.commit()
+    return get_desired_state(state_id) or {}
+
+
 def set_state(desired_state_id: str, state: str, *, reason: str = "") -> dict[str, Any]:
     clean_state = str(state or "").strip().lower()
     if clean_state not in VALID_STATES:

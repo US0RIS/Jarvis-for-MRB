@@ -834,6 +834,72 @@ def get_receipt_for_session(session_id: str) -> dict[str, Any] | None:
     return _decode_receipt(row) if row else None
 
 
+def validate_real_gate_receipt(receipt_id: str) -> dict[str, Any]:
+    item = get_receipt(str(receipt_id))
+    if item is None:
+        return {"valid": False, "reason": "REAL gate receipt does not exist.", "receipt": None}
+
+    gate = str(item.get("gate") or "")
+    expected_hash = _receipt_digest(
+        gate=gate,
+        deployment_sha_value=str(item.get("deployment_sha") or ""),
+        environment=str(item.get("environment_fingerprint") or ""),
+        harness=str(item.get("harness") or ""),
+        checks_json=json.dumps(item.get("checks") or [], ensure_ascii=False, sort_keys=True),
+        evidence_json=json.dumps(item.get("evidence") or {}, ensure_ascii=False, sort_keys=True),
+        trace_ref=str(item.get("trace_ref") or ""),
+        trace_sha256=str(item.get("trace_sha256") or ""),
+        session_id=str(item.get("session_id") or ""),
+        recorded_at=str(item.get("recorded_at") or ""),
+    )
+    if str(item.get("receipt_hash") or "") != expected_hash:
+        return {"valid": False, "reason": "receipt content hash mismatch", "receipt": item}
+
+    session_ok, session_error = _validated_live_session(
+        str(item.get("session_id") or ""),
+        gate=gate,
+        deployment_sha_value=str(item.get("deployment_sha") or ""),
+        environment=str(item.get("environment_fingerprint") or ""),
+        checks=list(item.get("checks") or []),
+        evidence=dict(item.get("evidence") or {}),
+        require_completed=True,
+        receipt_id=str(item.get("id") or ""),
+    )
+    if not session_ok:
+        return {"valid": False, "reason": session_error, "receipt": item}
+
+    if gate == "A12":
+        actual_trace_hash = _file_sha256(str(item.get("trace_ref") or ""))
+        if actual_trace_hash != str(item.get("trace_sha256") or ""):
+            return {
+                "valid": False,
+                "reason": "human-readable A12 trace content hash mismatch",
+                "receipt": item,
+            }
+
+    checks = item.get("checks") or []
+    if not checks or not all(
+        isinstance(check, dict) and check.get("passed") is True
+        for check in checks
+    ):
+        return {
+            "valid": False,
+            "reason": "receipt contains missing or non-passing checks",
+            "receipt": item,
+        }
+
+    try:
+        _validate_gate_evidence(
+            gate,
+            dict(item.get("evidence") or {}),
+            str(item.get("trace_ref") or ""),
+        )
+    except ValueError as exc:
+        return {"valid": False, "reason": str(exc), "receipt": item}
+
+    return {"valid": True, "reason": "", "receipt": item}
+
+
 def list_real_gate_receipts(
     *,
     deployment_sha_value: str | None = None,
@@ -985,52 +1051,8 @@ def release_status(
         gate = str(item.get("gate") or "")
         if gate in by_gate:
             continue
-        reason = ""
-        expected_hash = _receipt_digest(
-            gate=gate,
-            deployment_sha_value=str(item.get("deployment_sha") or ""),
-            environment=str(item.get("environment_fingerprint") or ""),
-            harness=str(item.get("harness") or ""),
-            checks_json=json.dumps(item.get("checks") or [], ensure_ascii=False, sort_keys=True),
-            evidence_json=json.dumps(item.get("evidence") or {}, ensure_ascii=False, sort_keys=True),
-            trace_ref=str(item.get("trace_ref") or ""),
-            trace_sha256=str(item.get("trace_sha256") or ""),
-            session_id=str(item.get("session_id") or ""),
-            recorded_at=str(item.get("recorded_at") or ""),
-        )
-        if str(item.get("receipt_hash") or "") != expected_hash:
-            reason = "receipt content hash mismatch"
-        else:
-            session_ok, session_error = _validated_live_session(
-                str(item.get("session_id") or ""),
-                gate=gate,
-                deployment_sha_value=str(item.get("deployment_sha") or ""),
-                environment=str(item.get("environment_fingerprint") or ""),
-                checks=list(item.get("checks") or []),
-                evidence=dict(item.get("evidence") or {}),
-                require_completed=True,
-                receipt_id=str(item.get("id") or ""),
-            )
-            if not session_ok:
-                reason = session_error
-        if reason:
-            pass
-        elif gate == "A12" and _file_sha256(str(item.get("trace_ref") or "")) != str(item.get("trace_sha256") or ""):
-            reason = "human-readable A12 trace content hash mismatch"
-        elif not item.get("checks") or not all(
-            isinstance(check, dict) and check.get("passed") is True
-            for check in (item.get("checks") or [])
-        ):
-            reason = "receipt contains missing or non-passing checks"
-        else:
-            try:
-                _validate_gate_evidence(
-                    gate,
-                    dict(item.get("evidence") or {}),
-                    str(item.get("trace_ref") or ""),
-                )
-            except ValueError as exc:
-                reason = str(exc)
+        validation = validate_real_gate_receipt(str(item.get("id") or ""))
+        reason = "" if validation.get("valid") else str(validation.get("reason") or "invalid REAL receipt")
         if reason:
             invalid_receipts.setdefault(gate, []).append(
                 {"receipt_id": str(item.get("id") or ""), "reason": reason[:1000]}

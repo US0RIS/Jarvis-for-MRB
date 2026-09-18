@@ -13,6 +13,7 @@ from jarvis_mrb.world_model import DB_PATH
 
 
 _PROCESS_INSTANCE_ID = str(uuid.uuid4())
+DEFAULT_EVALUATION_INTERVAL_SECONDS = 60
 
 
 def _now_dt() -> datetime:
@@ -51,6 +52,7 @@ def _connect() -> sqlite3.Connection:
             last_error TEXT NOT NULL DEFAULT '',
             last_tick_at TEXT,
             last_action_at TEXT,
+            next_evaluation_at TEXT,
             updated_at TEXT NOT NULL
         )
         """
@@ -62,6 +64,10 @@ def _connect() -> sqlite3.Connection:
     if "last_action_at" not in runtime_columns:
         conn.execute(
             "ALTER TABLE agency_runtime_state ADD COLUMN last_action_at TEXT"
+        )
+    if "next_evaluation_at" not in runtime_columns:
+        conn.execute(
+            "ALTER TABLE agency_runtime_state ADD COLUMN next_evaluation_at TEXT"
         )
 
     conn.execute(
@@ -194,6 +200,7 @@ def _runtime_state(desired_state_id: str) -> dict[str, Any]:
             "last_error": "",
             "last_tick_at": "",
             "last_action_at": "",
+            "next_evaluation_at": "",
         }
     return dict(row)
 
@@ -213,6 +220,11 @@ def _update_runtime(
     next_planning = current.get("next_planning_attempt_at")
     last_error = str(current.get("last_error") or "")
     last_action_at = current.get("last_action_at")
+    next_evaluation_at = current.get("next_evaluation_at")
+    if tick:
+        next_evaluation_at = (
+            _now_dt() + timedelta(seconds=DEFAULT_EVALUATION_INTERVAL_SECONDS)
+        ).isoformat()
     if planner_success is True:
         failures = 0
         last_planning = now
@@ -230,8 +242,9 @@ def _update_runtime(
             """
             INSERT INTO agency_runtime_state(
                 desired_state_id,consecutive_planner_failures,last_planning_attempt_at,
-                next_planning_attempt_at,last_error,last_tick_at,last_action_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?,?)
+                next_planning_attempt_at,last_error,last_tick_at,last_action_at,
+                next_evaluation_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
             ON CONFLICT(desired_state_id) DO UPDATE SET
                 consecutive_planner_failures=excluded.consecutive_planner_failures,
                 last_planning_attempt_at=excluded.last_planning_attempt_at,
@@ -239,6 +252,7 @@ def _update_runtime(
                 last_error=excluded.last_error,
                 last_tick_at=excluded.last_tick_at,
                 last_action_at=excluded.last_action_at,
+                next_evaluation_at=excluded.next_evaluation_at,
                 updated_at=excluded.updated_at
             """,
             (
@@ -249,6 +263,7 @@ def _update_runtime(
                 last_error,
                 now if tick else current.get("last_tick_at"),
                 now if action else last_action_at,
+                next_evaluation_at,
                 now,
             ),
         )

@@ -88,6 +88,11 @@ def evidence_for(gate: str) -> dict:
             "missing_capability_observed": True,
             "fabricated_tool_availability": False,
             "blocked_or_disabled_adapter_observed": True,
+            "adapter_synthesized_disabled": True,
+            "explicit_enablement_observed": True,
+            "capability_resolved_after_enable": True,
+            "goal_reactivated_after_capability": True,
+            "adapter_execution_still_confirmed": True,
         },
         "A11": {
             "preference_authority_conflict_observed": True,
@@ -499,6 +504,17 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["final_satisfaction_derived_from_verified_action"] = False
         with self.assertRaisesRegex(ValueError, "final_satisfaction_derived_from_verified_action"):
             agency_release._validate_gate_evidence("A12", evidence, str(self.a12_trace))
+
+    def test_a9_receipt_rejects_missing_capability_growth_lifecycle(self) -> None:
+        evidence = evidence_for("A9")
+        evidence["explicit_enablement_observed"] = False
+        with self.assertRaisesRegex(ValueError, "explicit_enablement_observed"):
+            agency_release._validate_gate_evidence("A9", evidence, "")
+
+        evidence = evidence_for("A9")
+        evidence["adapter_execution_still_confirmed"] = False
+        with self.assertRaisesRegex(ValueError, "adapter_execution_still_confirmed"):
+            agency_release._validate_gate_evidence("A9", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

@@ -268,6 +268,53 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
         self.assertEqual(agency_capability.get_gap(gap["id"])["status"], "resolved")
 
+    def test_resolving_one_of_multiple_capability_gaps_does_not_reactivate_goal(self) -> None:
+        state_id = self._state()
+        first = agency_capability.record_gap(state_id, "capability.one", "Need one.")
+        second = agency_capability.record_gap(state_id, "capability.two", "Need two.")
+        desired_state.set_state(
+            state_id,
+            "blocked",
+            reason="Missing capability: capability.one; capability.two.",
+        )
+
+        with patch(
+            "jarvis_mrb.agency_capability.available_tool",
+            side_effect=lambda name: {
+                "tool": name,
+                "known": True,
+                "available": name == "capability.one",
+                "implemented_for_agency": True,
+                "authority_blocked": name != "capability.one",
+                "agency_scope_blocked": False,
+                "wrapper_tool": "custom.run",
+            },
+        ):
+            first_pass = agency_capability.reconcile_gaps()
+
+        self.assertIn(first["id"], first_pass["resolved"])
+        self.assertNotIn(state_id, first_pass["reactivated"])
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "blocked")
+        self.assertEqual(agency_capability.get_gap(second["id"])["status"], "open")
+
+        with patch(
+            "jarvis_mrb.agency_capability.available_tool",
+            return_value={
+                "tool": "capability.two",
+                "known": True,
+                "available": True,
+                "implemented_for_agency": True,
+                "authority_blocked": False,
+                "agency_scope_blocked": False,
+                "wrapper_tool": "custom.run",
+            },
+        ):
+            second_pass = agency_capability.reconcile_gaps()
+
+        self.assertIn(second["id"], second_pass["resolved"])
+        self.assertIn(state_id, second_pass["reactivated"])
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
+
     def test_known_but_denied_tool_is_authority_gap_not_capability_gap(self) -> None:
         permissions.set_policy("external_write", "deny")
         info = agency_capability.available_tool("gmail.send")

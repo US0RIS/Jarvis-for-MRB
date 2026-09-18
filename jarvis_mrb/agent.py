@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import hashlib
 import json
 import os
 import re
@@ -63,6 +66,50 @@ OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
 OLLAMA_KEEP_ALIVE = os.environ.get("JARVIS_OLLAMA_KEEP_ALIVE", "30m")
 _PENDING_ACTION: dict[str, Any] | None = None
+_CONFIRMED_ACTION_KEY: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "jarvis_confirmed_action_key",
+    default="",
+)
+
+
+def _confirmation_action_key(tool: str, args: dict[str, Any]) -> str:
+    raw = json.dumps(
+        {"tool": str(tool), "args": dict(args or {})},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+@contextlib.contextmanager
+def _confirmed_action_context(tool: str, args: dict[str, Any]):
+    token = _CONFIRMED_ACTION_KEY.set(_confirmation_action_key(tool, args))
+    try:
+        yield
+    finally:
+        _CONFIRMED_ACTION_KEY.reset(token)
+
+
+def _bypass_confirmation_authorized(tool: str, args: dict[str, Any]) -> bool:
+    expected = _confirmation_action_key(tool, args)
+    if _CONFIRMED_ACTION_KEY.get() == expected:
+        return True
+
+    try:
+        from jarvis_mrb.tool_audit import current_agency_step_id
+        step_id = current_agency_step_id()
+    except Exception:
+        step_id = ""
+    if not step_id:
+        return False
+    try:
+        from jarvis_mrb.agency_plan import approved_execution_matches
+        return bool(approved_execution_matches(step_id, tool, args))
+    except Exception:
+        return False
+
 
 
 @dataclass(frozen=True)
@@ -440,9 +487,15 @@ def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool =
     decision = decide(tool)
     if not decision.allowed:
         return AgentReply(False, f"Permission policy denies {decision.risk} actions such as {tool}.")
-    if decision.needs_confirmation and not bypass_confirmation:
-        _PENDING_ACTION = {"tool": tool, "args": args}
-        return AgentReply(True, f"Ready to {_describe_action(tool, args)}. Say 'confirm' to proceed or 'cancel'.")
+    if decision.needs_confirmation:
+        if not bypass_confirmation:
+            _PENDING_ACTION = {"tool": tool, "args": args}
+            return AgentReply(True, f"Ready to {_describe_action(tool, args)}. Say 'confirm' to proceed or 'cancel'.")
+        if not _bypass_confirmation_authorized(tool, args):
+            return AgentReply(
+                False,
+                f"Protected {decision.risk} action {tool} has no matching persisted confirmation authority.",
+            )
     return _execute_unchecked(tool, args)
 
 
@@ -451,7 +504,10 @@ def _confirm_pending() -> AgentReply:
     if _PENDING_ACTION:
         pending = _PENDING_ACTION
         _PENDING_ACTION = None
-        return execute_tool(str(pending["tool"]), dict(pending["args"]), bypass_confirmation=True)
+        tool = str(pending["tool"])
+        args = dict(pending["args"])
+        with _confirmed_action_context(tool, args):
+            return execute_tool(tool, args, bypass_confirmation=True)
 
     try:
         from jarvis_mrb.agency_plan import approve_pending, list_pending_approvals, pending_approval

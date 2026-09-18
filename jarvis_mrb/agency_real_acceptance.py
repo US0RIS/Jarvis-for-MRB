@@ -192,6 +192,33 @@ def _current_plan_baseline(conn: sqlite3.Connection, desired_state_id: str) -> d
         ).fetchone()
     except sqlite3.OperationalError:
         row = None
+    if row is None:
+        return {}
+    result = dict(row)
+    try:
+        steps = conn.execute(
+            """
+            SELECT id,step_key,ordinal,tool,status,risk,requires_confirmation,
+                   approval_digest,verification_id,attempt_count,result_summary,blocked_reason
+            FROM agency_steps
+            WHERE plan_id=? ORDER BY ordinal
+            """,
+            (str(row["id"]),),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        steps = []
+    result["steps"] = [dict(step) for step in steps]
+    return result
+
+
+def _runtime_baseline(conn: sqlite3.Connection, desired_state_id: str) -> dict[str, Any]:
+    try:
+        row = conn.execute(
+            "SELECT * FROM agency_runtime_state WHERE desired_state_id=?",
+            (str(desired_state_id),),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
     return dict(row) if row else {}
 
 
@@ -262,6 +289,7 @@ def start_session(
             "desired_state": dict(desired) if desired else {},
             "criteria_hash": _criteria_hash(desired),
             "plan": plan,
+            "runtime": _runtime_baseline(conn, state_id) if state_id else {},
             "active_watches": _active_watches(conn, state_id) if state_id else [],
             "goal_entity_id": goal_entity_id,
         }
@@ -274,8 +302,25 @@ def start_session(
                 raise ValueError(
                     "A1 REAL session requires a boot recorded by the process-instance-aware runtime."
                 )
+            if str(boot.get("deployment_sha") or "") != sha:
+                raise ValueError("A1 REAL session boot baseline must belong to the exact deployed SHA.")
             if not plan:
                 raise ValueError("A1 REAL session requires a persistent current plan before restart.")
+            plan_steps = list(plan.get("steps") or [])
+            if not any(str(step.get("status") or "") in {"verified", "skipped"} for step in plan_steps):
+                raise ValueError("A1 REAL session requires completed/verified work before restart.")
+            if not any(str(step.get("status") or "") == "awaiting_approval" for step in plan_steps):
+                raise ValueError("A1 REAL session requires a persisted pending approval before restart.")
+            if not any(
+                str(step.get("result_summary") or "").strip()
+                or str(step.get("verification_id") or "").strip()
+                for step in plan_steps
+                if str(step.get("status") or "") in {"verified", "skipped"}
+            ):
+                raise ValueError("A1 REAL session requires persisted evidence for completed work.")
+            runtime = dict(baseline.get("runtime") or {})
+            if _parse_time(str(runtime.get("next_evaluation_at") or "")) is None:
+                raise ValueError("A1 REAL session requires a persisted next evaluation time.")
         if clean_gate == "A6":
             if str(desired["state"]) != "blocked":
                 raise ValueError("A6 REAL session must start while the desired state is blocked.")
@@ -666,14 +711,28 @@ def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list
     baseline = session["baseline"]
     current = _desired_state_row(conn, state_id)
     latest_boot = _latest_boot_baseline(conn)
-    baseline_boot_id = str((baseline.get("boot") or {}).get("id") or "")
-    plan_id = str((baseline.get("plan") or {}).get("id") or "")
+    baseline_boot = dict(baseline.get("boot") or {})
+    baseline_boot_id = str(baseline_boot.get("id") or "")
+    baseline_plan = dict(baseline.get("plan") or {})
+    plan_id = str(baseline_plan.get("id") or "")
     plan_row = conn.execute("SELECT * FROM agency_plans WHERE id=?", (plan_id,)).fetchone() if plan_id else None
-    runtime_row = conn.execute("SELECT * FROM agency_runtime_state WHERE desired_state_id=?", (state_id,)).fetchone()
+    current_steps = conn.execute(
+        """
+        SELECT id,step_key,tool,status,approval_digest,verification_id,
+               attempt_count,result_summary
+        FROM agency_steps WHERE plan_id=? ORDER BY ordinal
+        """,
+        (plan_id,),
+    ).fetchall() if plan_id else []
+    current_by_id = {str(row["id"]): dict(row) for row in current_steps}
+    runtime_row = conn.execute(
+        "SELECT * FROM agency_runtime_state WHERE desired_state_id=?",
+        (state_id,),
+    ).fetchone()
+    runtime = dict(runtime_row) if runtime_row else {}
     restatements = _goal_restatement_ids(conn, session)
-    baseline_instance_id = str(
-        (baseline.get("boot") or {}).get("process_instance_id") or ""
-    )
+
+    baseline_instance_id = str(baseline_boot.get("process_instance_id") or "")
     latest_instance_id = str((latest_boot or {}).get("process_instance_id") or "")
     restarted = (
         bool(latest_boot)
@@ -681,19 +740,102 @@ def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list
         and bool(baseline_instance_id)
         and bool(latest_instance_id)
         and latest_instance_id != baseline_instance_id
+        and str(latest_boot.get("deployment_sha") or "") == str(session["deployment_sha"])
     )
+
+    baseline_steps = list(baseline_plan.get("steps") or [])
+    completed_baseline = [
+        step for step in baseline_steps
+        if str(step.get("status") or "") in {"verified", "skipped"}
+    ]
+    completed_preserved = bool(completed_baseline)
+    completed_evidence_preserved = bool(completed_baseline)
+    completed_details: list[dict[str, Any]] = []
+    for step in completed_baseline:
+        current_step = current_by_id.get(str(step.get("id") or ""))
+        preserved = bool(
+            current_step
+            and str(current_step.get("status") or "") in {"verified", "skipped"}
+            and int(current_step.get("attempt_count") or 0) == int(step.get("attempt_count") or 0)
+        )
+        evidence_preserved = bool(
+            current_step
+            and str(current_step.get("result_summary") or "") == str(step.get("result_summary") or "")
+            and str(current_step.get("verification_id") or "") == str(step.get("verification_id") or "")
+        )
+        completed_preserved = completed_preserved and preserved
+        completed_evidence_preserved = completed_evidence_preserved and evidence_preserved
+        completed_details.append(
+            {
+                "step_id": str(step.get("id") or ""),
+                "preserved": preserved,
+                "evidence_preserved": evidence_preserved,
+                "before": step,
+                "after": current_step,
+            }
+        )
+
+    pending_baseline = [
+        step for step in baseline_steps
+        if str(step.get("status") or "") == "awaiting_approval"
+    ]
+    pending_preserved = bool(pending_baseline)
+    pending_details: list[dict[str, Any]] = []
+    for step in pending_baseline:
+        current_step = current_by_id.get(str(step.get("id") or ""))
+        preserved = bool(
+            current_step
+            and str(current_step.get("status") or "") == "awaiting_approval"
+            and int(current_step.get("attempt_count") or 0) == int(step.get("attempt_count") or 0)
+            and str(current_step.get("tool") or "") == str(step.get("tool") or "")
+            and str(current_step.get("approval_digest") or "") == str(step.get("approval_digest") or "")
+        )
+        pending_preserved = pending_preserved and preserved
+        pending_details.append(
+            {
+                "step_id": str(step.get("id") or ""),
+                "preserved": preserved,
+                "before": step,
+                "after": current_step,
+            }
+        )
+
+    baseline_next = _parse_time(
+        str((baseline.get("runtime") or {}).get("next_evaluation_at") or "")
+    )
+    current_next = _parse_time(str(runtime.get("next_evaluation_at") or ""))
+    next_evaluation_preserved = bool(
+        baseline_next is not None
+        and current_next is not None
+        and current_next >= baseline_next
+    )
+
     checks = [
-        _check("service actually restarted into a new process", restarted, {"baseline": baseline.get("boot"), "latest": latest_boot}),
+        _check("service actually restarted into a new process on the same SHA", restarted, {"baseline": baseline_boot, "latest": latest_boot}),
         _check("same desired state survived restart", current is not None, state_id),
         _check("same plan survived restart", plan_row is not None, plan_id),
         _check("success criteria survived unchanged", current is not None and _criteria_hash(current) == str(baseline.get("criteria_hash") or "")),
-        _check("runtime scheduling state survived", runtime_row is not None, dict(runtime_row) if runtime_row else None),
+        _check("completed work was not replayed or lost", completed_preserved, completed_details),
+        _check("completed-work evidence survived unchanged", completed_evidence_preserved, completed_details),
+        _check("pending approval survived without execution", pending_preserved, pending_details),
+        _check(
+            "next evaluation time survived or advanced",
+            next_evaluation_preserved,
+            {
+                "baseline": str((baseline.get("runtime") or {}).get("next_evaluation_at") or ""),
+                "current": str(runtime.get("next_evaluation_at") or ""),
+            },
+        ),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
     ]
     return {
         "checks": checks,
         "evidence": {
             "restart_observed": checks[0]["passed"],
+            "completed_work_preserved": checks[4]["passed"],
+            "evidence_preserved": checks[5]["passed"],
+            "pending_approval_preserved": checks[6]["passed"],
+            "next_evaluation_preserved": checks[7]["passed"],
             "goal_recovered_without_restatement": all(check["passed"] for check in checks[1:]),
         },
     }

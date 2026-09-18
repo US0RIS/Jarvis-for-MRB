@@ -887,6 +887,26 @@ def _invoke_executor(
         return executor(str(step["tool"]), arguments)
 
 
+def _custom_run_is_read_observation(step: dict[str, Any]) -> bool:
+    if str(step.get("tool") or "") != "custom.run":
+        return False
+    try:
+        arguments = resolved_arguments(str(step["id"]))
+        name = str(arguments.get("name") or "")
+        from jarvis_mrb.custom_tools import list_tools
+        matches = [
+            item for item in list_tools()
+            if str(item.get("name") or "") == name
+        ]
+    except Exception:
+        return False
+    return bool(
+        len(matches) == 1
+        and matches[0].get("enabled")
+        and str(matches[0].get("risk") or "") == "read"
+    )
+
+
 def _execute_step(
     plan: dict[str, Any],
     step: dict[str, Any],
@@ -964,7 +984,7 @@ def _execute_step(
                         blocked_reason=f"Outcome verification {verification_status}.",
                         finished=True,
                     )
-            elif str(step["risk"]) == "read":
+            elif str(step["risk"]) == "read" or _custom_run_is_read_observation(step):
                 _set_step_status(conn, str(step["id"]), "verified", result=message, finished=True)
             else:
                 _set_step_status(

@@ -50,10 +50,20 @@ def _connect() -> sqlite3.Connection:
             next_planning_attempt_at TEXT,
             last_error TEXT NOT NULL DEFAULT '',
             last_tick_at TEXT,
+            last_action_at TEXT,
             updated_at TEXT NOT NULL
         )
         """
     )
+    runtime_columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(agency_runtime_state)").fetchall()
+    }
+    if "last_action_at" not in runtime_columns:
+        conn.execute(
+            "ALTER TABLE agency_runtime_state ADD COLUMN last_action_at TEXT"
+        )
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS agency_settings (
@@ -183,6 +193,7 @@ def _runtime_state(desired_state_id: str) -> dict[str, Any]:
             "next_planning_attempt_at": "",
             "last_error": "",
             "last_tick_at": "",
+            "last_action_at": "",
         }
     return dict(row)
 
@@ -193,6 +204,7 @@ def _update_runtime(
     planner_success: bool | None = None,
     error: str = "",
     tick: bool = False,
+    action: bool = False,
 ) -> None:
     now = _now()
     current = _runtime_state(desired_state_id)
@@ -200,6 +212,7 @@ def _update_runtime(
     last_planning = current.get("last_planning_attempt_at")
     next_planning = current.get("next_planning_attempt_at")
     last_error = str(current.get("last_error") or "")
+    last_action_at = current.get("last_action_at")
     if planner_success is True:
         failures = 0
         last_planning = now
@@ -217,14 +230,15 @@ def _update_runtime(
             """
             INSERT INTO agency_runtime_state(
                 desired_state_id,consecutive_planner_failures,last_planning_attempt_at,
-                next_planning_attempt_at,last_error,last_tick_at,updated_at
-            ) VALUES(?,?,?,?,?,?,?)
+                next_planning_attempt_at,last_error,last_tick_at,last_action_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?)
             ON CONFLICT(desired_state_id) DO UPDATE SET
                 consecutive_planner_failures=excluded.consecutive_planner_failures,
                 last_planning_attempt_at=excluded.last_planning_attempt_at,
                 next_planning_attempt_at=excluded.next_planning_attempt_at,
                 last_error=excluded.last_error,
                 last_tick_at=excluded.last_tick_at,
+                last_action_at=excluded.last_action_at,
                 updated_at=excluded.updated_at
             """,
             (
@@ -234,6 +248,7 @@ def _update_runtime(
                 next_planning,
                 last_error,
                 now if tick else current.get("last_tick_at"),
+                now if action else last_action_at,
                 now,
             ),
         )
@@ -585,14 +600,64 @@ def tick_all(
         }
 
     action_budget = max(0, min(int(max_actions), 10)) if mode == "active" else 0
-    actions = 0
-    results: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for desired in list_desired_states(limit=max(1, min(int(limit), 200))):
         if str(desired.get("state") or "") not in {"active", "satisfied"}:
             continue
         authority = desired.get("authority") if isinstance(desired.get("authority"), dict) else {}
         if authority.get("agency_enabled") is not True:
             continue
+        candidates.append(desired)
+
+    runtime_by_id: dict[str, dict[str, Any]] = {}
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT desired_state_id,last_action_at FROM agency_runtime_state"
+        ).fetchall()
+    for row in rows:
+        runtime_by_id[str(row["desired_state_id"])] = {
+            "last_action_at": str(row["last_action_at"] or "")
+        }
+
+    def action_age_key(item: dict[str, Any]) -> tuple[int, float, str]:
+        state_id = str(item.get("id") or "")
+        raw = str((runtime_by_id.get(state_id) or {}).get("last_action_at") or "")
+        parsed = _parse_time(raw)
+        # Never-acted goals are oldest and therefore get first fair-share opportunity.
+        timestamp = parsed.timestamp() if parsed is not None else float("-inf")
+        return (-int(item.get("priority") or 0), timestamp, state_id)
+
+    ordered: list[dict[str, Any]] = []
+    if candidates:
+        max_priority = max(int(item.get("priority") or 0) for item in candidates)
+        top_priority = [
+            item for item in candidates
+            if int(item.get("priority") or 0) == max_priority
+        ]
+        champion = min(top_priority, key=action_age_key)
+        ordered.append(champion)
+
+        remaining = [item for item in candidates if str(item.get("id")) != str(champion.get("id"))]
+        remaining.sort(
+            key=lambda item: (
+                (
+                    _parse_time(
+                        str((runtime_by_id.get(str(item.get("id"))) or {}).get("last_action_at") or "")
+                    ).timestamp()
+                    if _parse_time(
+                        str((runtime_by_id.get(str(item.get("id"))) or {}).get("last_action_at") or "")
+                    ) is not None
+                    else float("-inf")
+                ),
+                -int(item.get("priority") or 0),
+                str(item.get("id") or ""),
+            )
+        )
+        ordered.extend(remaining)
+
+    actions = 0
+    results: list[dict[str, Any]] = []
+    for desired in ordered:
         result = tick_desired_state(
             str(desired["id"]),
             executor=executor,

@@ -547,6 +547,10 @@ def update_priority(desired_state_id: str, priority: float | int) -> dict[str, A
 
 def update_authority(desired_state_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     state_id = str(desired_state_id or "").strip()
+    requested = dict(updates or {})
+    now = _now()
+    previous: dict[str, Any] = {}
+    changed: dict[str, Any] = {}
     with _connect() as conn:
         row = conn.execute(
             "SELECT authority_json FROM desired_states WHERE id=?",
@@ -555,12 +559,37 @@ def update_authority(desired_state_id: str, updates: dict[str, Any]) -> dict[str
         if row is None:
             raise ValueError(f"Unknown desired state {state_id!r}.")
         authority = dict(_loads(str(row["authority_json"]), {}))
-        authority.update(dict(updates or {}))
+        for key, value in requested.items():
+            if authority.get(key) != value:
+                previous[str(key)] = authority.get(key)
+                changed[str(key)] = value
+        authority.update(requested)
         conn.execute(
             "UPDATE desired_states SET authority_json=?,updated_at=? WHERE id=?",
-            (json.dumps(authority, ensure_ascii=False, sort_keys=True), _now(), state_id),
+            (json.dumps(authority, ensure_ascii=False, sort_keys=True), now, state_id),
         )
         conn.commit()
+
+    if changed:
+        try:
+            from jarvis_mrb.world_model import record_event
+            record_event(
+                "desired_state.authority_changed",
+                f"Desired-state authority changed for {state_id}: {', '.join(sorted(changed))}.",
+                source_kind="jarvis_desired_state",
+                source_ref=f"{state_id}:authority:{now}",
+                occurred_at=now,
+                payload={
+                    "desired_state_id": state_id,
+                    "changed_keys": sorted(changed),
+                    "previous": previous,
+                    "current": changed,
+                },
+                evidence="Durable audit record of a desired-state authority mutation.",
+                confidence=1.0,
+            )
+        except Exception:
+            pass
     return get_desired_state(state_id) or {}
 
 
@@ -568,11 +597,18 @@ def set_state(desired_state_id: str, state: str, *, reason: str = "") -> dict[st
     clean_state = str(state or "").strip().lower()
     if clean_state not in VALID_STATES:
         raise ValueError(f"Invalid desired-state lifecycle state {clean_state!r}.")
+    state_id = str(desired_state_id)
+    clean_reason = str(reason or "")[:2000]
     now = _now()
     with _connect() as conn:
-        row = conn.execute("SELECT state FROM desired_states WHERE id=?", (str(desired_state_id),)).fetchone()
+        row = conn.execute(
+            "SELECT state,blocked_reason FROM desired_states WHERE id=?",
+            (state_id,),
+        ).fetchone()
         if row is None:
             raise ValueError(f"Unknown desired state {desired_state_id!r}.")
+        previous_state = str(row["state"])
+        previous_reason = str(row["blocked_reason"] or "")
         satisfied_at = now if clean_state == "satisfied" else None
         conn.execute(
             """
@@ -582,14 +618,37 @@ def set_state(desired_state_id: str, state: str, *, reason: str = "") -> dict[st
             """,
             (
                 clean_state,
-                str(reason or "")[:2000] if clean_state == "blocked" else "",
+                clean_reason if clean_state == "blocked" else "",
                 now,
                 satisfied_at,
-                str(desired_state_id),
+                state_id,
             ),
         )
         conn.commit()
-    return get_desired_state(str(desired_state_id)) or {}
+
+    next_reason = clean_reason if clean_state == "blocked" else ""
+    if previous_state != clean_state or previous_reason != next_reason:
+        try:
+            from jarvis_mrb.world_model import record_event
+            record_event(
+                "desired_state.lifecycle_changed",
+                f"Desired-state lifecycle changed: {previous_state} → {clean_state}.",
+                source_kind="jarvis_desired_state",
+                source_ref=f"{state_id}:lifecycle:{now}",
+                occurred_at=now,
+                payload={
+                    "desired_state_id": state_id,
+                    "state_before": previous_state,
+                    "state_after": clean_state,
+                    "reason_before": previous_reason,
+                    "reason_after": next_reason,
+                },
+                evidence="Durable audit record of an explicit desired-state lifecycle mutation.",
+                confidence=1.0,
+            )
+        except Exception:
+            pass
+    return get_desired_state(state_id) or {}
 
 
 def evaluations(desired_state_id: str, *, limit: int = 20) -> list[dict[str, Any]]:

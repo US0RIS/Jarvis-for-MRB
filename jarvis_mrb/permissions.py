@@ -97,6 +97,7 @@ TOOL_RISK: dict[str, Risk] = {
     "agency.disable": "local_write",
     "agency.activate_goal": "security",
     "agency.pause_goal": "local_write",
+    "permissions.set": "security",
 }
 
 

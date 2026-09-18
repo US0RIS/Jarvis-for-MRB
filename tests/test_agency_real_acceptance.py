@@ -320,6 +320,11 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 "target.missing.capability",
                 "The target goal needs a capability Jarvis does not have.",
             )
+            desired_state.set_state(
+                target_state,
+                "blocked",
+                reason="Missing capability: target.missing.capability.",
+            )
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
             self.assertFalse(evaluation["evidence"]["fabricated_tool_availability"])

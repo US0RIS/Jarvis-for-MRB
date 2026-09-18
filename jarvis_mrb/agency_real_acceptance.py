@@ -1263,12 +1263,66 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
 
 
 def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
-    rows = _verification_rows_for_state(conn, session["desired_state_id"], session["started_at"])
+    state_id = session["desired_state_id"]
+    rows = _verification_rows_for_state(conn, state_id, session["started_at"])
     external = [
         row for row in rows
         if str(row.get("risk") or "") == "external_write"
         and bool(row.get("action_event_proof"))
     ]
+
+    def expected_contract(row: dict[str, Any]) -> dict[str, Any]:
+        expected = dict(_loads(str(row.get("expected_json") or "{}"), {}))
+        return {
+            "verification_id": str(row.get("id") or ""),
+            "tool": str(row.get("tool") or ""),
+            "verifier": str(row.get("verifier") or ""),
+            "expected": expected,
+            "persisted": bool(expected),
+        }
+
+    def feedback_after_terminal(row: dict[str, Any]) -> list[dict[str, Any]]:
+        resolved_event_id = int(row.get("resolved_event_id") or 0)
+        if not resolved_event_id:
+            return []
+        event = conn.execute(
+            "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+            (resolved_event_id,),
+        ).fetchone()
+        terminal_time = _parse_time(
+            str(
+                (event["recorded_at"] if event else "")
+                or (event["occurred_at"] if event else "")
+                or ""
+            )
+        )
+        if terminal_time is None:
+            return []
+        evaluations = conn.execute(
+            """
+            SELECT id,observed_at,satisfied,state_before,state_after
+            FROM desired_state_evaluations
+            WHERE desired_state_id=? AND observed_at>=?
+            ORDER BY observed_at,id
+            """,
+            (state_id, session["started_at"]),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for evaluation in evaluations:
+            observed = _parse_time(str(evaluation["observed_at"] or ""))
+            if observed is None or observed < terminal_time:
+                continue
+            result.append(
+                {
+                    "id": int(evaluation["id"]),
+                    "observed_at": str(evaluation["observed_at"]),
+                    "satisfied": bool(evaluation["satisfied"]),
+                    "state_before": str(evaluation["state_before"]),
+                    "state_after": str(evaluation["state_after"]),
+                }
+            )
+        return result
+
     verified = [
         row for row in external
         if str(row.get("status") or "") == "verified"
@@ -1290,16 +1344,65 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             )
         )
     ]
+
+    counted = verified + negative
+    expected_details = [expected_contract(row) for row in counted]
+    expected_persisted = bool(counted) and all(
+        bool(item["persisted"]) for item in expected_details
+    )
+    feedback_details = {
+        str(row.get("id") or ""): feedback_after_terminal(row)
+        for row in counted
+    }
+    feedback_observed = bool(counted) and all(
+        bool(feedback_details.get(str(row.get("id") or "")))
+        for row in counted
+    )
+
     checks = [
-        _check("real external write has independently verified outcome", bool(verified), [row["id"] for row in verified]),
-        _check("failure/timeout/unverified outcome was exercised", bool(negative), [row["id"] for row in negative]),
+        _check(
+            "real external write attempts were durably audited",
+            bool(external),
+            [
+                {
+                    "verification_id": str(row.get("id") or ""),
+                    "action_event_id": int(row.get("action_event_id") or 0),
+                    "agency_step_id": str(row.get("agency_step_id") or ""),
+                    "tool": str(row.get("tool") or ""),
+                }
+                for row in external
+            ],
+        ),
+        _check(
+            "counted writes persisted concrete expected observable outcomes",
+            expected_persisted,
+            expected_details,
+        ),
+        _check(
+            "real external write has independently verified outcome",
+            bool(verified),
+            [str(row.get("id") or "") for row in verified],
+        ),
+        _check(
+            "failure/timeout/unverified outcome was exercised",
+            bool(negative),
+            [str(row.get("id") or "") for row in negative],
+        ),
+        _check(
+            "terminal verification results fed back into desired-state evaluation",
+            feedback_observed,
+            feedback_details,
+        ),
     ]
     return {
         "checks": checks,
         "evidence": {
-            "verified_real_write_observed": checks[0]["passed"],
-            "failure_timeout_or_unverified_observed": checks[1]["passed"],
-            "independent_readback_observed": checks[0]["passed"],
+            "action_attempt_persisted": checks[0]["passed"],
+            "expected_outcome_persisted": checks[1]["passed"],
+            "verified_real_write_observed": checks[2]["passed"],
+            "failure_timeout_or_unverified_observed": checks[3]["passed"],
+            "independent_readback_observed": checks[2]["passed"],
+            "verification_feedback_observed": checks[4]["passed"],
         },
     }
 

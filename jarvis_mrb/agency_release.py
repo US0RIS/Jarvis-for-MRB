@@ -192,6 +192,8 @@ def _connect() -> sqlite3.Connection:
             regression_ok INTEGER NOT NULL,
             synthetic_ok INTEGER NOT NULL,
             diagnostics_ok INTEGER NOT NULL,
+            tree_clean_before INTEGER NOT NULL DEFAULT 0,
+            tree_clean_after INTEGER NOT NULL DEFAULT 0,
             regression_summary TEXT NOT NULL DEFAULT '',
             synthetic_summary TEXT NOT NULL DEFAULT '',
             diagnostics_summary TEXT NOT NULL DEFAULT '',
@@ -231,6 +233,18 @@ def _connect() -> sqlite3.Connection:
         END;
         """
     )
+    validation_columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(agency_release_validation_runs)").fetchall()
+    }
+    if "tree_clean_before" not in validation_columns:
+        conn.execute(
+            "ALTER TABLE agency_release_validation_runs ADD COLUMN tree_clean_before INTEGER NOT NULL DEFAULT 0"
+        )
+    if "tree_clean_after" not in validation_columns:
+        conn.execute(
+            "ALTER TABLE agency_release_validation_runs ADD COLUMN tree_clean_after INTEGER NOT NULL DEFAULT 0"
+        )
     conn.commit()
     return conn
 
@@ -292,6 +306,25 @@ def deployment_sha(root: Path | None = None) -> str:
         return ""
     sha = str(result.stdout or "").strip().lower()
     return sha if result.returncode == 0 and _SHA_RE.fullmatch(sha) else ""
+
+
+def _git_worktree_clean(root: Path) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if result.returncode != 0:
+        detail = (str(result.stdout or "") + "\n" + str(result.stderr or "")).strip()
+        return False, detail[-2000:] or f"git status exited {result.returncode}"
+    dirty = str(result.stdout or "").strip()
+    return (not dirty, dirty[-5000:])
 
 
 def _require_true(evidence: dict[str, Any], key: str, gate: str) -> None:
@@ -541,6 +574,8 @@ def record_validation_run(
     regression_ok: bool,
     synthetic_ok: bool,
     diagnostics_ok: bool,
+    tree_clean_before: bool,
+    tree_clean_after: bool,
     regression_summary: str = "",
     synthetic_summary: str = "",
     diagnostics_summary: str = "",
@@ -557,9 +592,9 @@ def record_validation_run(
             """
             INSERT INTO agency_release_validation_runs(
                 id,deployment_sha,environment_fingerprint,source_root,compile_ok,regression_ok,
-                synthetic_ok,diagnostics_ok,regression_summary,synthetic_summary,
-                diagnostics_summary,recorded_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                synthetic_ok,diagnostics_ok,tree_clean_before,tree_clean_after,
+                regression_summary,synthetic_summary,diagnostics_summary,recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 run_id,
@@ -570,6 +605,8 @@ def record_validation_run(
                 1 if regression_ok else 0,
                 1 if synthetic_ok else 0,
                 1 if diagnostics_ok else 0,
+                1 if tree_clean_before else 0,
+                1 if tree_clean_after else 0,
                 str(regression_summary or "")[-5000:],
                 str(synthetic_summary or "")[-5000:],
                 str(diagnostics_summary or "")[-5000:],
@@ -664,6 +701,8 @@ def release_status(
         and int(validation.get("regression_ok") or 0) == 1
         and int(validation.get("synthetic_ok") or 0) == 1
         and int(validation.get("diagnostics_ok") or 0) == 1
+        and int(validation.get("tree_clean_before") or 0) == 1
+        and int(validation.get("tree_clean_after") or 0) == 1
     )
 
     if diagnostics is None:
@@ -736,6 +775,17 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
             "deployment_sha": sha,
         }
 
+    tree_clean_before, tree_before_detail = _git_worktree_clean(source)
+    if not tree_clean_before:
+        return {
+            "ok": False,
+            "recorded": False,
+            "error": "Release validation refuses to certify a dirty or unverifiable Git working tree.",
+            "source_root": str(source),
+            "deployment_sha": sha,
+            "git_status": tree_before_detail,
+        }
+
     compile_ok, compile_output = _run_command(
         [sys.executable, "-m", "compileall", "-q", "jarvis_mrb", "tests"],
         cwd=source,
@@ -758,6 +808,7 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
     except Exception as exc:
         diagnostics = {"ok": False, "error": str(exc)[:2000]}
     diagnostics_ok = bool(diagnostics.get("ok"))
+    tree_clean_after, tree_after_detail = _git_worktree_clean(source)
 
     run = record_validation_run(
         deployment_sha_value=sha,
@@ -766,12 +817,25 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
         regression_ok=regression_ok,
         synthetic_ok=synthetic_ok,
         diagnostics_ok=diagnostics_ok,
-        regression_summary=("compile:\n" + compile_output + "\n\nunittest:\n" + regression_output),
+        tree_clean_before=tree_clean_before,
+        tree_clean_after=tree_clean_after,
+        regression_summary=(
+            "compile:\n" + compile_output
+            + "\n\nunittest:\n" + regression_output
+            + ("\n\npost-test git status:\n" + tree_after_detail if tree_after_detail else "")
+        ),
         synthetic_summary=synthetic_output,
         diagnostics_summary=json.dumps(diagnostics, ensure_ascii=False, sort_keys=True, default=str),
     )
     return {
-        "ok": bool(compile_ok and regression_ok and synthetic_ok and diagnostics_ok),
+        "ok": bool(
+            compile_ok
+            and regression_ok
+            and synthetic_ok
+            and diagnostics_ok
+            and tree_clean_before
+            and tree_clean_after
+        ),
         "recorded": True,
         "deployment_sha": sha,
         "environment_fingerprint": environment_fingerprint(),
@@ -779,6 +843,8 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
         "regression_ok": regression_ok,
         "synthetic_ok": synthetic_ok,
         "diagnostics_ok": diagnostics_ok,
+        "tree_clean_before": tree_clean_before,
+        "tree_clean_after": tree_clean_after,
         "validation_run": run,
         "release_status": release_status(
             deployment_sha_value=sha,

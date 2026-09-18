@@ -25,7 +25,7 @@ _ALLOWED_NODE_TOOLS = {
     "vision.recall", "vision.ocr_clipboard",
     "expense.capture", "expense.list", "expense.export", "fact.check", "journal.generate",
     "state.get", "state.update", "state.temp_set", "state.temp_clear",
-    "knowledge.search", "spatial.find",
+    "knowledge.search", "spatial.find", "agency.deliberate",
 }
 
 
@@ -62,13 +62,15 @@ def plan_workflow(goal: str) -> dict[str, Any]:
     tools = ", ".join(sorted(_ALLOWED_NODE_TOOLS))
     system = f"""Create a small directed acyclic graph for a personal assistant workflow.
 Return JSON only with this schema:
-{{"summary":"...","nodes":[{{"id":"n1","tool":"tool.name","arguments":{{}},"depends_on":[]}}]}}
+{{"summary":"...","nodes":[{{"id":"n1","tool":"tool.name","arguments":{{}},"depends_on":[]}}],"missing_capability":null}}
+If the goal requires a capability that no allowed tool can provide, return:
+{{"summary":"...","nodes":[],"missing_capability":{{"capability":"short machine-readable name","reason":"concrete reason this capability is necessary"}}}}
 Allowed tools: {tools}
 Rules:
 - Use no more than 8 nodes.
 - Use explicit dependencies. Independent read-only lookups may have no dependency and can run in parallel.
 - A dependent argument may reference an earlier node's returned message with the exact placeholder ${{n1.message}}. Example: {{"body":"Summary: ${{n1.message}}"}}. Only reference nodes listed in depends_on.
-- Never invent a tool.
+- Never invent a tool. If no allowed tool can perform a necessary operation, use missing_capability instead.
 - Do not include a write action unless the user's goal actually requires it.
 - Prefer read-only gathering before writes.
 - Do not bypass confirmations; the execution layer enforces permissions.
@@ -103,8 +105,18 @@ Rules:
 
 def _validate_plan(plan: dict[str, Any]) -> None:
     nodes = plan.get("nodes")
-    if not isinstance(nodes, list) or not nodes or len(nodes) > 8:
-        raise ValueError("Workflow must contain between 1 and 8 nodes.")
+    missing = plan.get("missing_capability")
+    if not isinstance(nodes, list) or len(nodes) > 8:
+        raise ValueError("Workflow nodes must be a list with no more than 8 nodes.")
+    if missing is not None:
+        if not isinstance(missing, dict):
+            raise ValueError("Workflow missing_capability must be null or an object.")
+        capability = str(missing.get("capability") or "").strip()
+        reason = str(missing.get("reason") or "").strip()
+        if not capability or not reason:
+            raise ValueError("Workflow missing_capability requires capability and reason.")
+    if not nodes and not isinstance(missing, dict):
+        raise ValueError("Workflow must contain at least one node or an explicit missing_capability.")
     ids: set[str] = set()
     for raw in nodes:
         if not isinstance(raw, dict):

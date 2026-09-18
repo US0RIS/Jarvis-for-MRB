@@ -159,6 +159,49 @@ PASS requires a complete trace from initial desired state to verified satisfacti
 
 ---
 
+# REAL acceptance execution runbook
+
+Run REAL gates only on the actual deployed Windows Jarvis backend, with the physical iPhone and real connected services required by the scenario. Do not use test fixtures, direct database edits, synthetic providers, or foreground/manual tool orchestration to satisfy a REAL gate.
+
+The live harness is intentionally three-stage:
+
+```powershell
+jarvis-agency-real-gate start <GATE> --desired-state <ID> --parameters-json '<JSON>'
+jarvis-agency-real-gate evaluate <SESSION_ID>
+jarvis-agency-real-gate finalize <SESSION_ID>
+```
+
+`start` binds the session to the exact deployed Git SHA, persistent installation/environment fingerprint, baseline event position, and gate-specific starting state. `evaluate` derives checks from durable runtime evidence and does not create a receipt. `finalize` can mint an immutable REAL receipt only when every derived check passes. A changed SHA/environment, corrupted session/receipt, hidden manual tool execution, failed check, or missing evidence makes finalization fail closed.
+
+Gate-specific setup:
+
+- **A1:** Before `start`, the current persistent plan must contain at least one completed/verified step with stored evidence, at least one protected step already awaiting approval, a persisted next-evaluation time, and a boot record for the exact deployed SHA. Start A1, restart the actual Jarvis service/process without changing SHA, then evaluate/finalize. The harness rejects a second boot row from the same process instance.
+- **A2:** Start with an active authorized desired state whose success is externally observable. Exercise at least two non-read actions with independent terminal read-back. There must be a persisted unsatisfied desired-state evaluation after the first verified observation and before the second action, followed by automatic convergence and no further action after satisfaction.
+- **A3:** Use one desired state containing an automatic safe read and a protected external write. Approve one real protected write so the exact waiting step resumes, and explicitly deny a separate protected step so its path becomes blocked/needs-replan.
+- **A4:** Exercise a real consequential write with a persisted expected observable outcome and independent verification, plus a real induced failure, timeout, or non-verifiable result. Both terminal outcomes must feed back through desired-state evaluation.
+- **A5:** The baseline plan must include already-valid work that should survive the change. Start with `--parameters-json '{"preserve_step_key":"<STEP_KEY>"}'`. Complete that preserved step, inject a relevant external change, let Agency invalidate/replan, and verify the completed valid work is not replayed.
+- **A6:** Start while the desired state is blocked and has at least one persisted active wake watch. Change the blocking condition through a real observed event; after reactivation, Agency must automatically execute or surface the newly feasible next step according to permissions.
+- **A7:** Use a real ambiguous decision/research task and start with `--parameters-json '{"question_contains":"<UNIQUE QUESTION FRAGMENT>"}'`. The matching deliberation must contain overlapping completed evidence, skeptic/counterexample, feasibility, and risk/cost workers, bounded provenance, preserved disagreement, and synthesis only after worker completion.
+- **A8:** Use a dedicated desired state during a controlled interval containing at least five low-value attention events and one high-value exception. Exactly one interruption may emit and duplicate observations must not duplicate it.
+- **A9:** Start on the blocked target desired state. The missing capability must first be recorded unavailable. If a narrow adapter is appropriate, it must pass the real sandbox/request-plan validation path, remain disabled, be explicitly enabled through the audited security boundary, resolve the exact gap, reactivate the goal, and remain confirmation-gated. Read-only custom adapters may enter Agency; unverifiable custom writes may not.
+- **A11:** Start with `--parameters-json '{"tool":"<PROTECTED_TOOL>","preference_key":"<KEY>"}'`. Create a genuinely inferred in-session preference that points toward more autonomy, then prove the protected action still stops at the permission approval boundary. Explicit policy/user sources do not count as inference.
+- **A12:** Use one bounded desired state that naturally requires private retrieval, public research, plan-linked parallel deliberation, a protected external action, independent verification, and a causal replan after an injected external change. After the initial goal, human input is limited to approvals/denials and genuine value judgments. Foreground/manual intermediate tool calls invalidate the session. Final satisfaction must be derived from evidence linked to the independently verified protected action.
+
+Inspect live sessions with:
+
+```powershell
+jarvis-agency-real-gate status
+jarvis-agency-real-gate list
+```
+
+After **all** REAL receipts exist for the same exact SHA/environment, run the final validation **after** the acceptance campaign:
+
+```powershell
+jarvis-agency-release-check --full
+```
+
+Release readiness remains false unless compileall, the full Python regression suite, synthetic A1–A12 preflight, strict world/Agency diagnostics, clean Git tree checks, and every valid REAL receipt all pass for that same SHA/environment. A validation run that predates any selected REAL receipt is intentionally insufficient.
+
 # Required evidence for release
 
 A release candidate must include:

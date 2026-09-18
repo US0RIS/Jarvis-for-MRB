@@ -231,8 +231,20 @@ def select_branch(
     if len(matches) != 1:
         raise ValueError("Decision branch could not be uniquely identified.")
     selected = matches[0]
+    clean_rationale = " ".join(str(rationale or "").split())[:4000]
+    if not clean_rationale:
+        raise ValueError("Selecting a counterfactual branch requires an explicit rationale.")
+    conditions = [
+        " ".join(str(item or "").split())[:1500]
+        for item in (change_conditions or [])[:30]
+        if " ".join(str(item or "").split())
+    ]
+    if not conditions:
+        raise ValueError(
+            "Selecting a counterfactual branch requires at least one explicit condition "
+            "that would change or reopen the choice."
+        )
     now = _now()
-    conditions = [str(item)[:1500] for item in (change_conditions or [])[:30]]
 
     with _connect() as conn:
         conn.execute(
@@ -252,7 +264,7 @@ def select_branch(
             """,
             (
                 str(selected["id"]),
-                " ".join(str(rationale or "").split())[:4000],
+                clean_rationale,
                 json.dumps(conditions, ensure_ascii=False, sort_keys=True),
                 now,
                 now,
@@ -265,7 +277,7 @@ def select_branch(
         from jarvis_mrb.world_model import record_event
         record_event(
             "agency.counterfactual.selected",
-            f"Selected counterfactual branch {selected['title']}: {str(rationale)[:1000]}",
+            f"Selected counterfactual branch {selected['title']}: {clean_rationale[:1000]}",
             source_kind="jarvis_agency",
             source_ref=f"{case_id}:{selected['id']}",
             occurred_at=now,

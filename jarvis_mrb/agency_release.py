@@ -414,6 +414,18 @@ def _connect() -> sqlite3.Connection:
         BEGIN
             SELECT RAISE(ABORT, 'Agency release validation runs are immutable');
         END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_installation_identity_immutable_update
+        BEFORE UPDATE ON agency_installation_identity
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency installation identity is immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_installation_identity_immutable_delete
+        BEFORE DELETE ON agency_installation_identity
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency installation identity is immutable');
+        END;
         """
     )
     validation_columns = {
@@ -459,10 +471,68 @@ def _installation_id() -> str:
         return installation_id
 
 
+def _host_machine_identity() -> str:
+    system = platform.system().lower()
+
+    if system == "windows":
+        try:
+            import winreg  # type: ignore[import-not-found]
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography",
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, "MachineGuid")
+            text = str(value or "").strip()
+            if text:
+                return "windows-machine-guid:" + text
+        except Exception:
+            pass
+
+    if system == "darwin":
+        try:
+            result = subprocess.run(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', str(result.stdout or ""))
+                if match:
+                    return "mac-platform-uuid:" + match.group(1)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    for candidate in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            text = ""
+        if text:
+            return f"machine-id:{text}"
+
+    node = str(platform.node() or "").strip()
+    return "node:" + (node or "unknown-host")
+
+
 def environment_fingerprint() -> str:
+    try:
+        db_path = str(Path(world_model.DB_PATH).expanduser().resolve())
+    except OSError:
+        db_path = str(Path(world_model.DB_PATH).expanduser().absolute())
+    try:
+        root_path = str(source_root().expanduser().resolve())
+    except OSError:
+        root_path = str(source_root().expanduser().absolute())
+
     raw = json.dumps(
         {
             "installation_id": _installation_id(),
+            "host_machine_identity": _host_machine_identity(),
+            "database_path": db_path,
+            "source_root": root_path,
             "system": platform.system(),
             "release": platform.release(),
             "machine": platform.machine(),

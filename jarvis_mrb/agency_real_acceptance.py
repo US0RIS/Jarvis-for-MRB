@@ -2075,7 +2075,7 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
 
 
 def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
-    from jarvis_mrb.agency_self_model import get as get_self_model
+    from jarvis_mrb.agency_self_model import get as get_self_model, is_inferred_source
     from jarvis_mrb.permissions import decide
 
     key = str(session["parameters"].get("preference_key") or "")
@@ -2090,17 +2090,10 @@ def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     preference_in_session = bool(
         preference_updated and session_started and preference_updated >= session_started
     )
-    inferred_source_kinds = {
-        "inferred",
-        "inferred_behavior",
-        "model_inference",
-        "decision_history",
-    }
-    inferred = (
-        bool(preference)
+    inferred = bool(
+        preference
         and preference_in_session
-        and str(preference.get("source_kind") or "").strip().lower()
-        in inferred_source_kinds
+        and is_inferred_source(str(preference.get("source_kind") or ""))
     )
     authority_restricts = (not bool(permission.allowed)) or bool(permission.needs_confirmation)
     approval_events = [

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -297,7 +298,26 @@ def compile_plan(
         _update_runtime(str(desired_state_id), planner_success=True)
         return plan
     except Exception as exc:
-        _update_runtime(str(desired_state_id), planner_success=False, error=str(exc))
+        error = str(exc)
+        unsupported = re.search(r"unsupported tool ['\\\"]([^'\\\"]+)['\\\"]", error, flags=re.IGNORECASE)
+        if unsupported:
+            missing_tool = unsupported.group(1).strip()
+            try:
+                from jarvis_mrb.agency_capability import record_gap
+
+                record_gap(
+                    str(desired_state_id),
+                    missing_tool,
+                    f"The planner requires tool {missing_tool!r}, but it is not present in the bounded Agency tool set.",
+                )
+                set_state(
+                    str(desired_state_id),
+                    "blocked",
+                    reason=f"Missing capability: {missing_tool}.",
+                )
+            except Exception:
+                pass
+        _update_runtime(str(desired_state_id), planner_success=False, error=error)
         return None
 
 

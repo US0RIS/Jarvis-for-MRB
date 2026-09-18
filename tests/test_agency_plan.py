@@ -140,6 +140,62 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(observed[1][0], "fact.check")
         self.assertEqual(observed[1][1]["claim"], "Evidence: alpha evidence")
 
+    def test_executor_typeerror_after_side_effect_is_not_retried(self) -> None:
+        _, state_id = self._state_for_project("Project TypeError")
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "read", "tool": "knowledge.search", "arguments": {"query": "TypeError"}}],
+        )
+        calls: list[str] = []
+
+        def executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+            calls.append(tool)
+            raise TypeError("internal executor bug after observable side effect")
+
+        result = agency_plan.execute_next(plan["id"], executor)
+
+        self.assertEqual(calls, ["knowledge.search"])
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertEqual(result["status"], "needs_replan")
+        self.assertIn("TypeError", result["steps"][0]["result_summary"])
+
+    def test_approved_execution_rejects_adapter_without_explicit_bypass_support(self) -> None:
+        _, state_id = self._state_for_project("Project Strict Approval")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Strict approval",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda tool, args: SimpleNamespace(ok=True, message="must not run"),
+        )
+        calls: list[str] = []
+
+        def unsafe_adapter(tool: str, args: dict) -> SimpleNamespace:
+            calls.append(tool)
+            return SimpleNamespace(ok=True, message="unsafe")
+
+        result = agency_plan.approve_step(
+            plan["id"],
+            waiting["steps"][0]["id"],
+            unsafe_adapter,
+        )
+
+        self.assertEqual(calls, [])
+        self.assertEqual(result["status"], "needs_replan")
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn("bypass_confirmation", result["steps"][0]["result_summary"])
+
     def test_protected_step_waits_for_persistent_approval_without_calling_executor(self) -> None:
         _, state_id = self._state_for_project("Project Approval")
         plan = agency_plan.create_plan(

@@ -78,15 +78,17 @@ def available_tool(tool: str) -> dict[str, Any]:
     if len(matches) == 1:
         item = matches[0]
         enabled = bool(item.get("enabled"))
+        adapter_risk = str(item.get("risk") or "security")
+        observation_only = adapter_risk == "read"
         wrapper_permission = decide("custom.run")
         return {
             "tool": name,
             "known": True,
-            "available": bool(enabled and wrapper_permission.allowed),
-            "implemented_for_agency": True,
+            "available": bool(enabled and observation_only and wrapper_permission.allowed),
+            "implemented_for_agency": bool(observation_only),
             "authority_blocked": bool((not enabled) or (not wrapper_permission.allowed)),
-            "agency_scope_blocked": False,
-            "risk": str(item.get("risk") or "security"),
+            "agency_scope_blocked": bool(not observation_only),
+            "risk": adapter_risk,
             "requires_confirmation": bool(wrapper_permission.needs_confirmation),
             "source": "custom",
             "enabled": enabled,

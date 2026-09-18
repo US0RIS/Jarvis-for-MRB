@@ -17,6 +17,7 @@ from jarvis_mrb.agency_release import (
     get_receipt,
     get_receipt_for_session,
     record_real_gate_receipt,
+    validate_real_gate_receipt,
     _live_session_digest,
     _real_receipt_context_payload,
     _real_receipt_recording_context,
@@ -1330,13 +1331,20 @@ def finalize_session(session_id: str) -> dict[str, Any]:
     if str(session["status"]) == "completed":
         receipt_id = str(session.get("receipt_id") or "")
         receipt = get_receipt(receipt_id) if receipt_id else get_receipt_for_session(str(session["id"]))
+        validation = (
+            validate_real_gate_receipt(str(receipt.get("id")))
+            if receipt is not None
+            else {"valid": False, "reason": "completed session has no receipt"}
+        )
+        valid = bool(validation.get("valid"))
         return {
-            "passed": receipt is not None,
+            "passed": valid,
             "already_finalized": True,
             "receipt_created": False,
-            "receipt_reused": receipt is not None,
+            "receipt_reused": valid,
             "receipt": receipt,
             "receipt_id": str((receipt or {}).get("id") or receipt_id),
+            "receipt_validation_error": "" if valid else str(validation.get("reason") or ""),
             "session": session,
         }
     if str(session["status"]) != "running":

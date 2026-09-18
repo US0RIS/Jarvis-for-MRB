@@ -1029,17 +1029,23 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
     post_satisfaction_actions: list[dict[str, Any]] = []
     satisfied_at = _parse_time(str(desired["satisfied_at"] or "")) if desired is not None else None
     if satisfied_at is not None:
-        for row in verification_rows:
-            created_at = _parse_time(str(row.get("created_at") or ""))
-            if created_at is not None and created_at > satisfied_at:
-                post_satisfaction_actions.append(
-                    {
-                        "verification_id": str(row.get("id") or ""),
-                        "agency_step_id": str(row.get("agency_step_id") or ""),
-                        "tool": str(row.get("tool") or ""),
-                        "created_at": str(row.get("created_at") or ""),
-                    }
-                )
+        for item in _events_for_state(events, state_id):
+            if item["event_type"] != "agency.step.executed":
+                continue
+            executed_at = _parse_time(
+                str(item.get("recorded_at") or item.get("occurred_at") or "")
+            )
+            if executed_at is None or executed_at <= satisfied_at:
+                continue
+            payload = item.get("payload") or {}
+            post_satisfaction_actions.append(
+                {
+                    "event_id": int(item["id"]),
+                    "agency_step_id": str(payload.get("step_id") or ""),
+                    "tool": str(payload.get("tool") or ""),
+                    "executed_at": executed_at.isoformat(),
+                }
+            )
 
     restatements = _goal_restatement_ids(conn, session)
     checks = [

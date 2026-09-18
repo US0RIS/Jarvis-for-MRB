@@ -156,6 +156,40 @@ class AgencyAttentionTests(unittest.TestCase):
         self.assertEqual(int(final["occurrence_count"]), 2)
         self.assertEqual(int(final["emitted_count"]), 1)
 
+    def test_deferred_interrupt_remains_eligible_for_later_emission(self) -> None:
+        emitted: list[str] = []
+        kwargs = dict(
+            kind="approval_required",
+            message="Deferred protected action approval.",
+            desired_state_id="ds:deferred",
+            dedup_key="approval:deferred",
+            benefit=95,
+            urgency=90,
+            confidence=1.0,
+            error_cost=0,
+            attention_cost=10,
+            threshold=60,
+            dedup_seconds=3600,
+            emitter=emitted.append,
+        )
+
+        deferred = agency_attention.consider(
+            **kwargs,
+            allow_emit=False,
+            suppress_reason="cycle budget exhausted",
+        )
+        self.assertEqual(deferred["decision"], "interrupt")
+        self.assertFalse(deferred["emitted"])
+        self.assertTrue(deferred["suppressed"])
+        self.assertFalse(deferred["duplicate"])
+        self.assertEqual(emitted, [])
+
+        later = agency_attention.consider(**kwargs)
+        self.assertTrue(later["emitted"])
+        self.assertFalse(later["suppressed"])
+        self.assertFalse(later["duplicate"])
+        self.assertEqual(emitted, ["Deferred protected action approval."])
+
     def test_score_penalizes_uncertainty_and_interruption_cost(self) -> None:
         confident = agency_attention.attention_value(
             benefit=80,

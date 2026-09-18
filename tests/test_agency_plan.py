@@ -540,6 +540,63 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(persisted["status"], "awaiting_approval")
         self.assertEqual(persisted["steps"][0]["status"], "awaiting_approval")
 
+    def test_persisted_plan_and_step_specification_cannot_be_mutated_in_place(self) -> None:
+        _, state_id = self._state_for_project("Project Immutable Spec")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Original approved target",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        step_id = str(plan["steps"][0]["id"])
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_steps SET arguments_json=? WHERE id=?",
+                    (
+                        json.dumps(
+                            {
+                                "summary": "Substituted target",
+                                "start": "2030-01-01T11:00:00-08:00",
+                                "end": "2030-01-01T11:30:00-08:00",
+                            },
+                            sort_keys=True,
+                        ),
+                        step_id,
+                    ),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_steps SET tool='gmail.send' WHERE id=?",
+                    (step_id,),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_plans SET relevance_hash='tampered' WHERE id=?",
+                    (plan["id"],),
+                )
+        finally:
+            conn.close()
+
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertEqual(persisted["steps"][0]["tool"], "calendar.create")
+        self.assertEqual(
+            persisted["steps"][0]["arguments"]["summary"],
+            "Original approved target",
+        )
+
     def test_plan_persists_steps_and_dependencies(self) -> None:
         _, state_id = self._state_for_project()
         plan = agency_plan.create_plan(

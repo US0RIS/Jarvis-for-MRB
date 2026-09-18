@@ -448,6 +448,13 @@ def tick_desired_state(
 
     state_id = str(desired_state_id)
     _update_runtime(state_id, tick=True)
+    mode = get_mode()
+    if mode != "active":
+        return {
+            "desired_state_id": state_id,
+            "status": f"mode_{mode}",
+            "action_executed": False,
+        }
     desired = get_desired_state(state_id)
     if desired is None:
         return {"desired_state_id": state_id, "status": "missing"}

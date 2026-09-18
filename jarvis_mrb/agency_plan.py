@@ -178,15 +178,41 @@ def _relevance_hash(conn: sqlite3.Connection, desired_state_id: str) -> str:
             """,
             (entity_id,),
         ).fetchall()
-        snapshot["entities"][entity_id] = [
-            {
-                "predicate": str(row["predicate"]),
-                "object_id": str(row["object_id"] or ""),
-                "value_json": str(row["value_json"] or ""),
-                "confidence": round(float(row["confidence"] or 0.0), 6),
-            }
-            for row in beliefs
-        ]
+        linked_events = conn.execute(
+            """
+            SELECT e.id,e.event_type,e.source_kind,e.source_ref
+            FROM event_entities ee
+            JOIN events e ON e.id=ee.event_id
+            WHERE ee.entity_id=?
+              AND e.source_kind NOT IN (
+                'jarvis_agency','jarvis_desired_state','proactive_monitor',
+                'jarvis_jobs','background_worker','system'
+              )
+            ORDER BY e.id DESC
+            LIMIT 25
+            """,
+            (entity_id,),
+        ).fetchall()
+        snapshot["entities"][entity_id] = {
+            "beliefs": [
+                {
+                    "predicate": str(row["predicate"]),
+                    "object_id": str(row["object_id"] or ""),
+                    "value_json": str(row["value_json"] or ""),
+                    "confidence": round(float(row["confidence"] or 0.0), 6),
+                }
+                for row in beliefs
+            ],
+            "linked_events": [
+                {
+                    "id": int(row["id"]),
+                    "event_type": str(row["event_type"]),
+                    "source_kind": str(row["source_kind"]),
+                    "source_ref": str(row["source_ref"]),
+                }
+                for row in linked_events
+            ],
+        }
 
     for commitment_id in sorted(commitment_ids):
         row = conn.execute(

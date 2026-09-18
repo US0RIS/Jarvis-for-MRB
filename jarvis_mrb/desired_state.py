@@ -123,6 +123,19 @@ def _validate_criterion(raw: dict[str, Any]) -> dict[str, Any]:
     elif kind == "event_exists":
         if not str(raw.get("event_type") or "").strip():
             raise ValueError("event_exists requires event_type.")
+    elif kind == "event_match":
+        terms_all = raw.get("terms_all")
+        if not isinstance(terms_all, list) or not [item for item in terms_all if str(item).strip()]:
+            raise ValueError("event_match requires a non-empty terms_all list.")
+        for list_key in ("terms_none", "event_types", "source_kinds"):
+            value = raw.get(list_key)
+            if value is not None and not isinstance(value, list):
+                raise ValueError(f"event_match {list_key} must be a list when supplied.")
+        min_event_id = raw.get("min_event_id", 0)
+        try:
+            criterion["min_event_id"] = max(0, int(min_event_id or 0))
+        except (TypeError, ValueError):
+            raise ValueError("event_match min_event_id must be an integer.")
     else:
         raise ValueError(f"Unsupported desired-state criterion kind {kind!r}.")
     return criterion
@@ -305,6 +318,50 @@ def _evaluate_criterion(conn: sqlite3.Connection, criterion: dict[str, Any]) -> 
         })
         return result
 
+    if kind == "event_match":
+        terms_all = [_normalize(str(item)) for item in (criterion.get("terms_all") or []) if str(item).strip()]
+        terms_none = [_normalize(str(item)) for item in (criterion.get("terms_none") or []) if str(item).strip()]
+        event_types = [str(item).strip() for item in (criterion.get("event_types") or []) if str(item).strip()]
+        source_kinds = [str(item).strip() for item in (criterion.get("source_kinds") or []) if str(item).strip()]
+        min_event_id = max(0, int(criterion.get("min_event_id") or 0))
+
+        sql = "SELECT id,event_type,summary,evidence,source_kind,source_ref FROM events WHERE id>?"
+        params: list[Any] = [min_event_id]
+        if event_types:
+            placeholders = ",".join("?" for _ in event_types)
+            sql += f" AND event_type IN ({placeholders})"
+            params.extend(event_types)
+        if source_kinds:
+            placeholders = ",".join("?" for _ in source_kinds)
+            sql += f" AND source_kind IN ({placeholders})"
+            params.extend(source_kinds)
+        # Goal/intention declaration events are not completion evidence. The event
+        # must be a subsequent observation/action outcome from another source.
+        sql += " AND source_kind NOT IN ('iphone_goal','jarvis_intention') ORDER BY id DESC LIMIT 250"
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        match = None
+        for row in rows:
+            haystack = _normalize(
+                str(row["summary"] or "") + " " + str(row["evidence"] or "")
+            )
+            if not all(term in haystack for term in terms_all):
+                continue
+            if any(term in haystack for term in terms_none):
+                continue
+            match = row
+            break
+        result.update({
+            "terms_all": terms_all,
+            "terms_none": terms_none,
+            "min_event_id": min_event_id,
+            "event_id": int(match["id"]) if match else None,
+            "event_type": str(match["event_type"]) if match else None,
+            "source": f"{match['source_kind']}:{match['source_ref']}" if match else None,
+            "actual": str(match["summary"]) if match else None,
+            "satisfied": bool(match),
+        })
+        return result
+
     result["error"] = f"Unsupported criterion kind {kind!r}."
     return result
 
@@ -415,6 +472,26 @@ def list_desired_states(*, include_retired: bool = False, limit: int = 100) -> l
         item["authority"] = dict(_loads(str(item.pop("authority_json")), {}))
         result.append(item)
     return result
+
+
+def replace_criteria(desired_state_id: str, criteria: list[dict[str, Any]]) -> dict[str, Any]:
+    state_id = str(desired_state_id or "").strip()
+    clean = _validate_criteria(criteria)
+    with _connect() as conn:
+        row = conn.execute("SELECT 1 FROM desired_states WHERE id=?", (state_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown desired state {state_id!r}.")
+        conn.execute(
+            """
+            UPDATE desired_states
+            SET criteria_json=?,state=CASE WHEN state='satisfied' THEN 'active' ELSE state END,
+                satisfied_at=NULL,updated_at=?
+            WHERE id=?
+            """,
+            (json.dumps(clean, ensure_ascii=False, sort_keys=True), _now(), state_id),
+        )
+        conn.commit()
+    return get_desired_state(state_id) or {}
 
 
 def update_authority(desired_state_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -705,6 +782,6 @@ def status() -> dict[str, Any]:
         "ready": True,
         "states": counts,
         "evaluations": evaluations_count,
-        "criterion_kinds": ["belief_equals", "belief_in", "commitment_status", "entity_exists", "event_exists"],
+        "criterion_kinds": ["belief_equals", "belief_in", "commitment_status", "entity_exists", "event_exists", "event_match"],
         "wake_watches": len(list_wake_watches()),
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -48,8 +49,59 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agency_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return conn
+
+
+def get_mode() -> str:
+    default = str(os.environ.get("JARVIS_AGENCY_MODE", "monitor") or "monitor").strip().lower()
+    if default not in {"off", "monitor", "active"}:
+        default = "monitor"
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM agency_settings WHERE key='mode'").fetchone()
+    if row is None:
+        return default
+    value = str(row["value"] or "").strip().lower()
+    return value if value in {"off", "monitor", "active"} else default
+
+
+def set_mode(mode: str) -> str:
+    clean = str(mode or "").strip().lower()
+    if clean not in {"off", "monitor", "active"}:
+        raise ValueError("Agency mode must be off, monitor, or active.")
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO agency_settings(key,value,updated_at) VALUES('mode',?,?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at
+            """,
+            (clean, now),
+        )
+        conn.commit()
+    try:
+        from jarvis_mrb.world_model import record_event
+        record_event(
+            "agency.mode_changed",
+            f"Agency mode changed to {clean}.",
+            source_kind="jarvis_agency",
+            source_ref=f"agency-mode:{now}",
+            payload={"mode": clean},
+            evidence="Explicit Agency runtime mode change.",
+            confidence=1.0,
+        )
+    except Exception:
+        pass
+    return clean
 
 
 def _runtime_state(desired_state_id: str) -> dict[str, Any]:
@@ -255,6 +307,7 @@ def tick_desired_state(
     executor: Callable[..., Any],
     planner: Callable[[str], dict[str, Any]] | None = None,
     allow_action: bool = True,
+    allow_planning: bool = True,
 ) -> dict[str, Any]:
     from jarvis_mrb.agency_plan import current_plan, execute_next, reconcile_plan
     from jarvis_mrb.desired_state import evaluate_desired_state, get_desired_state
@@ -286,6 +339,14 @@ def tick_desired_state(
         plan = reconcile_plan(str(plan["id"]))
 
     if plan is None or str(plan.get("status") or "") in {"needs_replan", "blocked"}:
+        if not allow_planning:
+            return {
+                "desired_state_id": state_id,
+                "status": "monitoring",
+                "plan": plan,
+                "evaluation": evaluation,
+                "action_executed": False,
+            }
         planned = compile_plan(state_id, planner=planner)
         if planned is not None:
             plan = planned
@@ -344,7 +405,17 @@ def tick_all(
         import jarvis_mrb.agent as agent_module
         executor = agent_module.execute_tool
 
-    action_budget = max(0, min(int(max_actions), 10))
+    mode = get_mode()
+    if mode == "off":
+        return {
+            "mode": mode,
+            "desired_states_checked": 0,
+            "actions_executed": 0,
+            "action_budget": 0,
+            "results": [],
+        }
+
+    action_budget = max(0, min(int(max_actions), 10)) if mode == "active" else 0
     actions = 0
     results: list[dict[str, Any]] = []
     for desired in list_desired_states(limit=max(1, min(int(limit), 200))):
@@ -354,12 +425,14 @@ def tick_all(
             str(desired["id"]),
             executor=executor,
             planner=planner,
-            allow_action=actions < action_budget,
+            allow_action=mode == "active" and actions < action_budget,
+            allow_planning=mode == "active",
         )
         if result.get("action_executed"):
             actions += 1
         results.append(result)
     return {
+        "mode": mode,
         "desired_states_checked": len(results),
         "actions_executed": actions,
         "action_budget": action_budget,
@@ -420,6 +493,7 @@ def status() -> dict[str, Any]:
         ).fetchall()
     return {
         "ready": True,
+        "mode": get_mode(),
         "tracked": len(rows),
         "planner_backoff": [dict(row) for row in rows],
     }

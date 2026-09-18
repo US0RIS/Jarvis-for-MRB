@@ -100,6 +100,17 @@ class AgencyWorkflowContractTests(unittest.TestCase):
             catalog = _enabled_custom_tool_catalog()
         self.assertEqual([item["name"] for item in catalog], ["enabled_one"])
 
+    def test_custom_catalog_excludes_enabled_external_write_adapter_until_verifier_exists(self) -> None:
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {"name": "read_adapter", "enabled": True, "risk": "read"},
+                {"name": "write_adapter", "enabled": True, "risk": "external_write"},
+            ],
+        ):
+            catalog = _enabled_custom_tool_catalog()
+        self.assertEqual([item["name"] for item in catalog], ["read_adapter"])
+
     def test_explicit_missing_capability_can_replace_fake_node(self) -> None:
         _validate_plan(
             {

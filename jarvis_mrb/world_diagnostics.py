@@ -27,8 +27,8 @@ _AGENCY_REQUIRED_COLUMNS: dict[str, set[str]] = {
     "desired_states": {"criteria_json", "authority_json", "state", "generation"},
     "agency_plans": {"desired_state_id", "generation", "status", "relevance_hash"},
     "agency_steps": {
-        "plan_id", "status", "risk", "requires_confirmation", "verification_id",
-        "attempt_count", "started_at", "finished_at",
+        "plan_id", "status", "risk", "requires_confirmation", "approval_digest",
+        "verification_id", "attempt_count", "started_at", "finished_at",
     },
     "agency_runtime_boots": {"started_at", "deployment_sha", "process_id"},
     "agency_deliberations": {"agency_step_id", "disagreement_json", "status"},
@@ -198,6 +198,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
             "completed_real_session_receipt_mismatch": 0,
             "orphan_real_gate_receipts": 0,
             "running_real_sessions_with_receipt": 0,
+            "approval_capability_wrong_state": 0,
         }
         if (
             require_agency
@@ -321,6 +322,13 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 WHERE status='running' AND receipt_id!=''
                 """
             ).fetchone()[0])
+            agency_metrics["approval_capability_wrong_state"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_steps
+                WHERE approval_digest!=''
+                  AND status NOT IN ('awaiting_approval','executing')
+                """
+            ).fetchone()[0])
 
             for key, label in (
                 ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
@@ -336,6 +344,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 ("completed_real_sessions_without_receipt", "Completed REAL Agency sessions without receipts"),
                 ("completed_real_session_receipt_mismatch", "Completed REAL Agency sessions with mismatched receipts"),
                 ("orphan_real_gate_receipts", "REAL Agency receipts without matching sessions"),
+                ("approval_capability_wrong_state", "Agency approval capabilities attached to invalid step states"),
             ):
                 value = int(agency_metrics[key])
                 if value:

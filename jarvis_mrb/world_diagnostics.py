@@ -136,6 +136,12 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
             "orphan_verification_links": 0,
             "awaiting_verification_without_id": 0,
             "approval_plan_without_step": 0,
+            "invalid_real_session_states": 0,
+            "real_sessions_without_integrity_hash": 0,
+            "completed_real_sessions_without_receipt": 0,
+            "completed_real_session_receipt_mismatch": 0,
+            "orphan_real_gate_receipts": 0,
+            "running_real_sessions_with_receipt": 0,
         }
         if require_agency and _AGENCY_REQUIRED_TABLES <= tables:
             valid_desired = ("active", "satisfied", "blocked", "paused", "retired")
@@ -207,6 +213,54 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                   )
                 """
             ).fetchone()[0])
+            agency_metrics["invalid_real_session_states"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE status NOT IN ('running','completed')
+                """
+            ).fetchone()[0])
+            agency_metrics["real_sessions_without_integrity_hash"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE session_hash=''
+                """
+            ).fetchone()[0])
+            agency_metrics["completed_real_sessions_without_receipt"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE status='completed' AND receipt_id=''
+                """
+            ).fetchone()[0])
+            agency_metrics["completed_real_session_receipt_mismatch"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM agency_real_gate_sessions s
+                LEFT JOIN agency_real_gate_receipts r ON r.id=s.receipt_id
+                WHERE s.status='completed'
+                  AND s.receipt_id!=''
+                  AND (
+                    r.id IS NULL
+                    OR r.session_id!=s.id
+                    OR r.gate!=s.gate
+                    OR r.deployment_sha!=s.deployment_sha
+                    OR r.environment_fingerprint!=s.environment_fingerprint
+                  )
+                """
+            ).fetchone()[0])
+            agency_metrics["orphan_real_gate_receipts"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM agency_real_gate_receipts r
+                LEFT JOIN agency_real_gate_sessions s ON s.id=r.session_id
+                WHERE r.session_id='' OR s.id IS NULL
+                """
+            ).fetchone()[0])
+            agency_metrics["running_real_sessions_with_receipt"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE status='running' AND receipt_id!=''
+                """
+            ).fetchone()[0])
 
             for key, label in (
                 ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
@@ -217,10 +271,22 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 ("orphan_verification_links", "Action verifications pointing at missing Agency steps"),
                 ("awaiting_verification_without_id", "Agency steps awaiting verification without verification IDs"),
                 ("approval_plan_without_step", "Agency plans awaiting approval without an approval step"),
+                ("invalid_real_session_states", "REAL Agency sessions with invalid lifecycle states"),
+                ("real_sessions_without_integrity_hash", "REAL Agency sessions without integrity hashes"),
+                ("completed_real_sessions_without_receipt", "Completed REAL Agency sessions without receipts"),
+                ("completed_real_session_receipt_mismatch", "Completed REAL Agency sessions with mismatched receipts"),
+                ("orphan_real_gate_receipts", "REAL Agency receipts without matching sessions"),
             ):
                 value = int(agency_metrics[key])
                 if value:
                     problems.append(f"{label}: {value}")
+
+            running_with_receipt = int(agency_metrics["running_real_sessions_with_receipt"])
+            if running_with_receipt:
+                warnings.append(
+                    "REAL Agency sessions with receipts still marked running "
+                    f"(recoverable incomplete finalization): {running_with_receipt}"
+                )
 
         max_event = int(conn.execute("SELECT COALESCE(MAX(id),0) FROM events").fetchone()[0])
         linked_event = int(linker.get("last_linked_event_id") or 0)

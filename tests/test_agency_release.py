@@ -214,6 +214,18 @@ class AgencyReleaseTests(unittest.TestCase):
         persisted = agency_release.get_receipt(receipt["id"])
         self.assertEqual(persisted["harness"], "real-a1-acceptance")
 
+    def test_low_level_real_receipt_writer_rejects_unbound_evidence(self) -> None:
+        with self.assertRaisesRegex(ValueError, "live acceptance session"):
+            agency_release.record_real_gate_receipt(
+                "A1",
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+                harness="agency-real-gate-session-v1",
+                checks=[{"name": "A1 direct bypass", "passed": True, "evidence": "claimed"}],
+                evidence=evidence_for("A1"),
+                session_id="",
+            )
+
     def test_synthetic_or_synthetic_only_gate_cannot_be_recorded_as_real(self) -> None:
         with self.assertRaises(ValueError):
             agency_release.record_real_gate_receipt(

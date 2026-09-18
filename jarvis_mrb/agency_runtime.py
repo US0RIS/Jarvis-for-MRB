@@ -619,20 +619,20 @@ def tick_all(
             "last_action_at": str(row["last_action_at"] or "")
         }
 
-    def action_age_key(item: dict[str, Any]) -> tuple[int, float, str]:
+    def action_age_key(item: dict[str, Any]) -> tuple[float, float, str]:
         state_id = str(item.get("id") or "")
         raw = str((runtime_by_id.get(state_id) or {}).get("last_action_at") or "")
         parsed = _parse_time(raw)
         # Never-acted goals are oldest and therefore get first fair-share opportunity.
         timestamp = parsed.timestamp() if parsed is not None else float("-inf")
-        return (-int(item.get("priority") or 0), timestamp, state_id)
+        return (-float(item.get("priority") or 0.0), timestamp, state_id)
 
     ordered: list[dict[str, Any]] = []
     if candidates:
-        max_priority = max(int(item.get("priority") or 0) for item in candidates)
+        max_priority = max(float(item.get("priority") or 0.0) for item in candidates)
         top_priority = [
             item for item in candidates
-            if int(item.get("priority") or 0) == max_priority
+            if float(item.get("priority") or 0.0) == max_priority
         ]
         champion = min(top_priority, key=action_age_key)
         ordered.append(champion)
@@ -649,7 +649,7 @@ def tick_all(
                     ) is not None
                     else float("-inf")
                 ),
-                -int(item.get("priority") or 0),
+                -float(item.get("priority") or 0.0),
                 str(item.get("id") or ""),
             )
         )

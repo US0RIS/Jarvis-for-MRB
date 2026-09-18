@@ -1113,19 +1113,28 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A5")
 
-    def test_a6_requires_externally_grounded_wake_evidence(self) -> None:
+    def test_a6_requires_externally_grounded_wake_and_actionable_continuation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Dormant Wake Gate")
         state = desired_state.create_desired_state(
-            "Dormant Wake Gate available",
-            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True}],
+            "Dormant Wake Gate completed",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "done", "value": True}],
             authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a6",
         )
-        desired_state.set_state(str(state["id"]), "blocked", reason="Waiting for external availability.")
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Waiting for external prerequisite availability.",
+        )
         desired_state.add_wake_watch(
             str(state["id"]),
-            {"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True},
+            {
+                "kind": "belief_equals",
+                "entity_id": entity_id,
+                "predicate": "prerequisite",
+                "value": "available",
+            },
         )
 
         with self._patch_identity():
@@ -1137,25 +1146,56 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             )
             source_event_id = world_model.record_event(
                 "calendar.context_enriched",
-                "Dormant Wake Gate is now available.",
+                "Dormant Wake Gate prerequisite is now available.",
                 source_kind="calendar_enriched",
                 source_ref="real-a6:availability",
-                evidence="External availability observation.",
+                evidence="External prerequisite availability observation.",
                 participants=[(entity_id, "subject", 1.0)],
             )
             world_model.assert_belief(
                 entity_id,
-                "available",
-                value=True,
+                "prerequisite",
+                value="available",
                 source_event_id=source_event_id,
                 evidence="Observed externally.",
             )
             wake = desired_state.check_wake_watches()
             self.assertEqual(wake["triggered"], 1)
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "active",
+            )
+
+            continuation = agency_runtime.tick_desired_state(
+                str(state["id"]),
+                executor=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("protected continuation must await approval")
+                ),
+                planner=lambda _prompt: {
+                    "summary": "Use newly available prerequisite.",
+                    "nodes": [
+                        {
+                            "id": "continue",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": "Dormant Wake Gate continuation",
+                                "start": "2030-01-01T12:00:00-08:00",
+                                "end": "2030-01-01T12:30:00-08:00",
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
+            self.assertEqual(continuation["status"], "awaiting_approval")
 
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
             self.assertTrue(evaluation["evidence"]["wake_condition_changed"])
+            self.assertTrue(
+                evaluation["evidence"]["next_step_surfaced_or_executed"]
+            )
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])

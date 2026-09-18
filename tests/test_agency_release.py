@@ -27,6 +27,10 @@ def evidence_for(gate: str) -> dict:
     extras = {
         "A1": {
             "restart_observed": True,
+            "completed_work_preserved": True,
+            "evidence_preserved": True,
+            "pending_approval_preserved": True,
+            "next_evaluation_preserved": True,
             "goal_recovered_without_restatement": True,
         },
         "A2": {
@@ -369,6 +373,12 @@ class AgencyReleaseTests(unittest.TestCase):
                 evidence=evidence_for("A1"),
                 session_id="",
             )
+
+    def test_a1_receipt_rejects_incomplete_restart_continuity_evidence(self) -> None:
+        evidence = evidence_for("A1")
+        evidence["pending_approval_preserved"] = False
+        with self.assertRaisesRegex(ValueError, "pending_approval_preserved"):
+            agency_release._validate_gate_evidence("A1", evidence, "")
 
     def test_synthetic_or_synthetic_only_gate_cannot_be_recorded_as_real(self) -> None:
         with self.assertRaises(ValueError):

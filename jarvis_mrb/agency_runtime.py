@@ -659,6 +659,7 @@ def tick_all(
             "desired_states_checked": 0,
             "candidate_pool": 0,
             "actions_executed": 0,
+            "action_slots_used": 0,
             "action_budget": 0,
             "planning_attempts": 0,
             "planning_budget": 0,
@@ -797,11 +798,13 @@ def tick_all(
     from jarvis_mrb.agency_plan import current_plan
 
     actions = 0
+    action_slots_used = 0
     planning_attempts = 0
     results: list[dict[str, Any]] = []
     for desired in ordered:
         state_id = str(desired["id"])
         existing = current_plan(state_id, include_steps=False)
+        existing_status = str((existing or {}).get("status") or "")
         needs_planning = bool(
             str(desired.get("state") or "") == "active"
             and (
@@ -827,17 +830,26 @@ def tick_all(
             state_id,
             executor=executor,
             planner=planner,
-            allow_action=mode == "active" and actions < action_budget,
+            allow_action=mode == "active" and action_slots_used < action_budget,
             allow_planning=permit_planning,
         )
-        if result.get("action_executed"):
+        action_executed = bool(result.get("action_executed"))
+        if action_executed:
             actions += 1
+
+        entered_approval = bool(
+            str(result.get("status") or "") == "awaiting_approval"
+            and existing_status != "awaiting_approval"
+        )
+        if action_executed or entered_approval:
+            action_slots_used += 1
         results.append(result)
     return {
         "mode": mode,
         "desired_states_checked": len(results),
         "candidate_pool": len(candidates),
         "actions_executed": actions,
+        "action_slots_used": action_slots_used,
         "action_budget": action_budget,
         "planning_attempts": planning_attempts,
         "planning_budget": planning_budget,

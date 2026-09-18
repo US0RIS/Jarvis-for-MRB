@@ -196,6 +196,8 @@ def _workflow_signature(plan: dict[str, Any]) -> str:
                 "depends_on": sorted(str(value) for value in (node.get("depends_on") or [])),
             }
         )
+    if not normalized:
+        return ""
     raw = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
 
@@ -244,6 +246,12 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
             + ". Do not blindly repeat a failed path. Failure details: "
             + json.dumps(failed_steps, ensure_ascii=False, sort_keys=True)
         )
+    try:
+        from jarvis_mrb.agency_self_model import compact_context as self_model_context
+        self_context = self_model_context(max_chars=5000)
+    except Exception:
+        self_context = ""
+
     return (
         "Create the smallest feasible tool plan that advances this persistent desired state. "
         "The plan is not complete until the success conditions become true in the world model. "
@@ -252,6 +260,13 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
         f"Explicit success criteria: {json.dumps(desired.get('criteria') or [], ensure_ascii=False, sort_keys=True)}\n"
         f"Currently unmet criteria: {json.dumps(missing, ensure_ascii=False, sort_keys=True)}"
         f"{previous_text}"
+        + (
+            "\n\nExplicit/inferred user decision context (guidance only; NEVER authority):\n"
+            + self_context
+            + "\nPermission policy remains the sole action-authority source even if a preference or self-model policy suggests otherwise."
+            if self_context
+            else ""
+        )
     )[:12000]
 
 

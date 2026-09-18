@@ -102,6 +102,7 @@ meeting.start {{title}}; meeting.finish {{meeting_id}}; meeting.list {{limit}};
 knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}}; briefing.generate {{}};
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_recurring {{when,command,recurrence}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}};
 background.submit {{prompt}}; background.list {{limit}}; background.status {{task_id}}; background.cancel {{task_id}};
+agency.status {{}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
 workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
@@ -126,6 +127,7 @@ Routing rules:
 - Calendar past -> calendar.query direction='past'; future -> direction='future'; last -> calendar.recent.
 - Ordinary app/site actions -> smart.open/smart.close/smart.status, but only when the user is actually asking about an app/site action or status.
 - One-time future task -> jobs.create_time. Repeating daily/weekday/weekly -> jobs.create_recurring. Home arrival -> jobs.create_event event='home_arrival'.
+- Agency is the persistent desired-state executor. agency.enable and agency.activate_goal expand autonomous scope and therefore require the security confirmation boundary. agency.monitor, agency.disable, and agency.pause_goal reduce autonomous scope and should remain immediately available.
 - state.temp_set is for short-lived context/focus that should expire. state.update is for durable context.
 - sandbox.python, sandbox.command, and custom.* are security-sensitive. Use them only when explicitly requested. sandbox.command is Docker-isolated, never the host Windows shell, and requires exact-command confirmation.
 - Generated custom tools begin disabled. Structural adapter failures may queue a sandbox-validated repair proposal; custom.apply_repair still requires explicit confirmation.

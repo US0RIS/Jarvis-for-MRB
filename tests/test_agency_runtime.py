@@ -420,6 +420,32 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertTrue(all(len(items) == 2 for items in seen_by_cycle))
         self.assertEqual(first["candidate_pool"], 5)
 
+    def test_satisfied_goals_do_not_displace_active_goals_from_evaluation_window(self) -> None:
+        active_ids: list[str] = []
+        for index in range(3):
+            _, state_id = self._make_state(f"Active Window {index}")
+            desired_state.update_priority(state_id, 10.0)
+            active_ids.append(state_id)
+
+        satisfied_ids: list[str] = []
+        for index in range(3):
+            _, state_id = self._make_state(f"Satisfied Window {index}")
+            desired_state.update_priority(state_id, 100.0)
+            desired_state.set_state(state_id, "satisfied")
+            satisfied_ids.append(state_id)
+
+        agency_runtime.set_mode("active")
+        result = agency_runtime.tick_all(
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            max_actions=0,
+            limit=2,
+        )
+        selected = {str(item["desired_state_id"]) for item in result["results"]}
+
+        self.assertTrue(selected <= set(active_ids))
+        self.assertTrue(selected.isdisjoint(set(satisfied_ids)))
+        self.assertEqual(len(selected), 2)
+
     def test_fractional_priority_selects_true_highest_priority_goal_first(self) -> None:
         _, low_id = self._make_state("Fractional Low")
         _, high_id = self._make_state("Fractional High")

@@ -77,16 +77,20 @@ def available_tool(tool: str) -> dict[str, Any]:
         matches = []
     if len(matches) == 1:
         item = matches[0]
+        enabled = bool(item.get("enabled"))
+        wrapper_permission = decide("custom.run")
         return {
             "tool": name,
             "known": True,
-            "available": False,
-            "implemented_for_agency": False,
-            "authority_blocked": not bool(item.get("enabled")),
-            "agency_scope_blocked": True,
+            "available": bool(enabled and wrapper_permission.allowed),
+            "implemented_for_agency": True,
+            "authority_blocked": bool((not enabled) or (not wrapper_permission.allowed)),
+            "agency_scope_blocked": False,
             "risk": str(item.get("risk") or "security"),
-            "requires_confirmation": True,
+            "requires_confirmation": bool(wrapper_permission.needs_confirmation),
             "source": "custom",
+            "enabled": enabled,
+            "wrapper_tool": "custom.run",
         }
 
     return {
@@ -273,6 +277,45 @@ def synthesize_adapter(
         "gap": get_gap(str(gap_id)),
         "tool": item,
         "enabled": bool(item.get("enabled")),
+    }
+
+
+def reconcile_gaps() -> dict[str, Any]:
+    """Resume blocked goals when a previously missing/proposed capability becomes usable."""
+    from jarvis_mrb.desired_state import get_desired_state, set_state
+
+    resumed: list[str] = []
+    resolved: list[str] = []
+    gaps = list_gaps(open_only=True)
+    for gap in gaps:
+        capability = str(gap.get("capability") or "")
+        proposed = str(gap.get("proposed_tool_name") or "")
+        target = proposed or capability
+        availability = available_tool(target)
+        if not bool(availability.get("available")):
+            continue
+
+        gap_id = str(gap["id"])
+        resolve_gap(
+            gap_id,
+            f"Capability {target} is now available to Agency through {availability.get('wrapper_tool') or target}.",
+        )
+        resolved.append(gap_id)
+
+        state_id = str(gap.get("desired_state_id") or "")
+        state = get_desired_state(state_id) if state_id else None
+        if state is None or str(state.get("state") or "") != "blocked":
+            continue
+        blocked_reason = str(state.get("blocked_reason") or "").lower()
+        if capability.lower() not in blocked_reason and proposed.lower() not in blocked_reason:
+            continue
+        set_state(state_id, "active")
+        resumed.append(state_id)
+
+    return {
+        "checked": len(gaps),
+        "resolved": resolved,
+        "reactivated": resumed,
     }
 
 

@@ -33,6 +33,7 @@ def _receipt_digest(
     checks_json: str,
     evidence_json: str,
     trace_ref: str,
+    trace_sha256: str,
     session_id: str,
     recorded_at: str,
 ) -> str:
@@ -44,11 +45,26 @@ def _receipt_digest(
         "checks_json": str(checks_json),
         "evidence_json": str(evidence_json),
         "trace_ref": str(trace_ref),
+        "trace_sha256": str(trace_sha256),
         "session_id": str(session_id),
         "recorded_at": str(recorded_at),
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _file_sha256(path: str) -> str:
+    target = Path(str(path or "")).expanduser()
+    if not target.is_file():
+        return ""
+    digest = hashlib.sha256()
+    try:
+        with target.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
 
 
 def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
@@ -66,6 +82,7 @@ def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
         "unique(gate,deployment_sha,environment_fingerprint)" in sql.replace(" ", "")
         or "session_id" not in columns
         or "receipt_hash" not in columns
+        or "trace_sha256" not in columns
     )
     if not needs_rebuild:
         return
@@ -89,6 +106,7 @@ def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
             checks_json TEXT NOT NULL,
             evidence_json TEXT NOT NULL,
             trace_ref TEXT NOT NULL DEFAULT '',
+            trace_sha256 TEXT NOT NULL DEFAULT '',
             session_id TEXT NOT NULL DEFAULT '',
             receipt_hash TEXT NOT NULL,
             recorded_at TEXT NOT NULL
@@ -104,6 +122,11 @@ def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
         checks_json = str(legacy["checks_json"])
         evidence_json = str(legacy["evidence_json"])
         trace_ref = str(legacy["trace_ref"] or "")
+        trace_sha256 = (
+            str(legacy["trace_sha256"] or "")
+            if "trace_sha256" in keys
+            else _file_sha256(trace_ref)
+        )
         session_id = str(legacy["session_id"] or "") if "session_id" in keys else ""
         recorded_at = str(legacy["recorded_at"])
         digest = _receipt_digest(
@@ -114,6 +137,7 @@ def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
             checks_json=checks_json,
             evidence_json=evidence_json,
             trace_ref=trace_ref,
+            trace_sha256=trace_sha256,
             session_id=session_id,
             recorded_at=recorded_at,
         )
@@ -121,12 +145,12 @@ def _migrate_receipt_schema(conn: sqlite3.Connection) -> None:
             """
             INSERT INTO agency_real_gate_receipts(
                 id,gate,deployment_sha,environment_fingerprint,harness,checks_json,
-                evidence_json,trace_ref,session_id,receipt_hash,recorded_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                evidence_json,trace_ref,trace_sha256,session_id,receipt_hash,recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 str(legacy["id"]), gate, sha, env, harness, checks_json,
-                evidence_json, trace_ref, session_id, digest, recorded_at,
+                evidence_json, trace_ref, trace_sha256, session_id, digest, recorded_at,
             ),
         )
     conn.execute("DROP TABLE agency_real_gate_receipts_legacy")
@@ -149,6 +173,7 @@ def _connect() -> sqlite3.Connection:
             checks_json TEXT NOT NULL,
             evidence_json TEXT NOT NULL,
             trace_ref TEXT NOT NULL DEFAULT '',
+            trace_sha256 TEXT NOT NULL DEFAULT '',
             session_id TEXT NOT NULL DEFAULT '',
             receipt_hash TEXT NOT NULL,
             recorded_at TEXT NOT NULL
@@ -407,6 +432,9 @@ def record_real_gate_receipt(
     receipt_id = f"agency-real:{uuid.uuid4()}"
     recorded_at = _now()
     clean_trace_ref = str(trace_ref or "").strip()[:3000]
+    trace_sha256 = _file_sha256(clean_trace_ref) if clean_gate == "A12" else ""
+    if clean_gate == "A12" and not trace_sha256:
+        raise ValueError("A12 real receipt trace file could not be hashed.")
     clean_session_id = str(session_id or "").strip()[:300]
     checks_json = json.dumps(normalized_checks, ensure_ascii=False, sort_keys=True)
     evidence_json = json.dumps(clean_evidence, ensure_ascii=False, sort_keys=True)
@@ -418,6 +446,7 @@ def record_real_gate_receipt(
         checks_json=checks_json,
         evidence_json=evidence_json,
         trace_ref=clean_trace_ref,
+        trace_sha256=trace_sha256,
         session_id=clean_session_id,
         recorded_at=recorded_at,
     )
@@ -426,8 +455,8 @@ def record_real_gate_receipt(
             """
             INSERT INTO agency_real_gate_receipts(
                 id,gate,deployment_sha,environment_fingerprint,harness,checks_json,
-                evidence_json,trace_ref,session_id,receipt_hash,recorded_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                evidence_json,trace_ref,trace_sha256,session_id,receipt_hash,recorded_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 receipt_id,
@@ -438,6 +467,7 @@ def record_real_gate_receipt(
                 checks_json,
                 evidence_json,
                 clean_trace_ref,
+                trace_sha256,
                 clean_session_id,
                 receipt_hash,
                 recorded_at,
@@ -597,11 +627,14 @@ def release_status(
             checks_json=json.dumps(item.get("checks") or [], ensure_ascii=False, sort_keys=True),
             evidence_json=json.dumps(item.get("evidence") or {}, ensure_ascii=False, sort_keys=True),
             trace_ref=str(item.get("trace_ref") or ""),
+            trace_sha256=str(item.get("trace_sha256") or ""),
             session_id=str(item.get("session_id") or ""),
             recorded_at=str(item.get("recorded_at") or ""),
         )
         if str(item.get("receipt_hash") or "") != expected_hash:
             reason = "receipt content hash mismatch"
+        elif gate == "A12" and _file_sha256(str(item.get("trace_ref") or "")) != str(item.get("trace_sha256") or ""):
+            reason = "human-readable A12 trace content hash mismatch"
         elif not item.get("checks") or not all(
             isinstance(check, dict) and check.get("passed") is True
             for check in (item.get("checks") or [])

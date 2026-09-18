@@ -238,7 +238,7 @@ def create_plan(
                 INSERT INTO agency_steps(
                     id,plan_id,step_key,ordinal,tool,arguments_json,depends_on_json,status,
                     risk,requires_confirmation,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?)
+                ) VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?)
                 """,
                 (
                     step_ids[str(step["step_key"])],

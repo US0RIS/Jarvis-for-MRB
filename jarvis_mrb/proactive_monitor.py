@@ -326,10 +326,14 @@ def _check_desired_states() -> None:
 
 
 def check_once() -> None:
-    if not _proactive_enabled():
-        return
-    _run_isolated("proactive_calendar", _check_calendar)
-    _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+    proactive = _proactive_enabled()
+    if proactive:
+        _run_isolated("proactive_calendar", _check_calendar)
+        _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+
+    # Verification and persistent desired-state control are correctness/safety
+    # loops, not optional notification features. Disabling general proactive
+    # suggestions must not strand an already-approved action or active Agency goal.
     _run_isolated("action_verification", _check_action_verifications)
     _run_isolated("desired_state_evaluation", _check_desired_states)
     _run_isolated("agency_runtime", _check_agency_runtime)
@@ -339,15 +343,18 @@ def _loop() -> None:
     time.sleep(8)
     cycle = 0
     while True:
-        if _proactive_enabled():
-            # Isolate each provider. Calendar failure must not suppress action
-            # verification; verifier failure must not suppress urgent-mail checks.
+        proactive = _proactive_enabled()
+        if proactive:
             _run_isolated("proactive_calendar", _check_calendar)
-            _run_isolated("action_verification", _check_action_verifications)
-            _run_isolated("desired_state_evaluation", _check_desired_states)
-            _run_isolated("agency_runtime", _check_agency_runtime)
             if cycle % 3 == 0:
                 _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+
+        # Always keep outcome verification and the persistent Agency control loop
+        # alive. Agency's own mode/permissions determine whether any action occurs.
+        _run_isolated("action_verification", _check_action_verifications)
+        _run_isolated("desired_state_evaluation", _check_desired_states)
+        _run_isolated("agency_runtime", _check_agency_runtime)
+
         cycle += 1
         time.sleep(60)
 

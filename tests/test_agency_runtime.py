@@ -41,15 +41,57 @@ class AgencyRuntimeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def _make_state(self, name: str) -> tuple[str, str]:
+    def _make_state(self, name: str, *, agency_enabled: bool = True) -> tuple[str, str]:
         entity_id = world_model.ensure_entity("project", name)
         state = desired_state.create_desired_state(
             f"{name} ready",
             [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "ready", "value": True}],
+            authority={"agency_enabled": bool(agency_enabled)},
             source_kind="test",
             source_ref=f"runtime:{name}",
         )
         return entity_id, str(state["id"])
+
+    def test_active_mode_skips_goal_without_per_goal_agency_authority(self) -> None:
+        _, state_id = self._make_state("Project No Authority", agency_enabled=False)
+        agency_runtime.set_mode("active")
+        planner_calls: list[str] = []
+        executor_calls: list[str] = []
+
+        report = agency_runtime.tick_all(
+            planner=lambda prompt: planner_calls.append(prompt) or {
+                "summary": "must not plan",
+                "nodes": [{"id": "x", "tool": "knowledge.search", "arguments": {"query": "x"}}],
+            },
+            executor=lambda tool, args, **kwargs: executor_calls.append(tool) or SimpleNamespace(ok=True, message="must not run"),
+        )
+
+        self.assertEqual(report["mode"], "active")
+        self.assertEqual(report["desired_states_checked"], 0)
+        self.assertEqual(report["actions_executed"], 0)
+        self.assertEqual(planner_calls, [])
+        self.assertEqual(executor_calls, [])
+        self.assertIsNone(agency_plan.current_plan(state_id))
+
+    def test_direct_tick_cannot_bypass_per_goal_agency_authority(self) -> None:
+        _, state_id = self._make_state("Project Direct No Authority", agency_enabled=False)
+        agency_runtime.set_mode("active")
+        planner_calls: list[str] = []
+        executor_calls: list[str] = []
+
+        result = agency_runtime.tick_desired_state(
+            state_id,
+            planner=lambda prompt: planner_calls.append(prompt) or {
+                "summary": "must not plan",
+                "nodes": [{"id": "x", "tool": "knowledge.search", "arguments": {"query": "x"}}],
+            },
+            executor=lambda tool, args, **kwargs: executor_calls.append(tool) or SimpleNamespace(ok=True, message="must not run"),
+        )
+
+        self.assertEqual(result["status"], "authority_disabled")
+        self.assertFalse(result["action_executed"])
+        self.assertEqual(planner_calls, [])
+        self.assertEqual(executor_calls, [])
 
     def test_monitor_mode_neither_plans_nor_executes(self) -> None:
         _, state_id = self._make_state("Project Monitor")

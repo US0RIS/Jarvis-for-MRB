@@ -1903,6 +1903,21 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
             default=0,
         )
 
+        synthesis_action_events = [
+            item for item in events
+            if item["event_type"] == "action.tool"
+            and str(item.get("source_kind") or "") == "jarvis_tool"
+            and str((item.get("payload") or {}).get("tool") or "") == "custom.synthesize"
+            and bool((item.get("payload") or {}).get("ok"))
+            and str(
+                ((item.get("payload") or {}).get("arguments") or {}).get("gap_id") or ""
+            ) == gap_id
+            and str(
+                ((item.get("payload") or {}).get("arguments") or {}).get("name") or ""
+            ) == proposed
+            and (not synthesis_event_id or int(item["id"]) >= synthesis_event_id)
+        ]
+
         enable_events = [
             item for item in events
             if item["event_type"] == "action.tool"
@@ -1963,6 +1978,9 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
                 "gap_event_ids": [int(item["id"]) for item in gap_events],
                 "block_event_ids": [int(item["id"]) for item in block_events],
                 "synthesis_event_ids": [int(item["id"]) for item in synthesis_events],
+                "synthesis_action_event_ids": [
+                    int(item["id"]) for item in synthesis_action_events
+                ],
                 "enable_event_ids": [int(item["id"]) for item in enable_events],
                 "resolution_event_ids": [int(item["id"]) for item in resolution_events],
                 "reactivation_event_ids": [int(item["id"]) for item in reactivation_events],
@@ -1976,6 +1994,14 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
         item for item in lifecycle_candidates
         if bool(item.get("complete_sequence"))
     ]
+    allowed_foreground_action_ids = sorted(
+        {
+            int(event_id)
+            for item in successful
+            for key in ("synthesis_action_event_ids", "enable_event_ids")
+            for event_id in (item.get(key) or [])
+        }
+    )
     desired = _desired_state_row(conn, state_id)
     remaining = list_gaps(desired_state_id=state_id, open_only=True)
     active_after_resolution = bool(
@@ -2032,6 +2058,7 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
     ]
     return {
         "checks": checks,
+        "allowed_uncorrelated_action_event_ids": allowed_foreground_action_ids,
         "evidence": {
             "missing_capability_observed": bool(rows),
             "fabricated_tool_availability": bool(fabricated),

@@ -167,6 +167,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
             sm = env["agency_self_model"]
             wv = env["world_verification"]
             permissions = env["permissions"]
+            ar.set_mode("active")
 
             # A1 — persistent desired state: create, re-open through a fresh DB connection,
             # and preserve explicit criteria/authority without relying on conversation state.

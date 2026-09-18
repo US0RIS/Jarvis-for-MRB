@@ -296,6 +296,7 @@ def synthesize_adapter(
                 "allowed_hosts": [
                     str(value) for value in (item.get("allowed_hosts") or hosts)
                 ],
+                "sandbox_validated": True,
                 "disabled_at_synthesis": not bool(item.get("enabled")),
             },
             evidence=(

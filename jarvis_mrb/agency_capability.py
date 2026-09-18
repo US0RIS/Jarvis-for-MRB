@@ -44,15 +44,20 @@ def available_tool(tool: str) -> dict[str, Any]:
     permission is not a missing capability; it is an authority boundary.
     """
     from jarvis_mrb.permissions import TOOL_RISK, decide
+    from jarvis_mrb.workflow_engine import _ALLOWED_NODE_TOOLS
 
     name = str(tool or "").strip()
     if name in TOOL_RISK:
         permission = decide(name)
+        agency_allowed = name in _ALLOWED_NODE_TOOLS
+        permission_allowed = bool(permission.allowed)
         return {
             "tool": name,
             "known": True,
-            "available": bool(permission.allowed),
-            "authority_blocked": not bool(permission.allowed),
+            "available": bool(agency_allowed and permission_allowed),
+            "implemented_for_agency": bool(agency_allowed),
+            "authority_blocked": bool(not permission_allowed),
+            "agency_scope_blocked": bool(not agency_allowed),
             "risk": str(permission.risk),
             "requires_confirmation": bool(permission.needs_confirmation),
             "source": "builtin",
@@ -68,8 +73,10 @@ def available_tool(tool: str) -> dict[str, Any]:
         return {
             "tool": name,
             "known": True,
-            "available": bool(item.get("enabled")),
+            "available": False,
+            "implemented_for_agency": False,
             "authority_blocked": not bool(item.get("enabled")),
+            "agency_scope_blocked": True,
             "risk": str(item.get("risk") or "security"),
             "requires_confirmation": True,
             "source": "custom",
@@ -79,7 +86,9 @@ def available_tool(tool: str) -> dict[str, Any]:
         "tool": name,
         "known": False,
         "available": False,
+        "implemented_for_agency": False,
         "authority_blocked": False,
+        "agency_scope_blocked": False,
         "risk": "",
         "requires_confirmation": False,
         "source": "missing",

@@ -201,6 +201,8 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
             "running_real_sessions_with_receipt": 0,
             "approval_capability_wrong_state": 0,
             "installation_identity_count_invalid": 0,
+            "terminal_verification_event_mismatch": 0,
+            "independent_terminal_verification_without_observation": 0,
         }
         if (
             require_agency
@@ -335,6 +337,31 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 conn.execute("SELECT COUNT(*) FROM agency_installation_identity").fetchone()[0]
             )
             agency_metrics["installation_identity_count_invalid"] = 0 if identity_count == 1 else 1
+            agency_metrics["terminal_verification_event_mismatch"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM action_verifications v
+                LEFT JOIN events e ON e.id=v.resolved_event_id
+                WHERE v.status IN ('verified','failed','timed_out','unverified')
+                  AND (
+                    e.id IS NULL
+                    OR e.source_kind!='jarvis_verifier'
+                    OR e.event_type!=('verification.' || v.status)
+                  )
+                """
+            ).fetchone()[0])
+            agency_metrics["independent_terminal_verification_without_observation"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM action_verifications v
+                WHERE v.status IN ('verified','failed','timed_out')
+                  AND v.verifier NOT IN ('tool_return','return_value')
+                  AND NOT EXISTS (
+                    SELECT 1 FROM verification_observations o
+                    WHERE o.verification_id=v.id AND o.outcome=v.status
+                  )
+                """
+            ).fetchone()[0])
 
             for key, label in (
                 ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
@@ -352,6 +379,8 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 ("orphan_real_gate_receipts", "REAL Agency receipts without matching sessions"),
                 ("approval_capability_wrong_state", "Agency approval capabilities attached to invalid step states"),
                 ("installation_identity_count_invalid", "Agency installation identity singleton is missing or invalid"),
+                ("terminal_verification_event_mismatch", "Terminal action verifications without matching verifier events"),
+                ("independent_terminal_verification_without_observation", "Independent terminal action verifications without matching observations"),
             ):
                 value = int(agency_metrics[key])
                 if value:

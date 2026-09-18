@@ -17,6 +17,7 @@ import jarvis_mrb.agency_real_acceptance as agency_real_acceptance
 import jarvis_mrb.agency_release as agency_release
 import jarvis_mrb.agency_runtime as agency_runtime
 import jarvis_mrb.agency_self_model as agency_self_model
+import jarvis_mrb.custom_tools as custom_tools
 import jarvis_mrb.desired_state as desired_state
 import jarvis_mrb.permissions as permissions
 import jarvis_mrb.world_executive as world_executive
@@ -49,6 +50,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             "verification_db": world_verification.DB_PATH,
             "permissions_app": permissions.APP_DIR,
             "permissions_path": permissions.POLICY_PATH,
+            "custom_tools_app": custom_tools.APP_DIR,
+            "custom_tools_dir": custom_tools.TOOLS_DIR,
         }
         world_model.APP_DIR = self.base
         world_model.DB_PATH = self.db
@@ -63,6 +66,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         world_verification.DB_PATH = self.db
         permissions.APP_DIR = self.base
         permissions.POLICY_PATH = self.base / "permissions.json"
+        custom_tools.APP_DIR = self.base
+        custom_tools.TOOLS_DIR = self.base / "custom_tools"
 
         world_model.status()
         world_executive.status()
@@ -94,6 +99,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         world_verification.DB_PATH = self.originals["verification_db"]
         permissions.APP_DIR = self.originals["permissions_app"]
         permissions.POLICY_PATH = self.originals["permissions_path"]
+        custom_tools.APP_DIR = self.originals["custom_tools_app"]
+        custom_tools.TOOLS_DIR = self.originals["custom_tools_dir"]
         self.temp.cleanup()
 
     def _patch_identity(self, sha: str = SHA_A):

@@ -212,7 +212,7 @@ class AgencyReleaseTests(unittest.TestCase):
             conn.close()
 
         persisted = agency_release.get_receipt(receipt["id"])
-        self.assertEqual(persisted["harness"], "real-a1-acceptance")
+        self.assertEqual(persisted["harness"], "agency-real-gate-session-v1")
 
     def test_low_level_real_receipt_writer_rejects_unbound_evidence(self) -> None:
         with self.assertRaisesRegex(ValueError, "live acceptance session"):

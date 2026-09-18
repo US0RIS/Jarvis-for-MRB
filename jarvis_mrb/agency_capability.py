@@ -23,6 +23,7 @@ def _connect() -> sqlite3.Connection:
             desired_state_id TEXT NOT NULL DEFAULT '',
             capability TEXT NOT NULL,
             reason TEXT NOT NULL,
+            observed_availability_json TEXT NOT NULL DEFAULT '{}',
             status TEXT NOT NULL DEFAULT 'open',
             proposed_tool_name TEXT NOT NULL DEFAULT '',
             resolution TEXT NOT NULL DEFAULT '',
@@ -33,6 +34,11 @@ def _connect() -> sqlite3.Connection:
             ON agency_capability_gaps(status,desired_state_id,updated_at DESC);
         """
     )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_capability_gaps)").fetchall()}
+    if "observed_availability_json" not in columns:
+        conn.execute(
+            "ALTER TABLE agency_capability_gaps ADD COLUMN observed_availability_json TEXT NOT NULL DEFAULT '{}'"
+        )
     conn.commit()
     return conn
 
@@ -124,13 +130,23 @@ def record_gap(
             gap_id = str(existing["id"])
         else:
             gap_id = f"cap-gap:{uuid.uuid4()}"
+            observed_availability = available_tool(clean_capability)
             conn.execute(
                 """
                 INSERT INTO agency_capability_gaps(
-                    id,desired_state_id,capability,reason,status,created_at,updated_at
-                ) VALUES(?,?,?,?, 'open',?,?)
+                    id,desired_state_id,capability,reason,observed_availability_json,
+                    status,created_at,updated_at
+                ) VALUES(?,?,?,?,?,'open',?,?)
                 """,
-                (gap_id, state_id, clean_capability, clean_reason, now, now),
+                (
+                    gap_id,
+                    state_id,
+                    clean_capability,
+                    clean_reason,
+                    json.dumps(observed_availability, ensure_ascii=False, sort_keys=True),
+                    now,
+                    now,
+                ),
             )
         conn.commit()
 
@@ -163,7 +179,14 @@ def get_gap(gap_id: str) -> dict[str, Any] | None:
             "SELECT * FROM agency_capability_gaps WHERE id=?",
             (str(gap_id),),
         ).fetchone()
-    return dict(row) if row else None
+    if row is None:
+        return None
+    item = dict(row)
+    try:
+        item["observed_availability"] = json.loads(str(item.pop("observed_availability_json") or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        item["observed_availability"] = {}
+    return item
 
 
 def list_gaps(*, desired_state_id: str | None = None, open_only: bool = False) -> list[dict[str, Any]]:
@@ -180,7 +203,15 @@ def list_gaps(*, desired_state_id: str | None = None, open_only: bool = False) -
             f"SELECT * FROM agency_capability_gaps{where} ORDER BY updated_at DESC",
             tuple(params),
         ).fetchall()
-    return [dict(row) for row in rows]
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["observed_availability"] = json.loads(str(item.pop("observed_availability_json") or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            item["observed_availability"] = {}
+        result.append(item)
+    return result
 
 
 def synthesize_adapter(

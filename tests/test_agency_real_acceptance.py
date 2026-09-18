@@ -1011,7 +1011,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A3")
 
-    def test_a5_requires_external_change_before_invalidation_and_new_generation(self) -> None:
+    def test_a5_requires_external_change_replan_and_preserved_valid_work(self) -> None:
         entity_id = world_model.ensure_entity("project", "Causal Replan Gate")
         state = desired_state.create_desired_state(
             "Causal Replan Gate scheduled",
@@ -1024,6 +1024,11 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             state["id"],
             [
                 {
+                    "id": "preserved-read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "stable project requirements"},
+                },
+                {
                     "id": "write",
                     "tool": "calendar.create",
                     "arguments": {
@@ -1031,7 +1036,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                         "start": "2030-01-01T09:00:00-08:00",
                         "end": "2030-01-01T09:30:00-08:00",
                     },
-                }
+                    "depends_on": ["preserved-read"],
+                },
             ],
         )
 
@@ -1039,9 +1045,24 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             session = agency_real_acceptance.start_session(
                 "A5",
                 desired_state_id=str(state["id"]),
+                parameters={"preserve_step_key": "preserved-read"},
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
+            after_read = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="Stable requirements observed and retained.",
+                ),
+            )
+            preserved_step = next(
+                item for item in after_read["steps"]
+                if item["step_key"] == "preserved-read"
+            )
+            self.assertEqual(preserved_step["status"], "verified")
+            self.assertEqual(preserved_step["attempt_count"], 1)
+
             event_id = world_model.record_event(
                 "calendar.context_enriched",
                 "Causal Replan Gate timing changed externally.",
@@ -1057,11 +1078,28 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(invalidated["status"], "needs_replan")
+            self.assertEqual(
+                next(
+                    item for item in invalidated["steps"]
+                    if item["step_key"] == "preserved-read"
+                )["attempt_count"],
+                1,
+            )
 
             new_plan = agency_plan.create_plan(
                 str(state["id"]),
-                [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": "new timing"}}],
-                summary="Replanned after external timing change",
+                [
+                    {
+                        "id": "replanned-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Causal replan revised",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="Replanned after external timing change without replaying stable read",
             )
             self.assertGreater(new_plan["generation"], plan["generation"])
 
@@ -1069,6 +1107,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(evaluation["passed"], evaluation["checks"])
             causal = evaluation["checks"][0]["evidence"]
             self.assertTrue(any(event_id in item["external_event_ids"] for item in causal))
+            self.assertTrue(evaluation["evidence"]["already_valid_work_preserved"])
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])

@@ -289,6 +289,161 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertEqual(flagged[0]["event_id"], 1)
         self.assertEqual(flagged[0]["tool"], "web.search")
 
+    def test_a5_requires_external_change_before_invalidation_and_new_generation(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Causal Replan Gate")
+        state = desired_state.create_desired_state(
+            "Causal Replan Gate scheduled",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "scheduled", "value": True}],
+            source_kind="test",
+            source_ref="real:a5",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Causal replan",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A5",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Causal Replan Gate timing changed externally.",
+                source_kind="calendar_enriched",
+                source_ref="real-a5:external-change",
+                evidence="External calendar observation changed the relevant timing.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            invalidated = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("stale protected plan must not execute")
+                ),
+            )
+            self.assertEqual(invalidated["status"], "needs_replan")
+
+            new_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": "new timing"}}],
+                summary="Replanned after external timing change",
+            )
+            self.assertGreater(new_plan["generation"], plan["generation"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            causal = evaluation["checks"][0]["evidence"]
+            self.assertTrue(any(event_id in item["external_event_ids"] for item in causal))
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A5")
+
+    def test_a6_requires_externally_grounded_wake_evidence(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Dormant Wake Gate")
+        state = desired_state.create_desired_state(
+            "Dormant Wake Gate available",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True}],
+            source_kind="test",
+            source_ref="real:a6",
+        )
+        desired_state.set_state(str(state["id"]), "blocked", reason="Waiting for external availability.")
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True},
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            source_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Dormant Wake Gate is now available.",
+                source_kind="calendar_enriched",
+                source_ref="real-a6:availability",
+                evidence="External availability observation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "available",
+                value=True,
+                source_event_id=source_event_id,
+                evidence="Observed externally.",
+            )
+            wake = desired_state.check_wake_watches()
+            self.assertEqual(wake["triggered"], 1)
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(evaluation["evidence"]["wake_condition_changed"])
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A6")
+
+    def test_a6_internal_only_wake_does_not_count_as_real_evidence(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Internal Wake Gate")
+        state = desired_state.create_desired_state(
+            "Internal Wake Gate available",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True}],
+            source_kind="test",
+            source_ref="real:a6-internal",
+        )
+        desired_state.set_state(str(state["id"]), "blocked", reason="Waiting.")
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True},
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            internal_event = world_model.record_event(
+                "agency.synthetic_change",
+                "Jarvis internally marked availability.",
+                source_kind="jarvis_agency",
+                source_ref="real-a6:internal",
+                evidence="Internal-only change.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "available",
+                value=True,
+                source_event_id=internal_event,
+                evidence="Internal-only belief.",
+            )
+            desired_state.check_wake_watches()
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            wake_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith("wake condition later triggered")
+            )
+            self.assertFalse(wake_check["passed"])
+
     def test_a7_is_scoped_to_matching_real_deliberation(self) -> None:
         with self._patch_identity():
             session = agency_real_acceptance.start_session(

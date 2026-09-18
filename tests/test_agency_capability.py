@@ -61,6 +61,23 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertEqual(len(gaps), 1)
         self.assertEqual(gaps[0]["reason"], "Still missing.")
 
+    def test_gap_persists_availability_snapshot_from_time_of_block(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "future.nonexistent.capability",
+            "Required for the goal.",
+        )
+        snapshot = gap["observed_availability"]
+        self.assertEqual(snapshot["tool"], "future.nonexistent.capability")
+        self.assertFalse(snapshot["known"])
+        self.assertFalse(snapshot["available"])
+        self.assertFalse(snapshot["authority_blocked"])
+        self.assertFalse(snapshot["agency_scope_blocked"])
+
+        loaded = agency_capability.get_gap(gap["id"])
+        self.assertEqual(loaded["observed_availability"], snapshot)
+
     def test_adapter_synthesis_remains_disabled(self) -> None:
         state_id = self._state()
         gap = agency_capability.record_gap(state_id, "weather.private_api", "Need narrow API.")

@@ -554,15 +554,12 @@ def _confirm_pending() -> AgentReply:
             return execute_tool(tool, args, bypass_confirmation=True)
 
     try:
-        from jarvis_mrb.agency_plan import list_pending_approvals
+        from jarvis_mrb.agency_plan import describe_pending_approval, list_pending_approvals
 
         pending_agency = list_pending_approvals(limit=10)
         if pending_agency:
             descriptions = "; ".join(
-                (
-                    f"{item.get('desired_state_title')} — "
-                    f"{_describe_action(str(item.get('tool') or ''), dict(item.get('resolved_arguments') or {}))}"
-                )
+                f"{item.get('desired_state_title')} — {describe_pending_approval(item)}"
                 for item in pending_agency[:5]
             )
             return AgentReply(

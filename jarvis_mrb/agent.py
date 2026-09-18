@@ -454,7 +454,19 @@ def _confirm_pending() -> AgentReply:
         return execute_tool(str(pending["tool"]), dict(pending["args"]), bypass_confirmation=True)
 
     try:
-        from jarvis_mrb.agency_plan import approve_pending, pending_approval
+        from jarvis_mrb.agency_plan import approve_pending, list_pending_approvals, pending_approval
+
+        pending = list_pending_approvals(limit=10)
+        if len(pending) > 1:
+            descriptions = "; ".join(
+                f"{item.get('desired_state_title')} — {item.get('tool')}"
+                for item in pending[:5]
+            )
+            return AgentReply(
+                False,
+                "More than one Agency action is waiting for approval. "
+                f"Specify which one, for example 'approve agency <goal>': {descriptions}.",
+            )
 
         step = pending_approval()
         if step is not None:
@@ -493,8 +505,19 @@ def _cancel_pending() -> AgentReply:
         _PENDING_ACTION = None
         return AgentReply(True, "Cancelled.")
     try:
-        from jarvis_mrb.agency_plan import deny_pending
+        from jarvis_mrb.agency_plan import deny_pending, list_pending_approvals
 
+        pending = list_pending_approvals(limit=10)
+        if len(pending) > 1:
+            descriptions = "; ".join(
+                f"{item.get('desired_state_title')} — {item.get('tool')}"
+                for item in pending[:5]
+            )
+            return AgentReply(
+                False,
+                "More than one Agency action is waiting. "
+                f"Specify which one, for example 'deny agency <goal>': {descriptions}.",
+            )
         plan = deny_pending(reason="User denied the proposed Agency action.")
         if plan is not None:
             return AgentReply(True, "Denied that Agency action. The desired state remains active and Jarvis will seek another path.")
@@ -593,6 +616,29 @@ def _fast_path(text: str) -> AgentReply | None:
     m = re.fullmatch(r"(?:agency pause|pause agency goal) (.+)", n)
     if m:
         return execute_tool("agency.pause_goal", {"query": m.group(1).strip()})
+    m = re.fullmatch(r"approve agency (.+)", n)
+    if m:
+        try:
+            from jarvis_mrb.agency_plan import approve_matching
+            plan = approve_matching(
+                m.group(1).strip(),
+                lambda tool, args, bypass_confirmation=False: execute_tool(
+                    tool,
+                    args,
+                    bypass_confirmation=bypass_confirmation,
+                ),
+            )
+            return AgentReply(True, f"Agency approval processed. Plan status is {plan.get('status')}.")
+        except Exception as exc:
+            return AgentReply(False, f"Agency approval could not be processed: {exc}")
+    m = re.fullmatch(r"(?:deny|reject) agency (.+)", n)
+    if m:
+        try:
+            from jarvis_mrb.agency_plan import deny_matching
+            plan = deny_matching(m.group(1).strip(), reason="User denied the specified Agency action.")
+            return AgentReply(True, f"Denied that Agency action. Plan status is {plan.get('status')}.")
+        except Exception as exc:
+            return AgentReply(False, f"Agency denial could not be processed: {exc}")
     m = re.fullmatch(r"set (read|local_write|external_write|destructive|security) (?:actions )?to (auto|confirm|deny)", n)
     if m: return AgentReply(True, set_policy(m.group(1), m.group(2)))
 

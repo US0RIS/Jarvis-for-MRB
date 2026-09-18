@@ -730,6 +730,34 @@ def resolved_arguments(step_id: str) -> dict[str, Any]:
     return dict(_resolve_value(template, outputs))
 
 
+def approved_execution_matches(
+    step_id: str,
+    tool: str,
+    arguments: dict[str, Any],
+) -> bool:
+    """Validate the exact protected action currently executing under approval.
+
+    This is consulted by agent.execute_tool before honoring bypass_confirmation.
+    A bare boolean is never sufficient authority.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT tool,status FROM agency_steps WHERE id=?",
+            (str(step_id),),
+        ).fetchone()
+    if row is None:
+        return False
+    if str(row["status"] or "") != "executing":
+        return False
+    if str(row["tool"] or "") != str(tool):
+        return False
+    try:
+        expected = resolved_arguments(str(step_id))
+    except Exception:
+        return False
+    return expected == dict(arguments or {})
+
+
 def _executor_accepts_bypass(executor: Callable[..., Any]) -> bool:
     """Detect the adapter signature before execution; never retry an action after TypeError."""
     try:

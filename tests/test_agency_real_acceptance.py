@@ -135,7 +135,10 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertFalse(before["passed"])
             self.assertFalse(before["evidence"]["restart_observed"])
 
-            with patch("jarvis_mrb.agency_runtime.os.getpid", return_value=987654):
+            with patch(
+                "jarvis_mrb.agency_runtime._PROCESS_INSTANCE_ID",
+                "test-restarted-process-instance",
+            ):
                 agency_runtime.record_boot(deployment_sha=SHA_A)
             after = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(after["passed"], after["checks"])

@@ -39,6 +39,7 @@ def _connect() -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             question TEXT NOT NULL,
             context TEXT NOT NULL DEFAULT '',
+            agency_step_id TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL,
             synthesis_json TEXT NOT NULL DEFAULT '{}',
             disagreement_json TEXT NOT NULL DEFAULT '[]',
@@ -64,6 +65,13 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_agency_deliberation_workers
             ON agency_deliberation_workers(deliberation_id,role);
         """
+    )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_deliberations)").fetchall()}
+    if "agency_step_id" not in columns:
+        conn.execute("ALTER TABLE agency_deliberations ADD COLUMN agency_step_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agency_deliberations_step "
+        "ON agency_deliberations(agency_step_id,created_at DESC)"
     )
     conn.commit()
     return conn
@@ -286,13 +294,24 @@ def deliberate(
 
     deliberation_id = f"deliberation:{uuid.uuid4()}"
     created = _now()
+    try:
+        from jarvis_mrb.tool_audit import current_agency_step_id
+        agency_step_id = current_agency_step_id()
+    except Exception:
+        agency_step_id = ""
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO agency_deliberations(id,question,context,status,created_at)
-            VALUES(?,?,?,'running',?)
+            INSERT INTO agency_deliberations(id,question,context,agency_step_id,status,created_at)
+            VALUES(?,?,?,?,'running',?)
             """,
-            (deliberation_id, clean_question[:8000], str(context or "")[:20000], created),
+            (
+                deliberation_id,
+                clean_question[:8000],
+                str(context or "")[:20000],
+                str(agency_step_id or ""),
+                created,
+            ),
         )
         worker_ids: dict[str, str] = {}
         for role in selected_roles:
@@ -439,6 +458,7 @@ def deliberate(
         "id": deliberation_id,
         "status": status,
         "question": clean_question,
+        "agency_step_id": str(agency_step_id or ""),
         "roles": selected_roles,
         "outputs": outputs,
         "disagreements": disagreements,

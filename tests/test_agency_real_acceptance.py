@@ -846,6 +846,166 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertFalse(verified_check["passed"])
         self.assertFalse(evaluation["passed"])
 
+    def test_a3_proves_safe_read_approval_resumption_and_denial_replan(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A3 Permission Gate")
+        state = desired_state.create_desired_state(
+            "A3 Permission Gate scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a3",
+        )
+        first_plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A3 permission context"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A3 approved action",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["read"],
+                },
+            ],
+            summary="Read safely, then cross approval boundary",
+        )
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted the approved A3 action.",
+                data={"event_id": "a3-approved-event"},
+            )
+            agency_step_id = current_agency_step_id()
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=agency_step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=agency_step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A3",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            after_read = agency_plan.execute_next(
+                first_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="Safe read completed automatically.",
+                ),
+            )
+            self.assertEqual(after_read["status"], "active")
+            self.assertEqual(after_read["steps"][0]["status"], "verified")
+
+            waiting = agency_plan.execute_next(
+                first_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not run before approval",
+                ),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+            write_step = next(
+                item for item in waiting["steps"] if item["step_key"] == "write"
+            )
+            approved = agency_plan.approve_step(
+                first_plan["id"],
+                write_step["id"],
+                protected_executor,
+            )
+            approved_write = next(
+                item for item in approved["steps"] if item["step_key"] == "write"
+            )
+            self.assertEqual(approved_write["status"], "awaiting_verification")
+            self.assertEqual(approved_write["attempt_count"], 1)
+            self.assertTrue(approved_write["verification_id"])
+
+            denial_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "denied-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A3 denied action",
+                            "start": "2030-01-01T11:00:00-08:00",
+                            "end": "2030-01-01T11:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="Exercise explicit denial path",
+            )
+            denial_waiting = agency_plan.execute_next(
+                denial_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not run before approval",
+                ),
+            )
+            denied_step = denial_waiting["steps"][0]
+            self.assertEqual(denied_step["status"], "awaiting_approval")
+            denied = agency_plan.deny_step(
+                denial_plan["id"],
+                denied_step["id"],
+                reason="User rejected this protected action.",
+            )
+            self.assertEqual(denied["status"], "needs_replan")
+            self.assertEqual(denied["steps"][0]["status"], "blocked")
+            self.assertEqual(denied["steps"][0]["attempt_count"], 0)
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(evaluation["evidence"]["safe_read_auto_proceeded"])
+            self.assertTrue(
+                evaluation["evidence"]["protected_external_write_observed"]
+            )
+            self.assertTrue(evaluation["evidence"]["approval_resumed_same_plan"])
+            self.assertTrue(
+                evaluation["evidence"]["permission_boundary_not_bypassed"]
+            )
+            self.assertTrue(evaluation["evidence"]["denial_case_observed"])
+            self.assertTrue(
+                evaluation["evidence"]["denial_forced_replan_or_blocked"]
+            )
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A3")
+
     def test_a5_requires_external_change_before_invalidation_and_new_generation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Causal Replan Gate")
         state = desired_state.create_desired_state(

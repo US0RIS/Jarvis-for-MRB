@@ -8,8 +8,21 @@ from typing import Any, Callable
 import httpx
 
 from jarvis_mrb.planner_model import QUALITY_MODEL
-from jarvis_mrb.world_model import DB_PATH
+import jarvis_mrb.world_model as world_model
 
+
+DEFAULT_OBSERVATION_SOURCE_KINDS = [
+    "jarvis_verifier",
+    "calendar_enriched",
+    "gmail_attachment",
+    "rayban_camera",
+    "meeting_notes",
+    "expense_tracker",
+    "iphone_inventory",
+    "iphone_waiting",
+    "iphone_reminders",
+    "iphone_encounter",
+]
 
 _COMPLETION_WORDS = {
     "sign": "signed",
@@ -76,7 +89,7 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _max_event_id() -> int:
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
     try:
         row = conn.execute("SELECT COALESCE(MAX(id),0) FROM events").fetchone()
         return int(row[0]) if row else 0
@@ -264,7 +277,10 @@ def _validate_compiled(
                 "terms_all": terms_all[:8],
                 "terms_none": terms_none[:12],
                 "event_types": [str(item) for item in (criterion.get("event_types") or [])[:12] if str(item).strip()],
-                "source_kinds": [str(item) for item in (criterion.get("source_kinds") or [])[:12] if str(item).strip()],
+                "source_kinds": (
+                    [str(item) for item in (criterion.get("source_kinds") or [])[:12] if str(item).strip()]
+                    or list(DEFAULT_OBSERVATION_SOURCE_KINDS)
+                ),
                 "min_event_id": min_event_id,
             }
         )

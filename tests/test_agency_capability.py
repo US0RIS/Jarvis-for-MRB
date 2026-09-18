@@ -268,6 +268,71 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
         self.assertEqual(agency_capability.get_gap(gap["id"])["status"], "resolved")
 
+    def test_recovered_custom_capability_replans_but_still_requires_security_approval(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "weather.private_api",
+            "Need private weather data.",
+        )
+        with patch(
+            "jarvis_mrb.custom_tools.synthesize",
+            return_value={"name": "private_weather", "enabled": False, "risk": "read"},
+        ):
+            agency_capability.synthesize_adapter(
+                gap["id"],
+                name="private_weather",
+                description="Read private weather.",
+                api_spec="GET /weather",
+                allowed_hosts=["weather.example.com"],
+                risk="read",
+            )
+        desired_state.set_state(
+            state_id,
+            "blocked",
+            reason="Missing capability: weather.private_api.",
+        )
+        agency_runtime.set_mode("active")
+        executor_calls: list[str] = []
+        enabled_catalog = [
+            {
+                "name": "private_weather",
+                "enabled": True,
+                "risk": "read",
+                "description": "Private weather",
+                "allowed_hosts": ["weather.example.com"],
+            }
+        ]
+
+        with patch("jarvis_mrb.custom_tools.list_tools", return_value=enabled_catalog):
+            reconciled = agency_capability.reconcile_gaps()
+            result = agency_runtime.tick_desired_state(
+                state_id,
+                executor=lambda tool, args, **kwargs: executor_calls.append(tool) or SimpleNamespace(ok=True, message="must not run before approval"),
+                planner=lambda _prompt: {
+                    "summary": "Use recovered private weather adapter.",
+                    "nodes": [
+                        {
+                            "id": "weather",
+                            "tool": "custom.run",
+                            "arguments": {
+                                "name": "private_weather",
+                                "arguments": {"city": "Pasadena"},
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
+
+        self.assertIn(state_id, reconciled["reactivated"])
+        self.assertEqual(executor_calls, [])
+        self.assertEqual(result["status"], "awaiting_approval")
+        self.assertEqual(result["plan"]["steps"][0]["tool"], "custom.run")
+        self.assertEqual(result["plan"]["steps"][0]["risk"], "security")
+        self.assertTrue(result["plan"]["steps"][0]["requires_confirmation"])
+
     def test_resolving_one_of_multiple_capability_gaps_does_not_reactivate_goal(self) -> None:
         state_id = self._state()
         first = agency_capability.record_gap(state_id, "capability.one", "Need one.")

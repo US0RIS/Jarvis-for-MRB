@@ -649,15 +649,26 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
     details: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
-        availability = available_tool(str(row["capability"]))
-        if bool(availability.get("available")):
+        observed_availability = dict(
+            _loads(str(item.get("observed_availability_json") or "{}"), {})
+        )
+        current_availability = available_tool(str(row["capability"]))
+        if bool(observed_availability.get("available")):
             fabricated.append(str(row["capability"]))
         proposed = str(row["proposed_tool_name"] or "")
-        if proposed and not bool(available_tool(proposed).get("available")):
+        proposal_current = available_tool(proposed) if proposed else {}
+        if proposed and not bool(proposal_current.get("available")):
             blocked_or_disabled = True
         if str(row["status"]) == "open":
             blocked_or_disabled = True
-        details.append({"gap": item, "availability": availability})
+        details.append(
+            {
+                "gap": item,
+                "availability_at_gap": observed_availability,
+                "availability_now": current_availability,
+                "proposal_now": proposal_current,
+            }
+        )
     checks = [
         _check("missing capability was explicitly recorded", bool(rows), details),
         _check("no missing capability was fabricated as available", not fabricated, fabricated),

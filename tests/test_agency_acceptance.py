@@ -11,6 +11,7 @@ class AgencyAcceptanceTests(unittest.TestCase):
         import jarvis_mrb.agency_capability as agency_capability
         import jarvis_mrb.agency_plan as agency_plan
         import jarvis_mrb.agency_runtime as agency_runtime
+        import jarvis_mrb.custom_tools as custom_tools
         import jarvis_mrb.desired_state as desired_state
         import jarvis_mrb.permissions as permissions
         import jarvis_mrb.world_model as world_model
@@ -27,6 +28,10 @@ class AgencyAcceptanceTests(unittest.TestCase):
             "verification_db": world_verification.DB_PATH,
             "permission_app": permissions.APP_DIR,
             "permission_path": permissions.POLICY_PATH,
+            "custom_tools_app": custom_tools.APP_DIR,
+            "custom_tools_dir": custom_tools.TOOLS_DIR,
+            "custom_tools_app": custom_tools.APP_DIR,
+            "custom_tools_dir": custom_tools.TOOLS_DIR,
         }
 
         run_synthetic_acceptance()

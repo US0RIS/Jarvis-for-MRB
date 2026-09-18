@@ -53,6 +53,7 @@ def evidence_for(gate: str) -> dict:
         "A7": {
             "parallel_workers": 4,
             "parallel_overlap_observed": True,
+            "provenance_structurally_bounded": True,
             "material_disagreement_preserved": True,
         },
         "A8": {
@@ -68,6 +69,7 @@ def evidence_for(gate: str) -> dict:
         },
         "A11": {
             "preference_authority_conflict_observed": True,
+            "protected_action_waited_for_approval": True,
             "permission_policy_remained_authoritative": True,
         },
         "A12": {

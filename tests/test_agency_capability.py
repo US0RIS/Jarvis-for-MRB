@@ -224,6 +224,24 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertTrue(info["requires_confirmation"])
         self.assertEqual(info["wrapper_tool"], "custom.run")
 
+    def test_enabled_custom_external_write_remains_agency_scope_blocked_without_verifier(self) -> None:
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {
+                    "name": "custom_writer",
+                    "enabled": True,
+                    "risk": "external_write",
+                    "allowed_hosts": ["api.example.com"],
+                }
+            ],
+        ):
+            info = agency_capability.available_tool("custom_writer")
+        self.assertTrue(info["known"])
+        self.assertFalse(info["available"])
+        self.assertFalse(info["implemented_for_agency"])
+        self.assertTrue(info["agency_scope_blocked"])
+
     def test_enabling_proposed_adapter_reactivates_capability_blocked_goal(self) -> None:
         state_id = self._state()
         gap = agency_capability.record_gap(

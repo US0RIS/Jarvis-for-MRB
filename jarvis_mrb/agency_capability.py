@@ -341,7 +341,9 @@ def reconcile_gaps() -> dict[str, Any]:
         if state is None or str(state.get("state") or "") != "blocked":
             continue
         blocked_reason = str(state.get("blocked_reason") or "").lower()
-        if capability.lower() not in blocked_reason and proposed.lower() not in blocked_reason:
+        capability_matches = bool(capability and capability.lower() in blocked_reason)
+        proposed_matches = bool(proposed and proposed.lower() in blocked_reason)
+        if not (capability_matches or proposed_matches):
             continue
 
         remaining = [

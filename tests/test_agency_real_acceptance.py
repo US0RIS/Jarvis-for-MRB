@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -259,17 +261,24 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             )
             self.assertFalse(parallel_check["passed"])
 
+            barrier = threading.Barrier(2)
+
+            def linked_worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": "yes" if role == "evidence" else "no",
+                    "claims": [],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
             def executor(tool: str, args: dict, **kwargs: object):
                 result = agency_deliberation.deliberate(
                     str(args.get("question") or ""),
                     context=str(args.get("context") or ""),
                     roles=["evidence", "skeptic"],
-                    worker=lambda role, q, ctx: {
-                        "conclusion": "yes" if role == "evidence" else "no",
-                        "claims": [],
-                        "risks": [],
-                        "unknowns": [],
-                    },
+                    worker=linked_worker,
                     synthesizer=lambda q, ctx, outputs, disagreements: {
                         "answer": "disagreement",
                         "consensus": [],

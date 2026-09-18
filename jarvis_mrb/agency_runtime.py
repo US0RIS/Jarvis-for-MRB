@@ -373,7 +373,7 @@ def tick_desired_state(
     if plan and str(plan.get("status") or "") in {"awaiting_verification", "active"}:
         plan = reconcile_plan(str(plan["id"]))
 
-    if plan is None or str(plan.get("status") or "") in {"needs_replan", "blocked"}:
+    if plan is None or str(plan.get("status") or "") in {"needs_replan", "blocked", "completed"}:
         if not allow_planning:
             return {
                 "desired_state_id": state_id,

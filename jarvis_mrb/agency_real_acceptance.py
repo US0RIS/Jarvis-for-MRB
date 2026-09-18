@@ -321,6 +321,20 @@ def start_session(
             runtime = dict(baseline.get("runtime") or {})
             if _parse_time(str(runtime.get("next_evaluation_at") or "")) is None:
                 raise ValueError("A1 REAL session requires a persisted next evaluation time.")
+        if clean_gate == "A5":
+            preserve_step_key = str(params.get("preserve_step_key") or "").strip()
+            if not preserve_step_key:
+                raise ValueError(
+                    "A5 REAL session requires parameters.preserve_step_key for work known to remain valid."
+                )
+            plan_steps = list(plan.get("steps") or [])
+            if not plan or not any(
+                str(step.get("step_key") or "") == preserve_step_key
+                for step in plan_steps
+            ):
+                raise ValueError(
+                    "A5 REAL session preserve_step_key must identify a step in the current persistent plan."
+                )
         if clean_gate == "A6":
             if str(desired["state"]) != "blocked":
                 raise ValueError("A6 REAL session must start while the desired state is blocked.")
@@ -1410,7 +1424,80 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
 def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
     causal = _causal_replan_evidence(conn, session, events)
     restatements = _goal_restatement_ids(conn, session)
-    pairs = list(causal["causal_pairs"])
+    baseline_plan_id = str((session.get("baseline") or {}).get("plan", {}).get("id") or "")
+    preserve_step_key = str(session["parameters"].get("preserve_step_key") or "")
+    pairs = [
+        item for item in list(causal["causal_pairs"])
+        if str(item.get("invalidated_plan_id") or "") == baseline_plan_id
+    ]
+
+    preservation_details: list[dict[str, Any]] = []
+    preserved = False
+    for pair in pairs:
+        invalidation_event_id = int(pair["invalidation_event_id"])
+        invalidation_event = conn.execute(
+            "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+            (invalidation_event_id,),
+        ).fetchone()
+        invalidation_time = _parse_time(
+            str(
+                (invalidation_event["recorded_at"] if invalidation_event else "")
+                or (invalidation_event["occurred_at"] if invalidation_event else "")
+                or ""
+            )
+        )
+        step = conn.execute(
+            """
+            SELECT id,step_key,tool,arguments_json,status,attempt_count,
+                   result_summary,finished_at
+            FROM agency_steps
+            WHERE plan_id=? AND step_key=?
+            """,
+            (str(pair["invalidated_plan_id"]), preserve_step_key),
+        ).fetchone()
+        if step is None:
+            continue
+        finished_at = _parse_time(str(step["finished_at"] or ""))
+        completed_before_change = bool(
+            str(step["status"] or "") in {"verified", "skipped"}
+            and int(step["attempt_count"] or 0) > 0
+            and finished_at is not None
+            and invalidation_time is not None
+            and finished_at <= invalidation_time
+        )
+        replays = conn.execute(
+            """
+            SELECT s.id,s.step_key,s.tool,s.status,s.attempt_count,p.generation
+            FROM agency_steps s
+            JOIN agency_plans p ON p.id=s.plan_id
+            WHERE p.desired_state_id=?
+              AND p.generation>?
+              AND s.tool=?
+              AND s.arguments_json=?
+              AND s.attempt_count>0
+            ORDER BY p.generation,s.ordinal
+            """,
+            (
+                session["desired_state_id"],
+                int(pair["invalidated_generation"]),
+                str(step["tool"]),
+                str(step["arguments_json"]),
+            ),
+        ).fetchall()
+        detail = {
+            "step_id": str(step["id"]),
+            "step_key": str(step["step_key"]),
+            "tool": str(step["tool"]),
+            "status": str(step["status"]),
+            "attempt_count": int(step["attempt_count"] or 0),
+            "finished_at": str(step["finished_at"] or ""),
+            "completed_before_invalidation": completed_before_change,
+            "replays": [dict(row) for row in replays],
+        }
+        preservation_details.append(detail)
+        if completed_before_change and not replays:
+            preserved = True
+
     checks = [
         _check(
             "relevant external world change preceded stale-plan invalidation",
@@ -1418,14 +1505,19 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
             pairs,
         ),
         _check(
-            "stale plan was invalidated",
-            bool(causal["invalidations"]),
-            [int(item["id"]) for item in causal["invalidations"]],
+            "stale baseline plan was invalidated",
+            bool(pairs),
+            [int(item["invalidation_event_id"]) for item in pairs],
         ),
         _check(
             "a newer plan generation followed the invalidated path",
             bool(pairs),
             [item["new_plan"] for item in pairs],
+        ),
+        _check(
+            "already-valid work completed before invalidation and was not replayed",
+            preserved,
+            preservation_details,
         ),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
     ]
@@ -1434,9 +1526,11 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
         "evidence": {
             "external_change_observed": checks[0]["passed"],
             "stale_path_invalidated": checks[1]["passed"],
-            "replanned_without_goal_restatement": checks[2]["passed"] and checks[3]["passed"],
+            "replanned_without_goal_restatement": checks[2]["passed"] and checks[4]["passed"],
+            "already_valid_work_preserved": checks[3]["passed"],
         },
     }
+
 
 def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
     state_id = session["desired_state_id"]

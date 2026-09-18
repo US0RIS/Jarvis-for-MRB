@@ -313,6 +313,43 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
     )[:12000]
 
 
+def _handle_declared_capability_gap(
+    desired_state_id: str,
+    missing: dict[str, Any],
+    *,
+    set_state: Callable[..., dict[str, Any]],
+) -> None:
+    capability = " ".join(str(missing.get("capability") or "").split())[:500]
+    reason_detail = " ".join(str(missing.get("reason") or "").split())[:2500]
+    if not capability or not reason_detail:
+        raise ValueError("Planner declared an invalid missing capability.")
+
+    from jarvis_mrb.agency_capability import available_tool, record_gap
+
+    availability = available_tool(capability)
+    if not bool(availability.get("known")):
+        record_gap(
+            str(desired_state_id),
+            capability,
+            reason_detail,
+        )
+        reason = f"Missing capability: {capability}. {reason_detail}"
+    elif bool(availability.get("agency_scope_blocked")):
+        reason = (
+            f"Agency scope does not permit {capability}; the capability exists but is "
+            f"intentionally excluded from autonomous workflows. {reason_detail}"
+        )
+    elif bool(availability.get("authority_blocked")):
+        reason = f"Permission policy currently denies Agency use of {capability}. {reason_detail}"
+    else:
+        # A planner may not declare a tool missing if the bounded Agency registry
+        # already exposes and authorizes it. Treat that as a planner error.
+        raise ValueError(
+            f"Planner declared available Agency tool {capability!r} as a missing capability."
+        )
+    set_state(str(desired_state_id), "blocked", reason=reason)
+
+
 def compile_plan(
     desired_state_id: str,
     *,
@@ -343,6 +380,15 @@ def compile_plan(
         workflow = planner(prompt)
         if not isinstance(workflow, dict):
             raise ValueError("Planner returned a non-object plan.")
+        missing = workflow.get("missing_capability")
+        if isinstance(missing, dict):
+            _handle_declared_capability_gap(
+                str(desired_state_id),
+                missing,
+                set_state=set_state,
+            )
+            _update_runtime(str(desired_state_id), planner_success=True)
+            return None
         signature = _workflow_signature(workflow)
         if not signature:
             raise ValueError("Planner returned no executable nodes.")

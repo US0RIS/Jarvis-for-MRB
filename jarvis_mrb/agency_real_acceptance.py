@@ -744,6 +744,7 @@ def _verification_rows_for_state(conn: sqlite3.Connection, desired_state_id: str
             and str(resolved_event["source_kind"] or "") == "jarvis_verifier"
             and str(resolved_payload.get("verification_id") or "") == verification_id
             and str(resolved_payload.get("agency_step_id") or "") == step_id
+            and str(resolved_payload.get("desired_state_id") or "") == str(item.get("desired_state_id") or "")
             and str(resolved_payload.get("tool") or "") == tool
         )
 

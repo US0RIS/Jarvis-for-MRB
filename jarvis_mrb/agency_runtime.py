@@ -643,6 +643,7 @@ def tick_all(
     executor: Callable[..., Any] | None = None,
     planner: Callable[[str], dict[str, Any]] | None = None,
     max_actions: int = 2,
+    max_plans: int = 4,
     limit: int = 50,
 ) -> dict[str, Any]:
     from jarvis_mrb.desired_state import list_desired_states
@@ -659,10 +660,13 @@ def tick_all(
             "candidate_pool": 0,
             "actions_executed": 0,
             "action_budget": 0,
+            "planning_attempts": 0,
+            "planning_budget": 0,
             "results": [],
         }
 
     action_budget = max(0, min(int(max_actions), 10)) if mode == "active" else 0
+    planning_budget = max(0, min(int(max_plans), 20)) if mode == "active" else 0
     window_limit = max(1, min(int(limit), 200))
 
     # Load a broader pool than the per-cycle evaluation window. Otherwise a stable
@@ -790,15 +794,38 @@ def tick_all(
         )
         ordered.extend(remaining)
 
+    from jarvis_mrb.agency_plan import current_plan
+
     actions = 0
+    planning_attempts = 0
     results: list[dict[str, Any]] = []
     for desired in ordered:
+        state_id = str(desired["id"])
+        existing = current_plan(state_id, include_steps=False)
+        needs_planning = bool(
+            str(desired.get("state") or "") == "active"
+            and (
+                existing is None
+                or str(existing.get("status") or "")
+                in {"needs_replan", "blocked", "completed"}
+            )
+        )
+        permit_planning = bool(
+            mode == "active"
+            and (
+                not needs_planning
+                or planning_attempts < planning_budget
+            )
+        )
+        if needs_planning and permit_planning:
+            planning_attempts += 1
+
         result = tick_desired_state(
-            str(desired["id"]),
+            state_id,
             executor=executor,
             planner=planner,
             allow_action=mode == "active" and actions < action_budget,
-            allow_planning=mode == "active",
+            allow_planning=permit_planning,
         )
         if result.get("action_executed"):
             actions += 1
@@ -809,6 +836,8 @@ def tick_all(
         "candidate_pool": len(candidates),
         "actions_executed": actions,
         "action_budget": action_budget,
+        "planning_attempts": planning_attempts,
+        "planning_budget": planning_budget,
         "results": results,
     }
 

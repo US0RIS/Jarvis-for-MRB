@@ -418,6 +418,8 @@ def compile_plan(
         workflow = planner(prompt)
         if not isinstance(workflow, dict):
             raise ValueError("Planner returned a non-object plan.")
+        from jarvis_mrb.workflow_engine import _validate_plan
+        _validate_plan(workflow)
         missing = workflow.get("missing_capability")
         if isinstance(missing, dict):
             _handle_declared_capability_gap(

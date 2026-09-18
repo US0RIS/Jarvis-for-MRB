@@ -208,6 +208,8 @@ class AgencyReleaseTests(unittest.TestCase):
             regression_ok=True,
             synthetic_ok=True,
             diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=True,
             regression_summary="all tests passed",
             synthetic_summary="A1-A12 synthetic passed",
             diagnostics_summary="strict diagnostics clean",
@@ -258,6 +260,8 @@ class AgencyReleaseTests(unittest.TestCase):
             regression_ok=True,
             synthetic_ok=True,
             diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=True,
         )
         self.a12_trace.unlink()
 
@@ -378,6 +382,29 @@ class AgencyReleaseTests(unittest.TestCase):
         second = self._record("A1")
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_validation_record_with_dirty_tree_is_not_release_eligible(self) -> None:
+        for gate in sorted(agency_release.REAL_GATES):
+            self._record(gate)
+        agency_release.record_validation_run(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            source_root_value=str(self.base),
+            compile_ok=True,
+            regression_ok=True,
+            synthetic_ok=True,
+            diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=False,
+            regression_summary="Tests passed but modified tracked files.",
+        )
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertFalse(status["release_ready"])
+        self.assertTrue(any("validation run" in reason for reason in status["reasons"]))
+
     def test_failed_validation_run_is_not_release_eligible(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)
@@ -389,6 +416,8 @@ class AgencyReleaseTests(unittest.TestCase):
             regression_ok=False,
             synthetic_ok=True,
             diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=True,
             regression_summary="one test failed",
         )
         status = agency_release.release_status(

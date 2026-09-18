@@ -925,35 +925,82 @@ def execute_next(plan_id: str, executor: Callable[..., Any]) -> dict[str, Any]:
     return _execute_step(plan, step, executor, bypass_confirmation=False)
 
 
-def pending_approval(*, plan_id: str | None = None) -> dict[str, Any] | None:
+def list_pending_approvals(*, plan_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit), 200))
     with _connect() as conn:
+        sql = """
+            SELECT s.*,p.desired_state_id,p.generation,p.summary AS plan_summary,
+                   COALESCE(d.title,p.desired_state_id) AS desired_state_title
+            FROM agency_steps s
+            JOIN agency_plans p ON p.id=s.plan_id
+            LEFT JOIN desired_states d ON d.id=p.desired_state_id
+            WHERE s.status='awaiting_approval' AND p.status='awaiting_approval'
+        """
+        params: list[Any] = []
         if plan_id:
-            rows = conn.execute(
-                """
-                SELECT s.*,p.desired_state_id,p.generation,p.summary AS plan_summary
-                FROM agency_steps s JOIN agency_plans p ON p.id=s.plan_id
-                WHERE s.plan_id=? AND s.status='awaiting_approval' AND p.status='awaiting_approval'
-                ORDER BY s.ordinal LIMIT 2
-                """,
-                (str(plan_id),),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT s.*,p.desired_state_id,p.generation,p.summary AS plan_summary
-                FROM agency_steps s JOIN agency_plans p ON p.id=s.plan_id
-                WHERE s.status='awaiting_approval' AND p.status='awaiting_approval'
-                ORDER BY p.updated_at DESC,s.ordinal LIMIT 2
-                """
-            ).fetchall()
-    if len(rows) != 1:
-        return None
-    result = _row_to_step(rows[0])
-    result["resolved_arguments"] = resolved_arguments(str(result["id"]))
-    result["desired_state_id"] = str(rows[0]["desired_state_id"])
-    result["generation"] = int(rows[0]["generation"])
-    result["plan_summary"] = str(rows[0]["plan_summary"])
+            sql += " AND s.plan_id=?"
+            params.append(str(plan_id))
+        sql += " ORDER BY p.updated_at DESC,s.ordinal LIMIT ?"
+        params.append(safe_limit)
+        rows = conn.execute(sql, tuple(params)).fetchall()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = _row_to_step(row)
+        item["resolved_arguments"] = resolved_arguments(str(item["id"]))
+        item["desired_state_id"] = str(row["desired_state_id"])
+        item["desired_state_title"] = str(row["desired_state_title"])
+        item["generation"] = int(row["generation"])
+        item["plan_summary"] = str(row["plan_summary"])
+        result.append(item)
     return result
+
+
+def pending_approval(*, plan_id: str | None = None) -> dict[str, Any] | None:
+    rows = list_pending_approvals(plan_id=plan_id, limit=2)
+    return rows[0] if len(rows) == 1 else None
+
+
+def _normalize_match(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def matching_pending_approval(query: str) -> dict[str, Any]:
+    needle = _normalize_match(query)
+    if not needle:
+        raise ValueError("Approval query is empty.")
+    candidates = list_pending_approvals(limit=200)
+    matches: list[dict[str, Any]] = []
+    for item in candidates:
+        haystack = _normalize_match(
+            " ".join(
+                [
+                    str(item.get("desired_state_title") or ""),
+                    str(item.get("plan_summary") or ""),
+                    str(item.get("step_key") or ""),
+                    str(item.get("tool") or ""),
+                    json.dumps(item.get("resolved_arguments") or {}, ensure_ascii=False, sort_keys=True),
+                ]
+            )
+        )
+        if needle in haystack:
+            matches.append(item)
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError("No pending Agency approval uniquely matches that description.")
+    titles = ", ".join(str(item.get("desired_state_title") or item.get("tool")) for item in matches[:5])
+    raise ValueError(f"That description matches multiple pending Agency approvals: {titles}.")
+
+
+def approve_matching(query: str, executor: Callable[..., Any]) -> dict[str, Any]:
+    step = matching_pending_approval(query)
+    return approve_step(str(step["plan_id"]), str(step["id"]), executor)
+
+
+def deny_matching(query: str, *, reason: str = "User denied the proposed action.") -> dict[str, Any]:
+    step = matching_pending_approval(query)
+    return deny_step(str(step["plan_id"]), str(step["id"]), reason=reason)
 
 
 def approve_step(plan_id: str, step_id: str, executor: Callable[..., Any]) -> dict[str, Any]:

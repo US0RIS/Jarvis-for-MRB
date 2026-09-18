@@ -1946,8 +1946,29 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
         if str(row.get("risk") or "") == "external_write"
         and bool(row.get("action_event_proof"))
     ]
+    state_events = _events_for_state(events, state_id)
+    waiting_by_step: dict[str, list[int]] = {}
+    for item in state_events:
+        if item["event_type"] != "agency.step.awaiting_approval":
+            continue
+        step_id = str((item.get("payload") or {}).get("step_id") or "")
+        if step_id:
+            waiting_by_step.setdefault(step_id, []).append(int(item["id"]))
+
+    protected_external: list[dict[str, Any]] = []
+    for row in external:
+        step_id = str(row.get("agency_step_id") or "")
+        action_event_id = int(row.get("action_event_id") or 0)
+        prior_waiting = [
+            event_id
+            for event_id in waiting_by_step.get(step_id, [])
+            if event_id < action_event_id
+        ]
+        if prior_waiting:
+            protected_external.append(row)
+
     verified_external = [
-        row for row in external
+        row for row in protected_external
         if str(row.get("status") or "") == "verified"
         and str(row.get("verifier") or "") not in {"return_value", "tool_return"}
         and bool(row.get("independent_terminal_proof"))
@@ -1955,12 +1976,50 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     causal_replan = _causal_replan_evidence(conn, session, events)
     restatements = _goal_restatement_ids(conn, session)
     desired = _desired_state_row(conn, state_id)
+
+    satisfied_at = _parse_time(str(desired["satisfied_at"] or "")) if desired is not None else None
+    satisfaction_after_verified_action = False
+    verified_completion_links: list[dict[str, Any]] = []
+    if satisfied_at is not None:
+        for row in verified_external:
+            resolved_event_id = int(row.get("resolved_event_id") or 0)
+            event = conn.execute(
+                "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+                (resolved_event_id,),
+            ).fetchone() if resolved_event_id else None
+            verified_at = _parse_time(
+                str(
+                    (event["recorded_at"] if event else "")
+                    or (event["occurred_at"] if event else "")
+                    or ""
+                )
+            )
+            linked = bool(verified_at is not None and satisfied_at >= verified_at)
+            verified_completion_links.append(
+                {
+                    "verification_id": str(row.get("id") or ""),
+                    "resolved_event_id": resolved_event_id,
+                    "verified_at": verified_at.isoformat() if verified_at else "",
+                    "satisfied_at": satisfied_at.isoformat(),
+                    "satisfaction_followed_verification": linked,
+                }
+            )
+            satisfaction_after_verified_action = satisfaction_after_verified_action or linked
+
     checks = [
         _check("verified private information retrieval occurred", private_seen, verified_read_tools),
         _check("verified public web research occurred", public_seen, verified_read_tools),
         _check("parallel deliberation belonged to this Agency plan and overlapped", parallel_analysis, [str(row["id"]) for row in deliberations]),
-        _check("protected external action occurred", bool(external), [row["id"] for row in external]),
-        _check("external action was independently verified", bool(verified_external), [row["id"] for row in verified_external]),
+        _check(
+            "protected external action crossed approval boundary",
+            bool(protected_external),
+            [str(row.get("id") or "") for row in protected_external],
+        ),
+        _check(
+            "that protected external action was independently verified",
+            bool(verified_external),
+            [str(row.get("id") or "") for row in verified_external],
+        ),
         _check(
             "external reality change caused invalidation and a newer plan generation",
             bool(causal_replan["causal_pairs"]),
@@ -1968,6 +2027,11 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
         ),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
         _check("desired state reached satisfied", desired is not None and str(desired["state"]) == "satisfied"),
+        _check(
+            "final satisfaction followed the independently verified protected action",
+            satisfaction_after_verified_action,
+            verified_completion_links,
+        ),
     ]
     return {
         "checks": checks,
@@ -1976,9 +2040,11 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             "public_research": checks[1]["passed"],
             "parallel_analysis": checks[2]["passed"],
             "protected_external_action": checks[3]["passed"],
+            "protected_action_approval_boundary": checks[3]["passed"],
             "independent_outcome_verification": checks[4]["passed"],
             "replan_after_injected_change": checks[5]["passed"] and checks[6]["passed"],
             "final_desired_state_satisfied": checks[7]["passed"],
+            "final_satisfaction_followed_verified_action": checks[8]["passed"],
         },
     }
 

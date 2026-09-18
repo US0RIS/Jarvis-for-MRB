@@ -76,6 +76,47 @@ class WorldVerificationTests(unittest.TestCase):
             message="tool execution receipt",
         )
 
+    def test_verification_observations_are_append_only(self) -> None:
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "append-only-message", "email": "daniel@example.com"},
+            ),
+            action_event_id=self._action_event(),
+        )
+        world_verification._record_observation(
+            verification_id,
+            outcome="verified",
+            evidence="Independent observation.",
+        )
+        row = self._rows(
+            "SELECT id FROM verification_observations WHERE verification_id=?",
+            (verification_id,),
+        )[0]
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE verification_observations SET outcome='failed' WHERE id=?",
+                    (int(row["id"]),),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "DELETE FROM verification_observations WHERE id=?",
+                    (int(row["id"]),),
+                )
+        finally:
+            conn.close()
+
     def test_read_tool_return_value_closes_immediately(self) -> None:
         action_event = self._action_event(tool="knowledge.search", ok=True)
         verification_id = world_verification.register_execution(

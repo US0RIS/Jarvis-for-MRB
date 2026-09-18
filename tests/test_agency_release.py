@@ -456,6 +456,53 @@ class AgencyReleaseTests(unittest.TestCase):
         second = self._record("A1")
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_validation_must_postdate_selected_real_receipts(self) -> None:
+        agency_release.record_validation_run(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            source_root_value=str(self.base),
+            compile_ok=True,
+            regression_ok=True,
+            synthetic_ok=True,
+            diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=True,
+            regression_summary="pre-acceptance validation",
+        )
+        for gate in sorted(agency_release.REAL_GATES):
+            self._record(gate)
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertFalse(status["release_ready"])
+        self.assertFalse(status["validation_after_real_gates"])
+        self.assertTrue(
+            any("predates" in reason for reason in status["reasons"])
+        )
+
+        agency_release.record_validation_run(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            source_root_value=str(self.base),
+            compile_ok=True,
+            regression_ok=True,
+            synthetic_ok=True,
+            diagnostics_ok=True,
+            tree_clean_before=True,
+            tree_clean_after=True,
+            regression_summary="post-acceptance validation",
+        )
+        after = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertTrue(after["validation_after_real_gates"])
+        self.assertTrue(after["release_ready"])
+
     def test_validation_hash_detects_post_run_corruption(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)

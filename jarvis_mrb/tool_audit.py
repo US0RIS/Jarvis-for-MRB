@@ -178,6 +178,7 @@ def _record(tool: str, args: dict[str, Any], reply: Any, *, confirmed_execution:
             occurrence_args,
             ok=bool(getattr(reply, "ok", False)),
             message=_safe_result_message(tool, reply),
+            agency_step_id=current_agency_step_id(),
         )
     except Exception:
         return

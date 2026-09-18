@@ -464,6 +464,48 @@ class AgencyRuntimeTests(unittest.TestCase):
             2,
         )
 
+    def test_planner_backoff_does_not_consume_cycle_planning_budget(self) -> None:
+        _, backed_off = self._make_state("Planning Backoff")
+        _, ready = self._make_state("Planning Ready")
+        agency_runtime._update_runtime(
+            backed_off,
+            planner_success=False,
+            error="temporary planner failure",
+        )
+        self.assertFalse(agency_runtime._planning_allowed(backed_off))
+        self.assertTrue(agency_runtime._planning_allowed(ready))
+
+        agency_runtime.set_mode("active")
+        planner_calls: list[str] = []
+
+        def planner(prompt: str) -> dict:
+            planner_calls.append(prompt)
+            return {
+                "summary": "Safe observation",
+                "nodes": [
+                    {
+                        "id": "observe",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "ready goal"},
+                        "depends_on": [],
+                    }
+                ],
+                "missing_capability": None,
+            }
+
+        result = agency_runtime.tick_all(
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            planner=planner,
+            max_actions=0,
+            max_plans=1,
+            limit=2,
+        )
+
+        self.assertEqual(result["planning_attempts"], 1)
+        self.assertEqual(len(planner_calls), 1)
+        self.assertIsNone(agency_plan.current_plan(backed_off))
+        self.assertIsNotNone(agency_plan.current_plan(ready))
+
     def test_satisfied_goals_do_not_displace_active_goals_from_evaluation_window(self) -> None:
         active_ids: list[str] = []
         for index in range(3):

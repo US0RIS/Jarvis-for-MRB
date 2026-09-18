@@ -480,6 +480,25 @@ class AgencyReleaseTests(unittest.TestCase):
         }
         self.assertIn(newer["id"], invalid_ids)
 
+    def test_completed_session_retry_rejects_corrupted_receipt(self) -> None:
+        receipt = self._record("A1")
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("DROP TRIGGER agency_real_gate_receipts_immutable_update")
+            conn.execute(
+                "UPDATE agency_real_gate_receipts SET harness='tampered' WHERE id=?",
+                (receipt["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        retried = agency_real_acceptance.finalize_session(receipt["session_id"])
+        self.assertTrue(retried["already_finalized"])
+        self.assertFalse(retried["passed"])
+        self.assertFalse(retried["receipt_reused"])
+        self.assertIn("hash mismatch", retried["receipt_validation_error"])
+
     def test_content_hash_detects_receipt_corruption(self) -> None:
         receipt = self._record("A1")
         conn = sqlite3.connect(self.db)

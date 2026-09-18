@@ -2211,31 +2211,55 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     satisfied_at = _parse_time(str(desired["satisfied_at"] or "")) if desired is not None else None
     satisfaction_after_verified_action = False
     verified_completion_links: list[dict[str, Any]] = []
-    if satisfied_at is not None:
-        for row in verified_external:
-            resolved_event_id = int(row.get("resolved_event_id") or 0)
-            event = conn.execute(
-                "SELECT recorded_at,occurred_at FROM events WHERE id=?",
-                (resolved_event_id,),
-            ).fetchone() if resolved_event_id else None
-            verified_at = _parse_time(
-                str(
-                    (event["recorded_at"] if event else "")
-                    or (event["occurred_at"] if event else "")
-                    or ""
+    satisfied_evaluations = conn.execute(
+        """
+        SELECT id,observed_at,satisfied,state_before,state_after,details_json
+        FROM desired_state_evaluations
+        WHERE desired_state_id=? AND observed_at>=? AND satisfied=1
+        ORDER BY observed_at,id
+        """,
+        (state_id, session["started_at"]),
+    ).fetchall()
+    for row in verified_external:
+        resolved_event_id = int(row.get("resolved_event_id") or 0)
+        event = conn.execute(
+            "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+            (resolved_event_id,),
+        ).fetchone() if resolved_event_id else None
+        verified_at = _parse_time(
+            str(
+                (event["recorded_at"] if event else "")
+                or (event["occurred_at"] if event else "")
+                or ""
+            )
+        )
+        matching_evaluations: list[dict[str, Any]] = []
+        if verified_at is not None:
+            for evaluation in satisfied_evaluations:
+                observed_at = _parse_time(str(evaluation["observed_at"] or ""))
+                if observed_at is None or observed_at < verified_at:
+                    continue
+                matching_evaluations.append(
+                    {
+                        "id": int(evaluation["id"]),
+                        "observed_at": str(evaluation["observed_at"]),
+                        "state_before": str(evaluation["state_before"]),
+                        "state_after": str(evaluation["state_after"]),
+                        "details": _loads(str(evaluation["details_json"] or "{}"), {}),
+                    }
                 )
-            )
-            linked = bool(verified_at is not None and satisfied_at >= verified_at)
-            verified_completion_links.append(
-                {
-                    "verification_id": str(row.get("id") or ""),
-                    "resolved_event_id": resolved_event_id,
-                    "verified_at": verified_at.isoformat() if verified_at else "",
-                    "satisfied_at": satisfied_at.isoformat(),
-                    "satisfaction_followed_verification": linked,
-                }
-            )
-            satisfaction_after_verified_action = satisfaction_after_verified_action or linked
+        linked = bool(matching_evaluations)
+        verified_completion_links.append(
+            {
+                "verification_id": str(row.get("id") or ""),
+                "resolved_event_id": resolved_event_id,
+                "verified_at": verified_at.isoformat() if verified_at else "",
+                "satisfied_at": satisfied_at.isoformat() if satisfied_at else "",
+                "satisfied_evaluations_after_verification": matching_evaluations,
+                "satisfaction_followed_verification": linked,
+            }
+        )
+        satisfaction_after_verified_action = satisfaction_after_verified_action or linked
 
     satisfaction_evidence_links: list[dict[str, Any]] = []
     verified_resolved_ids = {

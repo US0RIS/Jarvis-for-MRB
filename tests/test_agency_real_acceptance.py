@@ -1278,13 +1278,19 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             unrelated = agency_real_acceptance.evaluate_session(session["id"])
             self.assertFalse(unrelated["passed"])
 
-            barrier = threading.Barrier(2)
+            barrier = threading.Barrier(4)
 
             def worker(role: str, q: str, ctx: str) -> dict:
                 barrier.wait(timeout=2)
                 time.sleep(0.05)
+                conclusions = {
+                    "evidence": "launch",
+                    "skeptic": "wait",
+                    "feasibility": "launch after dependency check",
+                    "risk_cost": "wait unless downside is bounded",
+                }
                 return {
-                    "conclusion": "launch" if role == "evidence" else "wait",
+                    "conclusion": conclusions[role],
                     "claims": [
                         {
                             "claim": f"{role} claim",
@@ -1299,7 +1305,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
             agency_deliberation.deliberate(
                 "Scoped launch decision for the real gate",
-                roles=["evidence", "skeptic"],
+                roles=["evidence", "skeptic", "feasibility", "risk_cost"],
                 worker=worker,
                 synthesizer=lambda q, ctx, outputs, disagreements: {
                     "answer": "preserve disagreement",
@@ -1313,7 +1319,10 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertEqual(evaluation["evidence"]["parallel_workers"], 4)
+            self.assertTrue(evaluation["evidence"]["required_epistemic_roles_present"])
             self.assertTrue(evaluation["evidence"]["provenance_structurally_bounded"])
+            self.assertTrue(evaluation["evidence"]["synthesis_after_workers"])
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A7")

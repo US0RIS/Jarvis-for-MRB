@@ -275,6 +275,38 @@ def synthesize_adapter(
             ),
         )
         conn.commit()
+
+    try:
+        from jarvis_mrb.world_model import record_event
+        record_event(
+            "agency.capability_adapter_synthesized",
+            (
+                f"Sandbox-tested adapter {str(item.get('name') or name)} drafted for "
+                f"missing capability {str(gap.get('capability') or '')}; left disabled."
+            ),
+            source_kind="jarvis_agency",
+            source_ref=str(gap_id),
+            occurred_at=now,
+            payload={
+                "gap_id": str(gap_id),
+                "desired_state_id": str(gap.get("desired_state_id") or ""),
+                "capability": str(gap.get("capability") or ""),
+                "proposed_tool_name": str(item.get("name") or name),
+                "risk": str(item.get("risk") or risk),
+                "allowed_hosts": [
+                    str(value) for value in (item.get("allowed_hosts") or hosts)
+                ],
+                "disabled_at_synthesis": not bool(item.get("enabled")),
+            },
+            evidence=(
+                "agency_capability.synthesize_adapter returned only after the custom-tool "
+                "sandbox/request-plan validation path completed; Agency reasserted disabled state."
+            ),
+            confidence=1.0,
+        )
+    except Exception:
+        pass
+
     return {
         "gap": get_gap(str(gap_id)),
         "tool": item,
@@ -340,22 +372,49 @@ def reconcile_gaps() -> dict[str, Any]:
 
 def resolve_gap(gap_id: str, resolution: str) -> dict[str, Any]:
     now = _now()
+    clean_resolution = str(resolution or "")[:3000]
     with _connect() as conn:
         row = conn.execute(
-            "SELECT 1 FROM agency_capability_gaps WHERE id=?",
+            """
+            SELECT desired_state_id,capability,proposed_tool_name,status
+            FROM agency_capability_gaps WHERE id=?
+            """,
             (str(gap_id),),
         ).fetchone()
         if row is None:
             raise ValueError(f"Unknown capability gap {gap_id!r}.")
+        previous_status = str(row["status"] or "")
         conn.execute(
             """
             UPDATE agency_capability_gaps
             SET status='resolved',resolution=?,updated_at=?
             WHERE id=?
             """,
-            (str(resolution or "")[:3000], now, str(gap_id)),
+            (clean_resolution, now, str(gap_id)),
         )
         conn.commit()
+
+    if previous_status != "resolved":
+        try:
+            from jarvis_mrb.world_model import record_event
+            record_event(
+                "agency.capability_resolved",
+                f"Agency capability resolved: {str(row['capability'] or '')}.",
+                source_kind="jarvis_agency",
+                source_ref=str(gap_id),
+                occurred_at=now,
+                payload={
+                    "gap_id": str(gap_id),
+                    "desired_state_id": str(row["desired_state_id"] or ""),
+                    "capability": str(row["capability"] or ""),
+                    "proposed_tool_name": str(row["proposed_tool_name"] or ""),
+                    "resolution": clean_resolution,
+                },
+                evidence="Previously open/proposed capability became available to the Agency runtime.",
+                confidence=1.0,
+            )
+        except Exception:
+            pass
     return get_gap(str(gap_id)) or {}
 
 

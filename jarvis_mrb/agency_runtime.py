@@ -12,6 +12,9 @@ from typing import Any, Callable
 from jarvis_mrb.world_model import DB_PATH
 
 
+_PROCESS_INSTANCE_ID = str(uuid.uuid4())
+
+
 def _now_dt() -> datetime:
     return datetime.now().astimezone()
 
@@ -66,7 +69,8 @@ def _connect() -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             started_at TEXT NOT NULL,
             deployment_sha TEXT NOT NULL DEFAULT '',
-            process_id INTEGER NOT NULL DEFAULT 0
+            process_id INTEGER NOT NULL DEFAULT 0,
+            process_instance_id TEXT NOT NULL DEFAULT ''
         )
         """
     )
@@ -74,6 +78,15 @@ def _connect() -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_agency_runtime_boots_started "
         "ON agency_runtime_boots(started_at DESC)"
     )
+    boot_columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(agency_runtime_boots)").fetchall()
+    }
+    if "process_instance_id" not in boot_columns:
+        conn.execute(
+            "ALTER TABLE agency_runtime_boots "
+            "ADD COLUMN process_instance_id TEXT NOT NULL DEFAULT ''"
+        )
     conn.commit()
     return conn
 
@@ -84,10 +97,17 @@ def record_boot(*, deployment_sha: str = "") -> dict[str, Any]:
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO agency_runtime_boots(id,started_at,deployment_sha,process_id)
-            VALUES(?,?,?,?)
+            INSERT INTO agency_runtime_boots(
+                id,started_at,deployment_sha,process_id,process_instance_id
+            ) VALUES(?,?,?,?,?)
             """,
-            (boot_id, now, str(deployment_sha or "")[:80], int(os.getpid())),
+            (
+                boot_id,
+                now,
+                str(deployment_sha or "")[:80],
+                int(os.getpid()),
+                _PROCESS_INSTANCE_ID,
+            ),
         )
         conn.commit()
     return {
@@ -95,6 +115,7 @@ def record_boot(*, deployment_sha: str = "") -> dict[str, Any]:
         "started_at": now,
         "deployment_sha": str(deployment_sha or "")[:80],
         "process_id": int(os.getpid()),
+        "process_instance_id": _PROCESS_INSTANCE_ID,
     }
 
 

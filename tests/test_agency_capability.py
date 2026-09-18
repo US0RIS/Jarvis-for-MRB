@@ -104,12 +104,43 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertEqual(len(gaps), 1)
         self.assertEqual(gaps[0]["capability"], "robot.arm")
 
+    def test_known_tool_excluded_from_autonomous_workflows_is_scope_boundary_not_missing_capability(self) -> None:
+        info = agency_capability.available_tool("meeting.start")
+        self.assertTrue(info["known"])
+        self.assertFalse(info["available"])
+        self.assertFalse(info["implemented_for_agency"])
+        self.assertTrue(info["agency_scope_blocked"])
+        self.assertFalse(info["authority_blocked"])
+
+    def test_runtime_does_not_record_capability_gap_for_intentionally_excluded_tool(self) -> None:
+        state_id = self._state()
+        agency_runtime.set_mode("active")
+
+        result = agency_runtime.tick_desired_state(
+            state_id,
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            planner=lambda _prompt: (_ for _ in ()).throw(
+                ValueError("Workflow requested unsupported tool 'meeting.start'.")
+            ),
+        )
+
+        self.assertFalse(result["action_executed"])
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertIn("Agency scope does not permit meeting.start", state["blocked_reason"])
+        self.assertEqual(
+            agency_capability.list_gaps(desired_state_id=state_id, open_only=True),
+            [],
+        )
+
     def test_known_but_denied_tool_is_authority_gap_not_capability_gap(self) -> None:
         permissions.set_policy("external_write", "deny")
         info = agency_capability.available_tool("gmail.send")
         self.assertTrue(info["known"])
         self.assertFalse(info["available"])
+        self.assertTrue(info["implemented_for_agency"])
         self.assertTrue(info["authority_blocked"])
+        self.assertFalse(info["agency_scope_blocked"])
         self.assertEqual(info["source"], "builtin")
 
 

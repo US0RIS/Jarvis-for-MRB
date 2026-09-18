@@ -928,6 +928,38 @@ class AgencyPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             agency_plan.matching_pending_approval("calendar.create")
 
+    def test_pending_approval_cannot_be_selected_by_action_arguments(self) -> None:
+        _, state_id = self._state_for_project("Project Goal Identity Only")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "send",
+                    "tool": "gmail.send",
+                    "arguments": {
+                        "recipient": "unique-recipient@example.com",
+                        "subject": "Sensitive approval text",
+                        "body": "Do not use these arguments as goal selectors.",
+                    },
+                }
+            ],
+            summary="Handle Project Goal Identity Only",
+        )
+        agency_plan.execute_next(
+            plan["id"],
+            lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+        )
+
+        matched = agency_plan.matching_pending_approval("Goal Identity Only")
+        self.assertEqual(matched["plan_id"], plan["id"])
+
+        with self.assertRaises(ValueError):
+            agency_plan.matching_pending_approval("unique-recipient@example.com")
+        with self.assertRaises(ValueError):
+            agency_plan.matching_pending_approval("Sensitive approval text")
+        with self.assertRaises(ValueError):
+            agency_plan.matching_pending_approval("gmail.send")
+
     def test_targeted_denial_changes_only_selected_pending_plan(self) -> None:
         _, state_one = self._state_for_project("Project Deny One")
         _, state_two = self._state_for_project("Project Deny Two")

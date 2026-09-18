@@ -185,21 +185,35 @@ def _completion_term(title: str) -> str:
     return ""
 
 
-def _fallback_contract(title: str, intention: dict[str, Any]) -> dict[str, Any] | None:
-    completion = _completion_term(title)
-    if not completion:
-        return None
+def _fallback_anchor(title: str, intention: dict[str, Any]) -> str:
     entity_names = [
         " ".join(str(item.get("name") or "").split())
         for item in (intention.get("entities") or [])
         if str(item.get("role") or "") == "project" and str(item.get("name") or "").strip()
     ]
-    anchor = entity_names[0] if entity_names else ""
-    if not anchor:
-        # Conservative fallback: only use a distinctive capitalized phrase from title.
-        candidates = re.findall(r"(?:[A-Z][A-Za-z0-9'_-]+(?:\s+[A-Z][A-Za-z0-9'_-]+)*)", str(title or ""))
-        candidates = [candidate.strip() for candidate in candidates if len(candidate.strip()) >= 4]
-        anchor = candidates[0] if candidates else ""
+    if entity_names:
+        return entity_names[0]
+
+    candidates = re.findall(
+        r"(?:[A-Z][A-Za-z0-9'_-]+(?:\s+[A-Z][A-Za-z0-9'_-]+)*)",
+        str(title or ""),
+    )
+    leading = {"get", "have", "make", "ensure", "finish", "complete", "confirm", "send", "book", "buy"}
+    for candidate in candidates:
+        words = candidate.strip().split()
+        while len(words) > 1 and words[0].lower() in leading:
+            words.pop(0)
+        cleaned = " ".join(words).strip()
+        if len(cleaned) >= 4:
+            return cleaned
+    return ""
+
+
+def _fallback_contract(title: str, intention: dict[str, Any]) -> dict[str, Any] | None:
+    completion = _completion_term(title)
+    if not completion:
+        return None
+    anchor = _fallback_anchor(title, intention)
     if not anchor:
         return None
 

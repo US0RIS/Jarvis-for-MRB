@@ -172,13 +172,65 @@ class WorldVerificationTests(unittest.TestCase):
         self.assertEqual(status, "verified")
         self.assertIn("calendar-event-456", evidence)
 
+    def test_gmail_success_without_provider_id_is_unverified(self) -> None:
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(ok=True, message="Provider accepted send.", data={}),
+            action_event_id=self._action_event(),
+        )
+        row = self._rows(
+            "SELECT status,verifier,last_evidence FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        self.assertEqual(str(row["status"]), "unverified")
+        self.assertEqual(str(row["verifier"]), "no_independent_verifier")
+        self.assertIn("no stable message ID", str(row["last_evidence"]))
+
+    def test_calendar_success_without_provider_id_is_unverified(self) -> None:
+        action_event = world_model.record_tool_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            ok=True,
+            message="provider accepted calendar create",
+        )
+        verification_id = world_verification.register_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            SimpleNamespace(ok=True, message="Provider accepted create.", data={}),
+            action_event_id=action_event,
+        )
+        row = self._rows(
+            "SELECT status,verifier,last_evidence FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        self.assertEqual(str(row["status"]), "unverified")
+        self.assertEqual(str(row["verifier"]), "no_independent_verifier")
+        self.assertIn("no stable event ID", str(row["last_evidence"]))
+
     def test_external_write_is_not_verified_by_tool_success_alone(self) -> None:
         _, decision_id = self._goal_and_decision()
         action_event = self._action_event()
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=action_event,
             executive_decision_id=decision_id,
         )
@@ -197,7 +249,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -231,7 +287,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -255,7 +315,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -284,7 +348,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )

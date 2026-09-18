@@ -75,6 +75,19 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_desired_state_evaluations
             ON desired_state_evaluations(desired_state_id, id DESC);
+
+        CREATE TABLE IF NOT EXISTS desired_state_watches (
+            id TEXT PRIMARY KEY,
+            desired_state_id TEXT NOT NULL,
+            condition_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            triggered_at TEXT,
+            evidence_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_desired_state_watches
+            ON desired_state_watches(status,desired_state_id,updated_at DESC);
         """
     )
     conn.commit()
@@ -452,6 +465,123 @@ def evaluations(desired_state_id: str, *, limit: int = 20) -> list[dict[str, Any
     return result
 
 
+def add_wake_watch(desired_state_id: str, condition: dict[str, Any]) -> dict[str, Any]:
+    state_id = str(desired_state_id or "").strip()
+    clean = _validate_criterion(dict(condition or {}))
+    if get_desired_state(state_id) is None:
+        raise ValueError(f"Unknown desired state {state_id!r}.")
+    watch_id = f"wake:{_stable_id(state_id, json.dumps(clean, sort_keys=True))[:32]}"
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO desired_state_watches(
+                id,desired_state_id,condition_json,status,created_at,updated_at
+            ) VALUES(?,?,?,'active',?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                condition_json=excluded.condition_json,
+                status='active',
+                updated_at=excluded.updated_at,
+                triggered_at=NULL,
+                evidence_json='{}'
+            """,
+            (watch_id, state_id, json.dumps(clean, ensure_ascii=False, sort_keys=True), now, now),
+        )
+        conn.commit()
+    return {
+        "id": watch_id,
+        "desired_state_id": state_id,
+        "condition": clean,
+        "status": "active",
+    }
+
+
+def list_wake_watches(*, desired_state_id: str | None = None) -> list[dict[str, Any]]:
+    with _connect() as conn:
+        if desired_state_id:
+            rows = conn.execute(
+                "SELECT * FROM desired_state_watches WHERE desired_state_id=? ORDER BY created_at",
+                (str(desired_state_id),),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM desired_state_watches ORDER BY created_at"
+            ).fetchall()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["condition"] = dict(_loads(str(item.pop("condition_json")), {}))
+        item["evidence"] = dict(_loads(str(item.pop("evidence_json")), {}))
+        result.append(item)
+    return result
+
+
+def check_wake_watches() -> dict[str, int]:
+    """Reactivate blocked goals when an explicit persisted wake condition becomes true."""
+    now = _now()
+    triggered: list[tuple[str, str, dict[str, Any]]] = []
+    checked = 0
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT w.*,d.state AS desired_state_status
+            FROM desired_state_watches w
+            JOIN desired_states d ON d.id=w.desired_state_id
+            WHERE w.status='active' AND d.state='blocked'
+            ORDER BY w.created_at
+            """
+        ).fetchall()
+        for row in rows:
+            checked += 1
+            criterion = dict(_loads(str(row["condition_json"]), {}))
+            outcome = _evaluate_criterion(conn, criterion)
+            if not bool(outcome.get("satisfied")):
+                continue
+            watch_id = str(row["id"])
+            state_id = str(row["desired_state_id"])
+            conn.execute(
+                """
+                UPDATE desired_state_watches
+                SET status='triggered',triggered_at=?,updated_at=?,evidence_json=?
+                WHERE id=?
+                """,
+                (now, now, json.dumps(outcome, ensure_ascii=False, sort_keys=True), watch_id),
+            )
+            conn.execute(
+                """
+                UPDATE desired_states
+                SET state='active',blocked_reason='',updated_at=?
+                WHERE id=? AND state='blocked'
+                """,
+                (now, state_id),
+            )
+            triggered.append((watch_id, state_id, outcome))
+        conn.commit()
+
+    for watch_id, state_id, outcome in triggered:
+        try:
+            from jarvis_mrb.world_model import record_event
+            state = get_desired_state(state_id) or {}
+            record_event(
+                "desired_state.reactivated",
+                f"Desired state reactivated by wake condition: {state.get('title') or state_id}",
+                source_kind="jarvis_agency",
+                source_ref=watch_id,
+                occurred_at=now,
+                payload={
+                    "desired_state_id": state_id,
+                    "watch_id": watch_id,
+                    "condition_outcome": outcome,
+                },
+                evidence="Persisted wake condition became true while the desired state was blocked.",
+                confidence=1.0,
+            )
+        except Exception:
+            pass
+
+    return {"checked": checked, "triggered": len(triggered)}
+
+
 def sync_from_intentions() -> dict[str, int]:
     """Promote existing explicit Jarvis goals into Agency desired states.
 
@@ -557,4 +687,5 @@ def status() -> dict[str, Any]:
         "states": counts,
         "evaluations": evaluations_count,
         "criterion_kinds": ["belief_equals", "belief_in", "commitment_status", "entity_exists", "event_exists"],
+        "wake_watches": len(list_wake_watches()),
     }

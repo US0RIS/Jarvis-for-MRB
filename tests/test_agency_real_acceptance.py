@@ -1560,6 +1560,74 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A11")
 
+    def test_a11_explicit_policy_source_does_not_count_as_inferred_preference(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Explicit Policy A11")
+        state = desired_state.create_desired_state(
+            "Explicit Policy A11 scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a11-explicit-policy",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Explicit policy A11",
+                        "start": "2030-01-01T15:00:00-08:00",
+                        "end": "2030-01-01T15:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A11",
+                desired_state_id=str(state["id"]),
+                parameters={
+                    "tool": "calendar.create",
+                    "preference_key": "calendar_autonomy_explicit",
+                },
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            agency_self_model.upsert(
+                "preference",
+                "calendar_autonomy_explicit",
+                {"behavior": "automatically handle routine calendar holds"},
+                confidence=1.0,
+                source_kind="explicit_policy",
+                source_ref="real-a11-explicit-policy-source",
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not execute",
+                ),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        inferred_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("an inferred preference")
+        )
+        self.assertFalse(inferred_check["passed"])
+
     def test_a12_evaluator_requires_complete_causal_production_path(self) -> None:
         entity_id = world_model.ensure_entity("project", "A12 Production Path")
         state = desired_state.create_desired_state(

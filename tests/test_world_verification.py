@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import jarvis_mrb.tool_audit as tool_audit
 import jarvis_mrb.world_executive as world_executive
@@ -86,6 +87,90 @@ class WorldVerificationTests(unittest.TestCase):
         row = self._rows("SELECT status,verifier FROM action_verifications WHERE id=?", (verification_id,))[0]
         self.assertEqual(str(row["status"]), "verified")
         self.assertEqual(str(row["verifier"]), "return_value")
+
+    def test_gmail_verification_prefers_exact_provider_message_id(self) -> None:
+        action_event = self._action_event()
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={
+                    "message_id": "gmail-message-123",
+                    "email": "daniel@example.com",
+                },
+            ),
+            action_event_id=action_event,
+        )
+        row = self._rows(
+            "SELECT expected_json FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        expected = json.loads(str(row["expected_json"]))
+        self.assertEqual(expected["message_id"], "gmail-message-123")
+
+        with patch(
+            "jarvis_mrb.tools.google.query_emails",
+            return_value=SimpleNamespace(
+                ok=True,
+                message="Found one sent message.",
+                data={"emails": [{"id": "gmail-message-123"}]},
+            ),
+        ):
+            status, evidence = world_verification._gmail_observation(expected)
+
+        self.assertEqual(status, "verified")
+        self.assertIn("gmail-message-123", evidence)
+
+    def test_calendar_verification_prefers_exact_provider_event_id(self) -> None:
+        action_event = world_model.record_tool_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            ok=True,
+            message="calendar execution receipt",
+        )
+        verification_id = world_verification.register_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Created calendar event 'Apollo signing'.",
+                data={"event_id": "calendar-event-456"},
+            ),
+            action_event_id=action_event,
+        )
+        row = self._rows(
+            "SELECT expected_json FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        expected = json.loads(str(row["expected_json"]))
+        self.assertEqual(expected["event_id"], "calendar-event-456")
+
+        with patch(
+            "jarvis_mrb.tools.google.query_calendar_events",
+            return_value=SimpleNamespace(
+                ok=True,
+                message="Found event.",
+                data={"events": [{"id": "calendar-event-456"}]},
+            ),
+        ):
+            status, evidence = world_verification._calendar_observation(expected)
+
+        self.assertEqual(status, "verified")
+        self.assertIn("calendar-event-456", evidence)
 
     def test_external_write_is_not_verified_by_tool_success_alone(self) -> None:
         _, decision_id = self._goal_and_decision()

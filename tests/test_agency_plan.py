@@ -249,6 +249,80 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(reconciled["status"], "needs_replan")
         self.assertIn("not yet satisfied", reconciled["last_error"])
 
+    def test_relevant_world_change_invalidates_plan_before_consequential_step(self) -> None:
+        entity_id, state_id = self._state_for_project("Project Drift")
+        world_model.assert_belief(entity_id, "constraint", value="old")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {"id": "observe", "tool": "knowledge.search", "arguments": {"query": "Project Drift"}},
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Drift action",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["observe"],
+                },
+            ],
+        )
+        calls: list[str] = []
+
+        def executor(tool: str, args: dict, **_: object) -> SimpleNamespace:
+            calls.append(tool)
+            return SimpleNamespace(ok=True, message="observed")
+
+        first = agency_plan.execute_next(plan["id"], executor)
+        self.assertEqual(first["steps"][0]["status"], "verified")
+        self.assertEqual(calls, ["knowledge.search"])
+
+        world_model.assert_belief(entity_id, "constraint", value="new")
+        stale = agency_plan.execute_next(plan["id"], executor)
+
+        self.assertEqual(calls, ["knowledge.search"])
+        self.assertEqual(stale["status"], "needs_replan")
+        self.assertIn("Relevant world state changed", stale["last_error"])
+        self.assertEqual(stale["steps"][1]["status"], "pending")
+
+    def test_world_change_while_waiting_for_approval_does_not_consume_approval(self) -> None:
+        entity_id, state_id = self._state_for_project("Project Approval Drift")
+        world_model.assert_belief(entity_id, "window", value="morning")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Approval drift action",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step_id = waiting["steps"][0]["id"]
+        self.assertEqual(waiting["status"], "awaiting_approval")
+
+        world_model.assert_belief(entity_id, "window", value="afternoon")
+        calls: list[str] = []
+        result = agency_plan.approve_step(
+            plan["id"],
+            step_id,
+            lambda tool, args, **kwargs: calls.append(tool) or SimpleNamespace(ok=True, message="unexpected"),
+        )
+
+        self.assertEqual(calls, [])
+        self.assertEqual(result["status"], "needs_replan")
+        self.assertEqual(result["steps"][0]["status"], "pending")
+        self.assertIn("Relevant world state changed", result["last_error"])
+
     def test_new_generation_supersedes_old_plan_without_destroying_history(self) -> None:
         _, state_id = self._state_for_project("Project Replan")
         first = agency_plan.create_plan(

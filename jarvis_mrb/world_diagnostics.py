@@ -8,13 +8,20 @@ from typing import Any
 
 from jarvis_mrb.world_model import DB_PATH, status as world_status
 
+_AGENCY_REQUIRED_TABLES = {
+    "desired_states", "desired_state_evaluations", "desired_state_watches",
+    "agency_plans", "agency_steps", "agency_runtime_state", "agency_settings",
+    "agency_deliberations", "agency_deliberation_workers", "agency_attention_events",
+    "agency_capability_gaps", "agency_decision_cases", "agency_decision_branches",
+    "agency_self_model_entries",
+}
 _REQUIRED_TABLES = {
     "entities", "external_ids", "aliases", "events", "event_entities", "beliefs", "commitments",
     "entity_relations", "relation_evidence", "intentions", "intention_entities", "intention_commitments",
     "term_observations", "term_conflicts", "document_version_pairs",
     "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
     "runtime_subsystem_health", "gmail_attachment_sync_state", "world_schema_meta", "world_schema_history",
-}
+} | _AGENCY_REQUIRED_TABLES
 _STRONG_PERSON_PROJECT_ROLES = {
     "sender", "recipient", "attendee", "organizer", "owner", "assignee",
     "participant", "meeting_participant", "speaker", "requester", "beneficiary",
@@ -117,6 +124,101 @@ def validate() -> dict[str, Any]:
         missing_tables = sorted(_REQUIRED_TABLES - tables)
         if missing_tables:
             problems.append("Missing required world tables: " + ", ".join(missing_tables))
+
+        agency_metrics: dict[str, Any] = {
+            "invalid_desired_states": 0,
+            "invalid_plan_states": 0,
+            "invalid_step_states": 0,
+            "multiple_current_plans": 0,
+            "orphan_plans": 0,
+            "orphan_verification_links": 0,
+            "awaiting_verification_without_id": 0,
+            "approval_plan_without_step": 0,
+        }
+        if _AGENCY_REQUIRED_TABLES <= tables:
+            valid_desired = ("active", "satisfied", "blocked", "paused", "retired")
+            desired_ph = ",".join("?" for _ in valid_desired)
+            agency_metrics["invalid_desired_states"] = int(conn.execute(
+                f"SELECT COUNT(*) FROM desired_states WHERE state NOT IN ({desired_ph})",
+                valid_desired,
+            ).fetchone()[0])
+
+            valid_plans = (
+                "active", "awaiting_approval", "awaiting_verification", "needs_replan",
+                "blocked", "completed", "superseded", "retired",
+            )
+            plan_ph = ",".join("?" for _ in valid_plans)
+            agency_metrics["invalid_plan_states"] = int(conn.execute(
+                f"SELECT COUNT(*) FROM agency_plans WHERE status NOT IN ({plan_ph})",
+                valid_plans,
+            ).fetchone()[0])
+
+            valid_steps = (
+                "pending", "awaiting_approval", "executing", "executed",
+                "awaiting_verification", "verified", "skipped", "failed", "blocked",
+            )
+            step_ph = ",".join("?" for _ in valid_steps)
+            agency_metrics["invalid_step_states"] = int(conn.execute(
+                f"SELECT COUNT(*) FROM agency_steps WHERE status NOT IN ({step_ph})",
+                valid_steps,
+            ).fetchone()[0])
+
+            current_plan_states = ("active", "awaiting_approval", "awaiting_verification", "needs_replan", "blocked")
+            current_ph = ",".join("?" for _ in current_plan_states)
+            agency_metrics["multiple_current_plans"] = len(conn.execute(
+                f"""
+                SELECT desired_state_id
+                FROM agency_plans
+                WHERE status IN ({current_ph})
+                GROUP BY desired_state_id
+                HAVING COUNT(*)>1
+                """,
+                current_plan_states,
+            ).fetchall())
+            agency_metrics["orphan_plans"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_plans p
+                LEFT JOIN desired_states d ON d.id=p.desired_state_id
+                WHERE d.id IS NULL
+                """
+            ).fetchone()[0])
+            agency_metrics["orphan_verification_links"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM action_verifications v
+                LEFT JOIN agency_steps s ON s.id=v.agency_step_id
+                WHERE v.agency_step_id!='' AND s.id IS NULL
+                """
+            ).fetchone()[0])
+            agency_metrics["awaiting_verification_without_id"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_steps
+                WHERE status='awaiting_verification' AND verification_id=''
+                """
+            ).fetchone()[0])
+            agency_metrics["approval_plan_without_step"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_plans p
+                WHERE p.status='awaiting_approval'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM agency_steps s
+                    WHERE s.plan_id=p.id AND s.status='awaiting_approval'
+                  )
+                """
+            ).fetchone()[0])
+
+            for key, label in (
+                ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
+                ("invalid_plan_states", "Agency plans with invalid lifecycle states"),
+                ("invalid_step_states", "Agency steps with invalid lifecycle states"),
+                ("multiple_current_plans", "Desired states with multiple current Agency plans"),
+                ("orphan_plans", "Agency plans without desired states"),
+                ("orphan_verification_links", "Action verifications pointing at missing Agency steps"),
+                ("awaiting_verification_without_id", "Agency steps awaiting verification without verification IDs"),
+                ("approval_plan_without_step", "Agency plans awaiting approval without an approval step"),
+            ):
+                value = int(agency_metrics[key])
+                if value:
+                    problems.append(f"{label}: {value}")
 
         max_event = int(conn.execute("SELECT COALESCE(MAX(id),0) FROM events").fetchone()[0])
         linked_event = int(linker.get("last_linked_event_id") or 0)
@@ -404,6 +506,7 @@ def validate() -> dict[str, Any]:
         "verified_outcomes_without_evidence_events": verified_without_event,
         "pending_verifications_past_deadline": overdue_verifications,
         "unverified_outcomes": unverifiable,
+        "agency": agency_metrics,
         "attachment_backlog_remaining": bool(attachments.get("backlog_remaining")),
         "attachment_last_status": attachment_state,
         "degraded_subsystems": len(degraded_subsystems),

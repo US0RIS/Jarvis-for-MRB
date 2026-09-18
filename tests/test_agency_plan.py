@@ -342,6 +342,49 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertIn("Relevant world state changed", stale["last_error"])
         self.assertEqual(stale["steps"][1]["status"], "pending")
 
+    def test_new_external_event_linked_to_goal_invalidates_consequential_plan(self) -> None:
+        entity_id, state_id = self._state_for_project("Project Event Drift")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Event drift action",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        self.assertEqual(waiting["status"], "awaiting_approval")
+
+        world_model.record_event(
+            "calendar.context_enriched",
+            "Project Event Drift timing changed externally.",
+            source_kind="calendar_enriched",
+            source_ref="event-drift:new",
+            evidence="Synthetic external calendar observation.",
+            participants=[(entity_id, "subject", 1.0)],
+        )
+
+        calls: list[str] = []
+        result = agency_plan.approve_step(
+            plan["id"],
+            waiting["steps"][0]["id"],
+            lambda tool, args, **kwargs: calls.append(tool) or SimpleNamespace(ok=True, message="unexpected"),
+        )
+
+        self.assertEqual(calls, [])
+        self.assertEqual(result["status"], "needs_replan")
+        self.assertEqual(result["steps"][0]["status"], "pending")
+        self.assertIn("Relevant world state changed", result["last_error"])
+
     def test_world_change_while_waiting_for_approval_does_not_consume_approval(self) -> None:
         entity_id, state_id = self._state_for_project("Project Approval Drift")
         world_model.assert_belief(entity_id, "window", value="morning")

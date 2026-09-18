@@ -203,6 +203,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
             "installation_identity_count_invalid": 0,
             "terminal_verification_event_mismatch": 0,
             "independent_terminal_verification_without_observation": 0,
+            "unsafe_agency_permission_policy": 0,
         }
         if (
             require_agency
@@ -362,6 +363,16 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                   )
                 """
             ).fetchone()[0])
+            try:
+                from jarvis_mrb.permissions import _load as load_permission_policy
+                policy = dict(load_permission_policy())
+                unsafe_risks = [
+                    risk for risk in ("external_write", "destructive", "security")
+                    if str(policy.get(risk) or "") == "auto"
+                ]
+            except Exception:
+                unsafe_risks = ["permission-policy-unavailable"]
+            agency_metrics["unsafe_agency_permission_policy"] = len(unsafe_risks)
 
             for key, label in (
                 ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
@@ -381,6 +392,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 ("installation_identity_count_invalid", "Agency installation identity singleton is missing or invalid"),
                 ("terminal_verification_event_mismatch", "Terminal action verifications without matching verifier events"),
                 ("independent_terminal_verification_without_observation", "Independent terminal action verifications without matching observations"),
+                ("unsafe_agency_permission_policy", "Protected Agency risk classes configured for automatic execution or unavailable"),
             ):
                 value = int(agency_metrics[key])
                 if value:

@@ -113,6 +113,48 @@ class AgencyDeliberationTests(unittest.TestCase):
         persisted = agency_deliberation.get(result["id"])
         self.assertEqual(persisted["disagreements"], result["disagreements"])
 
+    def test_worker_cannot_invent_provenance_identifier(self) -> None:
+        context = "SOURCE:doc-123 says the dependency is available."
+
+        result = agency_deliberation.deliberate(
+            "Is it available?",
+            context=context,
+            roles=["evidence"],
+            worker=lambda role, question, supplied_context: {
+                "conclusion": "Available",
+                "claims": [
+                    {
+                        "claim": "Dependency is available",
+                        "confidence": 0.9,
+                        "evidence": "Context says so",
+                        "source": "context",
+                    },
+                    {
+                        "claim": "Invented citation",
+                        "confidence": 0.9,
+                        "evidence": "Made up",
+                        "source": "doc-999",
+                    },
+                ],
+                "sources": ["doc-123", "doc-999"],
+                "risks": [],
+                "unknowns": [],
+            },
+            synthesizer=lambda q, c, outputs, disagreements: {
+                "answer": "Available",
+                "consensus": [],
+                "disagreements": disagreements,
+                "unknowns": [],
+                "recommended_next_evidence": [],
+                "confidence": 0.9,
+            },
+        )
+
+        output = result["outputs"][0]
+        self.assertEqual(output["sources"], ["doc-123"])
+        self.assertEqual(output["claims"][0]["source"], "context")
+        self.assertEqual(output["claims"][1]["source"], "unknown")
+
     def test_worker_failure_produces_partial_result_without_erasing_successes(self) -> None:
         def worker(role: str, question: str, context: str) -> dict:
             if role == "skeptic":

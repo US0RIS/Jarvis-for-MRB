@@ -912,6 +912,7 @@ def finalize_session(session_id: str) -> dict[str, Any]:
         return {"passed": False, "receipt_created": False, "session": get_session(session_id), "evaluation": evaluation}
 
     trace_ref = _write_a12_trace(session, evaluation) if str(session["gate"]) == "A12" else ""
+    receipt_created = True
     try:
         receipt = record_real_gate_receipt(
             str(session["gate"]),
@@ -924,6 +925,7 @@ def finalize_session(session_id: str) -> dict[str, Any]:
             session_id=str(session["id"]),
         )
     except sqlite3.IntegrityError:
+        receipt_created = False
         # The partial unique session index makes concurrent finalizers converge on
         # one immutable receipt. Only reuse a receipt that belongs to this session.
         receipt = get_receipt_for_session(str(session["id"]))
@@ -946,7 +948,8 @@ def finalize_session(session_id: str) -> dict[str, Any]:
         conn.commit()
     return {
         "passed": True,
-        "receipt_created": True,
+        "receipt_created": receipt_created,
+        "receipt_reused": not receipt_created,
         "receipt": receipt,
         "session": get_session(session_id),
         "evaluation": evaluation,

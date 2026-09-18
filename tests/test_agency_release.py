@@ -88,6 +88,7 @@ def evidence_for(gate: str) -> dict:
             "missing_capability_observed": True,
             "fabricated_tool_availability": False,
             "blocked_or_disabled_adapter_observed": True,
+            "adapter_sandbox_validated": True,
             "adapter_synthesized_disabled": True,
             "explicit_enablement_observed": True,
             "capability_resolved_after_enable": True,
@@ -514,6 +515,12 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence = evidence_for("A9")
         evidence["adapter_execution_still_confirmed"] = False
         with self.assertRaisesRegex(ValueError, "adapter_execution_still_confirmed"):
+            agency_release._validate_gate_evidence("A9", evidence, "")
+
+    def test_a9_receipt_rejects_adapter_without_sandbox_proof(self) -> None:
+        evidence = evidence_for("A9")
+        evidence["adapter_sandbox_validated"] = False
+        with self.assertRaisesRegex(ValueError, "adapter_sandbox_validated"):
             agency_release._validate_gate_evidence("A9", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:

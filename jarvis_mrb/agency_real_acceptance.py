@@ -716,8 +716,13 @@ def _causal_replan_evidence(
     }
 
 
-def _manual_orchestration_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _manual_orchestration_events(
+    events: list[dict[str, Any]],
+    *,
+    allowed_action_event_ids: set[int] | None = None,
+) -> list[dict[str, Any]]:
     flagged: list[dict[str, Any]] = []
+    allowed_ids = set(allowed_action_event_ids or set())
     for event in events:
         source_kind = str(event.get("source_kind") or "")
         payload = event.get("payload") or {}
@@ -725,6 +730,8 @@ def _manual_orchestration_events(events: list[dict[str, Any]]) -> list[dict[str,
         if event.get("event_type") == "action.tool" and source_kind == "jarvis_tool":
             tool = str(payload.get("tool") or "")
             agency_step_id = str(payload.get("agency_step_id") or "")
+            if int(event.get("id") or 0) in allowed_ids:
+                continue
             if not agency_step_id and tool not in {"agency.status"}:
                 flagged.append(
                     {
@@ -2350,7 +2357,15 @@ def evaluate_session(session_id: str) -> dict[str, Any]:
         events = _events_after(conn, int(session["baseline"].get("max_event_id") or 0))
         result = evaluator(session, conn, events)
 
-    manual_events = _manual_orchestration_events(events)
+    allowed_action_event_ids = {
+        int(value)
+        for value in (result.get("allowed_uncorrelated_action_event_ids") or [])
+        if str(value).isdigit()
+    }
+    manual_events = _manual_orchestration_events(
+        events,
+        allowed_action_event_ids=allowed_action_event_ids,
+    )
     checks = list(result.get("checks") or [])
     checks.extend(
         [

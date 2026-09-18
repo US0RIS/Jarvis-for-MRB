@@ -51,6 +51,7 @@ _AGENCY_REQUIRED_COLUMNS: dict[str, set[str]] = {
         "synthetic_ok", "diagnostics_ok", "tree_clean_before", "tree_clean_after",
         "validation_hash", "recorded_at",
     },
+    "agency_installation_identity": {"installation_id", "created_at"},
     "action_verifications": {"agency_step_id", "status", "verifier"},
 }
 
@@ -199,6 +200,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
             "orphan_real_gate_receipts": 0,
             "running_real_sessions_with_receipt": 0,
             "approval_capability_wrong_state": 0,
+            "installation_identity_count_invalid": 0,
         }
         if (
             require_agency
@@ -329,6 +331,10 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                   AND status NOT IN ('awaiting_approval','executing')
                 """
             ).fetchone()[0])
+            identity_count = int(
+                conn.execute("SELECT COUNT(*) FROM agency_installation_identity").fetchone()[0]
+            )
+            agency_metrics["installation_identity_count_invalid"] = 0 if identity_count == 1 else 1
 
             for key, label in (
                 ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
@@ -345,6 +351,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
                 ("completed_real_session_receipt_mismatch", "Completed REAL Agency sessions with mismatched receipts"),
                 ("orphan_real_gate_receipts", "REAL Agency receipts without matching sessions"),
                 ("approval_capability_wrong_state", "Agency approval capabilities attached to invalid step states"),
+                ("installation_identity_count_invalid", "Agency installation identity singleton is missing or invalid"),
             ):
                 value = int(agency_metrics[key])
                 if value:

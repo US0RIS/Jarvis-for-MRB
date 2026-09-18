@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Sequence
@@ -66,6 +67,7 @@ OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
 OLLAMA_KEEP_ALIVE = os.environ.get("JARVIS_OLLAMA_KEEP_ALIVE", "30m")
 _PENDING_ACTION: tuple[str, dict[str, Any], str] | None = None
+_PENDING_ACTION_LOCK = threading.RLock()
 _CONFIRMED_ACTION_KEY: contextvars.ContextVar[str] = contextvars.ContextVar(
     "jarvis_confirmed_action_key",
     default="",
@@ -498,11 +500,26 @@ def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool =
     if decision.needs_confirmation:
         if not bypass_confirmation:
             pending_args = dict(args or {})
-            _PENDING_ACTION = (
-                str(tool),
-                pending_args,
-                _confirmation_action_key(str(tool), pending_args),
-            )
+            pending_key = _confirmation_action_key(str(tool), pending_args)
+            with _PENDING_ACTION_LOCK:
+                existing = _PENDING_ACTION
+                if existing is not None:
+                    existing_tool, existing_args, existing_key = existing
+                    if (
+                        str(existing_tool) == str(tool)
+                        and str(existing_key) == pending_key
+                        and _confirmation_action_key(str(existing_tool), dict(existing_args)) == str(existing_key)
+                    ):
+                        return AgentReply(
+                            True,
+                            f"Ready to {_describe_action(tool, pending_args)}. Say 'confirm' to proceed or 'cancel'.",
+                        )
+                    return AgentReply(
+                        False,
+                        "Another protected action is already awaiting confirmation. "
+                        "Confirm or cancel that action before staging a different one.",
+                    )
+                _PENDING_ACTION = (str(tool), pending_args, pending_key)
             return AgentReply(True, f"Ready to {_describe_action(tool, pending_args)}. Say 'confirm' to proceed or 'cancel'.")
         if not _bypass_confirmation_authorized(tool, args):
             return AgentReply(
@@ -514,9 +531,11 @@ def execute_tool(tool: str, args: dict[str, Any], *, bypass_confirmation: bool =
 
 def _confirm_pending() -> AgentReply:
     global _PENDING_ACTION
-    if _PENDING_ACTION:
+    with _PENDING_ACTION_LOCK:
         pending = _PENDING_ACTION
-        _PENDING_ACTION = None
+        if pending is not None:
+            _PENDING_ACTION = None
+    if pending is not None:
         tool, stored_args, stored_key = pending
         args = dict(stored_args)
         if _confirmation_action_key(tool, args) != str(stored_key):
@@ -575,9 +594,10 @@ def _confirm_pending() -> AgentReply:
 
 def _cancel_pending() -> AgentReply:
     global _PENDING_ACTION
-    if _PENDING_ACTION:
-        _PENDING_ACTION = None
-        return AgentReply(True, "Cancelled.")
+    with _PENDING_ACTION_LOCK:
+        if _PENDING_ACTION:
+            _PENDING_ACTION = None
+            return AgentReply(True, "Cancelled.")
     try:
         from jarvis_mrb.agency_plan import deny_pending, list_pending_approvals
 

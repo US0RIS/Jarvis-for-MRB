@@ -899,9 +899,28 @@ def release_status(
         )
         validation_hash_ok = str(validation.get("validation_hash") or "") == expected_validation_hash
 
+    validation_after_real_gates = False
+    if validation and by_gate:
+        try:
+            validation_time = datetime.fromisoformat(
+                str(validation.get("recorded_at") or "").replace("Z", "+00:00")
+            )
+            receipt_times = [
+                datetime.fromisoformat(
+                    str(item.get("recorded_at") or "").replace("Z", "+00:00")
+                )
+                for item in by_gate.values()
+            ]
+            validation_after_real_gates = bool(
+                receipt_times and validation_time >= max(receipt_times)
+            )
+        except (TypeError, ValueError):
+            validation_after_real_gates = False
+
     validation_ok = bool(
         validation
         and validation_hash_ok
+        and validation_after_real_gates
         and int(validation.get("compile_ok") or 0) == 1
         and int(validation.get("regression_ok") or 0) == 1
         and int(validation.get("synthetic_ok") or 0) == 1
@@ -923,7 +942,13 @@ def release_status(
     if not valid_sha:
         reasons.append("Exact deployment Git SHA is unavailable.")
     if not validation_ok:
-        reasons.append("No fully passing validation run exists for this exact SHA/environment.")
+        if validation and validation_hash_ok and not validation_after_real_gates and by_gate:
+            reasons.append(
+                "The latest validation run predates one or more selected REAL gate receipts; "
+                "run full validation again after REAL acceptance."
+            )
+        else:
+            reasons.append("No fully passing validation run exists for this exact SHA/environment.")
     if not diagnostics_ok:
         reasons.append("Current strict world/Agency diagnostics are not clean.")
     if missing_real:
@@ -936,6 +961,7 @@ def release_status(
         "environment_fingerprint": env,
         "validation_run": validation,
         "validation_hash_ok": validation_hash_ok,
+        "validation_after_real_gates": validation_after_real_gates,
         "current_diagnostics_ok": diagnostics_ok,
         "real_gate_receipts": {gate: by_gate[gate]["id"] for gate in sorted(by_gate)},
         "invalid_real_gate_receipts": invalid_receipts,

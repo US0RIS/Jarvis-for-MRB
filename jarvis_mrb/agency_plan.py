@@ -885,10 +885,38 @@ def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -
     return get_plan(str(plan["id"]), include_steps=True)
 
 
+def _execution_authority_error(plan: dict[str, Any]) -> str:
+    try:
+        from jarvis_mrb.agency_runtime import get_mode
+        mode = get_mode()
+    except Exception:
+        return "Agency runtime mode could not be verified."
+    if mode != "active":
+        return f"Agency runtime mode is {mode!r}, not 'active'."
+
+    desired_state_id = str(plan.get("desired_state_id") or "")
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT state,authority_json FROM desired_states WHERE id=?",
+            (desired_state_id,),
+        ).fetchone()
+    if row is None:
+        return "Agency plan has no persistent desired state."
+    if str(row["state"] or "") != "active":
+        return f"Desired state is {str(row['state'] or '')!r}, not 'active'."
+    authority = dict(_loads(str(row["authority_json"]), {}))
+    if authority.get("agency_enabled") is not True:
+        return "Per-goal Agency authority is disabled."
+    return ""
+
+
 def execute_next(plan_id: str, executor: Callable[..., Any]) -> dict[str, Any]:
     plan = reconcile_plan(str(plan_id))
     if str(plan.get("status") or "") in PLAN_TERMINAL_STATES | {"awaiting_approval", "awaiting_verification", "needs_replan", "blocked"}:
         return plan
+    authority_error = _execution_authority_error(plan)
+    if authority_error:
+        raise PermissionError(authority_error)
 
     step = next_ready_step(str(plan_id))
     if step is None:
@@ -1012,6 +1040,10 @@ def approve_step(plan_id: str, step_id: str, executor: Callable[..., Any]) -> di
         raise ValueError(f"Unknown Agency step {step_id!r}.")
     if str(step["status"]) != "awaiting_approval":
         raise ValueError("Agency step is not waiting for approval.")
+
+    authority_error = _execution_authority_error(plan)
+    if authority_error:
+        raise PermissionError(authority_error)
 
     permission = permission_decision(str(step["tool"]))
     if str(permission.risk) != "read":

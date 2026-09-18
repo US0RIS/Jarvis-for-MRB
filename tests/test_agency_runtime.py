@@ -295,6 +295,25 @@ class AgencyRuntimeTests(unittest.TestCase):
         second_fair = next(value for value in executed if value != "Priority Champion")
         self.assertNotEqual(second_fair, first_fair)
 
+    def test_fractional_priority_selects_true_highest_priority_goal_first(self) -> None:
+        _, low_id = self._make_state("Fractional Low")
+        _, high_id = self._make_state("Fractional High")
+        desired_state.update_priority(low_id, 50.1)
+        desired_state.update_priority(high_id, 50.9)
+        for state_id, query in ((low_id, "Fractional Low"), (high_id, "Fractional High")):
+            agency_plan.create_plan(
+                state_id,
+                [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": query}}],
+            )
+
+        agency_runtime.set_mode("active")
+        calls: list[str] = []
+        agency_runtime.tick_all(
+            executor=lambda tool, args, **kwargs: calls.append(str(args["query"])) or SimpleNamespace(ok=True, message="ok"),
+            max_actions=1,
+        )
+        self.assertEqual(calls, ["Fractional High"])
+
     def test_desired_state_priority_rejects_non_finite_values(self) -> None:
         _, state_id = self._make_state("Priority Validation")
         with self.assertRaises(ValueError):

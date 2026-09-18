@@ -120,8 +120,64 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         agency_runtime._update_runtime(str(state["id"]), tick=True)
         return str(state["id"]), plan
 
-    def test_a1_requires_actual_new_boot_and_same_persistent_plan(self) -> None:
-        state_id, plan = self._state_with_plan("Restart Project")
+    def test_a1_requires_full_restart_continuity_without_replay(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Restart Project")
+        state = desired_state.create_desired_state(
+            "Restart Project ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a1",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "observe",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "Restart Project current state"},
+                },
+                {
+                    "id": "protected",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Restart Project follow-up",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["observe"],
+                },
+            ],
+            summary="Persist completed evidence and pending approval across restart",
+        )
+        first = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(
+                ok=True,
+                message="Observed durable pre-restart evidence.",
+            ),
+        )
+        self.assertEqual(first["steps"][0]["status"], "verified")
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("protected action must wait for approval")
+            ),
+        )
+        self.assertEqual(waiting["status"], "awaiting_approval")
+        self.assertEqual(waiting["steps"][1]["status"], "awaiting_approval")
+
+        state_id = str(state["id"])
+        agency_runtime._update_runtime(state_id, tick=True)
+        runtime_before = agency_runtime._runtime_state(state_id)
+        self.assertTrue(runtime_before["next_evaluation_at"])
         agency_runtime.record_boot(deployment_sha=SHA_A)
 
         with self._patch_identity():
@@ -135,13 +191,31 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertFalse(before["passed"])
             self.assertFalse(before["evidence"]["restart_observed"])
 
+            baseline_steps = session["baseline"]["plan"]["steps"]
+            baseline_observe = next(
+                item for item in baseline_steps if item["step_key"] == "observe"
+            )
+            baseline_protected = next(
+                item for item in baseline_steps if item["step_key"] == "protected"
+            )
+            self.assertEqual(baseline_observe["status"], "verified")
+            self.assertEqual(baseline_observe["attempt_count"], 1)
+            self.assertTrue(baseline_observe["result_summary"])
+            self.assertEqual(baseline_protected["status"], "awaiting_approval")
+            self.assertEqual(baseline_protected["attempt_count"], 0)
+
             with patch(
                 "jarvis_mrb.agency_runtime._PROCESS_INSTANCE_ID",
                 "test-restarted-process-instance",
             ):
                 agency_runtime.record_boot(deployment_sha=SHA_A)
+
             after = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(after["passed"], after["checks"])
+            self.assertTrue(after["evidence"]["completed_work_preserved"])
+            self.assertTrue(after["evidence"]["evidence_preserved"])
+            self.assertTrue(after["evidence"]["pending_approval_preserved"])
+            self.assertTrue(after["evidence"]["next_evaluation_preserved"])
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
@@ -150,6 +224,13 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
         loaded_plan = agency_plan.get_plan(plan["id"], include_steps=True)
         self.assertIsNotNone(loaded_plan)
+        assert loaded_plan is not None
+        observe = next(item for item in loaded_plan["steps"] if item["step_key"] == "observe")
+        protected = next(item for item in loaded_plan["steps"] if item["step_key"] == "protected")
+        self.assertEqual(observe["attempt_count"], 1)
+        self.assertEqual(observe["status"], "verified")
+        self.assertEqual(protected["attempt_count"], 0)
+        self.assertEqual(protected["status"], "awaiting_approval")
 
     def test_a8_receipt_is_derived_from_attention_ledger(self) -> None:
         emitted: list[str] = []

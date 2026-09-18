@@ -88,6 +88,8 @@ class AgencyReleaseTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
         self.db = self.base / "world_model.sqlite3"
+        self.a12_trace = self.base / "a12-real-trace.md"
+        self.a12_trace.write_text("# A12 REAL trace\nObserved real scenario.\n", encoding="utf-8")
         self.original_app_dir = world_model.APP_DIR
         self.original_db = world_model.DB_PATH
         world_model.APP_DIR = self.base
@@ -108,7 +110,7 @@ class AgencyReleaseTests(unittest.TestCase):
             harness=f"real-{gate.lower()}-acceptance",
             checks=[{"name": f"{gate} real acceptance", "passed": True, "evidence": "observed"}],
             evidence=evidence_for(gate),
-            trace_ref="traces/a12.txt" if gate == "A12" else "",
+            trace_ref=str(self.a12_trace) if gate == "A12" else "",
         )
 
     def test_real_gate_receipt_is_append_only(self) -> None:
@@ -224,6 +226,29 @@ class AgencyReleaseTests(unittest.TestCase):
         )
         self.assertFalse(other_environment["release_ready"])
         self.assertEqual(other_environment["real_gate_receipts"], {})
+
+    def test_deleted_a12_trace_invalidates_release_evidence(self) -> None:
+        for gate in sorted(agency_release.REAL_GATES):
+            self._record(gate)
+        agency_release.record_validation_run(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            source_root_value=str(self.base),
+            compile_ok=True,
+            regression_ok=True,
+            synthetic_ok=True,
+            diagnostics_ok=True,
+        )
+        self.a12_trace.unlink()
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertFalse(status["release_ready"])
+        self.assertIn("A12", status["missing_real_gates"])
+        self.assertIn("A12", status["invalid_real_gate_receipts"])
 
     def test_failed_validation_run_is_not_release_eligible(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):

@@ -482,17 +482,25 @@ def compile_plan(
         unsupported = re.search(r"unsupported tool ['\\\"]([^'\\\"]+)['\\\"]", error, flags=re.IGNORECASE)
         if unsupported:
             missing_tool = unsupported.group(1).strip()
+            reason = f"Agency planner requested unsupported tool {missing_tool}."
             try:
                 from jarvis_mrb.agency_capability import available_tool, record_gap
 
                 availability = available_tool(missing_tool)
                 if not bool(availability.get("known")):
-                    record_gap(
-                        str(desired_state_id),
-                        missing_tool,
-                        f"The planner requires tool {missing_tool!r}, but Jarvis has no implemented Agency capability for it.",
-                    )
-                    reason = f"Missing capability: {missing_tool}."
+                    try:
+                        record_gap(
+                            str(desired_state_id),
+                            missing_tool,
+                            f"The planner requires tool {missing_tool!r}, but Jarvis has no implemented Agency capability for it.",
+                        )
+                    except Exception as gap_exc:
+                        reason = (
+                            f"Missing capability: {missing_tool}. "
+                            f"Capability-gap persistence also failed: {gap_exc}"
+                        )
+                    else:
+                        reason = f"Missing capability: {missing_tool}."
                 elif bool(availability.get("agency_scope_blocked")):
                     reason = (
                         f"Agency scope does not permit {missing_tool}; the tool may exist for direct use "
@@ -502,9 +510,25 @@ def compile_plan(
                     reason = f"Permission policy currently denies Agency use of {missing_tool}."
                 else:
                     reason = f"Agency could not use known tool {missing_tool}."
+            except Exception as capability_exc:
+                reason = (
+                    f"Agency planner requested unsupported tool {missing_tool}; "
+                    f"capability inspection failed: {capability_exc}"
+                )
+
+            try:
                 set_state(str(desired_state_id), "blocked", reason=reason)
-            except Exception:
-                pass
+            except Exception as block_exc:
+                combined = (
+                    f"{error}; additionally failed to persist blocked state for "
+                    f"{missing_tool}: {block_exc}"
+                )
+                _update_runtime(
+                    str(desired_state_id),
+                    planner_success=False,
+                    error=combined,
+                )
+                raise RuntimeError(combined) from block_exc
         _update_runtime(str(desired_state_id), planner_success=False, error=error)
         return None
 

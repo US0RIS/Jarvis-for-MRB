@@ -32,6 +32,7 @@ def evidence_for(gate: str) -> dict:
             "action_observation_cycles": 2,
             "desired_state_satisfied": True,
             "automatic_stop_observed": True,
+            "goal_not_repeated": True,
         },
         "A3": {
             "protected_external_write_observed": True,

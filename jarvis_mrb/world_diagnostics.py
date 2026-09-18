@@ -14,7 +14,7 @@ _AGENCY_REQUIRED_TABLES = {
     "agency_deliberations", "agency_deliberation_workers", "agency_attention_events",
     "agency_capability_gaps", "agency_decision_cases", "agency_decision_branches",
     "agency_self_model_entries", "agency_real_gate_sessions",
-    "agency_real_gate_receipts", "agency_release_validation_runs",
+    "agency_real_gate_receipts", "agency_release_validation_runs", "agency_installation_identity",
 }
 _REQUIRED_TABLES = {
     "entities", "external_ids", "aliases", "events", "event_entities", "beliefs", "commitments",

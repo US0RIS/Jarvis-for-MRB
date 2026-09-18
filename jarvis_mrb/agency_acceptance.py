@@ -657,20 +657,109 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 {"emitted": emitted_a8, "events": len(aa.list_events())},
             )
 
-            # A9 — missing capability is explicit, while denied known tool is authority.
+            # A9 — missing capability is explicit, synthesis stays disabled, explicit
+            # enablement restores capability, and the recovered adapter remains confirmed.
             _, state_a9 = _make_state(env, "Acceptance A9")
-            gap_a9 = ac.record_gap(state_a9, "robot.arm", "Synthetic missing actuator.")
+            gap_a9 = ac.record_gap(
+                state_a9,
+                "private.status_api",
+                "Synthetic missing private status API.",
+            )
+            ds.set_state(
+                state_a9,
+                "blocked",
+                reason="Missing capability: private.status_api.",
+            )
+
+            custom_tools = env["custom_tools"]
+            original_synthesize_a9 = custom_tools.synthesize
+
+            def fake_synthesize_a9(
+                *,
+                name: str,
+                description: str,
+                api_spec: str,
+                allowed_hosts: list[str],
+                risk: str = "read",
+            ) -> dict[str, Any]:
+                item = {
+                    "name": str(name),
+                    "description": str(description),
+                    "api_spec": str(api_spec),
+                    "allowed_hosts": list(allowed_hosts),
+                    "risk": str(risk),
+                    "enabled": False,
+                    "code": (
+                        "import json\n"
+                        "print(json.dumps({'method':'GET','url':'https://api.example.com/status',"
+                        "'headers':{},'body':None}))\n"
+                    ),
+                }
+                custom_tools.TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+                custom_tools._path(str(name)).write_text(
+                    json.dumps(item, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                return item
+
+            try:
+                custom_tools.synthesize = fake_synthesize_a9
+                synthesized_a9 = ac.synthesize_adapter(
+                    gap_a9["id"],
+                    name="a9_status_adapter",
+                    description="Read synthetic private status.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+            finally:
+                custom_tools.synthesize = original_synthesize_a9
+
+            wm.record_tool_execution(
+                "custom.synthesize",
+                {
+                    "gap_id": gap_a9["id"],
+                    "name": "a9_status_adapter",
+                },
+                ok=True,
+                message="Synthetic adapter sandbox-validation path completed.",
+            )
+            disabled_a9 = custom_tools.get_tool("a9_status_adapter")
+            custom_tools.set_enabled("a9_status_adapter", True)
+            wm.record_tool_execution(
+                "custom.enable",
+                {"name": "a9_status_adapter", "enabled": True},
+                ok=True,
+                message="Synthetic user explicitly enabled adapter.",
+            )
+            reconciled_a9 = ac.reconcile_gaps()
+            recovered_a9 = ac.available_tool("a9_status_adapter")
+
             permissions.set_policy("external_write", "deny")
             authority_a9 = ac.available_tool("gmail.send")
             _check(
                 checks,
                 "A9",
-                "missing capability and authority denial are represented separately",
+                "capability gap synthesizes disabled adapter, recovers only after explicit enablement, and preserves authority",
                 gap_a9["status"] == "open"
+                and synthesized_a9["gap"]["status"] == "proposed"
+                and not synthesized_a9["enabled"]
+                and not bool(disabled_a9.get("enabled"))
+                and gap_a9["id"] in reconciled_a9["resolved"]
+                and state_a9 in reconciled_a9["reactivated"]
+                and recovered_a9["available"]
+                and recovered_a9["requires_confirmation"]
+                and recovered_a9["source"] == "custom"
                 and not authority_a9["available"]
                 and authority_a9["authority_blocked"]
                 and authority_a9["source"] == "builtin",
-                {"gap": gap_a9, "known_denied_tool": authority_a9},
+                {
+                    "gap": ac.get_gap(gap_a9["id"]),
+                    "synthesized": synthesized_a9,
+                    "reconciled": reconciled_a9,
+                    "recovered_adapter": recovered_a9,
+                    "known_denied_tool": authority_a9,
+                },
             )
             permissions.set_policy("external_write", "confirm")
 

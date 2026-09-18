@@ -458,6 +458,61 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
             raise ValueError(f"A12 real receipt trace file is unreadable: {exc}") from exc
 
 
+def _validated_live_session(
+    session_id: str,
+    *,
+    gate: str,
+    deployment_sha_value: str,
+    environment: str,
+    checks: list[dict[str, Any]],
+    evidence: dict[str, Any],
+    require_completed: bool,
+    receipt_id: str = "",
+) -> tuple[bool, str]:
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return False, "REAL receipt is not bound to a live acceptance session."
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM agency_real_gate_sessions WHERE id=?",
+                (clean_session_id,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return False, "REAL acceptance session ledger is unavailable."
+    if row is None:
+        return False, "REAL acceptance session does not exist."
+    if str(row["gate"] or "") != str(gate):
+        return False, "REAL acceptance session gate does not match receipt."
+    if str(row["deployment_sha"] or "") != str(deployment_sha_value):
+        return False, "REAL acceptance session SHA does not match receipt."
+    if str(row["environment_fingerprint"] or "") != str(environment):
+        return False, "REAL acceptance session environment does not match receipt."
+    status = str(row["status"] or "")
+    if require_completed:
+        if status != "completed":
+            return False, "REAL acceptance session is not completed."
+        if receipt_id and str(row["receipt_id"] or "") != str(receipt_id):
+            return False, "REAL acceptance session points to a different receipt."
+    elif status != "running":
+        return False, "REAL receipt can only be minted while its acceptance session is running."
+
+    try:
+        evaluation = json.loads(str(row["last_evaluation_json"] or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        evaluation = {}
+    if not isinstance(evaluation, dict) or evaluation.get("passed") is not True:
+        return False, "REAL acceptance session has no persisted passing evaluation."
+
+    stored_checks = evaluation.get("checks")
+    stored_evidence = evaluation.get("evidence")
+    if stored_checks != checks:
+        return False, "REAL receipt checks do not exactly match the session evaluation."
+    if stored_evidence != evidence:
+        return False, "REAL receipt evidence does not exactly match the session evaluation."
+    return True, ""
+
+
 def record_real_gate_receipt(
     gate: str,
     *,
@@ -502,13 +557,27 @@ def record_real_gate_receipt(
     if not env:
         raise ValueError("REAL gate receipt requires an environment fingerprint.")
 
+    clean_session_id = str(session_id or "").strip()[:300]
+    session_ok, session_error = _validated_live_session(
+        clean_session_id,
+        gate=clean_gate,
+        deployment_sha_value=clean_sha,
+        environment=env,
+        checks=normalized_checks,
+        evidence=clean_evidence,
+        require_completed=False,
+    )
+    if not session_ok:
+        raise ValueError(session_error)
+    if clean_harness != "agency-real-gate-session-v1":
+        raise ValueError("REAL gate receipts must be minted by the live Agency gate harness.")
+
     receipt_id = f"agency-real:{uuid.uuid4()}"
     recorded_at = _now()
     clean_trace_ref = str(trace_ref or "").strip()[:3000]
     trace_sha256 = _file_sha256(clean_trace_ref) if clean_gate == "A12" else ""
     if clean_gate == "A12" and not trace_sha256:
         raise ValueError("A12 real receipt trace file could not be hashed.")
-    clean_session_id = str(session_id or "").strip()[:300]
     checks_json = json.dumps(normalized_checks, ensure_ascii=False, sort_keys=True)
     evidence_json = json.dumps(clean_evidence, ensure_ascii=False, sort_keys=True)
     receipt_hash = _receipt_digest(
@@ -730,6 +799,21 @@ def release_status(
         )
         if str(item.get("receipt_hash") or "") != expected_hash:
             reason = "receipt content hash mismatch"
+        else:
+            session_ok, session_error = _validated_live_session(
+                str(item.get("session_id") or ""),
+                gate=gate,
+                deployment_sha_value=str(item.get("deployment_sha") or ""),
+                environment=str(item.get("environment_fingerprint") or ""),
+                checks=list(item.get("checks") or []),
+                evidence=dict(item.get("evidence") or {}),
+                require_completed=True,
+                receipt_id=str(item.get("id") or ""),
+            )
+            if not session_ok:
+                reason = session_error
+        if reason:
+            pass
         elif gate == "A12" and _file_sha256(str(item.get("trace_ref") or "")) != str(item.get("trace_sha256") or ""):
             reason = "human-readable A12 trace content hash mismatch"
         elif not item.get("checks") or not all(

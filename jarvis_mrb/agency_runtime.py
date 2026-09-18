@@ -318,18 +318,26 @@ def compile_plan(
         if unsupported:
             missing_tool = unsupported.group(1).strip()
             try:
-                from jarvis_mrb.agency_capability import record_gap
+                from jarvis_mrb.agency_capability import available_tool, record_gap
 
-                record_gap(
-                    str(desired_state_id),
-                    missing_tool,
-                    f"The planner requires tool {missing_tool!r}, but it is not present in the bounded Agency tool set.",
-                )
-                set_state(
-                    str(desired_state_id),
-                    "blocked",
-                    reason=f"Missing capability: {missing_tool}.",
-                )
+                availability = available_tool(missing_tool)
+                if not bool(availability.get("known")):
+                    record_gap(
+                        str(desired_state_id),
+                        missing_tool,
+                        f"The planner requires tool {missing_tool!r}, but Jarvis has no implemented Agency capability for it.",
+                    )
+                    reason = f"Missing capability: {missing_tool}."
+                elif bool(availability.get("agency_scope_blocked")):
+                    reason = (
+                        f"Agency scope does not permit {missing_tool}; the tool may exist for direct use "
+                        "but is intentionally excluded from autonomous workflows."
+                    )
+                elif bool(availability.get("authority_blocked")):
+                    reason = f"Permission policy currently denies Agency use of {missing_tool}."
+                else:
+                    reason = f"Agency could not use known tool {missing_tool}."
+                set_state(str(desired_state_id), "blocked", reason=reason)
             except Exception:
                 pass
         _update_runtime(str(desired_state_id), planner_success=False, error=error)

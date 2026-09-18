@@ -250,6 +250,114 @@ class AgencyReleaseTests(unittest.TestCase):
         self.assertIn("A12", status["missing_real_gates"])
         self.assertIn("A12", status["invalid_real_gate_receipts"])
 
+    def test_multiple_immutable_receipts_for_same_gate_sha_environment_are_allowed(self) -> None:
+        first = self._record("A1")
+        second = self._record("A1")
+        self.assertNotEqual(first["id"], second["id"])
+
+        receipts = agency_release.list_real_gate_receipts(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+        )
+        a1 = [item for item in receipts if item["gate"] == "A1"]
+        self.assertEqual(len(a1), 2)
+
+    def test_release_uses_older_valid_a12_receipt_if_newest_trace_is_lost(self) -> None:
+        older_trace = self.base / "a12-older.md"
+        newer_trace = self.base / "a12-newer.md"
+        older_trace.write_text("# older valid A12 trace\n", encoding="utf-8")
+        newer_trace.write_text("# newer valid A12 trace\n", encoding="utf-8")
+
+        older = agency_release.record_real_gate_receipt(
+            "A12",
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            harness="real-a12-older",
+            checks=[{"name": "A12 older", "passed": True}],
+            evidence=evidence_for("A12"),
+            trace_ref=str(older_trace),
+        )
+        newer = agency_release.record_real_gate_receipt(
+            "A12",
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            harness="real-a12-newer",
+            checks=[{"name": "A12 newer", "passed": True}],
+            evidence=evidence_for("A12"),
+            trace_ref=str(newer_trace),
+        )
+        newer_trace.unlink()
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertNotIn("A12", status["missing_real_gates"])
+        self.assertEqual(status["real_gate_receipts"]["A12"], older["id"])
+        invalid_ids = {
+            item["receipt_id"]
+            for item in status["invalid_real_gate_receipts"].get("A12", [])
+        }
+        self.assertIn(newer["id"], invalid_ids)
+
+    def test_content_hash_detects_receipt_corruption(self) -> None:
+        receipt = self._record("A1")
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("DROP TRIGGER agency_real_gate_receipts_immutable_update")
+            conn.execute(
+                "UPDATE agency_real_gate_receipts SET harness='tampered' WHERE id=?",
+                (receipt["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertIn("A1", status["missing_real_gates"])
+        reasons = status["invalid_real_gate_receipts"].get("A1", [])
+        self.assertTrue(any("hash mismatch" in item["reason"] for item in reasons))
+
+    def test_legacy_unique_receipt_schema_migrates_to_append_only_attempts(self) -> None:
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.executescript(
+                """
+                DROP TRIGGER IF EXISTS agency_real_gate_receipts_immutable_update;
+                DROP TRIGGER IF EXISTS agency_real_gate_receipts_immutable_delete;
+                DROP INDEX IF EXISTS idx_agency_real_gate_receipts_release;
+                DROP INDEX IF EXISTS idx_agency_real_gate_receipts_session;
+                DROP TABLE agency_real_gate_receipts;
+                CREATE TABLE agency_real_gate_receipts (
+                    id TEXT PRIMARY KEY,
+                    gate TEXT NOT NULL,
+                    deployment_sha TEXT NOT NULL,
+                    environment_fingerprint TEXT NOT NULL,
+                    harness TEXT NOT NULL,
+                    checks_json TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    trace_ref TEXT NOT NULL DEFAULT '',
+                    recorded_at TEXT NOT NULL,
+                    UNIQUE(gate,deployment_sha,environment_fingerprint)
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with agency_release._connect():
+            pass
+
+        first = self._record("A1")
+        second = self._record("A1")
+        self.assertNotEqual(first["id"], second["id"])
+
     def test_failed_validation_run_is_not_release_eligible(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):
             self._record(gate)

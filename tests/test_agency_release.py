@@ -51,9 +51,12 @@ def evidence_for(gate: str) -> dict:
             "denial_forced_replan_or_blocked": True,
         },
         "A4": {
+            "action_attempt_persisted": True,
+            "expected_outcome_persisted": True,
             "verified_real_write_observed": True,
             "failure_timeout_or_unverified_observed": True,
             "independent_readback_observed": True,
+            "verification_feedback_observed": True,
         },
         "A5": {
             "external_change_observed": True,
@@ -449,6 +452,12 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["denial_forced_replan_or_blocked"] = False
         with self.assertRaisesRegex(ValueError, "denial_forced_replan_or_blocked"):
             agency_release._validate_gate_evidence("A3", evidence, "")
+
+    def test_a4_receipt_rejects_verification_without_desired_state_feedback(self) -> None:
+        evidence = evidence_for("A4")
+        evidence["verification_feedback_observed"] = False
+        with self.assertRaisesRegex(ValueError, "verification_feedback_observed"):
+            agency_release._validate_gate_evidence("A4", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

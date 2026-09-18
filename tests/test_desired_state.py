@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -161,6 +163,94 @@ class DesiredStateTests(unittest.TestCase):
         self.assertIsNotNone(updated)
         assert updated is not None
         self.assertEqual(updated["state"], "satisfied")
+
+    def test_authority_and_lifecycle_mutations_are_durably_audited(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Project Audit")
+        state = desired_state.create_desired_state(
+            "Project Audit ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": False},
+            source_kind="test",
+            source_ref="audit-project",
+        )
+
+        desired_state.update_authority(
+            state["id"],
+            {"agency_enabled": True, "contract_compiled": True},
+        )
+        desired_state.set_state(
+            state["id"],
+            "blocked",
+            reason="Waiting for external prerequisite.",
+        )
+
+        with sqlite3.connect(self.db) as conn:
+            conn.row_factory = sqlite3.Row
+            authority_event = conn.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE event_type='desired_state.authority_changed'
+                ORDER BY id DESC LIMIT 1
+                """
+            ).fetchone()
+            lifecycle_event = conn.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE event_type='desired_state.lifecycle_changed'
+                ORDER BY id DESC LIMIT 1
+                """
+            ).fetchone()
+
+        self.assertIsNotNone(authority_event)
+        self.assertIsNotNone(lifecycle_event)
+        authority_payload = json.loads(str(authority_event["payload_json"]))
+        lifecycle_payload = json.loads(str(lifecycle_event["payload_json"]))
+        self.assertEqual(authority_payload["desired_state_id"], state["id"])
+        self.assertIn("agency_enabled", authority_payload["changed_keys"])
+        self.assertFalse(authority_payload["previous"]["agency_enabled"])
+        self.assertTrue(authority_payload["current"]["agency_enabled"])
+        self.assertEqual(lifecycle_payload["state_before"], "active")
+        self.assertEqual(lifecycle_payload["state_after"], "blocked")
+        self.assertEqual(
+            lifecycle_payload["reason_after"],
+            "Waiting for external prerequisite.",
+        )
+
+    def test_noop_authority_or_lifecycle_update_does_not_emit_duplicate_audit_event(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Project Audit Noop")
+        state = desired_state.create_desired_state(
+            "Project Audit Noop ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": False},
+            source_kind="test",
+            source_ref="audit-project-noop",
+        )
+        desired_state.update_authority(state["id"], {"agency_enabled": False})
+        desired_state.set_state(state["id"], "active")
+
+        with sqlite3.connect(self.db) as conn:
+            authority_count = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE event_type='desired_state.authority_changed'"
+            ).fetchone()[0]
+            lifecycle_count = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE event_type='desired_state.lifecycle_changed'"
+            ).fetchone()[0]
+        self.assertEqual(authority_count, 0)
+        self.assertEqual(lifecycle_count, 0)
 
     def test_blocked_and_retired_lifecycle_are_not_overridden_by_evaluation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Project Blocked")

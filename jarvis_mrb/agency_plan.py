@@ -880,6 +880,13 @@ def _execute_step(
         step_id=str(step["id"]),
         payload={"tool": step["tool"], "ok": ok},
     )
+    try:
+        from jarvis_mrb.agency_runtime import _update_runtime
+        _update_runtime(str(plan["desired_state_id"]), action=True)
+    except Exception:
+        # Action execution state is authoritative in the plan ledger. Fairness
+        # metadata must never turn an already-attempted action into a retry.
+        pass
     return reconcile_plan(str(plan["id"]))
 
 

@@ -47,6 +47,7 @@ def _isolated_agency_world(base: Path) -> Iterator[dict[str, Any]]:
     import jarvis_mrb.agency_plan as agency_plan
     import jarvis_mrb.agency_runtime as agency_runtime
     import jarvis_mrb.agency_self_model as agency_self_model
+    import jarvis_mrb.custom_tools as custom_tools
     import jarvis_mrb.desired_state as desired_state
     import jarvis_mrb.permissions as permissions
     import jarvis_mrb.world_executive as world_executive
@@ -77,8 +78,12 @@ def _isolated_agency_world(base: Path) -> Iterator[dict[str, Any]]:
                 setattr(module, "DB_PATH", db)
         saved.append((permissions, "APP_DIR", permissions.APP_DIR))
         saved.append((permissions, "POLICY_PATH", permissions.POLICY_PATH))
+        saved.append((custom_tools, "APP_DIR", custom_tools.APP_DIR))
+        saved.append((custom_tools, "TOOLS_DIR", custom_tools.TOOLS_DIR))
         permissions.APP_DIR = base
         permissions.POLICY_PATH = base / "permissions.json"
+        custom_tools.APP_DIR = base
+        custom_tools.TOOLS_DIR = base / "custom_tools"
 
         world_model.status()
         world_executive.status()
@@ -106,6 +111,7 @@ def _isolated_agency_world(base: Path) -> Iterator[dict[str, Any]]:
             "agency_self_model": agency_self_model,
             "world_verification": world_verification,
             "permissions": permissions,
+            "custom_tools": custom_tools,
         }
     finally:
         for module, attribute, value in reversed(saved):

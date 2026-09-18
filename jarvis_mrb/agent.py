@@ -133,6 +133,10 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
         return f"run custom API tool {args.get('name')!r}"
     if tool == "custom.apply_repair":
         return f"apply the sandbox-validated repair proposal for custom tool {args.get('name')!r}"
+    if tool == "agency.enable":
+        return "enable active Agency mode, allowing persistent goals to execute auto-authorized steps"
+    if tool == "agency.activate_goal":
+        return f"activate autonomous pursuit of Agency goal {args.get('query')!r}"
     return f"run {tool} with {args}"
 
 
@@ -295,6 +299,33 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
 
     if tool == "briefing.generate":
         return AgentReply(True, generate_briefing())
+
+    if tool == "agency.status":
+        from jarvis_mrb.agency_runtime import describe as describe_agency
+        return AgentReply(True, describe_agency())
+    if tool == "agency.enable":
+        from jarvis_mrb.agency_runtime import set_mode as set_agency_mode
+        return AgentReply(True, f"Agency mode is now {set_agency_mode('active')}.")
+    if tool == "agency.monitor":
+        from jarvis_mrb.agency_runtime import set_mode as set_agency_mode
+        return AgentReply(True, f"Agency mode is now {set_agency_mode('monitor')}.")
+    if tool == "agency.disable":
+        from jarvis_mrb.agency_runtime import set_mode as set_agency_mode
+        return AgentReply(True, f"Agency mode is now {set_agency_mode('off')}.")
+    if tool == "agency.activate_goal":
+        from jarvis_mrb.agency_runtime import activate_matching
+        try:
+            state = activate_matching(str(args.get("query") or ""))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        return AgentReply(True, f"Activated Agency pursuit of {state.get('title')}.")
+    if tool == "agency.pause_goal":
+        from jarvis_mrb.agency_runtime import pause_matching
+        try:
+            state = pause_matching(str(args.get("query") or ""))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        return AgentReply(True, f"Paused Agency pursuit of {state.get('title')}.")
 
     if tool == "workflow.run":
         goal = str(args.get("goal") or "").strip()
@@ -539,6 +570,18 @@ def _fast_path(text: str) -> AgentReply | None:
             return AgentReply(True, describe_agency())
         except Exception as exc:
             return AgentReply(False, f"Agency status is unavailable: {exc}")
+    if n in {"enable agency", "turn agency on", "agency active mode", "set agency active"}:
+        return execute_tool("agency.enable", {})
+    if n in {"pause agency", "agency monitor mode", "set agency to monitor", "set agency monitor"}:
+        return execute_tool("agency.monitor", {})
+    if n in {"disable agency", "turn agency off", "stop agency", "agency off"}:
+        return execute_tool("agency.disable", {})
+    m = re.fullmatch(r"(?:agency (?:pursue|activate)|have agency handle|jarvis,? handle) (.+)", n)
+    if m:
+        return execute_tool("agency.activate_goal", {"query": m.group(1).strip()})
+    m = re.fullmatch(r"(?:agency pause|pause agency goal) (.+)", n)
+    if m:
+        return execute_tool("agency.pause_goal", {"query": m.group(1).strip()})
     m = re.fullmatch(r"set (read|local_write|external_write|destructive|security) (?:actions )?to (auto|confirm|deny)", n)
     if m: return AgentReply(True, set_policy(m.group(1), m.group(2)))
 

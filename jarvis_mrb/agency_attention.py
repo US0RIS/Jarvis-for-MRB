@@ -111,6 +111,8 @@ def consider(
     dedup_seconds: int = 3600,
     severity: str = "info",
     emitter: Callable[[str], None] | None = None,
+    allow_emit: bool = True,
+    suppress_reason: str = "",
 ) -> dict[str, Any]:
     clean_kind = str(kind or "agency").strip()[:120]
     clean_message = " ".join(str(message or "").split())[:3000]
@@ -128,13 +130,19 @@ def consider(
     decision = "interrupt" if interrupt else "log"
     now = _now()
     duplicate = False
-    should_emit = interrupt
+    should_emit = interrupt and bool(allow_emit)
+    suppressed = bool(interrupt and not allow_emit)
 
     rationale = (
         f"score={score:.1f} = confidence({max(0.0, min(float(confidence), 1.0)):.2f})"
         f"*benefit({float(benefit):.1f}) + 0.6*urgency({float(urgency):.1f})"
         f" - error_cost({float(error_cost):.1f}) - attention_cost({float(attention_cost):.1f}); "
         f"threshold={float(threshold):.1f}"
+        + (
+            f"; emission_deferred={str(suppress_reason or 'attention budget').strip()[:300]}"
+            if suppressed
+            else ""
+        )
     )
 
     previous_last_emitted: str | None = None
@@ -257,6 +265,7 @@ def consider(
         "threshold": float(threshold),
         "emitted": emitted,
         "duplicate": duplicate,
+        "suppressed": suppressed,
         "rationale": rationale,
     }
 

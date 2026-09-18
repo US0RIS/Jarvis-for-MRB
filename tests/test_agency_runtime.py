@@ -260,7 +260,7 @@ class AgencyRuntimeTests(unittest.TestCase):
             ("Fair Three", 10),
         ):
             _entity, state_id = self._make_state(name)
-            desired_state.update_desired_state(state_id, priority=priority)
+            desired_state.update_priority(state_id, priority)
             agency_plan.create_plan(
                 state_id,
                 [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": name}}],
@@ -294,6 +294,13 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertIn("Priority Champion", executed)
         second_fair = next(value for value in executed if value != "Priority Champion")
         self.assertNotEqual(second_fair, first_fair)
+
+    def test_desired_state_priority_rejects_non_finite_values(self) -> None:
+        _, state_id = self._make_state("Priority Validation")
+        with self.assertRaises(ValueError):
+            desired_state.update_priority(state_id, float("nan"))
+        with self.assertRaises(ValueError):
+            desired_state.update_priority(state_id, float("inf"))
 
     def test_action_attempt_updates_last_action_at_even_outside_tick_all(self) -> None:
         _, state_id = self._make_state("Approved Action Fairness")

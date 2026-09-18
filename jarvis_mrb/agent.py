@@ -180,11 +180,37 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
         # operations. Do not abbreviate this string.
         return f"run this exact isolated terminal command: {str(args.get('command') or '').strip()!r}"
     if tool == "custom.synthesize":
-        return f"synthesize and validate custom API tool {args.get('name')!r}"
+        hosts = [
+            str(value)
+            for value in (args.get("allowed_hosts") or [])
+            if str(value).strip()
+        ]
+        risk = str(args.get("risk") or "read")
+        return (
+            f"synthesize and sandbox-validate custom API tool {args.get('name')!r} "
+            f"for risk {risk!r} and allowed host(s) {hosts!r}; API specification omitted"
+        )
     if tool == "custom.enable":
-        return f"change custom tool {args.get('name')!r} enabled state"
+        return (
+            f"set custom API tool {args.get('name')!r} enabled="
+            f"{bool(args.get('enabled', True))}"
+        )
     if tool == "custom.run":
-        return f"run custom API tool {args.get('name')!r}"
+        name = str(args.get("name") or "")
+        nested = args.get("arguments")
+        argument_names = (
+            sorted(str(key) for key in nested)
+            if isinstance(nested, dict) else []
+        )
+        hosts: list[str] = []
+        for item in list_custom_tools():
+            if str(item.get("name") or "") == name:
+                hosts = [str(value) for value in (item.get("allowed_hosts") or [])]
+                break
+        return (
+            f"run custom API tool {name!r} against allowed host(s) {hosts!r} "
+            f"with argument names {argument_names!r}; argument values omitted"
+        )
     if tool == "custom.apply_repair":
         return f"apply the sandbox-validated repair proposal for custom tool {args.get('name')!r}"
     if tool == "agency.enable":

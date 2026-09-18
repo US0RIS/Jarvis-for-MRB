@@ -71,6 +71,66 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertTrue(reply.ok)
         self.assertEqual(reply.data, provider.data)
 
+    def test_pending_approval_description_redacts_sensitive_email_body(self) -> None:
+        item = {
+            "id": "agency-step:redaction-email",
+            "tool": "gmail.send",
+            "resolved_arguments": {
+                "recipient": "counsel@example.com",
+                "subject": "Project Falcon",
+                "body": "TOP SECRET BODY VALUE 739184",
+            },
+        }
+        rendered = agency_plan.describe_pending_approval(item)
+
+        self.assertIn("counsel@example.com", rendered)
+        self.assertIn("Project Falcon", rendered)
+        self.assertIn("body omitted", rendered)
+        self.assertNotIn("TOP SECRET BODY VALUE", rendered)
+        self.assertNotIn("739184", rendered)
+
+    def test_pending_approval_display_id_does_not_depend_on_hidden_payload(self) -> None:
+        first = {
+            "id": "agency-step:redaction-stable",
+            "tool": "gmail.send",
+            "resolved_arguments": {
+                "recipient": "counsel@example.com",
+                "subject": "Project Falcon",
+                "body": "secret one",
+            },
+        }
+        second = {
+            **first,
+            "resolved_arguments": {
+                **first["resolved_arguments"],
+                "body": "secret two",
+            },
+        }
+
+        first_text = agency_plan.describe_pending_approval(first)
+        second_text = agency_plan.describe_pending_approval(second)
+        first_id = first_text.rsplit("action ", 1)[1]
+        second_id = second_text.rsplit("action ", 1)[1]
+        self.assertEqual(first_id, second_id)
+        self.assertNotIn("secret one", first_text)
+        self.assertNotIn("secret two", second_text)
+
+    def test_generic_pending_approval_description_exposes_names_not_values(self) -> None:
+        item = {
+            "id": "agency-step:redaction-generic",
+            "tool": "unknown.protected",
+            "resolved_arguments": {
+                "token": "SECRET-TOKEN-123",
+                "destination": "Sensitive Destination",
+            },
+        }
+        rendered = agency_plan.describe_pending_approval(item)
+
+        self.assertIn("destination", rendered)
+        self.assertIn("token", rendered)
+        self.assertNotIn("SECRET-TOKEN-123", rendered)
+        self.assertNotIn("Sensitive Destination", rendered)
+
     def test_naked_confirmation_bypass_is_rejected(self) -> None:
         args = {
             "summary": "Naked bypass",

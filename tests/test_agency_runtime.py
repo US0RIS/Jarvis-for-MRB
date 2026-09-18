@@ -420,6 +420,52 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertTrue(all(len(items) == 2 for items in seen_by_cycle))
         self.assertEqual(first["candidate_pool"], 5)
 
+    def test_action_budget_limits_new_approval_boundaries_per_cycle(self) -> None:
+        state_ids: list[str] = []
+        for index in range(5):
+            _, state_id = self._make_state(f"Approval Budget {index}")
+            agency_plan.create_plan(
+                state_id,
+                [
+                    {
+                        "id": "protected",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": f"Approval Budget {index}",
+                            "start": f"2030-01-0{index + 1}T09:00:00-08:00",
+                            "end": f"2030-01-0{index + 1}T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            state_ids.append(state_id)
+
+        agency_runtime.set_mode("active")
+        result = agency_runtime.tick_all(
+            executor=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("protected action must not execute before approval")
+            ),
+            max_actions=2,
+            limit=5,
+        )
+
+        waiting = [
+            state_id
+            for state_id in state_ids
+            if str((agency_plan.current_plan(state_id) or {}).get("status") or "")
+            == "awaiting_approval"
+        ]
+        still_active = [
+            state_id
+            for state_id in state_ids
+            if str((agency_plan.current_plan(state_id) or {}).get("status") or "")
+            == "active"
+        ]
+        self.assertEqual(len(waiting), 2)
+        self.assertEqual(len(still_active), 3)
+        self.assertEqual(result["action_slots_used"], 2)
+        self.assertEqual(result["actions_executed"], 0)
+
     def test_tick_all_bounds_new_planning_attempts_per_cycle(self) -> None:
         state_ids: list[str] = []
         for index in range(5):

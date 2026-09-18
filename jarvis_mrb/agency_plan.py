@@ -67,6 +67,7 @@ def _connect() -> sqlite3.Connection:
             status TEXT NOT NULL DEFAULT 'pending',
             risk TEXT NOT NULL DEFAULT '',
             requires_confirmation INTEGER NOT NULL DEFAULT 0,
+            approval_digest TEXT NOT NULL DEFAULT '',
             verification_id TEXT NOT NULL DEFAULT '',
             attempt_count INTEGER NOT NULL DEFAULT 0,
             result_summary TEXT NOT NULL DEFAULT '',
@@ -85,6 +86,9 @@ def _connect() -> sqlite3.Connection:
     plan_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_plans)").fetchall()}
     if "relevance_hash" not in plan_columns:
         conn.execute("ALTER TABLE agency_plans ADD COLUMN relevance_hash TEXT NOT NULL DEFAULT ''")
+    step_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_steps)").fetchall()}
+    if "approval_digest" not in step_columns:
+        conn.execute("ALTER TABLE agency_steps ADD COLUMN approval_digest TEXT NOT NULL DEFAULT ''")
     conn.commit()
     return conn
 
@@ -117,6 +121,7 @@ def _row_to_step(row: sqlite3.Row) -> dict[str, Any]:
         "status": str(row["status"]),
         "risk": str(row["risk"]),
         "requires_confirmation": bool(row["requires_confirmation"]),
+        "approval_digest": str(row["approval_digest"] or ""),
         "verification_id": str(row["verification_id"] or ""),
         "attempt_count": int(row["attempt_count"]),
         "result_summary": str(row["result_summary"] or ""),
@@ -730,6 +735,74 @@ def resolved_arguments(step_id: str) -> dict[str, Any]:
     return dict(_resolve_value(template, outputs))
 
 
+def _approval_digest(step_id: str, tool: str, arguments: dict[str, Any]) -> str:
+    raw = json.dumps(
+        {
+            "step_id": str(step_id),
+            "tool": str(tool),
+            "arguments": dict(arguments or {}),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _grant_step_approval(step_id: str, tool: str, arguments: dict[str, Any]) -> None:
+    digest = _approval_digest(step_id, tool, arguments)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT status,tool FROM agency_steps WHERE id=?",
+            (str(step_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown Agency step {step_id!r}.")
+        if str(row["status"] or "") != "awaiting_approval":
+            raise ValueError("Agency approval can only be granted to a step awaiting approval.")
+        if str(row["tool"] or "") != str(tool):
+            raise ValueError("Agency approval tool does not match the persisted step.")
+        conn.execute(
+            "UPDATE agency_steps SET approval_digest=?,updated_at=? WHERE id=?",
+            (digest, _now(), str(step_id)),
+        )
+        conn.commit()
+
+
+def _clear_step_approval(step_id: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE agency_steps SET approval_digest='',updated_at=? WHERE id=?",
+            (_now(), str(step_id)),
+        )
+        conn.commit()
+
+
+def _approval_grant_matches(
+    step_id: str,
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    required_status: str,
+) -> bool:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT tool,status,approval_digest FROM agency_steps WHERE id=?",
+            (str(step_id),),
+        ).fetchone()
+    if row is None:
+        return False
+    if str(row["status"] or "") != str(required_status):
+        return False
+    if str(row["tool"] or "") != str(tool):
+        return False
+    digest = str(row["approval_digest"] or "")
+    if not digest:
+        return False
+    return digest == _approval_digest(step_id, tool, arguments)
+
+
 def approved_execution_matches(
     step_id: str,
     tool: str,
@@ -740,22 +813,18 @@ def approved_execution_matches(
     This is consulted by agent.execute_tool before honoring bypass_confirmation.
     A bare boolean is never sufficient authority.
     """
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT tool,status FROM agency_steps WHERE id=?",
-            (str(step_id),),
-        ).fetchone()
-    if row is None:
-        return False
-    if str(row["status"] or "") != "executing":
-        return False
-    if str(row["tool"] or "") != str(tool):
-        return False
     try:
         expected = resolved_arguments(str(step_id))
     except Exception:
         return False
-    return expected == dict(arguments or {})
+    if expected != dict(arguments or {}):
+        return False
+    return _approval_grant_matches(
+        str(step_id),
+        str(tool),
+        expected,
+        required_status="executing",
+    )
 
 
 def _executor_accepts_bypass(executor: Callable[..., Any]) -> bool:
@@ -802,8 +871,18 @@ def _execute_step(
     *,
     bypass_confirmation: bool,
 ) -> dict[str, Any]:
+    step_id = str(step["id"])
+    arguments = resolved_arguments(step_id)
+    if bypass_confirmation and not _approval_grant_matches(
+        step_id,
+        str(step["tool"]),
+        arguments,
+        required_status="awaiting_approval",
+    ):
+        raise PermissionError("Approved Agency execution has no matching one-time approval capability.")
+
     with _connect() as conn:
-        _set_step_status(conn, str(step["id"]), "executing", increment_attempt=True, started=True)
+        _set_step_status(conn, step_id, "executing", increment_attempt=True, started=True)
         conn.commit()
 
     try:
@@ -813,6 +892,9 @@ def _execute_step(
     except Exception as exc:
         ok = False
         message = f"Execution raised {type(exc).__name__}: {exc}"
+    finally:
+        if bypass_confirmation:
+            _clear_step_approval(step_id)
 
     with _connect() as conn:
         if not ok:
@@ -1087,7 +1169,13 @@ def approve_step(plan_id: str, step_id: str, executor: Callable[..., Any]) -> di
             return stale
     if not permission.allowed:
         return deny_step(str(plan_id), str(step_id), reason=f"Permission policy now denies {permission.risk}.")
-    return _execute_step(plan, step, executor, bypass_confirmation=True)
+    arguments = resolved_arguments(str(step_id))
+    _grant_step_approval(str(step_id), str(step["tool"]), arguments)
+    try:
+        return _execute_step(plan, step, executor, bypass_confirmation=True)
+    except Exception:
+        _clear_step_approval(str(step_id))
+        raise
 
 
 def approve_pending(executor: Callable[..., Any]) -> dict[str, Any] | None:

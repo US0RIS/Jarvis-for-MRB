@@ -203,6 +203,71 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertTrue(runtime)
         self.assertIn("declared available Agency tool", runtime[0]["last_error"])
 
+    def test_enabled_custom_adapter_becomes_available_to_agency_through_security_wrapper(self) -> None:
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {
+                    "name": "private_weather",
+                    "enabled": True,
+                    "risk": "read",
+                    "description": "Private weather",
+                    "allowed_hosts": ["weather.example.com"],
+                }
+            ],
+        ):
+            info = agency_capability.available_tool("private_weather")
+        self.assertTrue(info["known"])
+        self.assertTrue(info["implemented_for_agency"])
+        self.assertTrue(info["available"])
+        self.assertFalse(info["agency_scope_blocked"])
+        self.assertTrue(info["requires_confirmation"])
+        self.assertEqual(info["wrapper_tool"], "custom.run")
+
+    def test_enabling_proposed_adapter_reactivates_capability_blocked_goal(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "weather.private_api",
+            "Need a narrow private weather API.",
+        )
+        with patch(
+            "jarvis_mrb.custom_tools.synthesize",
+            return_value={"name": "private_weather", "enabled": False, "risk": "read"},
+        ):
+            agency_capability.synthesize_adapter(
+                gap["id"],
+                name="private_weather",
+                description="Read private weather.",
+                api_spec="GET /weather",
+                allowed_hosts=["weather.example.com"],
+                risk="read",
+            )
+        desired_state.set_state(
+            state_id,
+            "blocked",
+            reason="Missing capability: weather.private_api.",
+        )
+
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {
+                    "name": "private_weather",
+                    "enabled": True,
+                    "risk": "read",
+                    "description": "Private weather",
+                    "allowed_hosts": ["weather.example.com"],
+                }
+            ],
+        ):
+            result = agency_capability.reconcile_gaps()
+
+        self.assertIn(gap["id"], result["resolved"])
+        self.assertIn(state_id, result["reactivated"])
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
+        self.assertEqual(agency_capability.get_gap(gap["id"])["status"], "resolved")
+
     def test_known_but_denied_tool_is_authority_gap_not_capability_gap(self) -> None:
         permissions.set_policy("external_write", "deny")
         info = agency_capability.available_tool("gmail.send")

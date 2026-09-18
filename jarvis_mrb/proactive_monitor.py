@@ -239,12 +239,28 @@ def _proactive_enabled() -> bool:
         return True
 
 
+def _check_desired_states() -> None:
+    """Continuously reconcile declarative desired states against the world model.
+
+    This is intentionally observation-only. It may close or reopen a desired state
+    based on explicit machine-evaluable criteria, but it never grants action authority.
+    Planning/execution remains behind the normal Executive and permission layers.
+    """
+    from jarvis_mrb.desired_state import evaluate_desired_state, list_desired_states
+
+    for item in list_desired_states(limit=200):
+        if str(item.get("state") or "") in {"blocked", "paused", "retired"}:
+            continue
+        evaluate_desired_state(str(item["id"]), persist=True)
+
+
 def check_once() -> None:
     if not _proactive_enabled():
         return
     _run_isolated("proactive_calendar", _check_calendar)
     _run_isolated("proactive_urgent_mail", _check_urgent_mail)
     _run_isolated("action_verification", _check_action_verifications)
+    _run_isolated("desired_state_evaluation", _check_desired_states)
 
 
 def _loop() -> None:
@@ -256,6 +272,7 @@ def _loop() -> None:
             # verification; verifier failure must not suppress urgent-mail checks.
             _run_isolated("proactive_calendar", _check_calendar)
             _run_isolated("action_verification", _check_action_verifications)
+            _run_isolated("desired_state_evaluation", _check_desired_states)
             if cycle % 3 == 0:
                 _run_isolated("proactive_urgent_mail", _check_urgent_mail)
         cycle += 1

@@ -99,9 +99,11 @@ def evidence_for(gate: str) -> dict:
             "public_research": True,
             "parallel_analysis": True,
             "protected_external_action": True,
+            "protected_action_approval_boundary": True,
             "independent_outcome_verification": True,
             "replan_after_injected_change": True,
             "final_desired_state_satisfied": True,
+            "final_satisfaction_followed_verified_action": True,
         },
     }
     return {**base, **extras[gate]}
@@ -480,6 +482,17 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["required_epistemic_roles_present"] = False
         with self.assertRaisesRegex(ValueError, "required_epistemic_roles_present"):
             agency_release._validate_gate_evidence("A7", evidence, "")
+
+    def test_a12_receipt_rejects_unapproved_or_preverification_completion(self) -> None:
+        evidence = evidence_for("A12")
+        evidence["protected_action_approval_boundary"] = False
+        with self.assertRaisesRegex(ValueError, "protected_action_approval_boundary"):
+            agency_release._validate_gate_evidence("A12", evidence, str(self.a12_trace))
+
+        evidence = evidence_for("A12")
+        evidence["final_satisfaction_followed_verified_action"] = False
+        with self.assertRaisesRegex(ValueError, "final_satisfaction_followed_verified_action"):
+            agency_release._validate_gate_evidence("A12", evidence, str(self.a12_trace))
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

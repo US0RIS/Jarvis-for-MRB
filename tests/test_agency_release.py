@@ -62,6 +62,7 @@ def evidence_for(gate: str) -> dict:
             "external_change_observed": True,
             "stale_path_invalidated": True,
             "replanned_without_goal_restatement": True,
+            "already_valid_work_preserved": True,
         },
         "A6": {
             "dormant_state_observed": True,
@@ -458,6 +459,12 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["verification_feedback_observed"] = False
         with self.assertRaisesRegex(ValueError, "verification_feedback_observed"):
             agency_release._validate_gate_evidence("A4", evidence, "")
+
+    def test_a5_receipt_rejects_replan_that_replays_valid_work(self) -> None:
+        evidence = evidence_for("A5")
+        evidence["already_valid_work_preserved"] = False
+        with self.assertRaisesRegex(ValueError, "already_valid_work_preserved"):
+            agency_release._validate_gate_evidence("A5", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

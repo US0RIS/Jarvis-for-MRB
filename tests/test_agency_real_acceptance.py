@@ -1563,7 +1563,11 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 from jarvis_mrb.tool_audit import current_agency_step_id
 
                 agency_step_id = current_agency_step_id()
-                reply = SimpleNamespace(ok=True, message="Calendar accepted A12 replanned write.")
+                reply = SimpleNamespace(
+                    ok=True,
+                    message="Calendar accepted A12 replanned write.",
+                    data={"event_id": "a12-replanned-event"},
+                )
                 action_event_id = world_model.record_tool_execution(
                     tool,
                     args,
@@ -1626,9 +1630,15 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(evaluation["evidence"]["public_research"])
             self.assertTrue(evaluation["evidence"]["parallel_analysis"])
             self.assertTrue(evaluation["evidence"]["protected_external_action"])
+            self.assertTrue(
+                evaluation["evidence"]["protected_action_approval_boundary"]
+            )
             self.assertTrue(evaluation["evidence"]["independent_outcome_verification"])
             self.assertTrue(evaluation["evidence"]["replan_after_injected_change"])
             self.assertTrue(evaluation["evidence"]["final_desired_state_satisfied"])
+            self.assertTrue(
+                evaluation["evidence"]["final_satisfaction_followed_verified_action"]
+            )
 
             causal = next(
                 item["evidence"]

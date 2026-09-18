@@ -94,33 +94,33 @@ def _connect() -> sqlite3.Connection:
         str(row["name"])
         for row in conn.execute("PRAGMA table_info(agency_real_gate_sessions)").fetchall()
     }
-    if "session_hash" not in columns:
+    added_session_hash = "session_hash" not in columns
+    if added_session_hash:
         conn.execute(
             "ALTER TABLE agency_real_gate_sessions ADD COLUMN session_hash TEXT NOT NULL DEFAULT ''"
         )
-    rows = conn.execute(
-        """
-        SELECT id,gate,deployment_sha,environment_fingerprint,desired_state_id,
-               parameters_json,baseline_json,started_at,session_hash
-        FROM agency_real_gate_sessions
-        WHERE session_hash=''
-        """
-    ).fetchall()
-    for row in rows:
-        digest = _live_session_digest(
-            session_id=str(row["id"]),
-            gate=str(row["gate"]),
-            deployment_sha_value=str(row["deployment_sha"]),
-            environment=str(row["environment_fingerprint"]),
-            desired_state_id=str(row["desired_state_id"] or ""),
-            parameters_json=str(row["parameters_json"] or "{}"),
-            baseline_json=str(row["baseline_json"] or "{}"),
-            started_at=str(row["started_at"]),
-        )
-        conn.execute(
-            "UPDATE agency_real_gate_sessions SET session_hash=? WHERE id=?",
-            (digest, str(row["id"])),
-        )
+        rows = conn.execute(
+            """
+            SELECT id,gate,deployment_sha,environment_fingerprint,desired_state_id,
+                   parameters_json,baseline_json,started_at
+            FROM agency_real_gate_sessions
+            """
+        ).fetchall()
+        for row in rows:
+            digest = _live_session_digest(
+                session_id=str(row["id"]),
+                gate=str(row["gate"]),
+                deployment_sha_value=str(row["deployment_sha"]),
+                environment=str(row["environment_fingerprint"]),
+                desired_state_id=str(row["desired_state_id"] or ""),
+                parameters_json=str(row["parameters_json"] or "{}"),
+                baseline_json=str(row["baseline_json"] or "{}"),
+                started_at=str(row["started_at"]),
+            )
+            conn.execute(
+                "UPDATE agency_real_gate_sessions SET session_hash=? WHERE id=?",
+                (digest, str(row["id"])),
+            )
     conn.executescript(
         """
         CREATE TRIGGER IF NOT EXISTS agency_real_gate_sessions_immutable_identity

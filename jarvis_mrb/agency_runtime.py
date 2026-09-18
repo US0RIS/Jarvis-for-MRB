@@ -451,6 +451,13 @@ def tick_desired_state(
     desired = get_desired_state(state_id)
     if desired is None:
         return {"desired_state_id": state_id, "status": "missing"}
+    authority = desired.get("authority") if isinstance(desired.get("authority"), dict) else {}
+    if authority.get("agency_enabled") is not True:
+        return {
+            "desired_state_id": state_id,
+            "status": "authority_disabled",
+            "action_executed": False,
+        }
     lifecycle = str(desired.get("state") or "")
     if lifecycle in {"paused", "blocked", "retired"}:
         return {"desired_state_id": state_id, "status": lifecycle}
@@ -554,6 +561,9 @@ def tick_all(
     results: list[dict[str, Any]] = []
     for desired in list_desired_states(limit=max(1, min(int(limit), 200))):
         if str(desired.get("state") or "") not in {"active", "satisfied"}:
+            continue
+        authority = desired.get("authority") if isinstance(desired.get("authority"), dict) else {}
+        if authority.get("agency_enabled") is not True:
             continue
         result = tick_desired_state(
             str(desired["id"]),

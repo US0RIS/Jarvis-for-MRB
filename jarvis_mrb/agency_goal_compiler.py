@@ -24,6 +24,13 @@ DEFAULT_OBSERVATION_SOURCE_KINDS = [
     "iphone_encounter",
 ]
 
+_ACHIEVED_TERMS = {
+    "signed", "executed", "approved", "accepted", "submitted", "sent",
+    "booked", "reserved", "purchased", "delivered", "received", "completed",
+    "finished", "resolved", "closed", "paid", "confirmed", "filed",
+    "launched", "deployed",
+}
+
 _COMPLETION_WORDS = {
     "sign": "signed",
     "signed": "signed",
@@ -165,10 +172,16 @@ Rules:
 
 
 def _completion_term(title: str) -> str:
+    """Fallback only when the goal itself names an achieved state.
+
+    The model compiler may infer a defensible future observation contract for an
+    imperative such as "book dinner". The deterministic fallback may not silently
+    invent what evidence "booked" would look like.
+    """
     words = re.findall(r"[a-zA-Z]+", str(title or "").lower())
     for word in words:
-        if word in _COMPLETION_WORDS:
-            return _COMPLETION_WORDS[word]
+        if word in _ACHIEVED_TERMS:
+            return word
     return ""
 
 

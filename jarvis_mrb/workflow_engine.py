@@ -65,6 +65,11 @@ def _enabled_custom_tool_catalog() -> list[dict[str, Any]]:
     for item in tools:
         if not isinstance(item, dict) or not bool(item.get("enabled")):
             continue
+        # Autonomous custom adapters are observation-only in Agency 1.0.
+        # External-write adapters need an independent verifier before they can
+        # safely participate in a persistent retrying control loop.
+        if str(item.get("risk") or "security") != "read":
+            continue
         name = str(item.get("name") or "").strip()
         if not name:
             continue

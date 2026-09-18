@@ -298,16 +298,28 @@ def _validate_compiled(
         if not any(len(term) >= 4 and term.lower() not in set(_COMPLETION_WORDS.values()) for term in terms_all):
             raise ValueError("event_match lacks a specific subject anchor.")
 
+        requested_sources = [
+            str(item).strip()
+            for item in (criterion.get("source_kinds") or [])[:12]
+            if str(item).strip()
+        ]
+        disallowed_sources = [
+            source for source in requested_sources
+            if source not in DEFAULT_OBSERVATION_SOURCE_KINDS
+        ]
+        if disallowed_sources:
+            raise ValueError(
+                "event_match requested non-observation source kinds: "
+                + ", ".join(disallowed_sources)
+            )
+
         clean.append(
             {
                 "kind": "event_match",
                 "terms_all": terms_all[:8],
                 "terms_none": terms_none[:12],
                 "event_types": [str(item) for item in (criterion.get("event_types") or [])[:12] if str(item).strip()],
-                "source_kinds": (
-                    [str(item) for item in (criterion.get("source_kinds") or [])[:12] if str(item).strip()]
-                    or list(DEFAULT_OBSERVATION_SOURCE_KINDS)
-                ),
+                "source_kinds": requested_sources or list(DEFAULT_OBSERVATION_SOURCE_KINDS),
                 "min_event_id": min_event_id,
             }
         )

@@ -61,6 +61,16 @@ class AgencyPlanTests(unittest.TestCase):
         )
         return entity_id, str(state["id"])
 
+    def test_agent_result_preserves_structured_provider_data(self) -> None:
+        provider = SimpleNamespace(
+            ok=True,
+            message="Created external object.",
+            data={"event_id": "evt-123", "message_id": "msg-123"},
+        )
+        reply = agent._result(provider)
+        self.assertTrue(reply.ok)
+        self.assertEqual(reply.data, provider.data)
+
     def test_naked_confirmation_bypass_is_rejected(self) -> None:
         args = {
             "summary": "Naked bypass",

@@ -142,6 +142,23 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertFalse(evaluated["satisfied"])
         self.assertEqual(evaluated["state"], "active")
 
+    def test_deterministic_fallback_requires_achieved_state_language(self) -> None:
+        self.assertIsNone(
+            agency_goal_compiler._fallback_contract(
+                "Book dinner",
+                {"entities": []},
+            )
+        )
+        contract = agency_goal_compiler._fallback_contract(
+            "Get Project Apollo signed",
+            {"entities": []},
+        )
+        self.assertIsNotNone(contract)
+        assert contract is not None
+        criterion = contract["criteria"][0]
+        self.assertEqual(criterion["terms_all"][0], "Project Apollo")
+        self.assertEqual(criterion["terms_all"][1], "signed")
+
     def test_low_confidence_contract_blocks_activation_and_does_not_grant_agency_authority(self) -> None:
         _, state_id = self._legacy_state("Complete Project Mercury")
 

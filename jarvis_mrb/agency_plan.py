@@ -634,18 +634,41 @@ def reconcile_plan(plan_id: str) -> dict[str, Any]:
         rows = conn.execute(
             """
             SELECT * FROM agency_steps
-            WHERE plan_id=? AND status IN ('executed','awaiting_verification')
+            WHERE plan_id=? AND status IN ('executing','executed','awaiting_verification')
             ORDER BY ordinal
             """,
             (str(plan_id),),
         ).fetchall()
         for step in rows:
-            verification = _verification_for_step(conn, str(step["id"]))
-            if verification is None:
-                if str(step["risk"]) == "read" and str(step["status"]) == "executed":
+            step_id = str(step["id"])
+            step_status = str(step["status"])
+            verification = _verification_for_step(conn, step_id)
+
+            if step_status == "executing":
+                # Process death or interruption while the executor was in flight.
+                # Never replay automatically: if the audited action produced a
+                # durable verification record, resume verification; otherwise the
+                # outcome is unknown and the step must fail closed.
+                conn.execute(
+                    "UPDATE agency_steps SET approval_digest='',updated_at=? WHERE id=?",
+                    (_now(), step_id),
+                )
+                if verification is None:
                     _set_step_status(
                         conn,
-                        str(step["id"]),
+                        step_id,
+                        "failed",
+                        result="Execution was interrupted before a durable outcome-verification record was available.",
+                        blocked_reason="Interrupted execution has unknown outcome; automatic replay is forbidden.",
+                        finished=True,
+                    )
+                    continue
+
+            if verification is None:
+                if str(step["risk"]) == "read" and step_status == "executed":
+                    _set_step_status(
+                        conn,
+                        step_id,
                         "verified",
                         result=str(step["result_summary"] or "Read observation returned successfully."),
                         finished=True,

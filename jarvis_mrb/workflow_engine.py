@@ -178,6 +178,15 @@ def execute_workflow(
     executor: Callable[[str, dict[str, Any]], Any],
 ) -> WorkflowResult:
     plan = plan_workflow(goal)
+    missing = plan.get("missing_capability")
+    if isinstance(missing, dict):
+        capability = str(missing.get("capability") or "unknown capability")
+        reason = str(missing.get("reason") or "No bounded tool can perform a required operation.")
+        return WorkflowResult(
+            False,
+            f"Workflow blocked by missing capability {capability}: {reason}",
+            plan,
+        )
     emit_cue("workflow_started")
     nodes = {str(node["id"]): node for node in plan["nodes"]}
     completed: dict[str, dict[str, Any]] = {}

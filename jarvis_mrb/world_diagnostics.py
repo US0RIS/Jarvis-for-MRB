@@ -23,6 +23,38 @@ _REQUIRED_TABLES = {
     "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
     "runtime_subsystem_health", "gmail_attachment_sync_state", "world_schema_meta", "world_schema_history",
 }
+_AGENCY_REQUIRED_COLUMNS: dict[str, set[str]] = {
+    "desired_states": {"criteria_json", "authority_json", "state", "generation"},
+    "agency_plans": {"desired_state_id", "generation", "status", "relevance_hash"},
+    "agency_steps": {
+        "plan_id", "status", "risk", "requires_confirmation", "verification_id",
+        "attempt_count", "started_at", "finished_at",
+    },
+    "agency_runtime_boots": {"started_at", "deployment_sha", "process_id"},
+    "agency_deliberations": {"agency_step_id", "disagreement_json", "status"},
+    "agency_capability_gaps": {
+        "desired_state_id", "capability", "observed_availability_json",
+        "proposed_tool_name", "status",
+    },
+    "agency_real_gate_sessions": {
+        "gate", "deployment_sha", "environment_fingerprint", "desired_state_id",
+        "parameters_json", "baseline_json", "session_hash", "status",
+        "last_evaluation_json", "receipt_id", "started_at", "completed_at",
+    },
+    "agency_real_gate_receipts": {
+        "gate", "deployment_sha", "environment_fingerprint", "checks_json",
+        "evidence_json", "trace_ref", "trace_sha256", "session_id",
+        "receipt_hash", "recorded_at",
+    },
+    "agency_release_validation_runs": {
+        "deployment_sha", "environment_fingerprint", "compile_ok", "regression_ok",
+        "synthetic_ok", "diagnostics_ok", "tree_clean_before", "tree_clean_after",
+        "validation_hash", "recorded_at",
+    },
+    "action_verifications": {"agency_step_id", "status", "verifier"},
+}
+
+
 _STRONG_PERSON_PROJECT_ROLES = {
     "sender", "recipient", "attendee", "organizer", "owner", "assignee",
     "participant", "meeting_participant", "speaker", "requester", "beneficiary",
@@ -39,6 +71,16 @@ def _connect() -> sqlite3.Connection:
 
 def _existing_tables(conn: sqlite3.Connection) -> set[str]:
     return {str(row["name"]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    try:
+        return {
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+    except sqlite3.OperationalError:
+        return set()
 
 
 def _parse_time(raw: str | None) -> datetime | None:
@@ -127,6 +169,20 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
         if missing_tables:
             problems.append("Missing required world tables: " + ", ".join(missing_tables))
 
+        missing_agency_columns: dict[str, list[str]] = {}
+        if require_agency:
+            for table, required_columns in _AGENCY_REQUIRED_COLUMNS.items():
+                if table not in tables:
+                    continue
+                missing = sorted(required_columns - _table_columns(conn, table))
+                if missing:
+                    missing_agency_columns[table] = missing
+            for table, missing in sorted(missing_agency_columns.items()):
+                problems.append(
+                    f"Agency table {table} is missing required columns: "
+                    + ", ".join(missing)
+                )
+
         agency_metrics: dict[str, Any] = {
             "invalid_desired_states": 0,
             "invalid_plan_states": 0,
@@ -143,7 +199,11 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
             "orphan_real_gate_receipts": 0,
             "running_real_sessions_with_receipt": 0,
         }
-        if require_agency and _AGENCY_REQUIRED_TABLES <= tables:
+        if (
+            require_agency
+            and _AGENCY_REQUIRED_TABLES <= tables
+            and not missing_agency_columns
+        ):
             valid_desired = ("active", "satisfied", "blocked", "paused", "retired")
             desired_ph = ",".join("?" for _ in valid_desired)
             agency_metrics["invalid_desired_states"] = int(conn.execute(
@@ -541,6 +601,7 @@ def validate(*, require_agency: bool = False) -> dict[str, Any]:
         "schema_migrations": migrations,
         "migration_history_contiguous": migration_history == expected_history,
         "missing_required_tables": missing_tables,
+        "missing_agency_columns": missing_agency_columns,
         "agency_required": bool(require_agency),
         "core": core,
         "linker": linker,

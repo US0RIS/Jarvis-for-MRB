@@ -89,6 +89,40 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertNotIn("TOP SECRET BODY VALUE", rendered)
         self.assertNotIn("739184", rendered)
 
+    def test_custom_run_approval_discloses_hosts_and_field_names_but_not_values(self) -> None:
+        item = {
+            "id": "agency-step:custom-redaction",
+            "tool": "custom.run",
+            "resolved_arguments": {
+                "name": "private_weather",
+                "arguments": {
+                    "city": "Pasadena",
+                    "secret_note": "DO NOT LEAK THIS VALUE 8842",
+                },
+            },
+        }
+        with patch(
+            "jarvis_mrb.custom_tools.list_tools",
+            return_value=[
+                {
+                    "name": "private_weather",
+                    "enabled": True,
+                    "risk": "read",
+                    "allowed_hosts": ["weather.example.com"],
+                }
+            ],
+        ):
+            rendered = agency_plan.describe_pending_approval(item)
+
+        self.assertIn("private_weather", rendered)
+        self.assertIn("weather.example.com", rendered)
+        self.assertIn("city", rendered)
+        self.assertIn("secret_note", rendered)
+        self.assertIn("values omitted", rendered)
+        self.assertNotIn("Pasadena", rendered)
+        self.assertNotIn("DO NOT LEAK THIS VALUE", rendered)
+        self.assertNotIn("8842", rendered)
+
     def test_pending_approval_display_id_does_not_depend_on_hidden_payload(self) -> None:
         first = {
             "id": "agency-step:redaction-stable",

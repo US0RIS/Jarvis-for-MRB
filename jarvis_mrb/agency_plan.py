@@ -1144,6 +1144,71 @@ def list_pending_approvals(*, plan_id: str | None = None, limit: int = 50) -> li
     return result
 
 
+def _approval_action_fingerprint(tool: str, arguments: dict[str, Any]) -> str:
+    raw = json.dumps(
+        {"tool": str(tool), "arguments": dict(arguments or {})},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
+def describe_pending_approval(item: dict[str, Any]) -> str:
+    """Render enough detail for informed consent without leaking arbitrary payloads."""
+    tool = str(item.get("tool") or "protected action")
+    args = dict(item.get("resolved_arguments") or {})
+    fingerprint = _approval_action_fingerprint(tool, args)
+
+    if tool == "gmail.send":
+        recipient = str(args.get("recipient") or "").strip() or "<unspecified recipient>"
+        subject = str(args.get("subject") or "").strip()
+        subject_text = f", subject {subject!r}" if subject else ""
+        return (
+            f"send email to {recipient!r}{subject_text}; "
+            f"message body omitted from notification; action {fingerprint}"
+        )
+
+    if tool == "calendar.create":
+        summary = str(args.get("summary") or "").strip() or "<untitled event>"
+        start = str(args.get("start") or "").strip() or "<unspecified start>"
+        end = str(args.get("end") or "").strip() or "<unspecified end>"
+        return (
+            f"create calendar event {summary!r} from {start} to {end}; "
+            f"description omitted; action {fingerprint}"
+        )
+
+    if tool in {"smart.close", "pc.close_app", "browser.close_tab"}:
+        target = str(args.get("name") or args.get("query") or "").strip() or "<unspecified target>"
+        return f"{tool} target {target!r}; action {fingerprint}"
+
+    if tool in {"smart.open", "pc.launch_app", "browser.open_site", "browser.focus_tab"}:
+        target = str(args.get("name") or args.get("query") or "").strip() or "<unspecified target>"
+        return f"{tool} target {target!r}; action {fingerprint}"
+
+    if tool in {"jobs.cancel", "background.cancel"}:
+        target = args.get("job_id") if tool == "jobs.cancel" else args.get("task_id")
+        return f"{tool} target {target!r}; action {fingerprint}"
+
+    if tool in {"state.update", "state.temp_set"}:
+        key = str(args.get("key") or "").strip() or "<unspecified key>"
+        return f"{tool} key {key!r}; value omitted; action {fingerprint}"
+
+    if tool in {"custom.run", "custom.synthesize", "custom.enable", "custom.apply_repair"}:
+        name = str(args.get("name") or "").strip() or "<unspecified custom tool>"
+        return f"{tool} {name!r}; payload omitted; action {fingerprint}"
+
+    parameter_names = sorted(str(key) for key in args)
+    rendered_names = ", ".join(parameter_names[:12]) if parameter_names else "none"
+    if len(parameter_names) > 12:
+        rendered_names += ", ..."
+    return (
+        f"{tool} with parameter names [{rendered_names}]; "
+        f"values omitted; action {fingerprint}"
+    )
+
+
 def pending_approval(*, plan_id: str | None = None) -> dict[str, Any] | None:
     rows = list_pending_approvals(plan_id=plan_id, limit=2)
     return rows[0] if len(rows) == 1 else None

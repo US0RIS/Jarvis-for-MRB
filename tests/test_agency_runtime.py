@@ -106,6 +106,51 @@ class AgencyRuntimeTests(unittest.TestCase):
         assert plan is not None
         self.assertEqual(plan["status"], "completed")
 
+    def test_satisfied_goal_that_later_drifts_gets_new_plan_generation(self) -> None:
+        entity_id, state_id = self._make_state("Project Reopen")
+        agency_runtime.set_mode("active")
+        plans: list[str] = []
+
+        def planner(prompt: str) -> dict:
+            plans.append(prompt)
+            return {
+                "summary": f"generation {len(plans)}",
+                "nodes": [
+                    {
+                        "id": "observe",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "Project Reopen"},
+                        "depends_on": [],
+                    }
+                ],
+            }
+
+        def first_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+            world_model.assert_belief(entity_id, "ready", value=True)
+            return SimpleNamespace(ok=True, message="ready observed")
+
+        first = agency_runtime.tick_desired_state(
+            state_id,
+            executor=first_executor,
+            planner=planner,
+        )
+        self.assertEqual(first["plan"]["status"], "completed")
+        first_generation = first["plan"]["generation"]
+
+        world_model.assert_belief(entity_id, "ready", value=False)
+        reopened = desired_state.evaluate_desired_state(state_id)
+        self.assertEqual(reopened["state"], "active")
+
+        second = agency_runtime.tick_desired_state(
+            state_id,
+            executor=lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="still not ready"),
+            planner=planner,
+            allow_action=False,
+        )
+        self.assertEqual(second["plan"]["generation"], first_generation + 1)
+        self.assertEqual(second["plan"]["status"], "active")
+        self.assertEqual(len(plans), 2)
+
     def test_planner_failure_uses_backoff_instead_of_retrying_every_tick(self) -> None:
         _, state_id = self._make_state("Project Backoff")
         agency_runtime.set_mode("active")

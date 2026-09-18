@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -59,8 +60,50 @@ def _connect() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agency_runtime_boots (
+            id TEXT PRIMARY KEY,
+            started_at TEXT NOT NULL,
+            deployment_sha TEXT NOT NULL DEFAULT '',
+            process_id INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agency_runtime_boots_started "
+        "ON agency_runtime_boots(started_at DESC)"
+    )
     conn.commit()
     return conn
+
+
+def record_boot(*, deployment_sha: str = "") -> dict[str, Any]:
+    boot_id = f"agency-boot:{uuid.uuid4()}"
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO agency_runtime_boots(id,started_at,deployment_sha,process_id)
+            VALUES(?,?,?,?)
+            """,
+            (boot_id, now, str(deployment_sha or "")[:80], int(os.getpid())),
+        )
+        conn.commit()
+    return {
+        "id": boot_id,
+        "started_at": now,
+        "deployment_sha": str(deployment_sha or "")[:80],
+        "process_id": int(os.getpid()),
+    }
+
+
+def latest_boot() -> dict[str, Any] | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM agency_runtime_boots ORDER BY started_at DESC,rowid DESC LIMIT 1"
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def get_mode() -> str:

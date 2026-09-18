@@ -118,6 +118,7 @@ def _bypass_confirmation_authorized(tool: str, args: dict[str, Any]) -> bool:
 class AgentReply:
     ok: bool
     message: str
+    data: Any = None
 
 
 def _normalize(text: str) -> str:
@@ -125,7 +126,11 @@ def _normalize(text: str) -> str:
 
 
 def _result(reply: Any) -> AgentReply:
-    return AgentReply(bool(reply.ok), str(reply.message))
+    return AgentReply(
+        bool(reply.ok),
+        str(reply.message),
+        getattr(reply, "data", None),
+    )
 
 
 def _matching_tab_exists(name: str) -> bool:

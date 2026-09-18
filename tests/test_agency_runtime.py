@@ -245,6 +245,43 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertEqual(executor_calls, [])
         runtime = agency_runtime._runtime_state(state_id)
         self.assertIn("unsupported tool", str(runtime["last_error"]).lower())
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertIn("sandbox.command", state["blocked_reason"])
+        self.assertIsNone(agency_plan.current_plan(state_id))
+
+    def test_unsupported_tool_still_blocks_if_capability_introspection_fails(self) -> None:
+        _, state_id = self._make_state("Planner Capability Inspection Failure")
+        agency_runtime.set_mode("active")
+
+        with patch(
+            "jarvis_mrb.agency_capability.available_tool",
+            side_effect=RuntimeError("capability registry unavailable"),
+        ):
+            result = agency_runtime.tick_desired_state(
+                state_id,
+                executor=lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not execute",
+                ),
+                planner=lambda _prompt: {
+                    "summary": "Attempt unsupported tool",
+                    "nodes": [
+                        {
+                            "id": "bad",
+                            "tool": "sandbox.command",
+                            "arguments": {"command": "whoami"},
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
+
+        self.assertFalse(result["action_executed"])
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertIn("capability inspection failed", state["blocked_reason"])
         self.assertIsNone(agency_plan.current_plan(state_id))
 
     def test_identical_failed_replan_blocks_instead_of_looping(self) -> None:

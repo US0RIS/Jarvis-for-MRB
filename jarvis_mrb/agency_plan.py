@@ -81,6 +81,33 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_agency_steps_plan
             ON agency_steps(plan_id,status,ordinal);
+
+        CREATE TRIGGER IF NOT EXISTS agency_plans_immutable_identity
+        BEFORE UPDATE ON agency_plans
+        WHEN NEW.id IS NOT OLD.id
+          OR NEW.desired_state_id IS NOT OLD.desired_state_id
+          OR NEW.generation IS NOT OLD.generation
+          OR NEW.created_at IS NOT OLD.created_at
+          OR NEW.relevance_hash IS NOT OLD.relevance_hash
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency plan identity and relevance baseline are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_steps_immutable_spec
+        BEFORE UPDATE ON agency_steps
+        WHEN NEW.id IS NOT OLD.id
+          OR NEW.plan_id IS NOT OLD.plan_id
+          OR NEW.step_key IS NOT OLD.step_key
+          OR NEW.ordinal IS NOT OLD.ordinal
+          OR NEW.tool IS NOT OLD.tool
+          OR NEW.arguments_json IS NOT OLD.arguments_json
+          OR NEW.depends_on_json IS NOT OLD.depends_on_json
+          OR NEW.risk IS NOT OLD.risk
+          OR NEW.requires_confirmation IS NOT OLD.requires_confirmation
+          OR NEW.created_at IS NOT OLD.created_at
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency step specification is immutable');
+        END;
         """
     )
     plan_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_plans)").fetchall()}

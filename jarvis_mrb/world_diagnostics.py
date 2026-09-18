@@ -21,7 +21,7 @@ _REQUIRED_TABLES = {
     "term_observations", "term_conflicts", "document_version_pairs",
     "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
     "runtime_subsystem_health", "gmail_attachment_sync_state", "world_schema_meta", "world_schema_history",
-} | _AGENCY_REQUIRED_TABLES
+}
 _STRONG_PERSON_PROJECT_ROLES = {
     "sender", "recipient", "attendee", "organizer", "owner", "assignee",
     "participant", "meeting_participant", "speaker", "requester", "beneficiary",
@@ -56,7 +56,7 @@ def _parse_time(raw: str | None) -> datetime | None:
     return value.astimezone()
 
 
-def validate() -> dict[str, Any]:
+def validate(*, require_agency: bool = False) -> dict[str, Any]:
     from jarvis_mrb.runtime_health import status as runtime_status
     from jarvis_mrb.world_document_versions import status as document_status
     from jarvis_mrb.world_executive import status as executive_status
@@ -121,7 +121,8 @@ def validate() -> dict[str, Any]:
             warnings.append(f"World database journal_mode is {journal_mode}, expected WAL after migration.")
 
         tables = _existing_tables(conn)
-        missing_tables = sorted(_REQUIRED_TABLES - tables)
+        required_tables = _REQUIRED_TABLES | (_AGENCY_REQUIRED_TABLES if require_agency else set())
+        missing_tables = sorted(required_tables - tables)
         if missing_tables:
             problems.append("Missing required world tables: " + ", ".join(missing_tables))
 
@@ -135,7 +136,7 @@ def validate() -> dict[str, Any]:
             "awaiting_verification_without_id": 0,
             "approval_plan_without_step": 0,
         }
-        if _AGENCY_REQUIRED_TABLES <= tables:
+        if require_agency and _AGENCY_REQUIRED_TABLES <= tables:
             valid_desired = ("active", "satisfied", "blocked", "paused", "retired")
             desired_ph = ",".join("?" for _ in valid_desired)
             agency_metrics["invalid_desired_states"] = int(conn.execute(
@@ -473,6 +474,7 @@ def validate() -> dict[str, Any]:
         "schema_migrations": migrations,
         "migration_history_contiguous": migration_history == expected_history,
         "missing_required_tables": missing_tables,
+        "agency_required": bool(require_agency),
         "core": core,
         "linker": linker,
         "executive": executive,

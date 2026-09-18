@@ -451,7 +451,9 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
             return AgentReply(False, str(exc))
         body = result.get("body")
         rendered = json.dumps(body, ensure_ascii=False) if not isinstance(body, str) else body
-        return AgentReply(True, f"Custom tool returned HTTP {result.get('status_code')}. {rendered[:2500]}")
+        status_code = int(result.get("status_code") or 0)
+        ok = 200 <= status_code < 300
+        return AgentReply(ok, f"Custom tool returned HTTP {status_code}. {rendered[:2500]}")
     if tool == "custom.repairs":
         repairs = list_custom_repairs()
         if not repairs:

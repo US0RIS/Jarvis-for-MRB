@@ -548,6 +548,63 @@ def _real_observation_event_ids(
     ]
 
 
+def _direct_evidence_event_ids(
+    conn: sqlite3.Connection,
+    outcome: dict[str, Any],
+    *,
+    min_event_id: int,
+) -> list[int]:
+    """Return only events directly referenced by one criterion outcome.
+
+    Unlike wake detection, this intentionally does not broaden an entity to every
+    recent event involving it; causal completion evidence must point at the exact
+    observation/action outcome that made the criterion true.
+    """
+    candidates: list[int] = []
+    event_id = outcome.get("event_id")
+    if event_id is not None:
+        try:
+            candidates.append(int(event_id))
+        except (TypeError, ValueError):
+            pass
+
+    belief_id = outcome.get("belief_id")
+    if belief_id is not None:
+        try:
+            row = conn.execute(
+                "SELECT source_event_id FROM beliefs WHERE id=?",
+                (int(belief_id),),
+            ).fetchone()
+        except (TypeError, ValueError):
+            row = None
+        if row is not None and row["source_event_id"] is not None:
+            candidates.append(int(row["source_event_id"]))
+
+    criterion = (
+        outcome.get("criterion")
+        if isinstance(outcome.get("criterion"), dict)
+        else {}
+    )
+    commitment_id = str(criterion.get("commitment_id") or "")
+    if commitment_id:
+        row = conn.execute(
+            "SELECT source_event_id,resolution_event_id FROM commitments WHERE id=?",
+            (commitment_id,),
+        ).fetchone()
+        if row is not None:
+            for key in ("resolution_event_id", "source_event_id"):
+                if row[key] is not None:
+                    candidates.append(int(row[key]))
+
+    return sorted(
+        {
+            value
+            for value in candidates
+            if int(value) > int(min_event_id)
+        }
+    )
+
+
 def _wake_evidence_real_event_ids(
     conn: sqlite3.Connection,
     outcome: dict[str, Any],
@@ -2034,7 +2091,7 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             if not isinstance(outcome, dict):
                 continue
             evidence_event_ids.update(
-                _wake_evidence_real_event_ids(
+                _direct_evidence_event_ids(
                     conn,
                     outcome,
                     min_event_id=int(session["baseline"].get("max_event_id") or 0),

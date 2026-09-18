@@ -808,26 +808,58 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 },
             )
 
-            # A11 — self model guides choices but can never grant authority.
+            # A11 — inferred preferences may guide planning but cannot grant authority.
+            _, state_a11 = _make_state(env, "Acceptance A11")
             sm.upsert(
                 "preference",
-                "email_autonomy",
-                "send routine email automatically",
-                confidence=1.0,
-                source_ref="a11:preference",
+                "calendar_autonomy",
+                {"behavior": "automatically handle routine calendar holds"},
+                confidence=0.85,
+                source_kind="inferred_behavior",
+                source_ref="a11:inferred-preference",
             )
-            permissions.set_policy("external_write", "deny")
-            authority_a11 = sm.authority_for("gmail.send")
+            permissions.set_policy("external_write", "confirm")
+            plan_a11 = ap.create_plan(
+                state_a11,
+                [
+                    {
+                        "id": "write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A11 synthetic protected hold",
+                            "start": "2030-01-01T14:00:00-08:00",
+                            "end": "2030-01-01T14:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            calls_a11: list[str] = []
+            waiting_a11 = ap.execute_next(
+                plan_a11["id"],
+                lambda tool, args, **kwargs: calls_a11.append(tool)
+                or SimpleNamespace(ok=True, message="must not execute"),
+            )
+            authority_a11 = sm.authority_for("calendar.create")
+            preference_a11 = sm.get("preference", "calendar_autonomy")
             _check(
                 checks,
                 "A11",
-                "high-confidence self-model preference cannot override permission authority",
-                not authority_a11["allowed"]
+                "inferred autonomy preference cannot bypass protected action approval boundary",
+                preference_a11 is not None
+                and preference_a11["source_kind"] == "inferred_behavior"
+                and waiting_a11["status"] == "awaiting_approval"
+                and calls_a11 == []
+                and authority_a11["allowed"]
+                and authority_a11["requires_confirmation"]
                 and authority_a11["authority_source"] == "permissions"
                 and not authority_a11["self_model_can_override"],
-                authority_a11,
+                {
+                    "preference": preference_a11,
+                    "plan_status": waiting_a11["status"],
+                    "executor_calls": calls_a11,
+                    "authority": authority_a11,
+                },
             )
-            permissions.set_policy("external_write", "confirm")
 
             # A12 — synthetic one-decision trace. It deliberately includes private/public
             # reads, parallel analysis, injected reality change -> replan, protected write,

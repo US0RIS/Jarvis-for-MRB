@@ -6,7 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import jarvis_mrb.agent as agent
 import jarvis_mrb.agency_plan as agency_plan
 import jarvis_mrb.agency_runtime as agency_runtime
 import jarvis_mrb.desired_state as desired_state
@@ -33,6 +35,8 @@ class AgencyPlanTests(unittest.TestCase):
 
         permissions.APP_DIR = self.base
         permissions.POLICY_PATH = self.base / "permissions.json"
+        permissions.set_policy("external_write", "confirm")
+        agent._PENDING_ACTION = None
 
         world_model.status()
         world_executive.status()
@@ -43,6 +47,7 @@ class AgencyPlanTests(unittest.TestCase):
         world_verification.status()
 
     def tearDown(self) -> None:
+        agent._PENDING_ACTION = None
         self.temp.cleanup()
 
     def _state_for_project(self, name: str = "Project Agency") -> tuple[str, str]:
@@ -55,6 +60,180 @@ class AgencyPlanTests(unittest.TestCase):
             source_ref=f"test:{name}",
         )
         return entity_id, str(state["id"])
+
+    def test_naked_confirmation_bypass_is_rejected(self) -> None:
+        args = {
+            "summary": "Naked bypass",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        with patch.object(
+            agent,
+            "_execute_unchecked",
+            return_value=agent.AgentReply(True, "unexpected execution"),
+        ) as unchecked:
+            reply = agent.execute_tool(
+                "calendar.create",
+                args,
+                bypass_confirmation=True,
+            )
+
+        self.assertFalse(reply.ok)
+        self.assertIn("no matching persisted confirmation authority", reply.message)
+        unchecked.assert_not_called()
+
+    def test_staged_user_confirmation_executes_only_exact_unchanged_action(self) -> None:
+        args = {
+            "summary": "Exact user confirmation",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        with patch.object(
+            agent,
+            "_execute_unchecked",
+            return_value=agent.AgentReply(True, "executed exact action"),
+        ) as unchecked:
+            staged = agent.execute_tool("calendar.create", args)
+            self.assertTrue(staged.ok)
+            self.assertIn("Say 'confirm'", staged.message)
+
+            confirmed = agent._confirm_pending()
+
+        self.assertTrue(confirmed.ok)
+        self.assertEqual(confirmed.message, "executed exact action")
+        unchecked.assert_called_once_with("calendar.create", args)
+        self.assertIsNone(agent._PENDING_ACTION)
+
+    def test_mutated_staged_user_confirmation_is_cancelled(self) -> None:
+        args = {
+            "summary": "Original pending action",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        staged = agent.execute_tool("calendar.create", args)
+        self.assertTrue(staged.ok)
+        self.assertIsNotNone(agent._PENDING_ACTION)
+        assert agent._PENDING_ACTION is not None
+        tool, stored_args, stored_key = agent._PENDING_ACTION
+        stored_args["summary"] = "Tampered after prompt"
+        agent._PENDING_ACTION = (tool, stored_args, stored_key)
+
+        with patch.object(
+            agent,
+            "_execute_unchecked",
+            return_value=agent.AgentReply(True, "must not execute"),
+        ) as unchecked:
+            confirmed = agent._confirm_pending()
+
+        self.assertFalse(confirmed.ok)
+        self.assertIn("changed after confirmation was requested", confirmed.message)
+        unchecked.assert_not_called()
+        self.assertIsNone(agent._PENDING_ACTION)
+
+    def test_agency_approval_capability_authorizes_only_exact_persisted_action_once(self) -> None:
+        _, state_id = self._state_for_project("Project Exact Approval")
+        args = {
+            "summary": "Exact Agency approval",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "write", "tool": "calendar.create", "arguments": args}],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step_id = str(waiting["steps"][0]["id"])
+
+        # A persisted awaiting-approval step is not itself confirmation authority.
+        from jarvis_mrb.tool_audit import agency_step_context
+        with (
+            agency_step_context(step_id),
+            patch.object(
+                agent,
+                "_execute_unchecked",
+                return_value=agent.AgentReply(True, "must not execute yet"),
+            ) as unchecked_before,
+        ):
+            premature = agent.execute_tool(
+                "calendar.create",
+                args,
+                bypass_confirmation=True,
+            )
+        self.assertFalse(premature.ok)
+        unchecked_before.assert_not_called()
+
+        exact_reply: agent.AgentReply | None = None
+        tampered_reply: agent.AgentReply | None = None
+
+        def approved_executor(
+            tool: str,
+            resolved: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> agent.AgentReply:
+            nonlocal exact_reply, tampered_reply
+            self.assertTrue(bypass_confirmation)
+            exact_reply = agent.execute_tool(
+                tool,
+                resolved,
+                bypass_confirmation=True,
+            )
+            tampered = dict(resolved)
+            tampered["summary"] = "Different unapproved action"
+            tampered_reply = agent.execute_tool(
+                tool,
+                tampered,
+                bypass_confirmation=True,
+            )
+            assert exact_reply is not None
+            return exact_reply
+
+        with patch.object(
+            agent,
+            "_execute_unchecked",
+            return_value=agent.AgentReply(True, "exact protected action executed"),
+        ) as unchecked:
+            result = agency_plan.approve_step(
+                plan["id"],
+                step_id,
+                approved_executor,
+            )
+
+        self.assertIsNotNone(exact_reply)
+        self.assertTrue(exact_reply.ok)
+        self.assertIsNotNone(tampered_reply)
+        self.assertFalse(tampered_reply.ok)
+        self.assertIn(
+            "no matching persisted confirmation authority",
+            tampered_reply.message,
+        )
+        unchecked.assert_called_once_with("calendar.create", args)
+
+        # This fake executor did not produce a durable external verification, so
+        # the plan correctly fails outcome verification; confirmation was still
+        # consumed and cannot be replayed.
+        self.assertEqual(result["status"], "needs_replan")
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertEqual(persisted["steps"][0]["approval_digest"], "")
+
+        with (
+            agency_step_context(step_id),
+            patch.object(
+                agent,
+                "_execute_unchecked",
+                return_value=agent.AgentReply(True, "must not replay"),
+            ) as replay_unchecked,
+        ):
+            replay = agent.execute_tool(
+                "calendar.create",
+                args,
+                bypass_confirmation=True,
+            )
+        self.assertFalse(replay.ok)
+        replay_unchecked.assert_not_called()
 
     def test_pausing_goal_after_approval_is_staged_prevents_execution(self) -> None:
         _, state_id = self._state_for_project("Project Revoke Goal")

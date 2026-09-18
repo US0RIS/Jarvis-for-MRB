@@ -33,6 +33,10 @@ _INFERRED_SOURCE_KINDS = {
 }
 
 
+def is_inferred_source(source_kind: str) -> bool:
+    return str(source_kind or "").strip().lower() in _INFERRED_SOURCE_KINDS
+
+
 def _source_authority(source_kind: str) -> int:
     clean = str(source_kind or "").strip().lower()
     if clean in _EXPLICIT_SOURCE_KINDS:

@@ -160,38 +160,55 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
         }
 
     if tool == "gmail.send":
-        # AgentReply currently may not preserve GoogleResult.data. The causal Gmail
-        # search boundary prevents an earlier message to the same recipient/subject
-        # from falsely verifying this send; exact message ID wins when available.
+        message_id = str(data.get("message_id") or "").strip()
         expected = {
-            "message_id": str(data.get("message_id") or ""),
+            "message_id": message_id,
             "recipient": str(data.get("email") or args.get("recipient") or "").strip().lower(),
             "subject": str(args.get("subject") or "").strip(),
             "not_before_unix": int((now - timedelta(seconds=10)).timestamp()),
         }
+        if not message_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": expected,
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Gmail accepted the send but returned no stable message ID; fuzzy recipient/subject matching is not accepted as proof.",
+            }
         return {
             "verifier": "gmail_sent_message",
             "expected": expected,
             "status": "pending",
             "next_check_at": (now + timedelta(seconds=5)).isoformat(),
             "deadline_at": (now + timedelta(minutes=10)).isoformat(),
-            "evidence": "Gmail send API accepted the message; waiting for causally bounded Sent Mail read-back.",
+            "evidence": f"Gmail accepted message {message_id}; waiting for exact-ID Sent Mail read-back.",
         }
 
     if tool == "calendar.create":
+        event_id = str(data.get("event_id") or "").strip()
         expected = {
-            "event_id": str(data.get("event_id") or ""),
+            "event_id": event_id,
             "summary": str(args.get("summary") or "").strip(),
             "start": str(args.get("start") or "").strip(),
             "end": str(args.get("end") or "").strip(),
         }
+        if not event_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": expected,
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Calendar accepted the create request but returned no stable event ID; title/time matching is not accepted as proof.",
+            }
         return {
             "verifier": "calendar_event_exists",
             "expected": expected,
             "status": "pending",
             "next_check_at": (now + timedelta(seconds=5)).isoformat(),
             "deadline_at": (now + timedelta(minutes=10)).isoformat(),
-            "evidence": "Calendar create API accepted the event; waiting for independent calendar read-back.",
+            "evidence": f"Calendar accepted event {event_id}; waiting for exact-ID calendar read-back.",
         }
 
     if tool in {"pc.launch_app", "smart.open"}:
@@ -528,13 +545,11 @@ def _gmail_observation(expected: dict[str, Any]) -> tuple[str, str]:
     if not result.ok:
         raise RuntimeError(result.message)
     emails = list((result.data or {}).get("emails") or [])
-    if message_id:
-        if any(str(item.get("id") or "") == message_id for item in emails if isinstance(item, dict)):
-            return ("verified", f"Sent Mail contains Gmail message {message_id} inside the causal verification window.")
-        return ("pending", f"Gmail message {message_id} is not visible in the causally bounded Sent Mail query yet.")
-    if emails:
-        return ("verified", "Sent Mail contains a recipient/subject match created after this action was attempted.")
-    return ("pending", "No causally valid Sent Mail match is visible yet.")
+    if not message_id:
+        return ("pending", "No stable Gmail message ID is available; fuzzy Sent Mail matching is not accepted as verification.")
+    if any(str(item.get("id") or "") == message_id for item in emails if isinstance(item, dict)):
+        return ("verified", f"Sent Mail contains Gmail message {message_id} inside the causal verification window.")
+    return ("pending", f"Gmail message {message_id} is not visible in the causally bounded Sent Mail query yet.")
 
 
 def _calendar_observation(expected: dict[str, Any]) -> tuple[str, str]:
@@ -559,19 +574,11 @@ def _calendar_observation(expected: dict[str, Any]) -> tuple[str, str]:
     if not result.ok:
         raise RuntimeError(result.message)
     events = list((result.data or {}).get("events") or [])
-    if event_id and any(str(item.get("id") or "") == event_id for item in events if isinstance(item, dict)):
+    if not event_id:
+        return ("pending", "No stable Calendar event ID is available; title/time matching is not accepted as verification.")
+    if any(str(item.get("id") or "") == event_id for item in events if isinstance(item, dict)):
         return ("verified", f"Calendar read-back contains event {event_id}.")
-    for item in events:
-        if not isinstance(item, dict):
-            continue
-        if summary and str(item.get("summary") or "").strip() != summary:
-            continue
-        if start and str(item.get("start") or "").strip() != start:
-            continue
-        if end and str(item.get("end") or "").strip() != end:
-            continue
-        return ("verified", "Calendar read-back contains the created event with matching title/start/end.")
-    return ("pending", "Created calendar event is not independently visible yet.")
+    return ("pending", f"Calendar event {event_id} is not independently visible yet.")
 
 
 def _app_running(name: str) -> tuple[bool, str]:

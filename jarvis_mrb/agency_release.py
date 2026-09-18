@@ -207,8 +207,17 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
             "final_desired_state_satisfied",
         ):
             _require_true(evidence, key, gate)
-        if not str(trace_ref or "").strip():
+        clean_trace = str(trace_ref or "").strip()
+        if not clean_trace:
             raise ValueError("A12 real receipt requires a non-empty human-readable trace_ref.")
+        trace_path = Path(clean_trace).expanduser()
+        if not trace_path.is_file():
+            raise ValueError("A12 real receipt trace_ref must point to an existing trace file.")
+        try:
+            if not trace_path.read_text(encoding="utf-8", errors="replace").strip():
+                raise ValueError("A12 real receipt trace file is empty.")
+        except OSError as exc:
+            raise ValueError(f"A12 real receipt trace file is unreadable: {exc}") from exc
 
 
 def record_real_gate_receipt(
@@ -404,6 +413,21 @@ def release_status(
         else []
     )
     by_gate = {str(item["gate"]): item for item in receipts}
+    invalid_receipts: dict[str, str] = {}
+    a12 = by_gate.get("A12")
+    if a12 is not None:
+        trace = Path(str(a12.get("trace_ref") or "")).expanduser()
+        if not trace.is_file():
+            invalid_receipts["A12"] = "human-readable A12 trace file is missing"
+            by_gate.pop("A12", None)
+        else:
+            try:
+                if not trace.read_text(encoding="utf-8", errors="replace").strip():
+                    invalid_receipts["A12"] = "human-readable A12 trace file is empty"
+                    by_gate.pop("A12", None)
+            except OSError:
+                invalid_receipts["A12"] = "human-readable A12 trace file is unreadable"
+                by_gate.pop("A12", None)
     missing_real = sorted(REAL_GATES - set(by_gate))
 
     validation = latest_validation_run(sha, environment=env) if valid_sha else None
@@ -442,6 +466,7 @@ def release_status(
         "validation_run": validation,
         "current_diagnostics_ok": diagnostics_ok,
         "real_gate_receipts": {gate: by_gate[gate]["id"] for gate in sorted(by_gate)},
+        "invalid_real_gate_receipts": invalid_receipts,
         "missing_real_gates": missing_real,
         "synthetic_only_gates": sorted(SYNTHETIC_ONLY_GATES),
         "reasons": reasons,

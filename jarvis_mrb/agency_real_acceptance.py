@@ -2213,7 +2213,8 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     verified_completion_links: list[dict[str, Any]] = []
     satisfied_evaluations = conn.execute(
         """
-        SELECT id,observed_at,satisfied,state_before,state_after,details_json
+        SELECT id,observed_at,satisfied,state_before,state_after,
+               evidence_json,missing_json
         FROM desired_state_evaluations
         WHERE desired_state_id=? AND observed_at>=? AND satisfied=1
         ORDER BY observed_at,id
@@ -2245,7 +2246,8 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
                         "observed_at": str(evaluation["observed_at"]),
                         "state_before": str(evaluation["state_before"]),
                         "state_after": str(evaluation["state_after"]),
-                        "details": _loads(str(evaluation["details_json"] or "{}"), {}),
+                        "evidence": _loads(str(evaluation["evidence_json"] or "[]"), []),
+                        "missing": _loads(str(evaluation["missing_json"] or "[]"), []),
                     }
                 )
         linked = bool(matching_evaluations)

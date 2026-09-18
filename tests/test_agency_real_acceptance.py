@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import jarvis_mrb.agency_attention as agency_attention
+import jarvis_mrb.agency_deliberation as agency_deliberation
 import jarvis_mrb.agency_plan as agency_plan
 import jarvis_mrb.agency_real_acceptance as agency_real_acceptance
 import jarvis_mrb.agency_release as agency_release
@@ -36,6 +37,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             "plan_db": agency_plan.DB_PATH,
             "runtime_db": agency_runtime.DB_PATH,
             "attention_db": agency_attention.DB_PATH,
+            "deliberation_db": agency_deliberation.DB_PATH,
             "verification_db": world_verification.DB_PATH,
             "permissions_app": permissions.APP_DIR,
             "permissions_path": permissions.POLICY_PATH,
@@ -47,6 +49,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         agency_plan.DB_PATH = self.db
         agency_runtime.DB_PATH = self.db
         agency_attention.DB_PATH = self.db
+        agency_deliberation.DB_PATH = self.db
         world_verification.DB_PATH = self.db
         permissions.APP_DIR = self.base
         permissions.POLICY_PATH = self.base / "permissions.json"
@@ -57,6 +60,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         agency_plan.status()
         agency_runtime.status()
         agency_attention.status()
+        agency_deliberation.status()
         world_verification.status()
         agency_real_acceptance.status()
         # Initialize release tables without depending on current deployment status.
@@ -71,6 +75,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         agency_plan.DB_PATH = self.originals["plan_db"]
         agency_runtime.DB_PATH = self.originals["runtime_db"]
         agency_attention.DB_PATH = self.originals["attention_db"]
+        agency_deliberation.DB_PATH = self.originals["deliberation_db"]
         world_verification.DB_PATH = self.originals["verification_db"]
         permissions.APP_DIR = self.originals["permissions_app"]
         permissions.POLICY_PATH = self.originals["permissions_path"]
@@ -181,6 +186,108 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertEqual(finalized["receipt"]["gate"], "A8")
 
         self.assertEqual(emitted, ["One high-value exception"])
+
+    def test_uncorrelated_audited_tool_execution_is_manual_orchestration(self) -> None:
+        events = [
+            {
+                "id": 1,
+                "event_type": "action.tool",
+                "source_kind": "jarvis_tool",
+                "payload": {"tool": "web.search", "agency_step_id": ""},
+            },
+            {
+                "id": 2,
+                "event_type": "action.tool",
+                "source_kind": "jarvis_tool",
+                "payload": {"tool": "knowledge.search", "agency_step_id": "agency-step:owned"},
+            },
+        ]
+        flagged = agency_real_acceptance._manual_orchestration_events(events)
+        self.assertEqual(len(flagged), 1)
+        self.assertEqual(flagged[0]["event_id"], 1)
+        self.assertEqual(flagged[0]["tool"], "web.search")
+
+    def test_a12_parallel_analysis_must_belong_to_its_own_agency_step(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A12 Linked Deliberation")
+        state = desired_state.create_desired_state(
+            "A12 Linked Deliberation complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            source_kind="test",
+            source_ref="real:a12-linked",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [
+                {
+                    "id": "deliberate",
+                    "tool": "agency.deliberate",
+                    "arguments": {"question": "Choose path", "context": "test"},
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            agency_deliberation.deliberate(
+                "Unrelated deliberation",
+                roles=["evidence", "skeptic"],
+                worker=lambda role, q, ctx: {
+                    "conclusion": role,
+                    "claims": [],
+                    "risks": [],
+                    "unknowns": [],
+                },
+                synthesizer=lambda q, ctx, outputs, disagreements: {
+                    "answer": "unrelated",
+                    "consensus": [],
+                    "disagreements": [{"issue": "unrelated"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.5,
+                },
+            )
+            unrelated_eval = agency_real_acceptance.evaluate_session(session["id"])
+            parallel_check = next(
+                item for item in unrelated_eval["checks"]
+                if item["name"].startswith("parallel deliberation belonged")
+            )
+            self.assertFalse(parallel_check["passed"])
+
+            def executor(tool: str, args: dict, **kwargs: object):
+                result = agency_deliberation.deliberate(
+                    str(args.get("question") or ""),
+                    context=str(args.get("context") or ""),
+                    roles=["evidence", "skeptic"],
+                    worker=lambda role, q, ctx: {
+                        "conclusion": "yes" if role == "evidence" else "no",
+                        "claims": [],
+                        "risks": [],
+                        "unknowns": [],
+                    },
+                    synthesizer=lambda q, ctx, outputs, disagreements: {
+                        "answer": "disagreement",
+                        "consensus": [],
+                        "disagreements": [{"issue": "linked disagreement"}],
+                        "unknowns": [],
+                        "recommended_next_evidence": [],
+                        "confidence": 0.5,
+                    },
+                )
+                return type("Reply", (), {"ok": True, "message": result["synthesis"]["answer"]})()
+
+            agency_plan.execute_next(plan["id"], executor)
+            linked_eval = agency_real_acceptance.evaluate_session(session["id"])
+            linked_parallel_check = next(
+                item for item in linked_eval["checks"]
+                if item["name"].startswith("parallel deliberation belonged")
+            )
+            self.assertTrue(linked_parallel_check["passed"])
 
     def test_sha_change_mid_session_prevents_receipt(self) -> None:
         with self._patch_identity(SHA_A):

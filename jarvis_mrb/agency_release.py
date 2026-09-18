@@ -614,6 +614,10 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
 
     if gate == "A1":
         _require_true(evidence, "restart_observed", gate)
+        _require_true(evidence, "completed_work_preserved", gate)
+        _require_true(evidence, "evidence_preserved", gate)
+        _require_true(evidence, "pending_approval_preserved", gate)
+        _require_true(evidence, "next_evaluation_preserved", gate)
         _require_true(evidence, "goal_recovered_without_restatement", gate)
     elif gate == "A2":
         _require_int_at_least(evidence, "action_observation_cycles", 2, gate)

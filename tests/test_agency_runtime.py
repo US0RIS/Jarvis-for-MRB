@@ -193,6 +193,38 @@ class AgencyRuntimeTests(unittest.TestCase):
         closed = desired_state.get_desired_state(state["id"])
         self.assertEqual(closed["state"], "satisfied")
 
+    def test_blocked_goal_wakes_when_persisted_condition_becomes_true(self) -> None:
+        entity_id, state_id = self._make_state("Project Wake")
+        desired_state.set_state(state_id, "blocked", reason="Waiting for prerequisite.")
+        desired_state.add_wake_watch(
+            state_id,
+            {"kind": "belief_equals", "entity_id": entity_id, "predicate": "prerequisite", "value": "available"},
+        )
+
+        first = desired_state.check_wake_watches()
+        self.assertEqual(first["triggered"], 0)
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "blocked")
+
+        world_model.assert_belief(entity_id, "prerequisite", value="available")
+        second = desired_state.check_wake_watches()
+        self.assertEqual(second["triggered"], 1)
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "active")
+        watches = desired_state.list_wake_watches(desired_state_id=state_id)
+        self.assertEqual(watches[0]["status"], "triggered")
+
+    def test_user_paused_goal_does_not_wake_automatically(self) -> None:
+        entity_id, state_id = self._make_state("Project Pause")
+        desired_state.set_state(state_id, "paused")
+        desired_state.add_wake_watch(
+            state_id,
+            {"kind": "belief_equals", "entity_id": entity_id, "predicate": "prerequisite", "value": True},
+        )
+        world_model.assert_belief(entity_id, "prerequisite", value=True)
+
+        result = desired_state.check_wake_watches()
+        self.assertEqual(result["triggered"], 0)
+        self.assertEqual(desired_state.get_desired_state(state_id)["state"], "paused")
+
     def test_agency_authority_expansion_is_security_class(self) -> None:
         self.assertEqual(permissions.decide("agency.enable").risk, "security")
         self.assertTrue(permissions.decide("agency.enable").needs_confirmation)

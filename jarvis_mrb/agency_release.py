@@ -652,6 +652,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_true(evidence, "external_change_observed", gate)
         _require_true(evidence, "stale_path_invalidated", gate)
         _require_true(evidence, "replanned_without_goal_restatement", gate)
+        _require_true(evidence, "already_valid_work_preserved", gate)
     elif gate == "A6":
         _require_true(evidence, "dormant_state_observed", gate)
         _require_true(evidence, "wake_condition_changed", gate)

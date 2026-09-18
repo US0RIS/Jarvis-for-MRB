@@ -9,6 +9,7 @@ from unittest.mock import patch
 import jarvis_mrb.agency_capability as agency_capability
 import jarvis_mrb.agency_plan as agency_plan
 import jarvis_mrb.agency_runtime as agency_runtime
+import jarvis_mrb.agent as agent
 import jarvis_mrb.desired_state as desired_state
 import jarvis_mrb.permissions as permissions
 import jarvis_mrb.world_executive as world_executive
@@ -78,6 +79,60 @@ class AgencyCapabilityTests(unittest.TestCase):
 
         loaded = agency_capability.get_gap(gap["id"])
         self.assertEqual(loaded["observed_availability"], snapshot)
+
+    def test_agent_gap_aware_synthesis_persists_exact_capability_proposal(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "weather.private_api",
+            "Need a narrow private weather API.",
+        )
+
+        with patch(
+            "jarvis_mrb.custom_tools.synthesize",
+            return_value={
+                "name": "private_weather",
+                "enabled": False,
+                "risk": "read",
+                "allowed_hosts": ["weather.example.com"],
+            },
+        ):
+            reply = agent._execute_unchecked(
+                "custom.synthesize",
+                {
+                    "gap_id": gap["id"],
+                    "name": "private_weather",
+                    "description": "Read private weather.",
+                    "api_spec": "GET /weather",
+                    "allowed_hosts": ["weather.example.com"],
+                    "risk": "read",
+                },
+            )
+
+        self.assertTrue(reply.ok)
+        self.assertIn(gap["id"], reply.message)
+        self.assertIn("disabled", reply.message)
+        persisted = agency_capability.get_gap(gap["id"])
+        self.assertEqual(persisted["status"], "proposed")
+        self.assertEqual(persisted["proposed_tool_name"], "private_weather")
+
+    def test_agency_status_exposes_open_capability_gap_id_and_capability(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "weather.private_api",
+            "Need private weather.",
+        )
+        desired_state.set_state(
+            state_id,
+            "blocked",
+            reason="Missing capability: weather.private_api.",
+        )
+
+        rendered = agency_runtime.describe()
+        self.assertIn("weather.private_api", rendered)
+        self.assertIn(gap["id"], rendered)
+        self.assertIn("Missing capability", rendered)
 
     def test_adapter_synthesis_remains_disabled(self) -> None:
         state_id = self._state()

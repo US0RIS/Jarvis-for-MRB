@@ -360,6 +360,66 @@ class AgencyRuntimeTests(unittest.TestCase):
         second_fair = next(value for value in executed if value != "Priority Champion")
         self.assertNotEqual(second_fair, first_fair)
 
+    def test_tick_all_rotates_candidate_window_beyond_limit(self) -> None:
+        state_ids: list[str] = []
+        for index in range(5):
+            _, state_id = self._make_state(f"Window Goal {index}")
+            desired_state.update_priority(state_id, 50.0)
+            agency_plan.create_plan(
+                state_id,
+                [
+                    {
+                        "id": "observe",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": f"Window Goal {index}"},
+                    }
+                ],
+            )
+            state_ids.append(state_id)
+
+        agency_runtime.set_mode("active")
+        seen_by_cycle: list[set[str]] = []
+
+        def executor(
+            _tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            return SimpleNamespace(
+                ok=True,
+                message=f"Observed {args.get('query')}.",
+            )
+
+        first = agency_runtime.tick_all(
+            executor=executor,
+            max_actions=0,
+            limit=2,
+        )
+        seen_by_cycle.append(
+            {str(item["desired_state_id"]) for item in first["results"]}
+        )
+        second = agency_runtime.tick_all(
+            executor=executor,
+            max_actions=0,
+            limit=2,
+        )
+        seen_by_cycle.append(
+            {str(item["desired_state_id"]) for item in second["results"]}
+        )
+        third = agency_runtime.tick_all(
+            executor=executor,
+            max_actions=0,
+            limit=2,
+        )
+        seen_by_cycle.append(
+            {str(item["desired_state_id"]) for item in third["results"]}
+        )
+
+        union = set().union(*seen_by_cycle)
+        self.assertEqual(union, set(state_ids))
+        self.assertTrue(all(len(items) == 2 for items in seen_by_cycle))
+        self.assertEqual(first["candidate_pool"], 5)
+
     def test_fractional_priority_selects_true_highest_priority_goal_first(self) -> None:
         _, low_id = self._make_state("Fractional Low")
         _, high_id = self._make_state("Fractional High")

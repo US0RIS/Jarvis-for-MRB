@@ -119,6 +119,7 @@ def _make_state(env: dict[str, Any], name: str, *, predicate: str = "ready", exp
     state = desired_state.create_desired_state(
         f"{name} desired outcome",
         [{"kind": "belief_equals", "entity_id": entity_id, "predicate": predicate, "value": expected}],
+        authority={"agency_enabled": True, "origin": "agency_acceptance"},
         source_kind="agency_acceptance",
         source_ref=f"acceptance:{name}",
     )

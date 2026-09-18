@@ -10,7 +10,7 @@ from jarvis_mrb.world_model import DB_PATH, status as world_status
 
 _AGENCY_REQUIRED_TABLES = {
     "desired_states", "desired_state_evaluations", "desired_state_watches",
-    "agency_plans", "agency_steps", "agency_runtime_state", "agency_settings",
+    "agency_plans", "agency_steps", "agency_runtime_state", "agency_settings", "agency_runtime_boots",
     "agency_deliberations", "agency_deliberation_workers", "agency_attention_events",
     "agency_capability_gaps", "agency_decision_cases", "agency_decision_branches",
     "agency_self_model_entries", "agency_real_gate_receipts", "agency_release_validation_runs",

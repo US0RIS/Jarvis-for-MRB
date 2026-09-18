@@ -312,6 +312,33 @@ class AgencyReleaseTests(unittest.TestCase):
 
         self.assertEqual(agency_release._installation_id(), installation_id)
 
+    def test_environment_fingerprint_changes_with_permission_posture(self) -> None:
+        with (
+            patch.object(agency_release, "_host_machine_identity", return_value="host-policy"),
+            patch("jarvis_mrb.permissions._load", return_value={
+                "read": "auto",
+                "local_write": "auto",
+                "external_write": "confirm",
+                "destructive": "confirm",
+                "security": "confirm",
+            }),
+        ):
+            confirmed = agency_release.environment_fingerprint()
+
+        with (
+            patch.object(agency_release, "_host_machine_identity", return_value="host-policy"),
+            patch("jarvis_mrb.permissions._load", return_value={
+                "read": "auto",
+                "local_write": "auto",
+                "external_write": "auto",
+                "destructive": "confirm",
+                "security": "confirm",
+            }),
+        ):
+            weakened = agency_release.environment_fingerprint()
+
+        self.assertNotEqual(confirmed, weakened)
+
     def test_environment_fingerprint_binds_host_and_source_path(self) -> None:
         with (
             patch.object(agency_release, "_host_machine_identity", return_value="host-A"),

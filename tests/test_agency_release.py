@@ -104,6 +104,7 @@ def evidence_for(gate: str) -> dict:
             "replan_after_injected_change": True,
             "final_desired_state_satisfied": True,
             "final_satisfaction_followed_verified_action": True,
+            "final_satisfaction_derived_from_verified_action": True,
         },
     }
     return {**base, **extras[gate]}
@@ -492,6 +493,11 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence = evidence_for("A12")
         evidence["final_satisfaction_followed_verified_action"] = False
         with self.assertRaisesRegex(ValueError, "final_satisfaction_followed_verified_action"):
+            agency_release._validate_gate_evidence("A12", evidence, str(self.a12_trace))
+
+        evidence = evidence_for("A12")
+        evidence["final_satisfaction_derived_from_verified_action"] = False
+        with self.assertRaisesRegex(ValueError, "final_satisfaction_derived_from_verified_action"):
             agency_release._validate_gate_evidence("A12", evidence, str(self.a12_trace))
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:

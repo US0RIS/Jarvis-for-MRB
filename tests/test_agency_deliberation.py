@@ -33,7 +33,7 @@ class AgencyDeliberationTests(unittest.TestCase):
             with lock:
                 started.append(role)
             barrier.wait(timeout=2)
-            time.sleep(0.08)
+            time.sleep(0.15)
             return {
                 "conclusion": f"{role} conclusion",
                 "claims": [{"claim": "shared claim", "confidence": 0.5, "evidence": role}],
@@ -67,9 +67,9 @@ class AgencyDeliberationTests(unittest.TestCase):
         self.assertEqual(set(started), {"evidence", "skeptic", "feasibility", "risk_cost"})
         self.assertEqual(len(synthesis_inputs), 1)
         self.assertEqual(len(synthesis_inputs[0]), 4)
-        # Four 80ms workers would be >=320ms if serialized. Leave generous overhead
+        # Four 150ms workers would be >=600ms if serialized. Leave generous overhead
         # for SQLite and thread scheduling while still proving concurrent execution.
-        self.assertLess(wall, 0.30)
+        self.assertLess(wall, 0.50)
 
         persisted = agency_deliberation.get(result["id"])
         self.assertIsNotNone(persisted)

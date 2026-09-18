@@ -1266,7 +1266,6 @@ def _write_a12_trace(session: dict[str, Any], evaluation: dict[str, Any]) -> str
     directory = Path(world_model.APP_DIR) / "agency_acceptance"
     directory.mkdir(parents=True, exist_ok=True)
     safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(session["id"]))
-    path = directory / f"{safe_id}-A12.md"
     lines = [
         "# Agency A12 REAL Trace",
         "",
@@ -1296,7 +1295,29 @@ def _write_a12_trace(session: dict[str, Any], evaluation: dict[str, Any]) -> str
             "",
         ]
     )
-    path.write_text("\n".join(lines), encoding="utf-8")
+    content = "\n".join(lines)
+    content_hash = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+    path = directory / f"{safe_id}-{content_hash[:16]}-A12.md"
+    if path.exists():
+        existing = path.read_text(encoding="utf-8", errors="replace")
+        if existing != content:
+            raise RuntimeError("Content-addressed A12 trace path collision.")
+        return str(path)
+
+    temp_path = directory / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        temp_path.write_text(content, encoding="utf-8")
+        try:
+            temp_path.replace(path)
+        except OSError:
+            # Another finalizer may have published the identical content first.
+            if not path.is_file() or path.read_text(encoding="utf-8", errors="replace") != content:
+                raise
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
     return str(path)
 
 

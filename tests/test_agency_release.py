@@ -117,6 +117,7 @@ class AgencyReleaseTests(unittest.TestCase):
         env: str = ENV,
         trace_ref: str | None = None,
         harness: str = "agency-real-gate-session-v1",
+        finalization_context: bool = True,
     ) -> dict:
         checks = [{"name": f"{gate} real acceptance", "passed": True, "evidence": "observed"}]
         evidence = evidence_for(gate)
@@ -171,8 +172,8 @@ class AgencyReleaseTests(unittest.TestCase):
             str(self.a12_trace) if gate == "A12" and trace_ref is None
             else str(trace_ref or "")
         )
-        receipt = agency_release.record_real_gate_receipt(
-            gate,
+        payload = agency_release._real_receipt_context_payload(
+            gate=gate,
             deployment_sha_value=sha,
             environment=env,
             harness=harness,
@@ -181,6 +182,29 @@ class AgencyReleaseTests(unittest.TestCase):
             trace_ref=actual_trace,
             session_id=session_id,
         )
+        if finalization_context:
+            with agency_release._real_receipt_recording_context(payload):
+                receipt = agency_release.record_real_gate_receipt(
+                    gate,
+                    deployment_sha_value=sha,
+                    environment=env,
+                    harness=harness,
+                    checks=checks,
+                    evidence=evidence,
+                    trace_ref=actual_trace,
+                    session_id=session_id,
+                )
+        else:
+            receipt = agency_release.record_real_gate_receipt(
+                gate,
+                deployment_sha_value=sha,
+                environment=env,
+                harness=harness,
+                checks=checks,
+                evidence=evidence,
+                trace_ref=actual_trace,
+                session_id=session_id,
+            )
         with sqlite3.connect(self.db) as conn:
             conn.execute(
                 """
@@ -260,6 +284,16 @@ class AgencyReleaseTests(unittest.TestCase):
 
         persisted = agency_release.get_receipt(receipt["id"])
         self.assertEqual(persisted["harness"], "agency-real-gate-session-v1")
+
+    def test_persisted_passing_session_cannot_mint_receipt_outside_finalize_context(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finalize_session"):
+            self._record("A1", finalization_context=False)
+
+        receipts = agency_release.list_real_gate_receipts(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+        )
+        self.assertEqual(receipts, [])
 
     def test_low_level_real_receipt_writer_rejects_unbound_evidence(self) -> None:
         with self.assertRaisesRegex(ValueError, "live acceptance session"):

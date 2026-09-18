@@ -219,6 +219,34 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertFalse(second["action_executed"])
         self.assertEqual(agency_runtime.status()["planner_backoff"][0]["consecutive_planner_failures"], 1)
 
+    def test_injected_planner_cannot_bypass_workflow_tool_allowlist(self) -> None:
+        _, state_id = self._make_state("Project Planner Boundary")
+        agency_runtime.set_mode("active")
+        executor_calls: list[str] = []
+
+        result = agency_runtime.tick_desired_state(
+            state_id,
+            executor=lambda tool, args, **kwargs: executor_calls.append(tool) or SimpleNamespace(ok=True, message="unexpected"),
+            planner=lambda _prompt: {
+                "summary": "Attempt unbounded tool",
+                "nodes": [
+                    {
+                        "id": "bad",
+                        "tool": "sandbox.command",
+                        "arguments": {"command": "whoami"},
+                        "depends_on": [],
+                    }
+                ],
+                "missing_capability": None,
+            },
+        )
+
+        self.assertFalse(result["action_executed"])
+        self.assertEqual(executor_calls, [])
+        runtime = agency_runtime._runtime_state(state_id)
+        self.assertIn("unsupported tool", str(runtime["last_error"]).lower())
+        self.assertIsNone(agency_plan.current_plan(state_id))
+
     def test_identical_failed_replan_blocks_instead_of_looping(self) -> None:
         _, state_id = self._make_state("Project Loop")
         agency_runtime.set_mode("active")

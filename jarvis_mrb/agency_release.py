@@ -398,6 +398,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_int_at_least(evidence, "action_observation_cycles", 2, gate)
         _require_true(evidence, "desired_state_satisfied", gate)
         _require_true(evidence, "automatic_stop_observed", gate)
+        _require_true(evidence, "goal_not_repeated", gate)
     elif gate == "A3":
         _require_true(evidence, "protected_external_write_observed", gate)
         _require_true(evidence, "approval_resumed_same_plan", gate)

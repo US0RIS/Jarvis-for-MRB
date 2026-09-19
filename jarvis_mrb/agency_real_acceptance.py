@@ -656,50 +656,17 @@ def _wake_evidence_real_event_ids(
     *,
     min_event_id: int,
 ) -> list[int]:
-    candidates: list[int] = []
-    event_id = outcome.get("event_id")
-    if event_id is not None:
-        try:
-            candidates.append(int(event_id))
-        except (TypeError, ValueError):
-            pass
+    """Return exact external observations that directly made a wake criterion true.
 
-    belief_id = outcome.get("belief_id")
-    if belief_id is not None:
-        try:
-            row = conn.execute(
-                "SELECT source_event_id FROM beliefs WHERE id=?",
-                (int(belief_id),),
-            ).fetchone()
-        except (TypeError, ValueError):
-            row = None
-        if row is not None and row["source_event_id"] is not None:
-            candidates.append(int(row["source_event_id"]))
-
-    criterion = outcome.get("criterion") if isinstance(outcome.get("criterion"), dict) else {}
-    commitment_id = str(criterion.get("commitment_id") or "")
-    if commitment_id:
-        row = conn.execute(
-            "SELECT source_event_id,resolution_event_id FROM commitments WHERE id=?",
-            (commitment_id,),
-        ).fetchone()
-        if row is not None:
-            for key in ("resolution_event_id", "source_event_id"):
-                if row[key] is not None:
-                    candidates.append(int(row[key]))
-
-    entity_id = str(outcome.get("entity_id") or criterion.get("entity_id") or "")
-    if entity_id:
-        rows = conn.execute(
-            """
-            SELECT event_id FROM event_entities
-            WHERE entity_id=? AND event_id>?
-            ORDER BY event_id
-            """,
-            (entity_id, int(min_event_id)),
-        ).fetchall()
-        candidates.extend(int(row["event_id"]) for row in rows)
-
+    A merely related event on the same entity is not enough: dormant goals should
+    wake because the watched condition changed, not because something else
+    happened to the same project/person/resource.
+    """
+    candidates = _direct_evidence_event_ids(
+        conn,
+        outcome,
+        min_event_id=int(min_event_id),
+    )
     return _real_observation_event_ids(
         conn,
         candidates,

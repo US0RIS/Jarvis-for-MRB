@@ -2689,6 +2689,28 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     causal_replan = _causal_replan_evidence(conn, session, events)
 
     step_by_id = {str(row["id"]): row for row in steps}
+    audited_action_event_ids: dict[str, list[int]] = {}
+    for item in events:
+        if item["event_type"] != "action.tool":
+            continue
+        if str(item.get("source_kind") or "") != "jarvis_tool":
+            continue
+        payload = item.get("payload") or {}
+        if not bool(payload.get("ok")):
+            continue
+        step_id = str(payload.get("agency_step_id") or "")
+        tool = str(payload.get("tool") or "")
+        step = step_by_id.get(step_id)
+        if (
+            not step_id
+            or step is None
+            or str(step["tool"] or "") != tool
+        ):
+            continue
+        audited_action_event_ids.setdefault(step_id, []).append(
+            int(item["id"])
+        )
+
     execution_event_ids: dict[str, list[int]] = {}
     for item in state_events:
         if item["event_type"] != "agency.step.executed":
@@ -2729,17 +2751,20 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             row for row in verified_read_steps
             if str(row["plan_id"]) == invalidated_plan_id
             and str(row["tool"]) in private_tools
+            and str(row["id"]) in audited_action_event_ids
         ]
         public_steps = [
             row for row in verified_read_steps
             if str(row["plan_id"]) == invalidated_plan_id
             and str(row["tool"]) == "web.search"
+            and str(row["id"]) in audited_action_event_ids
         ]
         candidate_deliberations = [
             step_by_id[step_id]
             for step_id in parallel_deliberation_step_ids
             if step_id in step_by_id
             and str(step_by_id[step_id]["plan_id"]) == invalidated_plan_id
+            and step_id in audited_action_event_ids
         ]
 
         for deliberation_step in candidate_deliberations:
@@ -2784,10 +2809,32 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
                         "private_step_ids": [
                             str(row["id"]) for row in linked_private
                         ],
+                        "private_action_event_ids": sorted(
+                            event_id
+                            for row in linked_private
+                            for event_id in audited_action_event_ids.get(
+                                str(row["id"]),
+                                [],
+                            )
+                        ),
                         "public_step_ids": [
                             str(row["id"]) for row in linked_public
                         ],
+                        "public_action_event_ids": sorted(
+                            event_id
+                            for row in linked_public
+                            for event_id in audited_action_event_ids.get(
+                                str(row["id"]),
+                                [],
+                            )
+                        ),
                         "deliberation_step_id": deliberation_id,
+                        "deliberation_action_event_ids": sorted(
+                            audited_action_event_ids.get(
+                                deliberation_id,
+                                [],
+                            )
+                        ),
                     }
                 )
                 break

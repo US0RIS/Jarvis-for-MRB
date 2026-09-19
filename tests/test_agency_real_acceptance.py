@@ -2962,7 +2962,12 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             finally:
                 conn.close()
 
-            finalized = agency_real_acceptance.finalize_session(session["id"])
+            with patch.object(
+                agency_real_acceptance,
+                "evaluate_session",
+                return_value=divergent,
+            ):
+                finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["passed"])
             self.assertFalse(finalized["receipt_created"])
             self.assertTrue(finalized["receipt_reused"])

@@ -1829,6 +1829,137 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A5")
 
+    def test_a5_temporal_coincidence_without_bound_trigger_provenance_fails(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A5 Temporal Coincidence Guard")
+        state = desired_state.create_desired_state(
+            "A5 Temporal Coincidence Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a5-temporal-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "preserved-read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "stable temporal-guard requirements"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A5 temporal guard",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["preserved-read"],
+                },
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A5",
+                desired_state_id=str(state["id"]),
+                parameters={"preserve_step_key": "preserved-read"},
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            after_read = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="Stable temporal-guard requirements observed.",
+                ),
+            )
+            self.assertEqual(
+                next(
+                    item for item in after_read["steps"]
+                    if item["step_key"] == "preserved-read"
+                )["status"],
+                "verified",
+            )
+
+            external_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "A5 temporal guard timing changed externally.",
+                source_kind="calendar_enriched",
+                source_ref="real-a5-temporal-guard:external",
+                evidence="A real-looking external event exists, but is not bound to the forged invalidation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE agency_plans
+                    SET status='needs_replan',
+                        last_error='forged stale-plan transition'
+                    WHERE id=?
+                    """,
+                    (plan["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            agency_plan._record_event(
+                "agency.plan.invalidated",
+                "Forged invalidation with no relevance-trigger provenance.",
+                plan_id=str(plan["id"]),
+                desired_state_id=str(state["id"]),
+                payload={
+                    "baseline_relevance_hash": str(plan["relevance_hash"]),
+                    "current_relevance_hash": "forged-current-hash",
+                },
+            )
+            replacement = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "replacement-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A5 temporal guard replacement",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            self.assertGreater(replacement["generation"], plan["generation"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        self.assertTrue(
+            any(
+                int(item["id"]) == external_event_id
+                for item in agency_real_acceptance._external_events_for_relevant_entities(
+                    sqlite3.connect(self.db),
+                    session,
+                )
+            )
+        )
+        causal_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "relevant external world change preceded stale-plan invalidation"
+            )
+        )
+        self.assertFalse(causal_check["passed"])
+        self.assertFalse(evaluation["evidence"]["external_change_observed"])
+
     def test_a6_requires_externally_grounded_wake_and_actionable_continuation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Dormant Wake Gate")
         state = desired_state.create_desired_state(

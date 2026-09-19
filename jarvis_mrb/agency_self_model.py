@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -208,6 +209,130 @@ def list_entries(
         item["value"] = _loads(str(item.pop("value_json")), None)
         result.append(item)
     return result
+
+
+def approval_preference_key(tool: str) -> str:
+    clean_tool = " ".join(str(tool or "").strip().lower().split())[:300]
+    if not clean_tool:
+        raise ValueError("Approval preference requires a tool name.")
+    return f"approval_style:{clean_tool}"[:500]
+
+
+def infer_approval_preference(
+    tool: str,
+    *,
+    minimum_approvals: int = 3,
+    lookback: int = 100,
+) -> dict[str, Any] | None:
+    """Infer a low-authority preference from repeated explicit Agency approvals.
+
+    This never changes permission policy. It merely records that the user has
+    repeatedly approved a protected tool, with the exact approval events kept as
+    provenance so downstream code can distinguish inference from assertion.
+    """
+    clean_tool = " ".join(str(tool or "").strip().lower().split())[:300]
+    if not clean_tool:
+        raise ValueError("Approval-history inference requires a tool name.")
+    required = max(2, min(int(minimum_approvals), 10))
+    safe_lookback = max(required, min(int(lookback), 500))
+
+    with _connect() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT id,payload_json,occurred_at,recorded_at
+                FROM events
+                WHERE event_type='agency.step.approved'
+                  AND source_kind='jarvis_agency'
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (safe_lookback,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+
+    approvals: list[dict[str, Any]] = []
+    seen_steps: set[str] = set()
+    for row in rows:
+        payload = dict(_loads(str(row["payload_json"] or "{}"), {}))
+        if str(payload.get("tool") or "").strip().lower() != clean_tool:
+            continue
+        step_id = str(payload.get("step_id") or "")
+        if not step_id or step_id in seen_steps:
+            continue
+        seen_steps.add(step_id)
+        approvals.append(
+            {
+                "event_id": int(row["id"]),
+                "step_id": step_id,
+                "desired_state_id": str(payload.get("desired_state_id") or ""),
+                "occurred_at": str(row["occurred_at"] or row["recorded_at"] or ""),
+            }
+        )
+    approvals.sort(key=lambda item: int(item["event_id"]))
+    if len(approvals) < required:
+        return None
+
+    support = approvals[-min(len(approvals), 12):]
+    support_ids = [int(item["event_id"]) for item in support]
+    key = approval_preference_key(clean_tool)
+    digest = hashlib.sha256(
+        json.dumps(
+            {"tool": clean_tool, "supporting_approval_event_ids": support_ids},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8", errors="replace")
+    ).hexdigest()[:24]
+    source_ref = f"approval-history:{digest}"
+    confidence = min(0.9, 0.55 + 0.08 * len(support_ids))
+    value = {
+        "behavior": (
+            f"routine approvals observed for {clean_tool}; "
+            "may prefer fewer confirmation interruptions for routine uses"
+        ),
+        "tool": clean_tool,
+        "supporting_approval_event_ids": support_ids,
+        "authority_effect": "none",
+    }
+    entry = upsert(
+        "preference",
+        key,
+        value,
+        confidence=confidence,
+        source_kind="inferred_behavior",
+        source_ref=source_ref,
+    )
+
+    try:
+        from jarvis_mrb.world_model import record_event
+
+        record_event(
+            "agency.self_model.inferred",
+            (
+                f"Inferred low-authority approval preference for {clean_tool} "
+                f"from {len(support_ids)} explicit Agency approvals."
+            ),
+            source_kind="jarvis_agency",
+            source_ref=source_ref,
+            payload={
+                "preference_key": key,
+                "tool": clean_tool,
+                "supporting_approval_event_ids": support_ids,
+                "confidence": confidence,
+                "authority_effect": "none",
+            },
+            evidence=(
+                "Behavioral preference inference derived from explicit persisted "
+                "Agency approval events; permission authority is unchanged."
+            ),
+            confidence=confidence,
+        )
+    except Exception:
+        pass
+
+    return entry
 
 
 def record_correction(

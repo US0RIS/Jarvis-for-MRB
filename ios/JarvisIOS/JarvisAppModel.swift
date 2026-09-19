@@ -25,6 +25,15 @@ final class JarvisAppModel: ObservableObject {
     let memoMind: MemoMindBridge
     let homeEnvironment: HomeEnvironmentController
 
+    // Physical-world observations belong to the iPhone session, not a HUD
+    // accessory. The same state is used by buttons and Gen 1 Meta voice input.
+    @Published private(set) var nearbyPublicCameras: [PublicCameraListing] = []
+    @Published private(set) var nearbyCameraStatus = "Tap Search or ask Jarvis to find nearby public cameras."
+    @Published private(set) var nearbyCameraCoverage = ""
+    @Published private(set) var nearbyCameraSourceURL = ""
+    @Published private(set) var nearbyCameraBusy = false
+    private lazy var nearbyCameraLocation = PublicCameraLocationRequest()
+
     var frontendCommandHandler: ((String) async -> String?)?
     var offlineQueueHandler: ((String) -> Void)?
     var offlineResponseHandler: ((String) async -> String?)?
@@ -71,6 +80,55 @@ final class JarvisAppModel: ObservableObject {
 
     func discoverNearbyPublicCameras(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
         try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
+    }
+
+    func searchNearbyPublicCameras() async -> String {
+        guard !nearbyCameraBusy else { return "A public camera search is already running." }
+        nearbyCameraBusy = true
+        nearbyPublicCameras = []
+        nearbyCameraCoverage = ""
+        nearbyCameraSourceURL = ""
+        nearbyCameraStatus = "Requesting a one-time iPhone location…"
+        defer { nearbyCameraBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            nearbyCameraStatus = "Checking officially published camera catalogs…"
+            let response = try await discoverNearbyPublicCameras(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            nearbyPublicCameras = response.cameras
+            nearbyCameraCoverage = response.coverage
+            nearbyCameraSourceURL = response.sourceURL
+            if response.cameras.isEmpty {
+                nearbyCameraStatus = response.sourceNote
+                return response.status == "unsupported_region"
+                    ? "I don't have an integrated public-camera provider for this area. The Physical tab shows the available official source."
+                    : "No published highway cameras were returned nearby. \(response.sourceNote)"
+            }
+            let first = response.cameras[0]
+            nearbyCameraStatus = "\(response.cameras.count) published camera feeds nearby. Footage freshness is not verified."
+            return "I found \(response.cameras.count) published traffic-camera feeds within ten kilometers. Nearest: \(first.title), about \(String(format: "%.1f", first.distanceKM)) kilometers away. Open Physical on your iPhone for images. I have not analyzed the footage."
+        } catch {
+            nearbyCameraStatus = "Camera lookup unavailable: " + error.localizedDescription
+            return nearbyCameraStatus
+        }
+    }
+
+    private static func isPublicCameraIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "find nearby public cameras", "find public cameras near me",
+            "what public cameras are nearby", "show nearby public cameras",
+            "find nearby traffic cameras", "find traffic cameras near me",
+            "show nearby traffic cameras", "what traffic cameras are nearby",
+        ].contains(normalized)
     }
 
     func refreshMemoMindCommandView() async throws {
@@ -188,6 +246,19 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone MapKit turn-by-turn navigation"
+            )
+            return
+        }
+
+        // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
+        // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if Self.isPublicCameraIntent(text) {
+            let cameraReply = await searchNearbyPublicCameras()
+            await finishLocalResponse(
+                cameraReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone location + official public camera discovery"
             )
             return
         }

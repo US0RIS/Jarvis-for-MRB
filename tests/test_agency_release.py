@@ -295,12 +295,58 @@ class AgencyReleaseTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["recorded"])
+        self.assertTrue(result["source_sha_stable"])
+        self.assertTrue(result["environment_stable"])
+        self.assertEqual(result["deployment_sha_after"], SHA_A)
+        self.assertEqual(result["environment_fingerprint_before"], ENV)
         run = result["validation_run"]
         self.assertEqual(run["harness"], agency_release._VALIDATION_HARNESS)
         self.assertTrue(result["release_status"]["validation_hash_ok"])
         self.assertFalse(result["release_status"]["release_ready"])
         self.assertTrue(result["release_status"]["missing_real_gates"])
         self.assertEqual(agency_release._VALIDATION_CONTEXT.get(), "")
+
+    def test_full_validation_fails_closed_if_git_head_changes_mid_run(self) -> None:
+        (self.base / "jarvis_mrb").mkdir(exist_ok=True)
+        (self.base / "tests").mkdir(exist_ok=True)
+
+        with (
+            patch.object(agency_release, "deployment_sha", side_effect=[SHA_A, SHA_B]),
+            patch.object(agency_release, "environment_fingerprint", return_value=ENV),
+            patch.object(agency_release, "_git_worktree_clean", return_value=(True, "")),
+            patch.object(agency_release, "_run_command", return_value=(True, "stage passed")),
+            patch("jarvis_mrb.world_diagnostics.validate", return_value={"ok": True}),
+        ):
+            result = agency_release.run_full_validation(root=self.base)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["source_sha_stable"])
+        self.assertFalse(result["tree_clean_after"])
+        self.assertEqual(result["deployment_sha_after"], SHA_B)
+        self.assertEqual(int(result["validation_run"]["tree_clean_after"]), 0)
+
+    def test_full_validation_fails_closed_if_environment_changes_mid_run(self) -> None:
+        (self.base / "jarvis_mrb").mkdir(exist_ok=True)
+        (self.base / "tests").mkdir(exist_ok=True)
+
+        with (
+            patch.object(agency_release, "deployment_sha", return_value=SHA_A),
+            patch.object(
+                agency_release,
+                "environment_fingerprint",
+                side_effect=["environment-before", "environment-after"],
+            ),
+            patch.object(agency_release, "_git_worktree_clean", return_value=(True, "")),
+            patch.object(agency_release, "_run_command", return_value=(True, "stage passed")),
+            patch("jarvis_mrb.world_diagnostics.validate", return_value={"ok": True}),
+        ):
+            result = agency_release.run_full_validation(root=self.base)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["environment_stable"])
+        self.assertFalse(result["diagnostics_ok"])
+        self.assertEqual(result["environment_fingerprint"], "environment-after")
+        self.assertEqual(int(result["validation_run"]["diagnostics_ok"]), 0)
 
     def test_low_level_validation_writer_rejects_asserted_pass_flags(self) -> None:
         with self.assertRaisesRegex(ValueError, "run_full_validation"):

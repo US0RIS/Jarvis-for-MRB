@@ -919,6 +919,9 @@ def _verification_rows_for_state(conn: sqlite3.Connection, desired_state_id: str
         )
         item["observation_after_action"] = observation_after_action
         item["resolution_after_observation"] = resolution_after_observation
+        item["terminal_record_proof"] = bool(
+            action_event_proof and terminal_event_proof
+        )
         item["independent_terminal_proof"] = bool(
             action_event_proof
             and terminal_event_proof
@@ -1535,7 +1538,7 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             or (
                 str(row.get("status") or "") == "unverified"
                 and str(row.get("verifier") or "") == "no_independent_verifier"
-                and bool(row.get("independent_terminal_proof"))
+                and bool(row.get("terminal_record_proof"))
             )
         )
     ]

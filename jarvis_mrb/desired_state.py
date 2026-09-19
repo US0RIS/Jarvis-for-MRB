@@ -22,6 +22,15 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())[:2000]
 
 
+def _contains_term(haystack: str, term: str) -> bool:
+    clean_haystack = _normalize(haystack)
+    clean_term = _normalize(term)
+    if not clean_term:
+        return False
+    pattern = rf"(?<!\\w){re.escape(clean_term)}(?!\\w)"
+    return re.search(pattern, clean_haystack) is not None
+
+
 def _stable_id(*parts: object) -> str:
     raw = "\n".join(str(part or "") for part in parts)
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
@@ -356,9 +365,9 @@ def _evaluate_criterion(conn: sqlite3.Connection, criterion: dict[str, Any]) -> 
             haystack = _normalize(
                 str(row["summary"] or "") + " " + str(row["evidence"] or "")
             )
-            if not all(term in haystack for term in terms_all):
+            if not all(_contains_term(haystack, term) for term in terms_all):
                 continue
-            if any(term in haystack for term in terms_none):
+            if any(_contains_term(haystack, term) for term in terms_none):
                 continue
             match = row
             break

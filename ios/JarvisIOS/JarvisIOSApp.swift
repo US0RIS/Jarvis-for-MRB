@@ -72,10 +72,10 @@ struct JarvisIOSApp: App {
                     }
 
                 NavigationStack {
-                    MemoMindPreviewView()
+                    JarvisPhysicalHubView()
                 }
                 .tabItem {
-                    Label("Glasses", systemImage: "eyeglasses")
+                    Label("Physical", systemImage: "location.north.line")
                 }
 
                 LocalIntelligenceMilestoneView()

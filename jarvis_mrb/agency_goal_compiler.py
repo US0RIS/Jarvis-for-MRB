@@ -209,6 +209,41 @@ def _fallback_anchor(title: str, intention: dict[str, Any]) -> str:
     return ""
 
 
+def _required_negations(completion: str) -> list[str]:
+    clean = str(completion or "").strip().lower()
+    result = [
+        f"not {clean}" if clean else "",
+        "pending",
+        "not complete",
+        "not completed",
+        "awaiting",
+    ]
+    special = {
+        "signed": ["unsigned", "needs signature", "needs signing", "to be signed", "awaiting signature"],
+        "approved": ["unapproved", "needs approval", "awaiting approval", "not approved"],
+        "accepted": ["not accepted", "awaiting acceptance", "needs acceptance"],
+        "submitted": ["not submitted", "needs submission", "awaiting submission"],
+        "sent": ["not sent", "draft", "queued to send", "needs sending"],
+        "booked": ["not booked", "needs booking", "to book", "awaiting booking"],
+        "reserved": ["not reserved", "needs reservation", "awaiting reservation"],
+        "purchased": ["not purchased", "needs purchase", "awaiting purchase"],
+        "delivered": ["not delivered", "out for delivery", "awaiting delivery"],
+        "received": ["not received", "awaiting receipt", "in transit"],
+        "completed": ["incomplete", "not completed", "needs completion", "in progress"],
+        "finished": ["unfinished", "not finished", "in progress"],
+        "resolved": ["unresolved", "not resolved", "pending resolution"],
+        "closed": ["not closed", "still open", "pending closure"],
+        "paid": ["unpaid", "not paid", "payment pending"],
+        "confirmed": ["unconfirmed", "not confirmed", "awaiting confirmation"],
+        "filed": ["not filed", "needs filing", "awaiting filing"],
+        "launched": ["not launched", "prelaunch", "awaiting launch"],
+        "deployed": ["not deployed", "deployment pending", "awaiting deployment"],
+        "executed": ["not executed", "awaiting execution", "needs execution"],
+    }
+    result.extend(special.get(clean, []))
+    return list(dict.fromkeys(item for item in result if item))
+
+
 def _fallback_contract(title: str, intention: dict[str, Any]) -> dict[str, Any] | None:
     completion = _completion_term(title)
     if not completion:
@@ -217,16 +252,7 @@ def _fallback_contract(title: str, intention: dict[str, Any]) -> dict[str, Any] 
     if not anchor:
         return None
 
-    negations = [
-        f"not {completion}",
-        "pending",
-        "not complete",
-        "not completed",
-    ]
-    if completion == "signed":
-        negations.extend(["unsigned", "needs signature", "to be signed"])
-    if completion == "booked":
-        negations.extend(["not booked", "needs booking", "to book"])
+    negations = _required_negations(completion)
 
     return {
         "confidence": 0.76,
@@ -289,14 +315,42 @@ def _validate_compiled(
         terms_none = [" ".join(str(item).split()) for item in (criterion.get("terms_none") or []) if str(item).strip()]
         if len(terms_all) < 2:
             raise ValueError("event_match requires at least a subject anchor and completion term.")
-        observed_completion = any(
-            completion in " ".join(terms_all).lower()
-            for completion in set(_COMPLETION_WORDS.values())
-        )
-        if not observed_completion:
-            raise ValueError("event_match lacks an achieved-state completion term.")
-        if not any(len(term) >= 4 and term.lower() not in set(_COMPLETION_WORDS.values()) for term in terms_all):
+
+        completion_terms = set(_COMPLETION_WORDS.values())
+        exact_completions = [
+            term.lower()
+            for term in terms_all
+            if term.lower() in completion_terms
+        ]
+        if not exact_completions:
+            raise ValueError(
+                "event_match requires the achieved-state completion term as its own exact terms_all item."
+            )
+        completion = exact_completions[0]
+
+        lowered_all = [term.lower() for term in terms_all]
+        forbidden_completion_phrases = set(_required_negations(completion))
+        if any(
+            term in forbidden_completion_phrases
+            or term.startswith(("not ", "awaiting ", "needs ", "need ", "to be "))
+            or term.startswith("un")
+            for term in lowered_all
+            if term != completion
+        ):
+            raise ValueError("event_match contains negated or incomplete completion language in terms_all.")
+
+        if not any(
+            len(term) >= 4
+            and term.lower() not in completion_terms
+            for term in terms_all
+        ):
             raise ValueError("event_match lacks a specific subject anchor.")
+
+        terms_none = list(
+            dict.fromkeys(
+                terms_none + _required_negations(completion)
+            )
+        )
 
         requested_sources = [
             str(item).strip()

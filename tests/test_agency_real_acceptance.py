@@ -2526,6 +2526,19 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 )
             self.assertFalse(synthesized["enabled"])
             self.assertEqual(synthesized["gap"]["status"], "proposed")
+            synthesis_action_event_id = world_model.record_tool_execution(
+                "custom.synthesize",
+                {
+                    "gap_id": gap["id"],
+                    "name": "target_adapter",
+                    "description": "Read the missing target capability.",
+                    "api_spec": "GET /status",
+                    "allowed_hosts": ["api.example.com"],
+                    "risk": "read",
+                },
+                ok=True,
+                message="Custom tool target_adapter was generated and sandbox-tested.",
+            )
 
             enable_event_id = world_model.record_tool_execution(
                 "custom.enable",
@@ -2560,13 +2573,12 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(evaluation["evidence"]["capability_resolved_after_enable"])
             self.assertTrue(evaluation["evidence"]["goal_reactivated_after_capability"])
             self.assertTrue(evaluation["evidence"]["adapter_execution_still_confirmed"])
-            self.assertNotIn(
-                enable_event_id,
-                [
-                    item["event_id"]
-                    for item in evaluation["manual_orchestration_events"]
-                ],
-            )
+            manual_event_ids = [
+                item["event_id"]
+                for item in evaluation["manual_orchestration_events"]
+            ]
+            self.assertNotIn(synthesis_action_event_id, manual_event_ids)
+            self.assertNotIn(enable_event_id, manual_event_ids)
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
@@ -2609,6 +2621,19 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                     allowed_hosts=["api.example.com"],
                     risk="read",
                 )
+            world_model.record_tool_execution(
+                "custom.synthesize",
+                {
+                    "gap_id": gap["id"],
+                    "name": "target_adapter",
+                    "description": "Target adapter.",
+                    "api_spec": "GET /status",
+                    "allowed_hosts": ["api.example.com"],
+                    "risk": "read",
+                },
+                ok=True,
+                message="Generated target adapter.",
+            )
 
             unrelated_event_id = world_model.record_tool_execution(
                 "custom.enable",

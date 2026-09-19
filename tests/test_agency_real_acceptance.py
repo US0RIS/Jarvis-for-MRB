@@ -2923,19 +2923,34 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                     "unknowns": [],
                 }
 
-            agency_deliberation.deliberate(
-                "Scoped launch decision for the real gate",
-                roles=["evidence", "skeptic", "feasibility", "risk_cost"],
-                worker=worker,
-                synthesizer=lambda q, ctx, outputs, disagreements: {
+            def synth(
+                q: str,
+                ctx: str,
+                outputs: list[dict],
+                disagreements: list[dict],
+            ) -> dict:
+                return {
                     "answer": "preserve disagreement",
                     "consensus": [],
                     "disagreements": [{"issue": "launch timing"}],
                     "unknowns": [],
                     "recommended_next_evidence": [],
                     "confidence": 0.5,
-                },
-            )
+                }
+
+            with patch.object(
+                agency_deliberation,
+                "_model_worker",
+                worker,
+            ), patch.object(
+                agency_deliberation,
+                "_model_synthesizer",
+                synth,
+            ):
+                agency_deliberation.deliberate(
+                    "Scoped launch decision for the real gate",
+                    roles=["evidence", "skeptic", "feasibility", "risk_cost"],
+                )
 
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
@@ -2943,9 +2958,63 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(evaluation["evidence"]["required_epistemic_roles_present"])
             self.assertTrue(evaluation["evidence"]["provenance_structurally_bounded"])
             self.assertTrue(evaluation["evidence"]["synthesis_after_workers"])
+            self.assertTrue(evaluation["evidence"]["production_model_backends"])
+            self.assertTrue(evaluation["evidence"]["completion_event_bound"])
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A7")
+
+    def test_a7_injected_callbacks_cannot_satisfy_real_backend_provenance(self) -> None:
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A7",
+                parameters={"question_contains": "injected callback guard"},
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            barrier = threading.Barrier(4)
+
+            def worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": role,
+                    "claims": [
+                        {
+                            "claim": f"{role} claim",
+                            "confidence": 0.6,
+                            "evidence": "Injected callback evidence.",
+                            "source": "reasoning",
+                        }
+                    ],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            agency_deliberation.deliberate(
+                "Injected callback guard real-looking deliberation",
+                roles=["evidence", "skeptic", "feasibility", "risk_cost"],
+                worker=worker,
+                synthesizer=lambda q, ctx, outputs, disagreements: {
+                    "answer": "Injected synthesis.",
+                    "consensus": [],
+                    "disagreements": [{"issue": "injected disagreement"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.5,
+                },
+            )
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        backend_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "REAL deliberation used the production model"
+            )
+        )
+        self.assertFalse(backend_check["passed"])
+        self.assertFalse(evaluation["evidence"]["production_model_backends"])
 
     def test_a9_proves_full_gap_synthesis_enable_resolution_lifecycle(self) -> None:
         target_state, _ = self._state_with_plan("Capability Target")

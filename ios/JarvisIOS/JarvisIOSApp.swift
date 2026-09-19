@@ -95,6 +95,7 @@ struct JarvisIOSApp: App {
             }
             .environmentObject(appModel)
             .environmentObject(appModel.memoMind)
+            .environmentObject(appModel.homeEnvironment)
             .environmentObject(persistentPresence)
             .environmentObject(meetingCapture)
             .environmentObject(frontendIntelligence)

@@ -185,6 +185,70 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertEqual(criterion["terms_all"][0], "Project Apollo")
         self.assertEqual(criterion["terms_all"][1], "signed")
 
+    def test_rejects_completion_substring_such_as_unsigned(self) -> None:
+        state_id = self._legacy_state("Have Apollo signed")
+        with self.assertRaisesRegex(ValueError, "exact terms_all item"):
+            agency_goal_compiler.compile_observable_contract(
+                state_id,
+                compiler=lambda _prompt: {
+                    "confidence": 0.99,
+                    "criteria": [
+                        {
+                            "kind": "event_match",
+                            "terms_all": ["Apollo", "unsigned"],
+                            "terms_none": [],
+                            "event_types": [],
+                            "source_kinds": [],
+                        }
+                    ],
+                    "explanation": "Bad contract",
+                },
+            )
+
+    def test_rejects_negated_completion_phrase_in_terms_all(self) -> None:
+        state_id = self._legacy_state("Have Apollo signed")
+        with self.assertRaisesRegex(ValueError, "exact terms_all item"):
+            agency_goal_compiler.compile_observable_contract(
+                state_id,
+                compiler=lambda _prompt: {
+                    "confidence": 0.99,
+                    "criteria": [
+                        {
+                            "kind": "event_match",
+                            "terms_all": ["Apollo", "not signed"],
+                            "terms_none": [],
+                            "event_types": [],
+                            "source_kinds": [],
+                        }
+                    ],
+                    "explanation": "Bad negated contract",
+                },
+            )
+
+    def test_injects_required_negations_when_model_omits_them(self) -> None:
+        state_id = self._legacy_state("Have Apollo signed")
+        result = agency_goal_compiler.compile_observable_contract(
+            state_id,
+            compiler=lambda _prompt: {
+                "confidence": 0.95,
+                "criteria": [
+                    {
+                        "kind": "event_match",
+                        "terms_all": ["Apollo", "signed"],
+                        "terms_none": [],
+                        "event_types": [],
+                        "source_kinds": [],
+                    }
+                ],
+                "explanation": "Future external evidence that Apollo is signed.",
+            },
+        )
+        criterion = result["criteria"][0]
+        self.assertIn("not signed", criterion["terms_none"])
+        self.assertIn("unsigned", criterion["terms_none"])
+        self.assertIn("needs signature", criterion["terms_none"])
+        self.assertIn("pending", criterion["terms_none"])
+
     def test_low_confidence_contract_blocks_activation_and_does_not_grant_agency_authority(self) -> None:
         _, state_id = self._legacy_state("Complete Project Mercury")
 

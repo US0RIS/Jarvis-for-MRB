@@ -215,6 +215,17 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
         )
     if tool == "custom.apply_repair":
         return f"apply the sandbox-validated repair proposal for custom tool {args.get('name')!r}"
+    if tool == "agency.counterfactual.create":
+        branches = args.get("branches") if isinstance(args.get("branches"), list) else []
+        return (
+            f"persist a counterfactual decision case for {args.get('question')!r} "
+            f"with {len(branches)} candidate branches"
+        )
+    if tool == "agency.counterfactual.select":
+        return (
+            f"record branch {args.get('branch')!r} as the selected counterfactual path "
+            f"for case {args.get('case_id')!r}, preserving all alternatives"
+        )
     if tool == "agency.enable":
         return "enable active Agency mode, allowing persistent goals to execute auto-authorized steps"
     if tool == "agency.activate_goal":
@@ -398,6 +409,85 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
         disagreements = result.get("disagreements") or []
         suffix = f" Material disagreement signals: {len(disagreements)}." if disagreements else ""
         return AgentReply(True, (answer or "Parallel deliberation completed.") + suffix)
+    if tool == "agency.counterfactual.create":
+        from jarvis_mrb.agency_counterfactual import create_case
+        question = str(args.get("question") or "").strip()
+        branches = args.get("branches")
+        if not question:
+            return AgentReply(False, "Counterfactual decision case requires a question.")
+        if not isinstance(branches, list):
+            return AgentReply(False, "Counterfactual decision case requires a branches list.")
+        try:
+            case = create_case(
+                question,
+                branches,
+                context=str(args.get("context") or ""),
+            )
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        titles = [
+            str(item.get("title") or item.get("key") or "")
+            for item in (case.get("branches") or [])
+        ]
+        return AgentReply(
+            True,
+            (
+                f"Counterfactual case {case['id']} preserved {len(titles)} branches"
+                + (": " + "; ".join(titles) if titles else ".")
+            ),
+            data=case,
+        )
+    if tool == "agency.counterfactual.compare":
+        from jarvis_mrb.agency_counterfactual import comparison
+        case_id = str(args.get("case_id") or "").strip()
+        if not case_id:
+            return AgentReply(False, "Counterfactual comparison requires a case_id.")
+        try:
+            result = comparison(case_id)
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        return AgentReply(
+            True,
+            json.dumps(result, ensure_ascii=False, sort_keys=True),
+            data=result,
+        )
+    if tool == "agency.counterfactual.select":
+        from jarvis_mrb.agency_counterfactual import select_branch
+        case_id = str(args.get("case_id") or "").strip()
+        branch = str(args.get("branch") or "").strip()
+        change_conditions = args.get("change_conditions")
+        if not case_id or not branch:
+            return AgentReply(False, "Counterfactual selection requires case_id and branch.")
+        if not isinstance(change_conditions, list):
+            return AgentReply(
+                False,
+                "Counterfactual selection requires explicit change_conditions.",
+            )
+        try:
+            case = select_branch(
+                case_id,
+                branch,
+                rationale=str(args.get("rationale") or ""),
+                change_conditions=[str(value) for value in change_conditions],
+            )
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        selected = next(
+            (
+                item for item in (case.get("branches") or [])
+                if str(item.get("id") or "") == str(case.get("selected_branch_id") or "")
+            ),
+            {},
+        )
+        return AgentReply(
+            True,
+            (
+                f"Selected {selected.get('title') or branch!r} for counterfactual case "
+                f"{case_id}. Alternatives remain preserved. "
+                f"Reopen conditions: {json.dumps(case.get('change_conditions') or [], ensure_ascii=False)}"
+            ),
+            data=case,
+        )
     if tool == "agency.enable":
         from jarvis_mrb.agency_runtime import set_mode as set_agency_mode
         return AgentReply(True, f"Agency mode is now {set_agency_mode('active')}.")
@@ -914,7 +1004,8 @@ background.submit {{prompt}}; background.list {{limit}}; background.status {{tas
 workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
-custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
+custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}};
+agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}.
 
 Routing rules:
 - web.search: current/recent/public information. Make the query self-contained; Jarvis refines conversational searches automatically.
@@ -930,6 +1021,9 @@ Routing rules:
 - spatial.find: where an object was last seen by passive vision. This is last-seen context, not reliable turn-by-turn navigation.
 - briefing.generate: a concise current briefing from calendar, unread mail, weather/news, and background work.
 - workflow.run: user asks for a multi-step goal that needs several tools in sequence. The DAG engine may parallelize safe reads. Existing permission policy still applies to every node; do not promise confirmation-free external/destructive writes.
+- agency.counterfactual.create: persist two or more materially different decision branches when the user wants alternatives compared or a consequential choice remembered. Each branch should explicitly capture assumptions, evidence, expected outcomes, cost, reversibility, and uncertainty when available.
+- agency.counterfactual.compare: retrieve a previously preserved decision case without changing it.
+- agency.counterfactual.select: record a chosen branch only when the user asks to choose/commit to a branch or clearly states the selection. Include a rationale and at least one concrete condition that would reopen the choice. This changes only Jarvis's internal decision ledger; it does not authorize external actions.
 - background.submit: long analysis/work that should continue while the live voice channel remains available.
 - state.temp_set: temporary focus/context that should expire automatically; use a sensible TTL in minutes. Use state.update only for durable context.
 - sandbox.python, sandbox.command, and custom.* are security-sensitive. Never use them unless the user explicitly asks. sandbox.command runs inside the locked-down Docker container, never the Windows host shell, and the confirmation reads the exact command aloud.

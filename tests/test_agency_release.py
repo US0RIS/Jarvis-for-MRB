@@ -334,6 +334,26 @@ class AgencyReleaseTests(unittest.TestCase):
 
         self.assertEqual(agency_release._installation_id(), installation_id)
 
+    def test_deployment_sha_rejects_asserted_build_sha_that_conflicts_with_git_head(self) -> None:
+        with (
+            patch.dict(agency_release.os.environ, {"JARVIS_BUILD_SHA": SHA_A}, clear=False),
+            patch.object(agency_release, "_git_head_sha", return_value=SHA_B),
+        ):
+            self.assertEqual(agency_release.deployment_sha(self.base), "")
+
+    def test_deployment_sha_accepts_matching_or_gitless_build_stamp(self) -> None:
+        with (
+            patch.dict(agency_release.os.environ, {"JARVIS_BUILD_SHA": SHA_A}, clear=False),
+            patch.object(agency_release, "_git_head_sha", return_value=SHA_A),
+        ):
+            self.assertEqual(agency_release.deployment_sha(self.base), SHA_A)
+
+        with (
+            patch.dict(agency_release.os.environ, {"JARVIS_BUILD_SHA": SHA_A}, clear=False),
+            patch.object(agency_release, "_git_head_sha", return_value=""),
+        ):
+            self.assertEqual(agency_release.deployment_sha(self.base), SHA_A)
+
     def test_environment_fingerprint_changes_with_permission_posture(self) -> None:
         with (
             patch.object(agency_release, "_host_machine_identity", return_value="host-policy"),

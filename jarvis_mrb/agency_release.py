@@ -1307,6 +1307,7 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
             "deployment_sha": sha,
         }
 
+    environment_before = environment_fingerprint()
     tree_clean_before, tree_before_detail = _git_worktree_clean(source)
     if not tree_clean_before:
         return {
@@ -1340,12 +1341,29 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
     except Exception as exc:
         diagnostics = {"ok": False, "error": str(exc)[:2000]}
     diagnostics_ok = bool(diagnostics.get("ok"))
-    tree_clean_after, tree_after_detail = _git_worktree_clean(source)
-    env = environment_fingerprint()
+    tree_clean_after_raw, tree_after_detail = _git_worktree_clean(source)
+    sha_after = deployment_sha(source)
+    environment_after = environment_fingerprint()
+    source_sha_stable = bool(sha_after) and sha_after == sha
+    environment_stable = environment_after == environment_before
+    tree_clean_after = bool(tree_clean_after_raw and source_sha_stable)
+    diagnostics_ok = bool(diagnostics_ok and environment_stable)
+    env = environment_after
+    provenance_notes: list[str] = []
+    if not source_sha_stable:
+        provenance_notes.append(
+            f"deployment SHA changed during validation: before={sha!r}, after={sha_after!r}"
+        )
+    if not environment_stable:
+        provenance_notes.append(
+            "environment fingerprint changed during validation: "
+            f"before={environment_before!r}, after={environment_after!r}"
+        )
     regression_summary = (
         "compile:\n" + compile_output
         + "\n\nunittest:\n" + regression_output
         + ("\n\npost-test git status:\n" + tree_after_detail if tree_after_detail else "")
+        + ("\n\nprovenance:\n" + "\n".join(provenance_notes) if provenance_notes else "")
     )[-5000:]
     synthetic_summary = str(synthetic_output or "")[-5000:]
     diagnostics_summary = json.dumps(
@@ -1395,6 +1413,10 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
         "recorded": True,
         "deployment_sha": sha,
         "environment_fingerprint": env,
+        "environment_fingerprint_before": environment_before,
+        "environment_stable": environment_stable,
+        "deployment_sha_after": sha_after,
+        "source_sha_stable": source_sha_stable,
         "compile_ok": compile_ok,
         "regression_ok": regression_ok,
         "synthetic_ok": synthetic_ok,

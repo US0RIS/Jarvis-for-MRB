@@ -1596,6 +1596,7 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "safe_read_auto_proceeded": checks[0]["passed"],
             "protected_external_write_observed": checks[1]["passed"],
             "approval_resumed_same_plan": checks[2]["passed"],
+            "approval_consumption_provenance_observed": checks[2]["passed"] and checks[3]["passed"],
             "permission_boundary_not_bypassed": checks[3]["passed"],
             "denial_case_observed": checks[4]["passed"],
             "denial_forced_replan_or_blocked": checks[5]["passed"],
@@ -1813,6 +1814,7 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "failure_timeout_or_unverified_observed": checks[3]["passed"],
             "independent_readback_observed": checks[2]["passed"],
             "verification_feedback_observed": checks[4]["passed"],
+            "exact_step_reconciliation_observed": checks[4]["passed"],
         },
     }
 
@@ -1929,6 +1931,7 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
         "evidence": {
             "external_change_observed": checks[0]["passed"],
             "stale_path_invalidated": checks[1]["passed"],
+            "causal_replan_lineage_bound": checks[0]["passed"] and checks[1]["passed"] and checks[2]["passed"],
             "replanned_without_goal_restatement": checks[2]["passed"] and checks[4]["passed"],
             "already_valid_work_preserved": checks[3]["passed"],
         },
@@ -2073,6 +2076,7 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "dormant_state_observed": checks[0]["passed"],
             "wake_condition_changed": checks[1]["passed"],
             "reactivated_without_goal_restatement": checks[2]["passed"] and checks[4]["passed"],
+            "wake_reactivation_provenance_bound": checks[2]["passed"],
             "next_step_surfaced_or_executed": checks[3]["passed"],
         },
     }
@@ -2616,6 +2620,7 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "blocked_or_disabled_adapter_observed": checks[1]["passed"] and checks[2]["passed"],
             "adapter_sandbox_validated": checks[2]["passed"],
             "adapter_synthesized_disabled": checks[2]["passed"],
+            "audited_synthesis_receipt_observed": checks[2]["passed"],
             "explicit_enablement_observed": checks[3]["passed"],
             "capability_resolved_after_enable": checks[4]["passed"],
             "goal_reactivated_after_capability": checks[5]["passed"],
@@ -2826,6 +2831,7 @@ def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             "preference_inference_provenance_events": [
                 int(item["event_id"]) for item in inference_events
             ],
+            "preference_inference_provenance_count": len(inference_events),
             "preference_authority_conflict_observed": checks[0]["passed"] and checks[1]["passed"],
             "protected_action_waited_for_approval": checks[2]["passed"],
             "permission_policy_remained_authoritative": checks[3]["passed"],
@@ -3278,6 +3284,8 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             "private_information_retrieval": checks[0]["passed"],
             "public_research": checks[1]["passed"],
             "parallel_analysis": checks[2]["passed"],
+            "production_deliberation_provenance": checks[2]["passed"],
+            "single_causal_branch": all(checks[index]["passed"] for index in range(6)),
             "protected_external_action": checks[3]["passed"],
             "protected_action_approval_boundary": checks[3]["passed"],
             "independent_outcome_verification": checks[4]["passed"],

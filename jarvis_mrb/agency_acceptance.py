@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
@@ -196,7 +196,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
             # and preserve explicit criteria/authority without relying on conversation state.
             entity_a1, state_a1 = _make_state(env, "Acceptance A1")
             created_a1 = ds.get_desired_state(state_a1)
-            with sqlite3.connect(env["db"]) as conn:
+            with closing(sqlite3.connect(env["db"])) as conn:
                 persisted = conn.execute(
                     "SELECT title,criteria_json,authority_json,state FROM desired_states WHERE id=?",
                     (state_a1,),
@@ -393,7 +393,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
 
             # A4 — tool receipt remains pending until a separate verifier state resolves it.
             verification_a4 = approved_a3b["steps"][0]["verification_id"]
-            with sqlite3.connect(env["db"]) as conn:
+            with closing(sqlite3.connect(env["db"])) as conn:
                 before_a4 = conn.execute(
                     "SELECT status FROM action_verifications WHERE id=?",
                     (verification_a4,),
@@ -437,7 +437,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 SimpleNamespace(ok=False, message="synthetic failure"),
                 action_event_id=failed_event,
             )
-            with sqlite3.connect(env["db"]) as conn:
+            with closing(sqlite3.connect(env["db"])) as conn:
                 failed_status = conn.execute(
                     "SELECT status FROM action_verifications WHERE id=?",
                     (failed_verification,),
@@ -813,7 +813,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
             _, state_a11 = _make_state(env, "Acceptance A11")
             permissions.set_policy("external_write", "confirm")
             approval_executor_a11 = _fake_audited_pending_write(env)
-            with sqlite3.connect(env["db"]) as conn:
+            with closing(sqlite3.connect(env["db"])) as conn:
                 approved_events_before_a11 = int(
                     conn.execute(
                         "SELECT COALESCE(MAX(id),0) FROM events"
@@ -876,7 +876,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 or SimpleNamespace(ok=True, message="must not execute"),
             )
             authority_a11 = sm.authority_for("calendar.create")
-            with sqlite3.connect(env["db"]) as conn:
+            with closing(sqlite3.connect(env["db"])) as conn:
                 conn.row_factory = sqlite3.Row
                 inference_events_a11 = [
                     dict(row)

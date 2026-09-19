@@ -3666,24 +3666,39 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                     "unknowns": [],
                 }
 
+            def synth(
+                q: str,
+                ctx: str,
+                outputs: list[dict],
+                disagreements: list[dict],
+            ) -> dict:
+                return {
+                    "answer": "Preserve both approaches.",
+                    "consensus": [],
+                    "disagreements": [{"issue": "A12 path choice"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.55,
+                }
+
             def read_and_deliberate_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
                 from jarvis_mrb.tool_audit import current_agency_step_id
 
                 if tool == "agency.deliberate":
-                    result = agency_deliberation.deliberate(
-                        str(args.get("question") or ""),
-                        context=str(args.get("context") or ""),
-                        roles=["evidence", "skeptic"],
-                        worker=worker,
-                        synthesizer=lambda q, ctx, outputs, disagreements: {
-                            "answer": "Preserve both approaches.",
-                            "consensus": [],
-                            "disagreements": [{"issue": "A12 path choice"}],
-                            "unknowns": [],
-                            "recommended_next_evidence": [],
-                            "confidence": 0.55,
-                        },
-                    )
+                    with patch.object(
+                        agency_deliberation,
+                        "_model_worker",
+                        worker,
+                    ), patch.object(
+                        agency_deliberation,
+                        "_model_synthesizer",
+                        synth,
+                    ):
+                        result = agency_deliberation.deliberate(
+                            str(args.get("question") or ""),
+                            context=str(args.get("context") or ""),
+                            roles=["evidence", "skeptic"],
+                        )
                     reply = SimpleNamespace(
                         ok=True,
                         message=str(result["synthesis"]["answer"]),
@@ -3878,6 +3893,21 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 "unknowns": [],
             }
 
+        def disconnected_synth(
+            q: str,
+            ctx: str,
+            outputs: list[dict],
+            disagreements: list[dict],
+        ) -> dict:
+            return {
+                "answer": "Disconnected research synthesis.",
+                "consensus": [],
+                "disagreements": [{"issue": "disconnected branch"}],
+                "unknowns": [],
+                "recommended_next_evidence": [],
+                "confidence": 0.5,
+            }
+
         def research_executor(
             tool: str,
             args: dict,
@@ -3886,20 +3916,20 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             from jarvis_mrb.tool_audit import current_agency_step_id
 
             if tool == "agency.deliberate":
-                result = agency_deliberation.deliberate(
-                    str(args.get("question") or ""),
-                    context=str(args.get("context") or ""),
-                    roles=["evidence", "skeptic"],
-                    worker=worker,
-                    synthesizer=lambda q, ctx, outputs, disagreements: {
-                        "answer": "Disconnected research synthesis.",
-                        "consensus": [],
-                        "disagreements": [{"issue": "disconnected branch"}],
-                        "unknowns": [],
-                        "recommended_next_evidence": [],
-                        "confidence": 0.5,
-                    },
-                )
+                with patch.object(
+                    agency_deliberation,
+                    "_model_worker",
+                    worker,
+                ), patch.object(
+                    agency_deliberation,
+                    "_model_synthesizer",
+                    disconnected_synth,
+                ):
+                    result = agency_deliberation.deliberate(
+                        str(args.get("question") or ""),
+                        context=str(args.get("context") or ""),
+                        roles=["evidence", "skeptic"],
+                    )
                 reply = SimpleNamespace(
                     ok=True,
                     message=str(result["synthesis"]["answer"]),

@@ -766,6 +766,7 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
         "status": status,
         "tool": str(row["tool"]),
         "evidence": evidence[:1500],
+        "resolved_event_id": int(event_id or 0),
         "executive_decision_id": str(row["executive_decision_id"] or ""),
         "agency_step_id": str(row["agency_step_id"] or ""),
     }

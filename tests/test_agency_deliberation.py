@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -56,15 +57,12 @@ class AgencyDeliberationTests(unittest.TestCase):
                 "confidence": 0.6,
             }
 
-        started_at = time.monotonic()
         result = agency_deliberation.deliberate(
             "Which path?",
             roles=["evidence", "skeptic", "feasibility", "risk_cost"],
             worker=worker,
             synthesizer=synth,
         )
-        wall = time.monotonic() - started_at
-
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["worker_backend"], "injected_callable")
         self.assertEqual(result["synthesizer_backend"], "injected_callable")
@@ -73,15 +71,24 @@ class AgencyDeliberationTests(unittest.TestCase):
         self.assertEqual(set(started), {"evidence", "skeptic", "feasibility", "risk_cost"})
         self.assertEqual(len(synthesis_inputs), 1)
         self.assertEqual(len(synthesis_inputs[0]), 4)
-        # Four 150ms workers would be >=600ms if serialized. Leave generous overhead
-        # for SQLite and thread scheduling while still proving concurrent execution.
-        self.assertLess(wall, 0.50)
-
         persisted = agency_deliberation.get(result["id"])
         self.assertIsNotNone(persisted)
         assert persisted is not None
         self.assertEqual(len(persisted["workers"]), 4)
         self.assertTrue(all(worker["status"] == "completed" for worker in persisted["workers"]))
+        starts = [
+            datetime.fromisoformat(str(worker["started_at"]))
+            for worker in persisted["workers"]
+        ]
+        completions = [
+            datetime.fromisoformat(str(worker["completed_at"]))
+            for worker in persisted["workers"]
+        ]
+        self.assertLessEqual(
+            max(starts),
+            min(completions),
+            "Required worker execution intervals did not overlap.",
+        )
 
     def test_default_model_path_persists_production_backend_provenance(self) -> None:
         barrier = threading.Barrier(2)

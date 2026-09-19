@@ -1219,6 +1219,11 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 traces["A12"],
             )
 
+        # Completed deliberation futures can retain unreachable frames long enough
+        # for Windows to keep SQLite handles open. The isolated world has restored
+        # all DB globals here; collect those cycles before TemporaryDirectory cleanup.
+        gc.collect()
+
     gate_results: dict[str, dict[str, Any]] = {}
     for gate in [f"A{index}" for index in range(1, 13)]:
         relevant = [check for check in checks if check["gate"] == gate]

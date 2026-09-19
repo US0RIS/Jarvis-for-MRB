@@ -22,6 +22,18 @@ Prepared September 18, 2026, from MemoMind's September 1 developer-access announ
 4. The status view is not an Agency-mode switch; use the normal, confirmation-protected command flow to enable Agency. A glasses/ring gesture cannot authorize a protected action.
 5. The existing Bluetooth audio route may send Jarvis speech to compatible glasses today; actual MemoMind HUD transport still awaits the vendor interface.
 
+## Physical actuation proof-of-concept: Apple Home lights
+
+The iPhone now includes `HomeEnvironmentController.swift` (in the **Glasses** tab) so Jarvis can interact with actual Apple Home lights *without MemoMind hardware*. This is intentionally distinct from the Windows `smart.open` tool, which launches an app/site rather than operating a household device.
+
+1. In Xcode, select an Apple signing team with the **HomeKit** capability. The iPhone app now declares `com.apple.developer.homekit` and explains permission in `NSHomeKitUsageDescription`.
+2. On the physical iPhone, open **Glasses → Discover Apple Home**, permit access, and inspect the discovered, directly reachable lightbulb services. Home access is not requested when Jarvis launches.
+3. Tap **On**/**Off** for a named light or say "Jarvis, turn on [exact device name]". Jarvis deliberately requires exact single-device matches; ambiguous names are blocked.
+4. After HomeKit accepts the write, Jarvis performs a *fresh* HomeKit characteristic read. "Verified in Apple Home" means the accessory reported the target value; it is not optical proof that a bulb emitted light.
+5. This does **not** expose scenes, locks, garage doors, outlets, shades, security systems, general electrical relays, or HomeKit credentials to the Windows agent. Do not mistake this iPhone-local capability for autonomous Agency control. Shades and broader authorized devices can be introduced once the light-only real-world loop works.
+
+**Hardware reality:** Apple Home integration exists only for devices already paired/bridged there. Lutron Caséta can publish compatible lamps to HomeKit via its Smart Bridge. The actual device list, authorization and readback must be checked on the phone; no house-specific devices are hardcoded.
+
 ## Why this is not a full hardware driver yet
 
 MemoMind says its first developer phase will include documented Bluetooth commands for HUD text/visuals, touch/button events, and microphone audio, with sample code. On September 10 it described a more extensive two-part SDK: **C on the glasses** and a **JavaScript phone plugin** in Memo Lab, with `.mmpkg` / `.gmp` packaging and a vendor simulator. The beta is targeted for **mid-October 2026**, initially whitelisted. That changes whether the appropriate final transport is direct CoreBluetooth in Jarvis iOS or a Memo Lab phone-plugin adapter. Do not guess a BLE UUID, advertise pairing, ship reverse-engineered commands, or assume the JS plugin can call into an unrelated iOS app without a documented bridge.

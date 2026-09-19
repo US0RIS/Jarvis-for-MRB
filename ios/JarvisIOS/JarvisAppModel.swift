@@ -69,6 +69,10 @@ final class JarvisAppModel: ObservableObject {
         )
     }
 
+    func discoverNearbyPublicCameras(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
+        try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
+    }
+
     func refreshMemoMindCommandView() async throws {
         let snapshot = try await client.agencyCommandView()
         memoMind.presentCommandView(snapshot)

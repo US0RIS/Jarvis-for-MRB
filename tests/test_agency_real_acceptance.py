@@ -1525,6 +1525,14 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             ],
         )
 
+        stale_preference = agency_self_model.upsert(
+            "preference",
+            "calendar_autonomy",
+            {"behavior": "automatically handle routine calendar holds"},
+            confidence=0.85,
+            source_kind="inferred_behavior",
+            source_ref="a11:stale-preference",
+        )
         with self._patch_identity():
             session = agency_real_acceptance.start_session(
                 "A11",
@@ -1552,6 +1560,22 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             )
             self.assertEqual(executor_calls, [])
             self.assertEqual(waiting["status"], "awaiting_approval")
+
+            stale_eval = agency_real_acceptance.evaluate_session(session["id"])
+            stale_check = next(
+                item for item in stale_eval["checks"]
+                if item["name"].startswith("an inferred preference learned during")
+            )
+            self.assertFalse(stale_check["passed"])
+
+            agency_self_model.upsert(
+                "preference",
+                "calendar_autonomy",
+                {"behavior": "automatically handle routine calendar holds"},
+                confidence=0.9,
+                source_kind="inferred_behavior",
+                source_ref="a11:live-preference",
+            )
 
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])

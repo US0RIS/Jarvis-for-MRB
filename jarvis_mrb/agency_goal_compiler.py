@@ -330,10 +330,16 @@ def _validate_compiled(
 
         lowered_all = [term.lower() for term in terms_all]
         forbidden_completion_phrases = set(_required_negations(completion))
+        completion_word = re.escape(completion)
         if any(
             term in forbidden_completion_phrases
-            or term.startswith(("not ", "awaiting ", "needs ", "need ", "to be "))
-            or term.startswith("un")
+            or (
+                re.search(rf"\\b{completion_word}\\b", term) is not None
+                and re.search(
+                    r"\\b(not|never|awaiting|pending|needs?|need|to be)\\b",
+                    term,
+                ) is not None
+            )
             for term in lowered_all
             if term != completion
         ):

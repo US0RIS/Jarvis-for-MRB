@@ -1544,15 +1544,6 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
-            agency_self_model.upsert(
-                "preference",
-                "calendar_autonomy",
-                {"behavior": "automatically handle routine calendar holds"},
-                confidence=0.85,
-                source_kind="inferred_behavior",
-                source_ref="real-a11-inference",
-            )
-
             executor_calls: list[str] = []
             waiting = agency_plan.execute_next(
                 plan["id"],

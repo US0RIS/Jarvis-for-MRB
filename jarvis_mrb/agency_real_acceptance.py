@@ -1813,11 +1813,60 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
         item for item in state_events
         if item["event_type"] == "desired_state.reactivated"
     ]
+    triggered_by_id = {
+        str(row["id"]): dict(row)
+        for row in rows
+        if str(row["status"]) == "triggered"
+    }
+    causal_reactivations: list[dict[str, Any]] = []
+    for item in reactivation:
+        payload = item.get("payload") or {}
+        watch_id = str(payload.get("watch_id") or "")
+        persisted = triggered_by_id.get(watch_id)
+        real_ids = list(real_trigger_events.get(watch_id) or [])
+        if persisted is None or not real_ids:
+            continue
+        event_outcome = payload.get("condition_outcome")
+        persisted_outcome = _loads(str(persisted.get("evidence_json") or "{}"), {})
+        same_outcome = bool(
+            isinstance(event_outcome, dict)
+            and isinstance(persisted_outcome, dict)
+            and json.dumps(
+                event_outcome,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            == json.dumps(
+                persisted_outcome,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+        )
+        prior_real_ids = sorted(
+            event_id
+            for event_id in real_ids
+            if int(event_id) < int(item["id"])
+        )
+        if same_outcome and prior_real_ids:
+            causal_reactivations.append(
+                {
+                    "reactivation_event_id": int(item["id"]),
+                    "watch_id": watch_id,
+                    "real_trigger_event_ids": prior_real_ids,
+                    "condition_outcome_matches_persisted_watch": True,
+                }
+            )
+
     desired = _desired_state_row(conn, state_id)
     restatements = _goal_restatement_ids(conn, session)
-    reactivated = bool(reactivation) and desired is not None and str(desired["state"]) in {"active", "satisfied"}
+    reactivated = bool(causal_reactivations) and desired is not None and str(desired["state"]) in {"active", "satisfied"}
 
-    reactivation_ids = [int(item["id"]) for item in reactivation]
+    reactivation_ids = [
+        int(item["reactivation_event_id"])
+        for item in causal_reactivations
+    ]
     first_reactivation_id = min(reactivation_ids) if reactivation_ids else 0
     downstream = [
         item for item in state_events
@@ -1836,7 +1885,11 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
             bool(real_trigger_events),
             real_trigger_events,
         ),
-        _check("desired state reactivated", reactivated, reactivation_ids),
+        _check(
+            "desired state reactivated from the same externally grounded wake",
+            reactivated,
+            causal_reactivations,
+        ),
         _check(
             "newly available next step surfaced or executed after reactivation",
             surfaced_or_executed,

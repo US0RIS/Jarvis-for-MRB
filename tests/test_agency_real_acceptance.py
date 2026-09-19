@@ -2632,8 +2632,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 {
                     "kind": "belief_equals",
                     "entity_id": entity_id,
-                    "predicate": "prerequisite",
-                    "value": "available",
+                    "predicate": "complete",
+                    "value": True,
                 }
             ],
             authority={"agency_enabled": True},
@@ -3103,6 +3103,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             ):
                 reconciled = agency_capability.reconcile_gaps()
                 evaluation = agency_real_acceptance.evaluate_session(session["id"])
+                finalized = agency_real_acceptance.finalize_session(session["id"])
 
             self.assertIn(gap["id"], reconciled["resolved"])
             self.assertIn(target_state, reconciled["reactivated"])
@@ -3121,7 +3122,6 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertNotIn(synthesis_action_event_id, manual_event_ids)
             self.assertNotIn(enable_event_id, manual_event_ids)
 
-            finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A9")
 

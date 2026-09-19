@@ -864,23 +864,67 @@ def _verification_rows_for_state(conn: sqlite3.Connection, desired_state_id: str
         )
 
         observation_proof = False
+        observation_row = None
         if status in {"verified", "failed", "timed_out"}:
-            observation_proof = conn.execute(
+            observation_row = conn.execute(
                 """
-                SELECT 1 FROM verification_observations
+                SELECT id,observed_at FROM verification_observations
                 WHERE verification_id=? AND outcome=?
                 ORDER BY id DESC LIMIT 1
                 """,
                 (verification_id, status),
-            ).fetchone() is not None
+            ).fetchone()
+            observation_proof = observation_row is not None
         elif status == "unverified":
             observation_proof = str(item.get("verifier") or "") == "no_independent_verifier"
+
+        action_time = _parse_time(
+            str(
+                (conn.execute(
+                    "SELECT recorded_at FROM events WHERE id=?",
+                    (action_event_id,),
+                ).fetchone() or {"recorded_at": ""})["recorded_at"]
+            )
+        ) if action_event_id else None
+        resolved_time = _parse_time(
+            str(
+                (conn.execute(
+                    "SELECT recorded_at FROM events WHERE id=?",
+                    (resolved_event_id,),
+                ).fetchone() or {"recorded_at": ""})["recorded_at"]
+            )
+        ) if resolved_event_id else None
+        observation_time = _parse_time(
+            str(observation_row["observed_at"] or "")
+        ) if observation_row is not None else None
+        observation_after_action = bool(
+            observation_time is not None
+            and action_time is not None
+            and observation_time >= action_time
+        )
+        resolution_after_observation = bool(
+            observation_time is not None
+            and resolved_time is not None
+            and resolved_time >= observation_time
+        )
 
         item["action_event_proof"] = action_event_proof
         item["terminal_event_proof"] = terminal_event_proof
         item["observation_proof"] = observation_proof
+        item["terminal_observation_id"] = (
+            int(observation_row["id"]) if observation_row is not None else 0
+        )
+        item["terminal_observed_at"] = (
+            str(observation_row["observed_at"]) if observation_row is not None else ""
+        )
+        item["observation_after_action"] = observation_after_action
+        item["resolution_after_observation"] = resolution_after_observation
         item["independent_terminal_proof"] = bool(
-            action_event_proof and terminal_event_proof and observation_proof
+            action_event_proof
+            and terminal_event_proof
+            and observation_proof
+            and observation_after_action
+            and resolution_after_observation
         )
         result.append(item)
     return result
@@ -1034,11 +1078,23 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "tool_return",
             "no_independent_verifier",
         }
+        and str(row.get("agency_step_id") or "")
+        and int(row.get("terminal_observation_id") or 0) > 0
         and bool(row.get("independent_terminal_proof"))
         and int(row.get("action_event_id") or 0) > baseline_event_id
         and int(row.get("resolved_event_id") or 0) > int(row.get("action_event_id") or 0)
     ]
     cycles.sort(key=lambda item: int(item.get("resolved_event_id") or 0))
+    distinct_step_ids = {
+        str(row.get("agency_step_id") or "")
+        for row in cycles
+        if str(row.get("agency_step_id") or "")
+    }
+    distinct_observation_ids = {
+        int(row.get("terminal_observation_id") or 0)
+        for row in cycles
+        if int(row.get("terminal_observation_id") or 0) > 0
+    }
 
     evaluations = conn.execute(
         """
@@ -1067,7 +1123,15 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if first_time is None:
             continue
 
+        first_step_id = str(first.get("agency_step_id") or "")
+        first_observation_id = int(first.get("terminal_observation_id") or 0)
         for second in cycles[first_index + 1 :]:
+            second_step_id = str(second.get("agency_step_id") or "")
+            second_observation_id = int(second.get("terminal_observation_id") or 0)
+            if second_step_id == first_step_id:
+                continue
+            if second_observation_id == first_observation_id:
+                continue
             second_action_id = int(second.get("action_event_id") or 0)
             if second_action_id <= first_resolved_id:
                 continue
@@ -1104,11 +1168,15 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
             if between:
                 causal_pair = {
                     "first_verification_id": str(first.get("id") or ""),
+                    "first_agency_step_id": first_step_id,
                     "first_action_event_id": int(first.get("action_event_id") or 0),
+                    "first_observation_id": first_observation_id,
                     "first_resolved_event_id": first_resolved_id,
                     "intermediate_unsatisfied_evaluations": between,
                     "second_verification_id": str(second.get("id") or ""),
+                    "second_agency_step_id": second_step_id,
                     "second_action_event_id": second_action_id,
+                    "second_observation_id": second_observation_id,
                     "second_resolved_event_id": int(second.get("resolved_event_id") or 0),
                 }
                 break
@@ -1151,14 +1219,18 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
     restatements = _goal_restatement_ids(conn, session)
     checks = [
         _check(
-            "two or more non-read actions received independent verified observations",
-            len(cycles) >= 2,
+            "two or more distinct non-read Agency steps received distinct independent verified observations",
+            len(cycles) >= 2
+            and len(distinct_step_ids) >= 2
+            and len(distinct_observation_ids) >= 2,
             [
                 {
                     "verification_id": str(row.get("id") or ""),
                     "agency_step_id": str(row.get("agency_step_id") or ""),
                     "tool": str(row.get("tool") or ""),
                     "action_event_id": int(row.get("action_event_id") or 0),
+                    "observation_id": int(row.get("terminal_observation_id") or 0),
+                    "observed_at": str(row.get("terminal_observed_at") or ""),
                     "resolved_event_id": int(row.get("resolved_event_id") or 0),
                     "verifier": str(row.get("verifier") or ""),
                 }
@@ -1191,6 +1263,8 @@ def _evaluate_a2(session: dict[str, Any], conn: sqlite3.Connection, events: list
         "evidence": {
             "action_observation_cycles": len(cycles),
             "independent_observation_cycles": len(cycles),
+            "distinct_action_steps": len(distinct_step_ids),
+            "distinct_observations": len(distinct_observation_ids),
             "second_action_followed_first_observation": checks[1]["passed"],
             "intermediate_unsatisfied_observed": checks[2]["passed"],
             "desired_state_satisfied": checks[3]["passed"],

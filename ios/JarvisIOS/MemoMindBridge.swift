@@ -1,6 +1,80 @@
 import Foundation
 import SwiftUI
 
+/// The compact, authenticated Agency status returned by the Jarvis backend.
+/// This is a read-only projection of persisted facts, not an LLM-generated claim.
+struct MemoMindCommandSnapshot: Decodable {
+    struct Objective: Decodable {
+        struct NextStep: Decodable {
+            let tool: String
+            let status: String
+            let stepKey: String
+
+            enum CodingKeys: String, CodingKey {
+                case tool, status
+                case stepKey = "step_key"
+            }
+        }
+        let title: String
+        let state: String
+        let evaluatedAt: String
+        let planStatus: String
+        let stepCount: Int
+        let verifiedSteps: Int
+        let nextStep: NextStep?
+
+        enum CodingKeys: String, CodingKey {
+            case title, state
+            case evaluatedAt = "evaluated_at"
+            case planStatus = "plan_status"
+            case stepCount = "step_count"
+            case verifiedSteps = "verified_steps"
+            case nextStep = "next_step"
+        }
+    }
+
+    struct PendingApproval: Decodable {
+        let goal: String
+        let tool: String
+        let summary: String
+    }
+
+    struct Alert: Decodable {
+        let message: String
+        let severity: String
+        let seenAt: String
+
+        enum CodingKeys: String, CodingKey {
+            case message, severity
+            case seenAt = "seen_at"
+        }
+    }
+
+    let generatedAt: String
+    let source: String
+    let mode: String
+    let totalGoals: Int
+    let activeGoals: Int
+    let blockedGoals: Int
+    let pendingApprovalCount: Int
+    let goals: [Objective]
+    let pendingApprovals: [PendingApproval]
+    let recentAlerts: [Alert]
+    let readOnly: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case source, mode, goals
+        case generatedAt = "generated_at"
+        case totalGoals = "total_goals"
+        case activeGoals = "active_goals"
+        case blockedGoals = "blocked_goals"
+        case pendingApprovalCount = "pending_approval_count"
+        case pendingApprovals = "pending_approvals"
+        case recentAlerts = "recent_alerts"
+        case readOnly = "read_only"
+    }
+}
+
 /// Jarvis-side contract for MemoMind One. No vendor BLE UUIDs or SDK types belong
 /// here: the future phone/glasses transport translates real hardware events to
 /// MemoMindInput, and renders MemoMindHUDFrame onto the actual HUD.
@@ -30,7 +104,7 @@ enum MemoMindIntent: Equatable {
 
 struct MemoMindHUDCard: Equatable, Identifiable {
     enum Kind: String {
-        case status, reply, approval, alert
+        case status, reply, approval, alert, overview, objective, exception, pendingAction
     }
 
     let id: UUID
@@ -80,7 +154,7 @@ struct MemoMindHUDFrame: Equatable {
             lines: wrapped,
             index: index,
             count: count,
-            requiresPhoneApproval: card.kind == .approval,
+            requiresPhoneApproval: card.kind == .approval || card.kind == .pendingAction,
             isRedacted: redacted
         )
     }
@@ -183,6 +257,66 @@ final class MemoMindBridge: ObservableObject {
         cards.append(card)
         if cards.count > 20 { cards.removeFirst(cards.count - 20) }
         selectedIndex = cards.count - 1
+        publish()
+    }
+
+    /// Replace only the Agency command-view slice of the HUD, retaining
+    /// conversational replies and other standalone status cards.
+    func presentCommandView(_ snapshot: MemoMindCommandSnapshot) {
+        guard snapshot.readOnly, snapshot.source == "persisted_agency" else { return }
+        let commandKinds: Set<MemoMindHUDCard.Kind> = [
+            .overview, .objective, .exception, .pendingAction
+        ]
+        cards.removeAll { commandKinds.contains($0.kind) }
+        cards.append(
+            MemoMindHUDCard(
+                kind: .overview,
+                title: "COMMAND VIEW • " + snapshot.mode.uppercased(),
+                body: "\(snapshot.activeGoals) active / \(snapshot.totalGoals) goals. \(snapshot.blockedGoals) blocked. \(snapshot.pendingApprovalCount) need approval. Snapshot: \(snapshot.generatedAt).",
+                containsPrivateData: true
+            )
+        )
+        for objective in snapshot.goals {
+            let next = objective.nextStep.map { "Next: \($0.tool) [\($0.status)]" }
+                ?? "No next step recorded."
+            let evaluated = objective.evaluatedAt.isEmpty
+                ? "Not yet evaluated."
+                : "Last evaluation: \(objective.evaluatedAt)."
+            cards.append(
+                MemoMindHUDCard(
+                    kind: .objective,
+                    title: "GOAL • " + objective.state.uppercased(),
+                    body: "\(objective.title). \(objective.verifiedSteps)/\(objective.stepCount) plan steps verified. \(next). \(evaluated)",
+                    containsPrivateData: true
+                )
+            )
+        }
+        for approval in snapshot.pendingApprovals {
+            cards.append(
+                MemoMindHUDCard(
+                    kind: .pendingAction,
+                    title: "APPROVAL ON IPHONE",
+                    body: "\(approval.goal): \(approval.tool). \(approval.summary)",
+                    containsPrivateData: true
+                )
+            )
+        }
+        for alert in snapshot.recentAlerts {
+            cards.append(
+                MemoMindHUDCard(
+                    kind: .exception,
+                    title: "ALERT • " + alert.severity.uppercased(),
+                    body: "\(alert.message). Last seen: \(alert.seenAt).",
+                    containsPrivateData: true
+                )
+            )
+        }
+        if cards.count > 40 { cards.removeFirst(cards.count - 40) }
+        if let overviewIndex = cards.firstIndex(where: { $0.kind == .overview }) {
+            selectedIndex = overviewIndex
+        } else {
+            selectedIndex = min(selectedIndex, cards.count - 1)
+        }
         publish()
     }
 

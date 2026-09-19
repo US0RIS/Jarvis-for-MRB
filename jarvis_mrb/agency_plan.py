@@ -5,6 +5,7 @@ import inspect
 import json
 import re
 import sqlite3
+import threading
 import uuid
 from datetime import datetime
 from typing import Any, Callable
@@ -18,6 +19,14 @@ PLAN_TERMINAL_STATES = {"completed", "superseded", "retired"}
 STEP_SUCCESS_STATES = {"verified", "skipped"}
 STEP_TERMINAL_FAILURE_STATES = {"failed", "blocked"}
 STEP_OPEN_STATES = {"pending", "awaiting_approval", "executing", "executed", "awaiting_verification"}
+
+_ACTIVE_EXECUTIONS: set[str] = set()
+_ACTIVE_EXECUTIONS_LOCK = threading.RLock()
+
+
+def _execution_is_active(step_id: str) -> bool:
+    with _ACTIVE_EXECUTIONS_LOCK:
+        return str(step_id) in _ACTIVE_EXECUTIONS
 
 
 def _now() -> str:
@@ -672,6 +681,11 @@ def reconcile_plan(plan_id: str) -> dict[str, Any]:
             verification = _verification_for_step(conn, step_id)
 
             if step_status == "executing":
+                if _execution_is_active(step_id):
+                    # Another thread in this process owns the claimed execution.
+                    # A concurrent scheduler/reconcile pass must not misclassify
+                    # live work as a process-death recovery case.
+                    continue
                 # Process death or interruption while the executor was in flight.
                 # Never replay automatically: if the audited action produced a
                 # durable verification record, resume verification; otherwise the
@@ -934,6 +948,56 @@ def _custom_run_is_read_observation(step: dict[str, Any]) -> bool:
     )
 
 
+def _claim_step_for_execution(
+    plan: dict[str, Any],
+    step: dict[str, Any],
+    arguments: dict[str, Any],
+    *,
+    bypass_confirmation: bool,
+) -> bool:
+    """Atomically claim one persisted step for exactly one executor invocation."""
+    step_id = str(step["id"])
+    expected_status = "awaiting_approval" if bypass_confirmation else "pending"
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT status,tool,approval_digest FROM agency_steps WHERE id=? AND plan_id=?",
+            (step_id, str(plan["id"])),
+        ).fetchone()
+        if row is None or str(row["status"] or "") != expected_status:
+            conn.rollback()
+            return False
+        if str(row["tool"] or "") != str(step["tool"]):
+            conn.rollback()
+            raise PermissionError("Persisted Agency step tool changed before execution.")
+        if bypass_confirmation:
+            digest = str(row["approval_digest"] or "")
+            expected_digest = _approval_digest(step_id, str(step["tool"]), arguments)
+            if not digest or digest != expected_digest:
+                conn.rollback()
+                raise PermissionError(
+                    "Approved Agency execution has no matching one-time approval capability."
+                )
+
+        _set_step_status(
+            conn,
+            step_id,
+            "executing",
+            increment_attempt=True,
+            started=True,
+        )
+        _set_plan_status(conn, str(plan["id"]), "active")
+        with _ACTIVE_EXECUTIONS_LOCK:
+            _ACTIVE_EXECUTIONS.add(step_id)
+        try:
+            conn.commit()
+        except Exception:
+            with _ACTIVE_EXECUTIONS_LOCK:
+                _ACTIVE_EXECUTIONS.discard(step_id)
+            raise
+    return True
+
+
 def _execute_step(
     plan: dict[str, Any],
     step: dict[str, Any],
@@ -943,103 +1007,107 @@ def _execute_step(
 ) -> dict[str, Any]:
     step_id = str(step["id"])
     arguments = resolved_arguments(step_id)
-    if bypass_confirmation and not _approval_grant_matches(
-        step_id,
-        str(step["tool"]),
+    claimed = _claim_step_for_execution(
+        plan,
+        step,
         arguments,
-        required_status="awaiting_approval",
-    ):
-        raise PermissionError("Approved Agency execution has no matching one-time approval capability.")
-
-    with _connect() as conn:
-        _set_step_status(conn, step_id, "executing", increment_attempt=True, started=True)
-        conn.commit()
+        bypass_confirmation=bypass_confirmation,
+    )
+    if not claimed:
+        # Another worker already claimed or completed this exact step. Returning
+        # the persisted plan is fail-closed and, critically, does not invoke the
+        # side-effecting executor a second time.
+        return get_plan(str(plan["id"]), include_steps=True) or {}
 
     try:
-        reply = _invoke_executor(step, executor, bypass_confirmation=bypass_confirmation)
-        ok = bool(getattr(reply, "ok", False))
-        message = str(getattr(reply, "message", reply) or "")
-    except Exception as exc:
-        ok = False
-        message = f"Execution raised {type(exc).__name__}: {exc}"
-    finally:
-        if bypass_confirmation:
-            _clear_step_approval(step_id)
+        try:
+            reply = _invoke_executor(step, executor, bypass_confirmation=bypass_confirmation)
+            ok = bool(getattr(reply, "ok", False))
+            message = str(getattr(reply, "message", reply) or "")
+        except Exception as exc:
+            ok = False
+            message = f"Execution raised {type(exc).__name__}: {exc}"
+        finally:
+            if bypass_confirmation:
+                _clear_step_approval(step_id)
 
-    with _connect() as conn:
-        if not ok:
-            _set_step_status(
-                conn,
-                str(step["id"]),
-                "failed",
-                result=message,
-                blocked_reason="Tool execution failed.",
-                finished=True,
-            )
-            _set_plan_status(conn, str(plan["id"]), "needs_replan", error=message)
-            conn.commit()
-        else:
-            _set_step_status(conn, str(step["id"]), "executed", result=message)
-            verification = _verification_for_step(conn, str(step["id"]))
-            if verification is not None:
-                verification_id = str(verification["id"])
-                verification_status = str(verification["status"])
-                if verification_status == "verified":
-                    _set_step_status(
-                        conn,
-                        str(step["id"]),
-                        "verified",
-                        verification_id=verification_id,
-                        result=str(verification["last_evidence"] or message),
-                        finished=True,
-                    )
-                elif verification_status == "pending":
-                    _set_step_status(
-                        conn,
-                        str(step["id"]),
-                        "awaiting_verification",
-                        verification_id=verification_id,
-                        result=str(verification["last_evidence"] or message),
-                    )
-                else:
-                    _set_step_status(
-                        conn,
-                        str(step["id"]),
-                        "failed",
-                        verification_id=verification_id,
-                        result=str(verification["last_evidence"] or message),
-                        blocked_reason=f"Outcome verification {verification_status}.",
-                        finished=True,
-                    )
-            elif str(step["risk"]) == "read" or _custom_run_is_read_observation(step):
-                _set_step_status(conn, str(step["id"]), "verified", result=message, finished=True)
-            else:
+        with _connect() as conn:
+            if not ok:
                 _set_step_status(
                     conn,
                     str(step["id"]),
                     "failed",
                     result=message,
-                    blocked_reason="No durable action-verification record was produced.",
+                    blocked_reason="Tool execution failed.",
                     finished=True,
                 )
-            conn.commit()
+                _set_plan_status(conn, str(plan["id"]), "needs_replan", error=message)
+                conn.commit()
+            else:
+                _set_step_status(conn, str(step["id"]), "executed", result=message)
+                verification = _verification_for_step(conn, str(step["id"]))
+                if verification is not None:
+                    verification_id = str(verification["id"])
+                    verification_status = str(verification["status"])
+                    if verification_status == "verified":
+                        _set_step_status(
+                            conn,
+                            str(step["id"]),
+                            "verified",
+                            verification_id=verification_id,
+                            result=str(verification["last_evidence"] or message),
+                            finished=True,
+                        )
+                    elif verification_status == "pending":
+                        _set_step_status(
+                            conn,
+                            str(step["id"]),
+                            "awaiting_verification",
+                            verification_id=verification_id,
+                            result=str(verification["last_evidence"] or message),
+                        )
+                    else:
+                        _set_step_status(
+                            conn,
+                            str(step["id"]),
+                            "failed",
+                            verification_id=verification_id,
+                            result=str(verification["last_evidence"] or message),
+                            blocked_reason=f"Outcome verification {verification_status}.",
+                            finished=True,
+                        )
+                elif str(step["risk"]) == "read" or _custom_run_is_read_observation(step):
+                    _set_step_status(conn, str(step["id"]), "verified", result=message, finished=True)
+                else:
+                    _set_step_status(
+                        conn,
+                        str(step["id"]),
+                        "failed",
+                        result=message,
+                        blocked_reason="No durable action-verification record was produced.",
+                        finished=True,
+                    )
+                conn.commit()
 
-    _record_event(
-        "agency.step.executed",
-        f"Agency step {step['step_key']} executed: {step['tool']}.",
-        plan_id=str(plan["id"]),
-        desired_state_id=str(plan["desired_state_id"]),
-        step_id=str(step["id"]),
-        payload={"tool": step["tool"], "ok": ok},
-    )
-    try:
-        from jarvis_mrb.agency_runtime import _update_runtime
-        _update_runtime(str(plan["desired_state_id"]), action=True)
-    except Exception:
-        # Action execution state is authoritative in the plan ledger. Fairness
-        # metadata must never turn an already-attempted action into a retry.
-        pass
-    return reconcile_plan(str(plan["id"]))
+        _record_event(
+            "agency.step.executed",
+            f"Agency step {step['step_key']} executed: {step['tool']}.",
+            plan_id=str(plan["id"]),
+            desired_state_id=str(plan["desired_state_id"]),
+            step_id=str(step["id"]),
+            payload={"tool": step["tool"], "ok": ok},
+        )
+        try:
+            from jarvis_mrb.agency_runtime import _update_runtime
+            _update_runtime(str(plan["desired_state_id"]), action=True)
+        except Exception:
+            # Action execution state is authoritative in the plan ledger. Fairness
+            # metadata must never turn an already-attempted action into a retry.
+            pass
+        return reconcile_plan(str(plan["id"]))
+    finally:
+        with _ACTIVE_EXECUTIONS_LOCK:
+            _ACTIVE_EXECUTIONS.discard(step_id)
 
 
 def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -> dict[str, Any] | None:

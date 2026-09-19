@@ -1063,7 +1063,11 @@ class AgencyPlanTests(unittest.TestCase):
         def audited_fake(tool: str, args: dict, *, bypass_confirmation: bool = False) -> SimpleNamespace:
             self.assertTrue(bypass_confirmation)
             self.assertEqual(current_agency_step_id(), step_id)
-            reply = SimpleNamespace(ok=True, message="Calendar event created.")
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar event created.",
+                data={"event_id": "agency-verification-test-event"},
+            )
             action_event_id = world_model.record_tool_execution(tool, args, ok=True, message=reply.message)
             world_verification.register_execution(
                 tool,

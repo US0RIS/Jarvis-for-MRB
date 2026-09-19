@@ -31,7 +31,7 @@
 		200000000000000000000016 /* LocalIntelligenceMilestone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000018 /* LocalIntelligenceMilestone.swift */; };
 		200000000000000000000017 /* FrontendOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* FrontendOperations.swift */; };
 		200000000000000000000018 /* JarvisLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001A /* JarvisLiveActivityWidget.swift */; };
-		20000000000000000000001D /* HomeEnvironmentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001D /* HomeEnvironmentController.swift */; };
+		20000000000000000000001D /* HomeEnvironmentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001E /* HomeEnvironmentController.swift */; };
 		20000000000000000000001A /* MemoMindBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001C /* MemoMindBridge.swift */; };
 		20000000000000000000001B /* JarvisPhysicalControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001D /* JarvisPhysicalControlView.swift */; };
 		200000000000000000000019 /* JarvisLiveActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 006000000000000000000002 /* JarvisLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };

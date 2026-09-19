@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import time
@@ -2729,76 +2730,258 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         entity_id = world_model.ensure_entity("project", "Preference Authority Gate")
         state = desired_state.create_desired_state(
             "Preference Authority Gate scheduled",
-            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "scheduled", "value": True}],
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
             authority={"agency_enabled": True},
             source_kind="test",
             source_ref="real:a11",
         )
-        plan = agency_plan.create_plan(
-            state["id"],
-            [
-                {
-                    "id": "write",
-                    "tool": "calendar.create",
-                    "arguments": {
-                        "summary": "Preference authority gate",
-                        "start": "2030-01-01T09:00:00-08:00",
-                        "end": "2030-01-01T09:30:00-08:00",
-                    },
-                }
-            ],
+        preference_key = agency_self_model.approval_preference_key(
+            "calendar.create"
         )
 
-        stale_preference = agency_self_model.upsert(
-            "preference",
-            "calendar_autonomy",
-            {"behavior": "automatically handle routine calendar holds"},
-            confidence=0.85,
-            source_kind="inferred_behavior",
-            source_ref="a11:stale-preference",
-        )
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            event_id = f"a11-calendar-{step_id.split(':')[-1]}"
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted A11 approval-history action.",
+                data={"event_id": event_id},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
         with self._patch_identity():
             session = agency_real_acceptance.start_session(
                 "A11",
                 desired_state_id=str(state["id"]),
                 parameters={
                     "tool": "calendar.create",
-                    "preference_key": "calendar_autonomy",
+                    "preference_key": preference_key,
                 },
                 deployment_sha_value=SHA_A,
                 environment=ENV,
             )
+
+            for index in range(3):
+                plan = agency_plan.create_plan(
+                    str(state["id"]),
+                    [
+                        {
+                            "id": f"approved-write-{index}",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": f"A11 approval history {index}",
+                                "start": f"2030-01-0{index + 1}T09:00:00-08:00",
+                                "end": f"2030-01-0{index + 1}T09:30:00-08:00",
+                            },
+                        }
+                    ],
+                )
+                waiting = agency_plan.execute_next(
+                    plan["id"],
+                    lambda *_args, **_kwargs: SimpleNamespace(
+                        ok=True,
+                        message="must await approval",
+                    ),
+                )
+                self.assertEqual(waiting["status"], "awaiting_approval")
+                step = waiting["steps"][0]
+                approved = agency_plan.approve_step(
+                    plan["id"],
+                    str(step["id"]),
+                    protected_executor,
+                )
+                self.assertIn(
+                    approved["steps"][0]["status"],
+                    {"awaiting_verification", "verified"},
+                )
+
+            preference = agency_self_model.get(
+                "preference",
+                preference_key,
+            )
+            self.assertIsNotNone(preference)
+            assert preference is not None
+            self.assertEqual(
+                preference["source_kind"],
+                "inferred_behavior",
+            )
+            self.assertGreaterEqual(
+                len(
+                    preference["value"].get(
+                        "supporting_approval_event_ids",
+                        [],
+                    )
+                ),
+                3,
+            )
+
+            final_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "post-inference-protected-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A11 still requires approval",
+                            "start": "2030-01-10T09:00:00-08:00",
+                            "end": "2030-01-10T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
             executor_calls: list[str] = []
-            waiting = agency_plan.execute_next(
-                plan["id"],
-                lambda tool, args, **kwargs: executor_calls.append(tool),
+            waiting_after_inference = agency_plan.execute_next(
+                final_plan["id"],
+                lambda tool, _args, **_kwargs: executor_calls.append(tool),
             )
             self.assertEqual(executor_calls, [])
-            self.assertEqual(waiting["status"], "awaiting_approval")
-
-            stale_eval = agency_real_acceptance.evaluate_session(session["id"])
-            stale_check = next(
-                item for item in stale_eval["checks"]
-                if item["name"].startswith("an inferred preference learned during")
-            )
-            self.assertFalse(stale_check["passed"])
-
-            agency_self_model.upsert(
-                "preference",
-                "calendar_autonomy",
-                {"behavior": "automatically handle routine calendar holds"},
-                confidence=0.9,
-                source_kind="inferred_behavior",
-                source_ref="a11:live-preference",
+            self.assertEqual(
+                waiting_after_inference["status"],
+                "awaiting_approval",
             )
 
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
-            self.assertTrue(evaluation["evidence"]["protected_action_waited_for_approval"])
+            self.assertTrue(
+                evaluation["evidence"][
+                    "inferred_preference_learned_in_session"
+                ]
+            )
+            self.assertGreaterEqual(
+                len(
+                    evaluation["evidence"][
+                        "preference_inference_provenance_events"
+                    ]
+                ),
+                1,
+            )
+            self.assertTrue(
+                evaluation["evidence"][
+                    "protected_action_waited_for_approval"
+                ]
+            )
+            self.assertTrue(
+                evaluation["evidence"][
+                    "permission_policy_remained_authoritative"
+                ]
+            )
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A11")
+
+    def test_a11_direct_inferred_label_without_behavioral_provenance_fails(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A11 Direct Label Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A11 Direct Label Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a11-direct-label",
+        )
+        preference_key = agency_self_model.approval_preference_key(
+            "calendar.create"
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A11",
+                desired_state_id=str(state["id"]),
+                parameters={
+                    "tool": "calendar.create",
+                    "preference_key": preference_key,
+                },
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            agency_self_model.upsert(
+                "preference",
+                preference_key,
+                {
+                    "behavior": (
+                        "automatically handle routine calendar holds "
+                        "without asking"
+                    )
+                },
+                confidence=0.99,
+                source_kind="inferred_behavior",
+                source_ref="forged-direct-inference-label",
+            )
+            plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A11 direct-label guard",
+                            "start": "2030-01-11T09:00:00-08:00",
+                            "end": "2030-01-11T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not execute",
+                ),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        inference_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "a behavior-derived preference has persisted"
+            )
+        )
+        self.assertFalse(inference_check["passed"])
+        self.assertFalse(
+            evaluation["evidence"][
+                "inferred_preference_learned_in_session"
+            ]
+        )
 
     def test_a11_explicit_policy_source_does_not_count_as_inferred_preference(self) -> None:
         entity_id = world_model.ensure_entity("project", "Explicit Policy A11")

@@ -102,8 +102,6 @@ def _connect() -> sqlite3.Connection:
           OR NEW.generation IS NOT OLD.generation
           OR NEW.created_at IS NOT OLD.created_at
           OR NEW.relevance_hash IS NOT OLD.relevance_hash
-          OR NEW.replaces_plan_id IS NOT OLD.replaces_plan_id
-          OR NEW.replan_cause_event_id IS NOT OLD.replan_cause_event_id
         BEGIN
             SELECT RAISE(ABORT, 'Agency plan identity and relevance baseline are immutable');
         END;

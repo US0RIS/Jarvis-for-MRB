@@ -1512,7 +1512,28 @@ def approve_step(plan_id: str, step_id: str, executor: Callable[..., Any]) -> di
     arguments = resolved_arguments(str(step_id))
     _grant_step_approval(str(step_id), str(step["tool"]), arguments)
     try:
-        return _execute_step(plan, step, executor, bypass_confirmation=True)
+        result = _execute_step(plan, step, executor, bypass_confirmation=True)
+        _record_event(
+            "agency.step.approved",
+            f"Explicit Agency approval was consumed for {step['tool']}.",
+            plan_id=str(plan_id),
+            desired_state_id=str(plan["desired_state_id"]),
+            step_id=str(step_id),
+            payload={
+                "tool": str(step["tool"]),
+                "risk": str(permission.risk),
+                "requires_confirmation": bool(permission.needs_confirmation),
+            },
+        )
+        try:
+            from jarvis_mrb.agency_self_model import infer_approval_preference
+
+            infer_approval_preference(str(step["tool"]))
+        except Exception:
+            # Self-model learning is advisory only. It must never change whether
+            # the already-authorized action executes or alter permission authority.
+            pass
+        return result
     except Exception:
         _clear_step_approval(str(step_id))
         raise

@@ -53,6 +53,8 @@
         <string>location</string>
     </array>
 
+    <key>NSHomeKitUsageDescription</key>
+    <string>Jarvis discovers your Apple Home light devices only when requested, and can change a selected light on explicit command with a fresh HomeKit state check.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Jarvis uses the microphone for voice commands, explicit Meeting Notes, and optional room listening.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

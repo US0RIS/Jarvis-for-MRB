@@ -447,6 +447,42 @@ class AgencyCapabilityTests(unittest.TestCase):
         self.assertEqual(state["state"], "blocked")
         self.assertIn("legal approval", state["blocked_reason"])
 
+    def test_resolved_capability_does_not_clear_unrelated_blocker_that_mentions_tool(self) -> None:
+        state_id = self._state()
+        gap = agency_capability.record_gap(
+            state_id,
+            "weather.private_api",
+            "Need private weather data.",
+        )
+        desired_state.set_state(
+            state_id,
+            "blocked",
+            reason=(
+                "Waiting for legal review before using weather.private_api; "
+                "this is not a capability blocker."
+            ),
+        )
+
+        with patch(
+            "jarvis_mrb.agency_capability.available_tool",
+            return_value={
+                "tool": "weather.private_api",
+                "known": True,
+                "available": True,
+                "implemented_for_agency": True,
+                "authority_blocked": False,
+                "agency_scope_blocked": False,
+                "wrapper_tool": "custom.run",
+            },
+        ):
+            result = agency_capability.reconcile_gaps()
+
+        self.assertIn(gap["id"], result["resolved"])
+        self.assertNotIn(state_id, result["reactivated"])
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertIn("legal review", state["blocked_reason"])
+
     def test_resolving_one_of_multiple_capability_gaps_does_not_reactivate_goal(self) -> None:
         state_id = self._state()
         first = agency_capability.record_gap(state_id, "capability.one", "Need one.")

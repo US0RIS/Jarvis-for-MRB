@@ -344,17 +344,25 @@ def start_session(
             if not plan:
                 raise ValueError("A1 REAL session requires a persistent current plan before restart.")
             plan_steps = list(plan.get("steps") or [])
-            if not any(str(step.get("status") or "") in {"verified", "skipped"} for step in plan_steps):
-                raise ValueError("A1 REAL session requires completed/verified work before restart.")
+            verified_executed = [
+                step for step in plan_steps
+                if str(step.get("status") or "") == "verified"
+                and int(step.get("attempt_count") or 0) > 0
+            ]
+            if not verified_executed:
+                raise ValueError(
+                    "A1 REAL session requires executed and verified work before restart."
+                )
             if not any(str(step.get("status") or "") == "awaiting_approval" for step in plan_steps):
                 raise ValueError("A1 REAL session requires a persisted pending approval before restart.")
             if not any(
                 str(step.get("result_summary") or "").strip()
                 or str(step.get("verification_id") or "").strip()
-                for step in plan_steps
-                if str(step.get("status") or "") in {"verified", "skipped"}
+                for step in verified_executed
             ):
-                raise ValueError("A1 REAL session requires persisted evidence for completed work.")
+                raise ValueError(
+                    "A1 REAL session requires persisted evidence for executed verified work."
+                )
             runtime = dict(baseline.get("runtime") or {})
             if _parse_time(str(runtime.get("next_evaluation_at") or "")) is None:
                 raise ValueError("A1 REAL session requires a persisted next evaluation time.")

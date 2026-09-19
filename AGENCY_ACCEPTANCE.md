@@ -126,6 +126,14 @@ For a consequential decision:
 
 This is decision support, not a claim to predict unknowable future events.
 
+The same subsystem is available through the normal Jarvis tool boundary:
+`agency.counterfactual.create` persists two or more branches,
+`agency.counterfactual.compare` retrieves the preserved comparison, and
+`agency.counterfactual.select` records a chosen branch plus explicit conditions
+that would reopen the choice. Create/select are local-state writes only. Selecting
+a branch does not grant permission for any external action represented by that
+branch; downstream actions still cross their ordinary permission boundary.
+
 ## Gate A11 — Self-model is policy, not mimicry [SYNTHETIC + REAL]
 
 Jarvis must distinguish:

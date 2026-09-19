@@ -3181,6 +3181,15 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 ],
                 summary="A12 replanned path",
             )
+            self.assertEqual(
+                second_plan["replaces_plan_id"],
+                first_plan["id"],
+            )
+            self.assertEqual(
+                second_plan["replan_cause_event_id"],
+                invalidated["invalidation_event_id"],
+            )
+            self.assertGreater(second_plan["replan_cause_event_id"], 0)
             waiting = agency_plan.execute_next(
                 second_plan["id"],
                 lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
@@ -3456,7 +3465,9 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             unrelated_eval = agency_real_acceptance.evaluate_session(session["id"])
             parallel_check = next(
                 item for item in unrelated_eval["checks"]
-                if item["name"].startswith("parallel deliberation belonged")
+                if item["name"].startswith(
+                    "parallel deliberation consumed those reads"
+                )
             )
             self.assertFalse(parallel_check["passed"])
 
@@ -3493,9 +3504,12 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             linked_eval = agency_real_acceptance.evaluate_session(session["id"])
             linked_parallel_check = next(
                 item for item in linked_eval["checks"]
-                if item["name"].startswith("parallel deliberation belonged")
+                if item["name"].startswith(
+                    "parallel deliberation consumed those reads"
+                )
             )
-            self.assertTrue(linked_parallel_check["passed"])
+            self.assertFalse(linked_parallel_check["passed"])
+            self.assertFalse(linked_eval["evidence"]["parallel_analysis"])
 
     def test_receipt_reuse_reconciles_completed_session_to_winning_evidence(self) -> None:
         emitted: list[str] = []

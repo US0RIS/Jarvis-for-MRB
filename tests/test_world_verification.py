@@ -76,6 +76,65 @@ class WorldVerificationTests(unittest.TestCase):
             message="tool execution receipt",
         )
 
+    def test_legacy_verification_schema_migrates_before_identity_triggers(self) -> None:
+        legacy_db = self.base / "legacy_verification.sqlite3"
+        conn = sqlite3.connect(legacy_db)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE action_verifications (
+                    id TEXT PRIMARY KEY,
+                    action_event_id INTEGER NOT NULL UNIQUE,
+                    executive_decision_id TEXT NOT NULL DEFAULT '',
+                    tool TEXT NOT NULL,
+                    arguments_json TEXT NOT NULL,
+                    verifier TEXT NOT NULL,
+                    expected_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_check_at TEXT,
+                    deadline_at TEXT,
+                    last_checked_at TEXT,
+                    last_evidence TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_event_id INTEGER
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        world_verification.DB_PATH = legacy_db
+        try:
+            status = world_verification.status()
+            self.assertTrue(status["installed"])
+            conn = sqlite3.connect(legacy_db)
+            try:
+                columns = {
+                    str(row[1])
+                    for row in conn.execute(
+                        "PRAGMA table_info(action_verifications)"
+                    ).fetchall()
+                }
+                triggers = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='trigger'"
+                    ).fetchall()
+                }
+            finally:
+                conn.close()
+        finally:
+            world_verification.DB_PATH = self.db
+
+        self.assertIn("agency_step_id", columns)
+        self.assertIn("action_verifications_immutable_identity", triggers)
+        self.assertIn("action_verifications_resolved_event_once", triggers)
+        self.assertIn("verification_observations_before_terminal_only", triggers)
+
     def test_verification_observations_are_append_only(self) -> None:
         verification_id = world_verification.register_execution(
             "gmail.send",

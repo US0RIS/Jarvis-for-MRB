@@ -2584,6 +2584,63 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A9")
 
+    def test_a9_internal_synthesis_event_without_audited_tool_receipt_fails(self) -> None:
+        target_state, _ = self._state_with_plan("Capability Synthesis Receipt Guard")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A9",
+                desired_state_id=target_state,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            gap = agency_capability.record_gap(
+                target_state,
+                "target.missing.capability",
+                "Need a target adapter.",
+            )
+            desired_state.set_state(
+                target_state,
+                "blocked",
+                reason="Missing capability: target.missing.capability.",
+            )
+            with patch(
+                "jarvis_mrb.custom_tools.synthesize",
+                return_value={
+                    "name": "target_adapter",
+                    "enabled": False,
+                    "risk": "read",
+                    "allowed_hosts": ["api.example.com"],
+                },
+            ):
+                synthesized = agency_capability.synthesize_adapter(
+                    gap["id"],
+                    name="target_adapter",
+                    description="Target adapter.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+            self.assertFalse(synthesized["enabled"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        synthesis_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "gap-bound adapter was sandbox-synthesized"
+            )
+        )
+        self.assertFalse(synthesis_check["passed"])
+        lifecycle = synthesis_check["evidence"]
+        self.assertTrue(
+            any(bool(item["synthesis_event_ids"]) for item in lifecycle)
+        )
+        self.assertTrue(
+            all(not item["synthesis_action_event_ids"] for item in lifecycle)
+        )
+
     def test_a9_does_not_whitelist_unrelated_foreground_custom_action(self) -> None:
         target_state, _ = self._state_with_plan("Capability Manual Guard")
 

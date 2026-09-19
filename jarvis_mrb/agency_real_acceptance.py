@@ -2629,6 +2629,7 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     ]
     deliberations: list[sqlite3.Row] = []
     parallel_analysis = False
+    parallel_deliberation_step_ids: set[str] = set()
     if deliberation_step_ids:
         placeholders = ",".join("?" for _ in deliberation_step_ids)
         deliberations = conn.execute(
@@ -2649,7 +2650,9 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             ).fetchall()
             if len(completed_workers) >= 2 and _workers_overlap(list(completed_workers)):
                 parallel_analysis = True
-                break
+                parallel_deliberation_step_ids.add(
+                    str(deliberation["agency_step_id"] or "")
+                )
     verification_rows = _verification_rows_for_state(conn, state_id, session["started_at"])
     external = [
         row for row in verification_rows
@@ -2684,6 +2687,139 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
         and bool(row.get("independent_terminal_proof"))
     ]
     causal_replan = _causal_replan_evidence(conn, session, events)
+
+    step_by_id = {str(row["id"]): row for row in steps}
+    execution_event_ids: dict[str, list[int]] = {}
+    for item in state_events:
+        if item["event_type"] != "agency.step.executed":
+            continue
+        step_id = str((item.get("payload") or {}).get("step_id") or "")
+        if step_id:
+            execution_event_ids.setdefault(step_id, []).append(int(item["id"]))
+
+    def dependency_ancestors(step_id: str) -> set[str]:
+        ancestors: set[str] = set()
+        pending = [str(step_id)]
+        while pending:
+            current_id = pending.pop()
+            row = step_by_id.get(current_id)
+            if row is None:
+                continue
+            for dep in list(_loads(str(row["depends_on_json"] or "[]"), [])):
+                dep_id = str(dep)
+                if not dep_id or dep_id in ancestors:
+                    continue
+                ancestors.add(dep_id)
+                pending.append(dep_id)
+        return ancestors
+
+    research_replan_paths: list[dict[str, Any]] = []
+    for pair in causal_replan["causal_pairs"]:
+        invalidated_plan_id = str(pair.get("invalidated_plan_id") or "")
+        replacement_plan_id = str((pair.get("new_plan") or {}).get("id") or "")
+        invalidation_event_id = int(pair.get("invalidation_event_id") or 0)
+        if (
+            not invalidated_plan_id
+            or not replacement_plan_id
+            or invalidation_event_id <= 0
+        ):
+            continue
+
+        private_steps = [
+            row for row in verified_read_steps
+            if str(row["plan_id"]) == invalidated_plan_id
+            and str(row["tool"]) in private_tools
+        ]
+        public_steps = [
+            row for row in verified_read_steps
+            if str(row["plan_id"]) == invalidated_plan_id
+            and str(row["tool"]) == "web.search"
+        ]
+        candidate_deliberations = [
+            step_by_id[step_id]
+            for step_id in parallel_deliberation_step_ids
+            if step_id in step_by_id
+            and str(step_by_id[step_id]["plan_id"]) == invalidated_plan_id
+        ]
+
+        for deliberation_step in candidate_deliberations:
+            deliberation_id = str(deliberation_step["id"])
+            ancestors = dependency_ancestors(deliberation_id)
+            linked_private = [
+                row for row in private_steps
+                if str(row["id"]) in ancestors
+                and any(
+                    event_id < invalidation_event_id
+                    for event_id in execution_event_ids.get(str(row["id"]), [])
+                )
+            ]
+            linked_public = [
+                row for row in public_steps
+                if str(row["id"]) in ancestors
+                and any(
+                    event_id < invalidation_event_id
+                    for event_id in execution_event_ids.get(str(row["id"]), [])
+                )
+            ]
+            deliberation_before_invalidation = any(
+                event_id < invalidation_event_id
+                for event_id in execution_event_ids.get(deliberation_id, [])
+            )
+            if (
+                linked_private
+                and linked_public
+                and deliberation_before_invalidation
+            ):
+                research_replan_paths.append(
+                    {
+                        "invalidated_plan_id": invalidated_plan_id,
+                        "invalidation_event_id": invalidation_event_id,
+                        "external_event_ids": list(
+                            pair.get("external_event_ids") or []
+                        ),
+                        "replacement_plan_id": replacement_plan_id,
+                        "replacement_plan_created_event_id": int(
+                            pair.get("new_plan_created_event_id") or 0
+                        ),
+                        "private_step_ids": [
+                            str(row["id"]) for row in linked_private
+                        ],
+                        "public_step_ids": [
+                            str(row["id"]) for row in linked_public
+                        ],
+                        "deliberation_step_id": deliberation_id,
+                    }
+                )
+                break
+
+    replacement_boundaries = {
+        str(item["replacement_plan_id"]): int(
+            item["replacement_plan_created_event_id"]
+        )
+        for item in research_replan_paths
+    }
+    causal_protected_external: list[dict[str, Any]] = []
+    for row in protected_external:
+        step = step_by_id.get(str(row.get("agency_step_id") or ""))
+        if step is None:
+            continue
+        replacement_plan_id = str(step["plan_id"])
+        created_event_id = int(
+            replacement_boundaries.get(replacement_plan_id, 0)
+        )
+        if not created_event_id:
+            continue
+        if int(row.get("action_event_id") or 0) <= created_event_id:
+            continue
+        causal_protected_external.append(row)
+
+    causal_verified_external = [
+        row for row in causal_protected_external
+        if str(row.get("status") or "") == "verified"
+        and str(row.get("verifier") or "") not in {"return_value", "tool_return"}
+        and bool(row.get("independent_terminal_proof"))
+    ]
+
     restatements = _goal_restatement_ids(conn, session)
     desired = _desired_state_row(conn, state_id)
 
@@ -2700,7 +2836,7 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
         """,
         (state_id, session["started_at"]),
     ).fetchall()
-    for row in verified_external:
+    for row in causal_verified_external:
         resolved_event_id = int(row.get("resolved_event_id") or 0)
         event = conn.execute(
             "SELECT recorded_at,occurred_at FROM events WHERE id=?",
@@ -2745,7 +2881,7 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     satisfaction_evidence_links: list[dict[str, Any]] = []
     verified_resolved_ids = {
         int(row.get("resolved_event_id") or 0)
-        for row in verified_external
+        for row in causal_verified_external
         if int(row.get("resolved_event_id") or 0) > 0
     }
     satisfied_evaluations = conn.execute(
@@ -2785,23 +2921,35 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     )
 
     checks = [
-        _check("verified private information retrieval occurred", private_seen, verified_read_tools),
-        _check("verified public web research occurred", public_seen, verified_read_tools),
-        _check("parallel deliberation belonged to this Agency plan and overlapped", parallel_analysis, [str(row["id"]) for row in deliberations]),
         _check(
-            "protected external action crossed approval boundary",
-            bool(protected_external),
-            [str(row.get("id") or "") for row in protected_external],
+            "verified private information retrieval is an ancestor of the causal deliberation",
+            bool(research_replan_paths),
+            research_replan_paths,
         ),
         _check(
-            "that protected external action was independently verified",
-            bool(verified_external),
-            [str(row.get("id") or "") for row in verified_external],
+            "verified public web research is an ancestor of the causal deliberation",
+            bool(research_replan_paths),
+            research_replan_paths,
         ),
         _check(
-            "external reality change caused invalidation and a newer plan generation",
-            bool(causal_replan["causal_pairs"]),
-            causal_replan["causal_pairs"],
+            "parallel deliberation consumed those reads before causal invalidation",
+            bool(research_replan_paths),
+            research_replan_paths,
+        ),
+        _check(
+            "the explicitly linked replacement plan crossed the protected approval boundary",
+            bool(causal_protected_external),
+            [str(row.get("id") or "") for row in causal_protected_external],
+        ),
+        _check(
+            "that causal replacement action was independently verified",
+            bool(causal_verified_external),
+            [str(row.get("id") or "") for row in causal_verified_external],
+        ),
+        _check(
+            "external reality change caused invalidation and an explicitly linked replacement plan",
+            bool(research_replan_paths),
+            research_replan_paths,
         ),
         _check("goal was not conversationally restated", len(restatements) == 0, restatements),
         _check("desired state reached satisfied", desired is not None and str(desired["state"]) == "satisfied"),

@@ -218,6 +218,29 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             ):
                 agency_runtime.record_boot(deployment_sha=SHA_A)
 
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    "UPDATE agency_steps SET status='skipped' WHERE id=?",
+                    (baseline_observe["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            mutated = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(mutated["passed"])
+            self.assertFalse(mutated["evidence"]["completed_work_preserved"])
+
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    "UPDATE agency_steps SET status='verified' WHERE id=?",
+                    (baseline_observe["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
             after = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(after["passed"], after["checks"])
             self.assertTrue(after["evidence"]["completed_work_preserved"])

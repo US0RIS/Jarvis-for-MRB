@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from contextlib import closing, contextmanager
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
@@ -590,7 +591,6 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                     "unknowns": [],
                 }
 
-            started_a7 = time.monotonic()
             deliberation_a7 = ad.deliberate(
                 "A7 decision?",
                 worker=worker_a7,
@@ -603,17 +603,41 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                     "confidence": 0.5,
                 },
             )
-            elapsed_a7 = time.monotonic() - started_a7
+            persisted_a7 = ad.get(str(deliberation_a7["id"])) or {}
+            workers_a7 = list(persisted_a7.get("workers") or [])
+            starts_a7 = [
+                datetime.fromisoformat(str(worker["started_at"]))
+                for worker in workers_a7
+                if worker.get("started_at")
+            ]
+            completions_a7 = [
+                datetime.fromisoformat(str(worker["completed_at"]))
+                for worker in workers_a7
+                if worker.get("completed_at")
+            ]
+            overlap_a7 = bool(
+                len(starts_a7) == 4
+                and len(completions_a7) == 4
+                and max(starts_a7) < min(completions_a7)
+            )
             _check(
                 checks,
                 "A7",
                 "parallel workers persist independent outputs before synthesis",
                 len(deliberation_a7["outputs"]) == 4
-                and elapsed_a7 < 0.5
+                and overlap_a7
                 and bool(deliberation_a7["disagreements"]),
                 {
                     "workers": len(deliberation_a7["outputs"]),
-                    "wall_seconds": round(elapsed_a7, 3),
+                    "worker_intervals": [
+                        {
+                            "role": str(worker.get("role") or ""),
+                            "started_at": str(worker.get("started_at") or ""),
+                            "completed_at": str(worker.get("completed_at") or ""),
+                        }
+                        for worker in workers_a7
+                    ],
+                    "overlap_observed": overlap_a7,
                     "disagreements": deliberation_a7["disagreements"],
                 },
             )

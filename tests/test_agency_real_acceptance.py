@@ -589,6 +589,117 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_completed_real_session_cannot_be_reopened_or_relinked(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Completed Session Immutability")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Immutable low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"immutable-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Immutable high",
+                desired_state_id=state_id,
+                dedup_key="immutable-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["passed"])
+            self.assertTrue(finalized["receipt_created"])
+            receipt_id = finalized["receipt"]["id"]
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET status='running',receipt_id='',completed_at=NULL
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+            conn.rollback()
+
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET receipt_id='agency-real:tampered'
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+            conn.rollback()
+
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET last_evaluation_json='{}'
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+            conn.rollback()
+
+            row = conn.execute(
+                """
+                SELECT status,receipt_id,completed_at
+                FROM agency_real_gate_sessions WHERE id=?
+                """,
+                (session["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(row[0], "completed")
+        self.assertEqual(row[1], receipt_id)
+        self.assertTrue(row[2])
+
+    def test_running_real_session_cannot_claim_receipt_before_completion(self) -> None:
+        state_id, _ = self._state_with_plan("Invalid Running Receipt")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET receipt_id='agency-real:fake'
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+        finally:
+            conn.close()
+
     def test_forced_real_session_tampering_fails_integrity_check_and_cannot_finalize(self) -> None:
         state_id, _ = self._state_with_plan("Tampered Session")
         with self._patch_identity():

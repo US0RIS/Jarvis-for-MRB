@@ -2725,6 +2725,19 @@ def finalize_session(session_id: str) -> dict[str, Any]:
         if receipt is None:
             raise
     completed_at = _now()
+    completion_evaluation = dict(evaluation)
+    if not receipt_created:
+        # A competing finalizer may have minted the immutable receipt after this
+        # caller evaluated the session. Complete the session with the evidence that
+        # actually won the receipt race, never with a later divergent snapshot.
+        completion_evaluation["passed"] = True
+        completion_evaluation["checks"] = list(receipt.get("checks") or [])
+        completion_evaluation["evidence"] = dict(receipt.get("evidence") or {})
+        completion_evaluation["evaluated_at"] = str(
+            receipt.get("recorded_at") or completion_evaluation.get("evaluated_at") or completed_at
+        )
+        completion_evaluation["receipt_reconciled"] = True
+
     with _connect() as conn:
         conn.execute(
             """
@@ -2734,7 +2747,12 @@ def finalize_session(session_id: str) -> dict[str, Any]:
             """,
             (
                 str(receipt["id"]), completed_at,
-                json.dumps(evaluation, ensure_ascii=False, sort_keys=True, default=str),
+                json.dumps(
+                    completion_evaluation,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ),
                 str(session_id),
             ),
         )

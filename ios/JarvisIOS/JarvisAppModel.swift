@@ -23,6 +23,7 @@ final class JarvisAppModel: ObservableObject {
     let geofenceManager: GeofenceManager
     let metaGlasses: MetaGlassesManager
     let memoMind: MemoMindBridge
+    let homeEnvironment: HomeEnvironmentController
 
     var frontendCommandHandler: ((String) async -> String?)?
     var offlineQueueHandler: ((String) -> Void)?
@@ -50,6 +51,7 @@ final class JarvisAppModel: ObservableObject {
         geofenceManager = GeofenceManager()
         metaGlasses = MetaGlassesManager()
         memoMind = MemoMindBridge()
+        homeEnvironment = HomeEnvironmentController()
 
         geofenceManager.onHomeArrival = { [weak self] in
             Task { @MainActor in
@@ -182,6 +184,19 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone MapKit turn-by-turn navigation"
+            )
+            return
+        }
+
+        // An explicitly discovered Apple Home is a direct phone-local control
+        // surface. Only narrow, exact-name light commands are handled here;
+        // every action gets a fresh HomeKit state readback.
+        if let homeReply = await homeEnvironment.handleCommand(text) {
+            await finishLocalResponse(
+                homeReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone HomeKit verified light control"
             )
             return
         }

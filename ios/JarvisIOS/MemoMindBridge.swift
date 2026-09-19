@@ -242,8 +242,8 @@ struct MemoMindPreviewView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(frame.title)
                         .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    ForEach(Array(frame.lines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
+                    ForEach(Array(frame.lines.enumerated()), id: \.offset) { entry in
+                        Text(entry.element)
                             .font(.system(size: 17, design: .monospaced))
                     }
                     if frame.requiresPhoneApproval {

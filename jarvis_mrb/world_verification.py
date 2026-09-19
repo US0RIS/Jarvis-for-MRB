@@ -969,7 +969,8 @@ def context_for_query(query: str, limit: int = 6) -> str:
 
 
 def status() -> dict[str, Any]:
-    with _connect() as conn:
+    conn = _connect()
+    try:
         counts = {
             str(row["status"]): int(row["count"])
             for row in conn.execute(
@@ -979,6 +980,8 @@ def status() -> dict[str, Any]:
         row = conn.execute(
             "SELECT updated_at FROM action_verifications ORDER BY updated_at DESC LIMIT 1"
         ).fetchone()
+    finally:
+        conn.close()
     return {
         "installed": True,
         "tool_receipt_is_outcome": False,

@@ -225,6 +225,26 @@ class AgencyGoalCompilerTests(unittest.TestCase):
                 },
             )
 
+    def test_legitimate_subject_starting_with_un_is_not_treated_as_negation(self) -> None:
+        state_id = self._legacy_state("Have United Airlines booked")
+        result = agency_goal_compiler.compile_observable_contract(
+            state_id,
+            compiler=lambda _prompt: {
+                "confidence": 0.95,
+                "criteria": [
+                    {
+                        "kind": "event_match",
+                        "terms_all": ["United Airlines", "booked"],
+                        "terms_none": [],
+                        "event_types": [],
+                        "source_kinds": [],
+                    }
+                ],
+                "explanation": "Future observation that United Airlines is booked.",
+            },
+        )
+        self.assertEqual(result["criteria"][0]["terms_all"], ["United Airlines", "booked"])
+
     def test_injects_required_negations_when_model_omits_them(self) -> None:
         state_id = self._legacy_state("Have Apollo signed")
         result = agency_goal_compiler.compile_observable_contract(

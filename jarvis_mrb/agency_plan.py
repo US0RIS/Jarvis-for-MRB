@@ -163,6 +163,14 @@ def _connect() -> sqlite3.Connection:
         BEGIN
             SELECT RAISE(ABORT, 'Agency plan invalidation provenance is write-once');
         END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_plans_immutable_replan_lineage
+        BEFORE UPDATE ON agency_plans
+        WHEN NEW.replaces_plan_id IS NOT OLD.replaces_plan_id
+          OR NEW.replan_cause_event_id IS NOT OLD.replan_cause_event_id
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency plan replan lineage is immutable');
+        END;
         """
     )
     step_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_steps)").fetchall()}

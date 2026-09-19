@@ -114,7 +114,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         }
         guard !candidates.isEmpty else { return nil }
         guard candidates.count == 1, let target = candidates.first else {
-            return "More than one HomeKit light matches. Use the explicit control in the Glasses tab."
+            return "More than one HomeKit light matches. Use the explicit control in the Physical tab."
         }
         return await setLight(target.id, on: desired)
     }
@@ -170,7 +170,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
     }
 }
 
-struct JarvisPhysicalControlView: View {
+struct AppleHomeControlView: View {
     @EnvironmentObject var home: HomeEnvironmentController
 
     var body: some View {

@@ -43,6 +43,41 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertEqual(len(states), 1)
         return goal_id, str(states[0]["id"])
 
+    def _linked_pending_commitment(
+        self,
+        title: str = "Complete Project Apollo",
+        *,
+        commitment_id: str = "commitment:apollo-final",
+    ) -> tuple[str, str]:
+        _, state_id = self._legacy_state(title)
+        source_event_id = world_model.record_event(
+            "commitment.waiting_updated",
+            f"Waiting item pending: {title} final confirmation",
+            source_kind="iphone_waiting",
+            source_ref=commitment_id,
+            evidence="Pending external commitment observation.",
+        )
+        world_model.upsert_commitment(
+            commitment_id,
+            owner_name="Daniel Reed",
+            action=f"{title} final confirmation",
+            status="pending",
+            source_event_id=source_event_id,
+        )
+        world_executive.refresh_intentions()
+        state = desired_state.get_desired_state(state_id)
+        self.assertIsNotNone(state)
+        assert state is not None
+        intention = agency_goal_compiler._intention_context(
+            str(state.get("intention_id") or "")
+        )
+        commitment_ids = {
+            str(item.get("id") or "")
+            for item in (intention.get("commitments") or [])
+        }
+        self.assertIn(commitment_id, commitment_ids)
+        return state_id, commitment_id
+
     def _compiler(self, _prompt: str) -> dict:
         return {
             "confidence": 0.94,
@@ -268,6 +303,97 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertIn("unsigned", criterion["terms_none"])
         self.assertIn("needs signature", criterion["terms_none"])
         self.assertIn("pending", criterion["terms_none"])
+
+    def test_commitment_contract_rejects_resolution_that_occurs_during_compilation(self) -> None:
+        state_id, commitment_id = self._linked_pending_commitment()
+
+        def racing_compiler(_prompt: str) -> dict:
+            resolution_event_id = world_model.record_event(
+                "commitment.waiting_updated",
+                "Waiting item resolved: Complete Project Apollo final confirmation",
+                source_kind="iphone_waiting",
+                source_ref=commitment_id,
+                evidence="Commitment resolved while the goal contract model was running.",
+            )
+            world_model.upsert_commitment(
+                commitment_id,
+                owner_name="Daniel Reed",
+                action="Complete Project Apollo final confirmation",
+                status="resolved",
+                source_event_id=resolution_event_id,
+            )
+            return {
+                "confidence": 0.98,
+                "criteria": [
+                    {
+                        "kind": "commitment_status",
+                        "commitment_id": commitment_id,
+                        "status": "resolved",
+                    }
+                ],
+                "explanation": "Resolve the supplied commitment.",
+            }
+
+        with self.assertRaisesRegex(ValueError, "already resolved"):
+            agency_goal_compiler.compile_observable_contract(
+                state_id,
+                compiler=racing_compiler,
+            )
+
+        state = desired_state.get_desired_state(state_id)
+        self.assertEqual(state["state"], "blocked")
+        self.assertFalse(state["authority"]["agency_enabled"])
+
+    def test_commitment_contract_requires_resolution_event_after_compile_baseline(self) -> None:
+        state_id, commitment_id = self._linked_pending_commitment(
+            commitment_id="commitment:apollo-future-resolution"
+        )
+        compiled = agency_goal_compiler.compile_observable_contract(
+            state_id,
+            compiler=lambda _prompt: {
+                "confidence": 0.97,
+                "criteria": [
+                    {
+                        "kind": "commitment_status",
+                        "commitment_id": commitment_id,
+                        "status": "resolved",
+                    }
+                ],
+                "explanation": "The linked pending commitment must resolve later.",
+            },
+        )
+        criterion = compiled["criteria"][0]
+        self.assertEqual(criterion["kind"], "commitment_status")
+        baseline = int(criterion["min_resolution_event_id"])
+        self.assertGreaterEqual(baseline, 0)
+
+        before = desired_state.evaluate_desired_state(state_id, persist=True)
+        self.assertFalse(before["satisfied"])
+        self.assertEqual(before["criteria"][0]["min_resolution_event_id"], baseline)
+        self.assertIsNone(before["criteria"][0]["resolution_event_id"])
+
+        resolution_event_id = world_model.record_event(
+            "commitment.waiting_updated",
+            "Waiting item resolved: Complete Project Apollo final confirmation",
+            source_kind="iphone_waiting",
+            source_ref=commitment_id,
+            evidence="Later external commitment resolution.",
+        )
+        self.assertGreater(resolution_event_id, baseline)
+        world_model.upsert_commitment(
+            commitment_id,
+            owner_name="Daniel Reed",
+            action="Complete Project Apollo final confirmation",
+            status="resolved",
+            source_event_id=resolution_event_id,
+        )
+
+        after = desired_state.evaluate_desired_state(state_id, persist=True)
+        self.assertTrue(after["satisfied"])
+        self.assertEqual(
+            after["criteria"][0]["resolution_event_id"],
+            resolution_event_id,
+        )
 
     def test_low_confidence_contract_blocks_activation_and_does_not_grant_agency_authority(self) -> None:
         _, state_id = self._legacy_state("Complete Project Mercury")

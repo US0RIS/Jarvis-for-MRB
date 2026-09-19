@@ -2202,6 +2202,14 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
             ) == proposed
             and (not synthesis_event_id or int(item["id"]) >= synthesis_event_id)
         ]
+        synthesis_action_event_id = min(
+            (int(item["id"]) for item in synthesis_action_events),
+            default=0,
+        )
+        synthesis_boundary_event_id = max(
+            synthesis_event_id,
+            synthesis_action_event_id,
+        )
 
         enable_events = [
             item for item in events
@@ -2215,7 +2223,10 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
             and bool(
                 ((item.get("payload") or {}).get("arguments") or {}).get("enabled")
             )
-            and (not synthesis_event_id or int(item["id"]) > synthesis_event_id)
+            and (
+                not synthesis_boundary_event_id
+                or int(item["id"]) > synthesis_boundary_event_id
+            )
         ]
         enable_event_id = min(
             (int(item["id"]) for item in enable_events),
@@ -2246,6 +2257,7 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
             gap_event_id
             and block_events
             and synthesis_event_id
+            and synthesis_action_event_id
             and enable_event_id
             and resolution_event_id
             and reactivation_events
@@ -2308,8 +2320,12 @@ def _evaluate_a9(session: dict[str, Any], conn: sqlite3.Connection, events: list
             lifecycle_candidates,
         ),
         _check(
-            "gap-bound adapter was sandbox-synthesized and left disabled",
-            any(bool(item["synthesis_event_ids"]) for item in lifecycle_candidates),
+            "gap-bound adapter was sandbox-synthesized, left disabled, and returned through an audited custom.synthesize action",
+            any(
+                bool(item["synthesis_event_ids"])
+                and bool(item["synthesis_action_event_ids"])
+                for item in lifecycle_candidates
+            ),
             lifecycle_candidates,
         ),
         _check(

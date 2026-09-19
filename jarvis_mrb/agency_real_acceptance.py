@@ -1622,10 +1622,21 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "persisted": bool(expected),
         }
 
-    def feedback_after_terminal(row: dict[str, Any]) -> list[dict[str, Any]]:
+    def feedback_after_terminal(row: dict[str, Any]) -> dict[str, Any]:
+        verification_id = str(row.get("id") or "")
+        step_id = str(row.get("agency_step_id") or "")
+        terminal_status = str(row.get("status") or "")
         resolved_event_id = int(row.get("resolved_event_id") or 0)
-        if not resolved_event_id:
-            return []
+        if not verification_id or not step_id or not resolved_event_id:
+            return {
+                "verification_id": verification_id,
+                "agency_step_id": step_id,
+                "terminal_status": terminal_status,
+                "control_loop_reconciled": False,
+                "desired_state_evaluations": [],
+                "reason": "missing exact verification/step/terminal event identity",
+            }
+
         event = conn.execute(
             "SELECT recorded_at,occurred_at FROM events WHERE id=?",
             (resolved_event_id,),
@@ -1638,7 +1649,42 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             )
         )
         if terminal_time is None:
-            return []
+            return {
+                "verification_id": verification_id,
+                "agency_step_id": step_id,
+                "terminal_status": terminal_status,
+                "control_loop_reconciled": False,
+                "desired_state_evaluations": [],
+                "reason": "terminal verification event has no parseable time",
+            }
+
+        step = conn.execute(
+            """
+            SELECT s.id,s.plan_id,s.status,s.verification_id,s.result_summary,
+                   s.blocked_reason,s.updated_at,s.finished_at,p.status AS plan_status,
+                   p.desired_state_id
+            FROM agency_steps s
+            JOIN agency_plans p ON p.id=s.plan_id
+            WHERE s.id=?
+            """,
+            (step_id,),
+        ).fetchone()
+        expected_step_status = (
+            "verified" if terminal_status == "verified" else "failed"
+        )
+        finished_at = (
+            _parse_time(str(step["finished_at"] or ""))
+            if step is not None else None
+        )
+        step_reconciled = bool(
+            step is not None
+            and str(step["desired_state_id"] or "") == state_id
+            and str(step["verification_id"] or "") == verification_id
+            and str(step["status"] or "") == expected_step_status
+            and finished_at is not None
+            and finished_at >= terminal_time
+        )
+
         evaluations = conn.execute(
             """
             SELECT id,observed_at,satisfied,state_before,state_after
@@ -1648,12 +1694,12 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             """,
             (state_id, session["started_at"]),
         ).fetchall()
-        result: list[dict[str, Any]] = []
+        later_evaluations: list[dict[str, Any]] = []
         for evaluation in evaluations:
             observed = _parse_time(str(evaluation["observed_at"] or ""))
             if observed is None or observed < terminal_time:
                 continue
-            result.append(
+            later_evaluations.append(
                 {
                     "id": int(evaluation["id"]),
                     "observed_at": str(evaluation["observed_at"]),
@@ -1662,7 +1708,19 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
                     "state_after": str(evaluation["state_after"]),
                 }
             )
-        return result
+
+        return {
+            "verification_id": verification_id,
+            "agency_step_id": step_id,
+            "terminal_status": terminal_status,
+            "resolved_event_id": resolved_event_id,
+            "terminal_at": terminal_time.isoformat(),
+            "expected_step_status": expected_step_status,
+            "step": dict(step) if step is not None else None,
+            "control_loop_reconciled": step_reconciled,
+            "desired_state_evaluations": later_evaluations,
+            "desired_state_evaluated_after_terminal": bool(later_evaluations),
+        }
 
     verified = [
         row for row in external
@@ -1696,7 +1754,18 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
         for row in counted
     }
     feedback_observed = bool(counted) and all(
-        bool(feedback_details.get(str(row.get("id") or "")))
+        bool(
+            feedback_details.get(
+                str(row.get("id") or ""),
+                {},
+            ).get("control_loop_reconciled")
+        )
+        and bool(
+            feedback_details.get(
+                str(row.get("id") or ""),
+                {},
+            ).get("desired_state_evaluated_after_terminal")
+        )
         for row in counted
     )
 
@@ -1730,7 +1799,7 @@ def _evaluate_a4(session: dict[str, Any], conn: sqlite3.Connection, events: list
             [str(row.get("id") or "") for row in negative],
         ),
         _check(
-            "terminal verification results fed back into desired-state evaluation",
+            "terminal verification results were reconciled into their exact Agency steps and then fed into desired-state evaluation",
             feedback_observed,
             feedback_details,
         ),

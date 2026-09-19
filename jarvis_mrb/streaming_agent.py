@@ -99,7 +99,7 @@ web.status {{}}; web.search {{query,num}};
 vision.recall {{query,seconds,max_frames}}; vision.ocr_clipboard {{}};
 expense.capture {{}}; expense.list {{limit}}; expense.export {{}}; fact.check {{claim}}; journal.generate {{}};
 meeting.start {{title}}; meeting.finish {{meeting_id}}; meeting.list {{limit}};
-knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}}; briefing.generate {{}};
+knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}}; chronos.trace {{entity,limit}}; chronos.state_at {{entity,at}}; chronos.changes {{entity,since,until,limit}}; briefing.generate {{}};
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_recurring {{when,command,recurrence}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}};
 background.submit {{prompt}}; background.list {{limit}}; background.status {{task_id}}; background.cancel {{task_id}};
 agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
@@ -120,6 +120,9 @@ Routing rules:
 - meeting.start/finish: only on explicit user request. Never begin live discussion capture merely because a calendar meeting exists.
 - knowledge.search: search across indexed mail, calendar, local notes, and prior conversations when the user asks for something across their own data without naming one source, or when the deterministic Executive Loop proposes an exact knowledge.search for an executive query.
 - spatial.find: answer where a portable object was last seen by passive vision. It is last-seen memory, not reliable turn-by-turn navigation.
+- chronos.trace: reconstruct occurrence-time-ordered history attached to a known world entity.
+- chronos.state_at: reconstruct persisted beliefs about an entity at a specific ISO date/time; preserve competing observations as uncertainty.
+- chronos.changes: explain belief revisions and linked events over a time window using real occurrence/observation time rather than ingestion order.
 - briefing.generate: current concise briefing from calendar, unread mail, weather/news, and background work.
 - workflow.run: multi-step goal requiring several tools. The DAG engine may parallelize safe reads and enforces normal permission policy on every node.
 - Gmail read/check/find/search/review -> gmail.query. Latest inbox email: query='in:inbox', limit=1. Never request more than 10.

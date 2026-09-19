@@ -175,6 +175,12 @@ struct JarvisAPIClient {
         }
     }
 
+    func agencyCommandView() async throws -> MemoMindCommandSnapshot {
+        let (data, response) = try await get(path: "agency/command-view", timeout: 15)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(MemoMindCommandSnapshot.self, from: data)
+    }
+
     func command(_ text: String) async throws -> JarvisAPIResponse {
         let response = try await post(path: "command", body: ["text": text, "session_id": sessionID])
         return JarvisAPIResponse(ok: response.ok, message: Self.collapseRepeatedSir(response.message))

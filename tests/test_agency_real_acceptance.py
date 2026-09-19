@@ -3290,6 +3290,264 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 any(external_change_id in item["external_event_ids"] for item in causal)
             )
 
+    def test_a12_disconnected_research_cannot_be_combined_with_unrelated_replan(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A12 Disconnected Branch Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A12 Disconnected Branch Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-disconnected-branch",
+        )
+
+        barrier = threading.Barrier(2)
+
+        def worker(role: str, _question: str, _context: str) -> dict:
+            barrier.wait(timeout=2)
+            time.sleep(0.05)
+            return {
+                "conclusion": role,
+                "claims": [],
+                "risks": [],
+                "unknowns": [],
+            }
+
+        def research_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            if tool == "agency.deliberate":
+                result = agency_deliberation.deliberate(
+                    str(args.get("question") or ""),
+                    context=str(args.get("context") or ""),
+                    roles=["evidence", "skeptic"],
+                    worker=worker,
+                    synthesizer=lambda q, ctx, outputs, disagreements: {
+                        "answer": "Disconnected research synthesis.",
+                        "consensus": [],
+                        "disagreements": [{"issue": "disconnected branch"}],
+                        "unknowns": [],
+                        "recommended_next_evidence": [],
+                        "confidence": 0.5,
+                    },
+                )
+                return SimpleNamespace(
+                    ok=True,
+                    message=str(result["synthesis"]["answer"]),
+                )
+            return SimpleNamespace(
+                ok=True,
+                message=f"{tool} disconnected research observation",
+            )
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted disconnected-branch final write.",
+                data={"event_id": "a12-disconnected-final"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            research_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "private",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "disconnected private context"},
+                    },
+                    {
+                        "id": "public",
+                        "tool": "web.search",
+                        "arguments": {"query": "disconnected public evidence"},
+                        "depends_on": ["private"],
+                    },
+                    {
+                        "id": "deliberate",
+                        "tool": "agency.deliberate",
+                        "arguments": {
+                            "question": "Analyze disconnected evidence",
+                            "context": "${private.message} ${public.message}",
+                        },
+                        "depends_on": ["private", "public"],
+                    },
+                ],
+            )
+            for _ in range(3):
+                agency_plan.execute_next(
+                    research_plan["id"],
+                    research_executor,
+                )
+
+            unrelated_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "unrelated-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Unrelated stale path",
+                            "start": "2030-02-01T09:00:00-08:00",
+                            "end": "2030-02-01T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            external_change_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Disconnected branch external timing changed.",
+                source_kind="calendar_enriched",
+                source_ref="real-a12-disconnected:change",
+                evidence="This change belongs to the unrelated plan branch.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            invalidated = agency_plan.execute_next(
+                unrelated_plan["id"],
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("stale unrelated write must not run")
+                ),
+            )
+            self.assertEqual(invalidated["status"], "needs_replan")
+
+            replacement = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "replacement-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Disconnected replacement",
+                            "start": "2030-02-01T10:00:00-08:00",
+                            "end": "2030-02-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            self.assertEqual(
+                replacement["replaces_plan_id"],
+                unrelated_plan["id"],
+            )
+            self.assertEqual(
+                replacement["replan_cause_event_id"],
+                invalidated["invalidation_event_id"],
+            )
+
+            waiting = agency_plan.execute_next(
+                replacement["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                replacement["id"],
+                waiting["steps"][0]["id"],
+                protected_executor,
+            )
+            verification_id = str(
+                approved["steps"][0]["verification_id"]
+            )
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Independent read-back verified disconnected replacement.",
+                ),
+            ):
+                verified = world_verification.check_one(
+                    verification_id,
+                    force=True,
+                )
+            self.assertEqual(verified["status"], "verified")
+
+            conn = sqlite3.connect(self.db)
+            conn.row_factory = sqlite3.Row
+            try:
+                verification_event = conn.execute(
+                    """
+                    SELECT id FROM events
+                    WHERE event_type='verification.verified'
+                      AND source_kind='jarvis_verifier'
+                      AND source_ref=?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (verification_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(verification_event)
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                source_event_id=int(verification_event["id"]),
+                evidence=(
+                    "The disconnected replacement really completed the goal, "
+                    "but its research was not on the invalidated branch."
+                ),
+            )
+            agency_plan.reconcile_plan(replacement["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        self.assertTrue(evaluation["evidence"]["final_desired_state_satisfied"])
+        self.assertFalse(evaluation["evidence"]["private_information_retrieval"])
+        self.assertFalse(evaluation["evidence"]["public_research"])
+        self.assertFalse(evaluation["evidence"]["parallel_analysis"])
+        causal_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "external reality change caused invalidation"
+            )
+        )
+        self.assertFalse(causal_check["passed"])
+        self.assertGreater(
+            external_change_id,
+            int(session["baseline"]["max_event_id"]),
+        )
+
     def test_a12_unrelated_later_event_cannot_supply_final_completion_provenance(self) -> None:
         entity_id = world_model.ensure_entity("project", "A12 Provenance Guard")
         state = desired_state.create_desired_state(

@@ -58,7 +58,8 @@ def _connect() -> sqlite3.Connection:
             updated_at TEXT NOT NULL,
             completed_at TEXT,
             last_error TEXT NOT NULL DEFAULT '',
-            relevance_hash TEXT NOT NULL DEFAULT ''
+            relevance_hash TEXT NOT NULL DEFAULT '',
+            relevance_event_id INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agency_plan_generation
             ON agency_plans(desired_state_id,generation);
@@ -122,6 +123,20 @@ def _connect() -> sqlite3.Connection:
     plan_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_plans)").fetchall()}
     if "relevance_hash" not in plan_columns:
         conn.execute("ALTER TABLE agency_plans ADD COLUMN relevance_hash TEXT NOT NULL DEFAULT ''")
+    if "relevance_event_id" not in plan_columns:
+        conn.execute(
+            "ALTER TABLE agency_plans ADD COLUMN relevance_event_id INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.executescript(
+        """
+        CREATE TRIGGER IF NOT EXISTS agency_plans_immutable_relevance_event
+        BEFORE UPDATE ON agency_plans
+        WHEN NEW.relevance_event_id IS NOT OLD.relevance_event_id
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency plan relevance event baseline is immutable');
+        END;
+        """
+    )
     step_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_steps)").fetchall()}
     if "approval_digest" not in step_columns:
         conn.execute("ALTER TABLE agency_steps ADD COLUMN approval_digest TEXT NOT NULL DEFAULT ''")
@@ -142,6 +157,7 @@ def _row_to_plan(row: sqlite3.Row) -> dict[str, Any]:
         "completed_at": str(row["completed_at"] or ""),
         "last_error": str(row["last_error"] or ""),
         "relevance_hash": str(row["relevance_hash"] or ""),
+        "relevance_event_id": int(row["relevance_event_id"] or 0),
     }
 
 
@@ -274,6 +290,67 @@ def relevance_hash(desired_state_id: str) -> str:
         return _relevance_hash(conn, str(desired_state_id))
 
 
+def _relevance_linked_event_ids(
+    conn: sqlite3.Connection,
+    desired_state_id: str,
+    *,
+    after_event_id: int = 0,
+) -> list[int]:
+    """Return external-ish linked events that participate in the relevance snapshot.
+
+    This is deliberately narrower than "all events since plan creation": each ID
+    must be attached to an entity that the desired state itself references and
+    must come from a source class that can affect the relevance hash.
+    """
+    try:
+        state = conn.execute(
+            "SELECT intention_id,criteria_json FROM desired_states WHERE id=?",
+            (str(desired_state_id),),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        state = None
+    if state is None:
+        return []
+
+    criteria = list(_loads(str(state["criteria_json"]), []))
+    entity_ids = {
+        str(item.get("entity_id"))
+        for item in criteria
+        if isinstance(item, dict) and item.get("entity_id")
+    }
+    intention_id = str(state["intention_id"] or "")
+    if intention_id:
+        try:
+            rows = conn.execute(
+                "SELECT entity_id FROM intention_entities WHERE intention_id=?",
+                (intention_id,),
+            ).fetchall()
+            entity_ids.update(str(row["entity_id"]) for row in rows)
+        except sqlite3.OperationalError:
+            pass
+
+    if not entity_ids:
+        return []
+
+    placeholders = ",".join("?" for _ in entity_ids)
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT e.id
+        FROM event_entities ee
+        JOIN events e ON e.id=ee.event_id
+        WHERE ee.entity_id IN ({placeholders})
+          AND e.id>?
+          AND e.source_kind NOT IN (
+            'jarvis_agency','jarvis_desired_state','proactive_monitor',
+            'jarvis_jobs','background_worker','system'
+          )
+        ORDER BY e.id
+        """,
+        (*sorted(entity_ids), int(after_event_id)),
+    ).fetchall()
+    return [int(row["id"]) for row in rows]
+
+
 def _desired_state_exists(conn: sqlite3.Connection, desired_state_id: str) -> bool:
     try:
         return conn.execute("SELECT 1 FROM desired_states WHERE id=?", (desired_state_id,)).fetchone() is not None
@@ -366,11 +443,14 @@ def create_plan(
             (now, state_id),
         )
         plan_relevance_hash = _relevance_hash(conn, state_id)
+        linked_event_ids = _relevance_linked_event_ids(conn, state_id)
+        plan_relevance_event_id = max(linked_event_ids) if linked_event_ids else 0
         conn.execute(
             """
             INSERT INTO agency_plans(
-                id,desired_state_id,generation,summary,rationale,status,created_at,updated_at,relevance_hash
-            ) VALUES(?,?,?,?,?,'active',?,?,?)
+                id,desired_state_id,generation,summary,rationale,status,created_at,updated_at,
+                relevance_hash,relevance_event_id
+            ) VALUES(?,?,?,?,?,'active',?,?,?,?)
             """,
             (
                 plan_id,
@@ -381,6 +461,7 @@ def create_plan(
                 now,
                 now,
                 plan_relevance_hash,
+                plan_relevance_event_id,
             ),
         )
 
@@ -1116,7 +1197,13 @@ def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -
     if not baseline or not current or baseline == current:
         return None
     reason = "Relevant world state changed after this plan was compiled; replan before another consequential action."
+    baseline_event_id = int(plan.get("relevance_event_id") or 0)
     with _connect() as conn:
+        trigger_event_ids = _relevance_linked_event_ids(
+            conn,
+            str(plan.get("desired_state_id") or ""),
+            after_event_id=baseline_event_id,
+        )
         if pending_step_id:
             row = conn.execute("SELECT status FROM agency_steps WHERE id=?", (pending_step_id,)).fetchone()
             if row is not None and str(row["status"]) == "awaiting_approval":
@@ -1135,7 +1222,12 @@ def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -
         plan_id=str(plan["id"]),
         desired_state_id=str(plan["desired_state_id"]),
         step_id=str(pending_step_id or ""),
-        payload={"baseline_relevance_hash": baseline, "current_relevance_hash": current},
+        payload={
+            "baseline_relevance_hash": baseline,
+            "current_relevance_hash": current,
+            "baseline_relevance_event_id": baseline_event_id,
+            "trigger_event_ids": trigger_event_ids,
+        },
     )
     return get_plan(str(plan["id"]), include_steps=True)
 

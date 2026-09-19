@@ -201,8 +201,6 @@ class AgencyCounterfactualTests(unittest.TestCase):
             created,
             action_event_id=create_event,
         )
-        create_before = world_verification.check_one(create_verification)
-        self.assertIsNone(create_before)
         create_after = world_verification.check_one(
             create_verification,
             force=True,

@@ -480,6 +480,10 @@ final class PersistentPresenceController: ObservableObject {
 
         case "proactive_alert", "background_complete", "background_failed", "meeting_complete":
             guard !message.isEmpty else { return }
+            appModel.memoMind.presentProactiveAlert(
+                message,
+                severity: String(describing: event["severity"] ?? "info")
+            )
             lastProactiveMessage = message
             if appModel.settings.proactiveAnnouncements {
                 pendingAnnouncements.append((message, cue))

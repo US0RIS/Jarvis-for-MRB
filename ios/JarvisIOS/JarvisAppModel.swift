@@ -67,6 +67,11 @@ final class JarvisAppModel: ObservableObject {
         )
     }
 
+    func refreshMemoMindCommandView() async throws {
+        let snapshot = try await client.agencyCommandView()
+        memoMind.presentCommandView(snapshot)
+    }
+
     func checkConnection() async {
         do {
             let healthy = try await client.health()

@@ -629,6 +629,8 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
     elif gate == "A2":
         _require_int_at_least(evidence, "action_observation_cycles", 2, gate)
         _require_int_at_least(evidence, "independent_observation_cycles", 2, gate)
+        _require_int_at_least(evidence, "distinct_action_steps", 2, gate)
+        _require_int_at_least(evidence, "distinct_observations", 2, gate)
         _require_true(evidence, "second_action_followed_first_observation", gate)
         _require_true(evidence, "intermediate_unsatisfied_observed", gate)
         _require_true(evidence, "desired_state_satisfied", gate)
@@ -1199,7 +1201,7 @@ def release_status(
                 for item in by_gate.values()
             ]
             validation_after_real_gates = bool(
-                receipt_times and validation_time >= max(receipt_times)
+                receipt_times and validation_time > max(receipt_times)
             )
         except (TypeError, ValueError):
             validation_after_real_gates = False

@@ -105,6 +105,39 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_verification_observations_verification
             ON verification_observations(verification_id,id DESC);
 
+        CREATE TRIGGER IF NOT EXISTS action_verifications_immutable_identity
+        BEFORE UPDATE ON action_verifications
+        WHEN NEW.id IS NOT OLD.id
+          OR NEW.action_event_id IS NOT OLD.action_event_id
+          OR NEW.executive_decision_id IS NOT OLD.executive_decision_id
+          OR NEW.agency_step_id IS NOT OLD.agency_step_id
+          OR NEW.tool IS NOT OLD.tool
+          OR NEW.arguments_json IS NOT OLD.arguments_json
+          OR NEW.verifier IS NOT OLD.verifier
+          OR NEW.expected_json IS NOT OLD.expected_json
+          OR NEW.created_at IS NOT OLD.created_at
+        BEGIN
+            SELECT RAISE(ABORT, 'Action verification identity and expected outcome are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS action_verifications_resolved_event_once
+        BEFORE UPDATE ON action_verifications
+        WHEN OLD.resolved_event_id IS NOT NULL
+          AND NEW.resolved_event_id IS NOT OLD.resolved_event_id
+        BEGIN
+            SELECT RAISE(ABORT, 'Action verification terminal event cannot be relinked');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_before_terminal_only
+        BEFORE INSERT ON verification_observations
+        WHEN COALESCE(
+            (SELECT status FROM action_verifications WHERE id=NEW.verification_id),
+            ''
+        ) IN ('verified','failed','timed_out','unverified','superseded')
+        BEGIN
+            SELECT RAISE(ABORT, 'Cannot append observations to a terminal action verification');
+        END;
+
         CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_update
         BEFORE UPDATE ON verification_observations
         BEGIN

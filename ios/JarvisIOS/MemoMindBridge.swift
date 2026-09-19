@@ -320,6 +320,22 @@ final class MemoMindBridge: ObservableObject {
         publish()
     }
 
+    func presentProactiveAlert(_ text: String, severity: String) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        cards.append(
+            MemoMindHUDCard(
+                kind: .alert,
+                title: "JARVIS ALERT • " + severity.uppercased(),
+                body: cleaned,
+                containsPrivateData: true
+            )
+        )
+        if cards.count > 40 { cards.removeFirst(cards.count - 40) }
+        selectedIndex = cards.count - 1
+        publish()
+    }
+
     func presentStatus(_ text: String) {
         cards.append(MemoMindHUDCard(kind: .status, title: "STATUS", body: text))
         if cards.count > 20 { cards.removeFirst(cards.count - 20) }
@@ -338,7 +354,7 @@ final class MemoMindBridge: ObservableObject {
             selectedIndex = max(0, selectedIndex - 1)
             intent = .previousCard
         case .tap, .headNod, .ringSelect:
-            intent = cards[selectedIndex].kind == .approval
+            intent = (cards[selectedIndex].kind == .approval || cards[selectedIndex].kind == .pendingAction)
                 ? .showApprovalOnPhone : .revealCurrentCard
         case .doubleTap, .longPress:
             intent = .requestVoiceCapture
@@ -366,6 +382,9 @@ final class MemoMindBridge: ObservableObject {
 /// MemoMind's beta SDK is available. It does not claim to render on real glasses.
 struct MemoMindPreviewView: View {
     @EnvironmentObject var bridge: MemoMindBridge
+    @EnvironmentObject var appModel: JarvisAppModel
+    @State private var isRefreshing = false
+    @State private var fetchStatus = "Read-only Agency command view"
 
     var body: some View {
         let frame = bridge.currentFrame
@@ -376,6 +395,18 @@ struct MemoMindPreviewView: View {
                 Text(bridge.connectionState.rawValue)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                HStack {
+                    Text(fetchStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isRefreshing { ProgressView() }
+                    Button("Refresh") {
+                        Task { await refreshCommandView() }
+                    }
+                    .disabled(isRefreshing)
+                }
 
                 VStack(alignment: .leading, spacing: 14) {
                     Text(frame.title)
@@ -417,5 +448,26 @@ struct MemoMindPreviewView: View {
             .padding()
         }
         .navigationTitle("Glasses")
+        .task {
+            while !Task.isCancelled {
+                await refreshCommandView()
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshCommandView() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            try await appModel.refreshMemoMindCommandView()
+            fetchStatus = "Agency snapshot received"
+        } catch {
+            // No invented goal counts or false connected state when the backend
+            // has not yet been updated or the phone is offline.
+            fetchStatus = "Agency unavailable: " + error.localizedDescription
+        }
     }
 }

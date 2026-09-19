@@ -220,6 +220,49 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertEqual(criterion["terms_all"][0], "Project Apollo")
         self.assertEqual(criterion["terms_all"][1], "signed")
 
+    def test_rejects_generic_subject_anchor_not_grounded_to_named_goal(self) -> None:
+        state_id = self._legacy_state("Have Project Apollo signed")
+        with self.assertRaisesRegex(ValueError, "specifically grounded"):
+            agency_goal_compiler.compile_observable_contract(
+                state_id,
+                compiler=lambda _prompt: {
+                    "confidence": 0.99,
+                    "criteria": [
+                        {
+                            "kind": "event_match",
+                            "terms_all": ["document", "signed"],
+                            "terms_none": [],
+                            "event_types": [],
+                            "source_kinds": [],
+                        }
+                    ],
+                    "explanation": "Too broad.",
+                },
+            )
+
+    def test_accepts_specific_anchor_tokens_grounded_in_goal_context(self) -> None:
+        state_id = self._legacy_state("Have Project Apollo signed")
+        result = agency_goal_compiler.compile_observable_contract(
+            state_id,
+            compiler=lambda _prompt: {
+                "confidence": 0.95,
+                "criteria": [
+                    {
+                        "kind": "event_match",
+                        "terms_all": ["Project Apollo", "signed"],
+                        "terms_none": [],
+                        "event_types": [],
+                        "source_kinds": [],
+                    }
+                ],
+                "explanation": "Project-specific future signature evidence.",
+            },
+        )
+        self.assertEqual(
+            result["criteria"][0]["terms_all"],
+            ["Project Apollo", "signed"],
+        )
+
     def test_rejects_completion_substring_such_as_unsigned(self) -> None:
         state_id = self._legacy_state("Have Apollo signed")
         with self.assertRaisesRegex(ValueError, "exact terms_all item"):

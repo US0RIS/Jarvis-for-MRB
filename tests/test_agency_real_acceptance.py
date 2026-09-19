@@ -2260,6 +2260,143 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         }
         self.assertNotIn(unrelated_external_id, evidence_ids)
 
+    def test_a6_reactivation_before_external_trigger_cannot_pass(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A6 Reactivation Ordering Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A6 Reactivation Ordering Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "done",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-ordering-guard",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Waiting for an external calendar observation.",
+        )
+        watch_condition = {
+            "kind": "event_exists",
+            "event_type": "calendar.context_enriched",
+            "source_ref": "real-a6-ordering-guard:external",
+            "summary_contains": "ordering prerequisite arrived",
+        }
+        watch = desired_state.add_wake_watch(
+            str(state["id"]),
+            watch_condition,
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            baseline_event_id = int(session["baseline"]["max_event_id"])
+            predicted_external_id = baseline_event_id + 2
+            future_outcome = {
+                "kind": "event_exists",
+                "criterion": watch_condition,
+                "satisfied": True,
+                "event_id": predicted_external_id,
+                "actual": "Ordering prerequisite arrived externally.",
+            }
+            forged_reactivation_id = world_model.record_event(
+                "desired_state.reactivated",
+                "Forged early reactivation before the external trigger existed.",
+                source_kind="jarvis_agency",
+                source_ref=str(watch["id"]),
+                payload={
+                    "desired_state_id": str(state["id"]),
+                    "watch_id": str(watch["id"]),
+                    "condition_outcome": future_outcome,
+                },
+                evidence="Deliberately out-of-order reactivation for regression testing.",
+            )
+            self.assertEqual(forged_reactivation_id, baseline_event_id + 1)
+
+            external_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Ordering prerequisite arrived externally.",
+                source_kind="calendar_enriched",
+                source_ref="real-a6-ordering-guard:external",
+                evidence="The real trigger arrived only after the forged reactivation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            self.assertEqual(external_event_id, predicted_external_id)
+
+            conn = sqlite3.connect(self.db)
+            conn.row_factory = sqlite3.Row
+            try:
+                actual_outcome = desired_state._evaluate_criterion(
+                    conn,
+                    watch_condition,
+                )
+                self.assertEqual(actual_outcome, future_outcome)
+                now = datetime.now().astimezone().isoformat()
+                conn.execute(
+                    """
+                    UPDATE desired_state_watches
+                    SET status='triggered',triggered_at=?,updated_at=?,evidence_json=?
+                    WHERE id=?
+                    """,
+                    (
+                        now,
+                        now,
+                        json.dumps(actual_outcome, ensure_ascii=False, sort_keys=True),
+                        str(watch["id"]),
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE desired_states
+                    SET state='active',blocked_reason='',updated_at=?
+                    WHERE id=?
+                    """,
+                    (now, str(state["id"])),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            agency_plan._record_event(
+                "agency.step.awaiting_approval",
+                "Forged downstream continuation after the early reactivation.",
+                plan_id="agency-plan:a6-ordering-guard",
+                desired_state_id=str(state["id"]),
+                step_id="agency-step:a6-ordering-guard",
+                payload={"tool": "calendar.create", "risk": "external_write"},
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        wake_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("wake condition later triggered")
+        )
+        self.assertTrue(wake_check["passed"])
+        reactivation_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "desired state reactivated from the same externally grounded wake"
+            )
+        )
+        self.assertFalse(reactivation_check["passed"])
+        self.assertFalse(
+            evaluation["evidence"]["reactivated_without_goal_restatement"]
+        )
+
     def test_a7_is_scoped_to_matching_real_deliberation(self) -> None:
         with self._patch_identity():
             session = agency_real_acceptance.start_session(

@@ -601,9 +601,8 @@ def _direct_evidence_event_ids(
 ) -> list[int]:
     """Return only events directly referenced by one criterion outcome.
 
-    Unlike wake detection, this intentionally does not broaden an entity to every
-    recent event involving it; causal completion evidence must point at the exact
-    observation/action outcome that made the criterion true.
+    Causal acceptance evidence must point at the exact observation/action outcome
+    that made the criterion true; entity-level proximity is not evidence.
     """
     candidates: list[int] = []
     event_id = outcome.get("event_id")

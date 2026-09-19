@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 
 import jarvis_mrb.agency_counterfactual as agency_counterfactual
+import jarvis_mrb.agent as agent
+import jarvis_mrb.permissions as permissions
 import jarvis_mrb.world_model as world_model
 
 
@@ -98,6 +100,78 @@ class AgencyCounterfactualTests(unittest.TestCase):
                 rationale="A is more reversible.",
                 change_conditions=[],
             )
+
+    def test_agent_tools_expose_counterfactual_lifecycle_without_external_authority(self) -> None:
+        created = agent._execute_unchecked(
+            "agency.counterfactual.create",
+            {
+                "question": "Which reversible launch path should Project Orion take?",
+                "context": "The pilot is cheap; full rollout is faster but harder to reverse.",
+                "branches": [
+                    {
+                        "id": "pilot",
+                        "title": "Pilot first",
+                        "assumptions": ["Pilot signal is representative"],
+                        "evidence": [{"source": "context", "fact": "Pilot is cheap"}],
+                        "expected_outcomes": ["Learn before scaling"],
+                        "cost": {"relative": "low"},
+                        "reversibility": 0.95,
+                        "uncertainty": 0.35,
+                    },
+                    {
+                        "id": "rollout",
+                        "title": "Full rollout",
+                        "assumptions": ["Demand is already established"],
+                        "evidence": [{"source": "context", "fact": "Rollout is faster"}],
+                        "expected_outcomes": ["Reach scale sooner"],
+                        "cost": {"relative": "high"},
+                        "reversibility": 0.2,
+                        "uncertainty": 0.6,
+                    },
+                ],
+            },
+        )
+        self.assertTrue(created.ok, created.message)
+        self.assertIsInstance(created.data, dict)
+        case_id = str(created.data["id"])
+
+        compared = agent._execute_unchecked(
+            "agency.counterfactual.compare",
+            {"case_id": case_id},
+        )
+        self.assertTrue(compared.ok, compared.message)
+        self.assertEqual(len(compared.data["branches"]), 2)
+        self.assertEqual(compared.data["status"], "open")
+
+        selected = agent._execute_unchecked(
+            "agency.counterfactual.select",
+            {
+                "case_id": case_id,
+                "branch": "pilot",
+                "rationale": "Pilot first preserves optionality while uncertainty remains material.",
+                "change_conditions": [
+                    "Reopen the choice if independent demand evidence is strong enough to justify full rollout."
+                ],
+            },
+        )
+        self.assertTrue(selected.ok, selected.message)
+        self.assertEqual(selected.data["status"], "selected")
+        self.assertEqual(len(selected.data["branches"]), 2)
+        by_key = {item["key"]: item for item in selected.data["branches"]}
+        self.assertEqual(by_key["pilot"]["status"], "selected")
+        self.assertEqual(by_key["rollout"]["status"], "candidate")
+        self.assertEqual(
+            permissions.TOOL_RISK["agency.counterfactual.compare"],
+            "read",
+        )
+        self.assertEqual(
+            permissions.TOOL_RISK["agency.counterfactual.create"],
+            "local_write",
+        )
+        self.assertEqual(
+            permissions.TOOL_RISK["agency.counterfactual.select"],
+            "local_write",
+        )
 
     def test_case_requires_multiple_branches(self) -> None:
         with self.assertRaises(ValueError):

@@ -1535,6 +1535,198 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertFalse(verified_check["passed"])
         self.assertFalse(evaluation["passed"])
 
+    def test_a4_later_evaluation_cannot_replace_exact_step_reconciliation(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A4 Reconciliation Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A4 Reconciliation Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-reconciliation-guard",
+        )
+
+        def audited_calendar_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted A4 reconciliation-guard write.",
+                data={"event_id": f"a4-reconcile-{step_id[-8:]}"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            positive_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "positive",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 unreconciled positive",
+                            "start": "2030-01-20T09:00:00-08:00",
+                            "end": "2030-01-20T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                positive_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                positive_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            positive_verification_id = str(
+                approved["steps"][0]["verification_id"]
+            )
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Independent A4 reconciliation-guard read-back.",
+                ),
+            ):
+                positive = world_verification.check_one(
+                    positive_verification_id,
+                    force=True,
+                )
+            self.assertEqual(positive["status"], "verified")
+
+            # Deliberately do NOT call reconcile_plan on the positive plan.
+            # A later desired-state evaluation exists, but the exact step still
+            # has not consumed the terminal verification result.
+            desired_state.evaluate_desired_state(str(state["id"]))
+
+            negative_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "negative",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 reconciled negative",
+                            "start": "2030-01-20T10:00:00-08:00",
+                            "end": "2030-01-20T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                negative_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                negative_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            negative_verification_id = str(
+                approved["steps"][0]["verification_id"]
+            )
+            expired = "2000-01-01T00:00:00+00:00"
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE action_verifications
+                    SET deadline_at=?,next_check_at=?
+                    WHERE id=?
+                    """,
+                    (
+                        expired,
+                        expired,
+                        negative_verification_id,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "pending",
+                    "Negative exact event remained absent.",
+                ),
+            ):
+                negative = world_verification.check_one(
+                    negative_verification_id,
+                    force=True,
+                )
+            self.assertEqual(negative["status"], "timed_out")
+            agency_plan.reconcile_plan(negative_plan["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        feedback_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "terminal verification results were reconciled"
+            )
+        )
+        self.assertFalse(feedback_check["passed"])
+        positive_feedback = feedback_check["evidence"][
+            positive_verification_id
+        ]
+        self.assertFalse(positive_feedback["control_loop_reconciled"])
+        self.assertTrue(
+            positive_feedback["desired_state_evaluated_after_terminal"]
+        )
+        self.assertEqual(
+            positive_feedback["step"]["status"],
+            "awaiting_verification",
+        )
+        self.assertFalse(
+            evaluation["evidence"]["verification_feedback_observed"]
+        )
+
     def test_a3_proves_safe_read_approval_resumption_and_denial_replan(self) -> None:
         entity_id = world_model.ensure_entity("project", "A3 Permission Gate")
         state = desired_state.create_desired_state(

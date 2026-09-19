@@ -918,40 +918,47 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 },
             )
 
-            # A12 — synthetic one-decision trace. It deliberately includes private/public
-            # reads, parallel analysis, injected reality change -> replan, protected write,
-            # approval, separate verification, and desired-state convergence.
-            entity_a12, state_a12 = _make_state(env, "Acceptance A12", predicate="complete", expected=True)
-            wm.assert_belief(entity_a12, "route", value="old")
-
-            deliberation_a12 = ad.deliberate(
-                "Choose A12 execution path",
-                roles=["evidence", "skeptic", "feasibility", "risk_cost"],
-                worker=lambda role, q, ctx: {
-                    "conclusion": f"{role} analysis",
-                    "claims": [{"claim": "A12 can proceed", "confidence": 0.7, "evidence": role}],
-                    "risks": [],
-                    "unknowns": [],
-                },
-                synthesizer=lambda q, c, outputs, disagreements: {
-                    "answer": "Proceed with bounded reversible path.",
-                    "consensus": ["Use bounded path"],
-                    "disagreements": disagreements,
-                    "unknowns": [],
-                    "recommended_next_evidence": [],
-                    "confidence": 0.7,
-                },
+            # A12 — synthetic one-decision trace using the same causal branch
+            # architecture required by the REAL evaluator: private/public research
+            # feeds plan-linked deliberation, that exact plan is invalidated by a
+            # changed fact, and the explicitly linked replacement performs the
+            # protected write whose independent verification satisfies the goal.
+            entity_a12, state_a12 = _make_state(
+                env,
+                "Acceptance A12",
+                predicate="complete",
+                expected=True,
             )
+            wm.assert_belief(entity_a12, "route", value="old")
 
             first_a12 = ap.create_plan(
                 state_a12,
                 [
-                    {"id": "private", "tool": "knowledge.search", "arguments": {"query": "A12 private state"}},
+                    {
+                        "id": "private",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "A12 private state"},
+                    },
                     {
                         "id": "public",
                         "tool": "web.search",
-                        "arguments": {"query": "A12 public evidence", "num": 5},
+                        "arguments": {
+                            "query": "A12 public evidence",
+                            "num": 5,
+                        },
                         "depends_on": ["private"],
+                    },
+                    {
+                        "id": "deliberate",
+                        "tool": "agency.deliberate",
+                        "arguments": {
+                            "question": "Choose A12 execution path",
+                            "context": (
+                                "Private: ${private.message}; "
+                                "Public: ${public.message}"
+                            ),
+                        },
+                        "depends_on": ["private", "public"],
                     },
                     {
                         "id": "write",
@@ -961,72 +968,177 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                             "start": "2030-01-01T12:00:00-08:00",
                             "end": "2030-01-01T12:30:00-08:00",
                         },
-                        "depends_on": ["public"],
+                        "depends_on": ["deliberate"],
                     },
                 ],
-                summary="A12 initial path",
+                summary="A12 initial causal branch",
             )
             trace_a12: list[str] = []
-            read_exec = lambda tool, args, **kwargs: trace_a12.append(tool) or SimpleNamespace(ok=True, message=f"{tool} evidence")
-            ap.execute_next(first_a12["id"], read_exec)
-            ap.execute_next(first_a12["id"], read_exec)
+            deliberation_holder_a12: dict[str, Any] = {}
+            barrier_a12 = threading.Barrier(4)
 
-            # Reality changes after research but before the external write.
+            def worker_a12(
+                role: str,
+                question: str,
+                context: str,
+            ) -> dict[str, Any]:
+                barrier_a12.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": (
+                        "proceed"
+                        if role in {"evidence", "feasibility"}
+                        else "wait"
+                    ),
+                    "claims": [
+                        {
+                            "claim": f"{role} A12 branch claim",
+                            "confidence": 0.7,
+                            "evidence": (
+                                "Reasoning from the private/public context "
+                                "already gathered by the plan."
+                            ),
+                            "source": "reasoning",
+                        }
+                    ],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            def synth_a12(
+                question: str,
+                context: str,
+                outputs: list[dict[str, Any]],
+                disagreements: list[dict[str, Any]],
+            ) -> dict[str, Any]:
+                return {
+                    "answer": "Proceed with bounded reversible path.",
+                    "consensus": [],
+                    "disagreements": (
+                        disagreements
+                        or [{"issue": "A12 synthetic branch disagreement"}]
+                    ),
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.7,
+                }
+
+            def research_exec_a12(
+                tool: str,
+                args: dict[str, Any],
+                **kwargs: Any,
+            ) -> SimpleNamespace:
+                from jarvis_mrb.tool_audit import current_agency_step_id
+
+                trace_a12.append(tool)
+                if tool == "agency.deliberate":
+                    result = ad.deliberate(
+                        str(args.get("question") or ""),
+                        context=str(args.get("context") or ""),
+                        roles=[
+                            "evidence",
+                            "skeptic",
+                            "feasibility",
+                            "risk_cost",
+                        ],
+                        worker=worker_a12,
+                        synthesizer=synth_a12,
+                    )
+                    deliberation_holder_a12["result"] = result
+                    reply = SimpleNamespace(
+                        ok=True,
+                        message=str(
+                            (result.get("synthesis") or {}).get("answer")
+                            or "Synthetic deliberation completed."
+                        ),
+                    )
+                else:
+                    reply = SimpleNamespace(
+                        ok=True,
+                        message=f"{tool} evidence",
+                    )
+                wm.record_tool_execution(
+                    tool,
+                    args,
+                    ok=True,
+                    message=reply.message,
+                    agency_step_id=current_agency_step_id(),
+                )
+                return reply
+
+            ap.execute_next(first_a12["id"], research_exec_a12)
+            ap.execute_next(first_a12["id"], research_exec_a12)
+            ap.execute_next(first_a12["id"], research_exec_a12)
+
+            deliberation_a12 = dict(
+                deliberation_holder_a12.get("result") or {}
+            )
+            if len(deliberation_a12.get("outputs") or []) != 4:
+                raise AssertionError(
+                    "Synthetic A12 plan-linked deliberation did not complete four workers."
+                )
+
+            # Reality changes after research + deliberation but before the
+            # consequential write, invalidating this exact plan.
             wm.assert_belief(entity_a12, "route", value="new")
-            invalidated_a12 = ap.execute_next(first_a12["id"], read_exec)
+            invalidated_a12 = ap.execute_next(
+                first_a12["id"],
+                research_exec_a12,
+            )
             trace_a12.append("replan_required")
 
             second_a12 = ap.create_plan(
                 state_a12,
                 [
-                    {"id": "private2", "tool": "knowledge.search", "arguments": {"query": "A12 refreshed private state"}},
                     {
-                        "id": "public2",
-                        "tool": "web.search",
-                        "arguments": {"query": "A12 refreshed public evidence", "num": 5},
-                        "depends_on": ["private2"],
-                    },
-                    {
-                        "id": "write2",
+                        "id": "write-replanned",
                         "tool": "calendar.create",
                         "arguments": {
                             "summary": "A12 revised synthetic external action",
                             "start": "2030-01-01T13:00:00-08:00",
                             "end": "2030-01-01T13:30:00-08:00",
                         },
-                        "depends_on": ["public2"],
-                    },
+                    }
                 ],
-                summary="A12 revised path",
+                summary="A12 explicitly linked replacement branch",
             )
-            ap.execute_next(second_a12["id"], read_exec)
-            ap.execute_next(second_a12["id"], read_exec)
-            waiting_a12 = ap.execute_next(second_a12["id"], read_exec)
+            waiting_a12 = ap.execute_next(
+                second_a12["id"],
+                research_exec_a12,
+            )
             trace_a12.append("approval_required")
             approved_a12 = ap.approve_step(
                 second_a12["id"],
-                waiting_a12["steps"][2]["id"],
+                waiting_a12["steps"][0]["id"],
                 _fake_audited_pending_write(env),
             )
             trace_a12.append("approved")
-            verification_a12 = approved_a12["steps"][2]["verification_id"]
+            verification_a12 = approved_a12["steps"][0]["verification_id"]
             original_observe_a12 = wv._observe
             try:
                 wv._observe = lambda verifier, expected: (
                     "verified",
                     "Synthetic external state independently observed.",
                 )
-                verified_a12 = wv.check_one(verification_a12, force=True)
+                verified_a12 = wv.check_one(
+                    verification_a12,
+                    force=True,
+                )
             finally:
                 wv._observe = original_observe_a12
             if verified_a12 is None or verified_a12["status"] != "verified":
-                raise AssertionError("Synthetic A12 independent verification did not resolve.")
+                raise AssertionError(
+                    "Synthetic A12 independent verification did not resolve."
+                )
             wm.assert_belief(
                 entity_a12,
                 "complete",
                 value=True,
                 source_event_id=int(verified_a12["resolved_event_id"]),
-                evidence="Synthetic A12 completion follows independent verification.",
+                evidence=(
+                    "Synthetic A12 completion follows independent "
+                    "verification of the replacement action."
+                ),
             )
             completed_a12 = ap.reconcile_plan(second_a12["id"])
             trace_a12.append("verified_and_satisfied")
@@ -1035,31 +1147,57 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 "trace": trace_a12,
                 "first_plan": first_a12["id"],
                 "invalidated_status": invalidated_a12["status"],
+                "invalidation_event_id": int(
+                    invalidated_a12.get("invalidation_event_id") or 0
+                ),
                 "second_plan": second_a12["id"],
+                "replaces_plan_id": second_a12.get("replaces_plan_id"),
+                "replan_cause_event_id": int(
+                    second_a12.get("replan_cause_event_id") or 0
+                ),
                 "verification_id": verification_a12,
                 "final_plan_status": completed_a12["status"],
                 "desired_state": ds.get_desired_state(state_a12)["state"],
-                "deliberation_id": deliberation_a12["id"],
+                "deliberation_id": str(deliberation_a12.get("id") or ""),
+                "deliberation_step_id": str(
+                    deliberation_a12.get("agency_step_id") or ""
+                ),
             }
             _check(
                 checks,
                 "A12",
-                "one-decision synthetic trace crosses research, parallel analysis, replan, approval, verification, convergence",
+                (
+                    "one-decision synthetic trace keeps research, deliberation, "
+                    "causal replan, approval, verification, and convergence on "
+                    "one explicit branch"
+                ),
                 trace_a12
                 == [
                     "knowledge.search",
                     "web.search",
+                    "agency.deliberate",
                     "replan_required",
-                    "knowledge.search",
-                    "web.search",
+                    "calendar.create",
                     "approval_required",
                     "approved",
                     "verified_and_satisfied",
                 ]
                 and invalidated_a12["status"] == "needs_replan"
+                and int(
+                    invalidated_a12.get("invalidation_event_id") or 0
+                ) > 0
+                and second_a12.get("replaces_plan_id") == first_a12["id"]
+                and int(
+                    second_a12.get("replan_cause_event_id") or 0
+                )
+                == int(
+                    invalidated_a12.get("invalidation_event_id") or 0
+                )
+                and str(deliberation_a12.get("agency_step_id") or "")
+                == str(first_a12["steps"][2]["id"])
                 and completed_a12["status"] == "completed"
                 and ds.get_desired_state(state_a12)["state"] == "satisfied"
-                and len(deliberation_a12["outputs"]) == 4,
+                and len(deliberation_a12.get("outputs") or []) == 4,
                 traces["A12"],
             )
 

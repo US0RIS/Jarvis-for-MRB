@@ -27,7 +27,7 @@ def _contains_term(haystack: str, term: str) -> bool:
     clean_term = _normalize(term)
     if not clean_term:
         return False
-    pattern = rf"(?<!\\w){re.escape(clean_term)}(?!\\w)"
+    pattern = rf"(?<!\w){re.escape(clean_term)}(?!\w)"
     return re.search(pattern, clean_haystack) is not None
 
 

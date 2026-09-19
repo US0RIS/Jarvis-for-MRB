@@ -16,13 +16,22 @@ Prepared September 18, 2026, from MemoMind's September 1 developer-access announ
 
 ## Portable physical-world sensor: official public camera catalog
 
-A prototype physical-world discovery panel lives in **Glasses → PHYSICAL WORLD**. A button asks the iPhone for its position once, then calls the authenticated Jarvis backend via `POST /physical/public-cameras` with coordinates in the JSON body (not URL access logs). The backend does not persist the location. It looks up published government highway-camera locations, sorts by distance, and returns publicly posted images and optional streams. The iPhone renders publisher still images and offers the official stream directly; the backend does not scrape camera firmware, scan nearby IP ranges, or proxy footage.
+A standalone physical-world discovery panel lives in **Physical → Public viewpoints** on the normal iPhone tab bar; it has no MemoMind runtime prerequisite. A button asks the iPhone for its position once, then calls the authenticated Jarvis backend via `POST /physical/public-cameras` with coordinates in the JSON body (not URL access logs). The backend does not persist the location. It looks up published government highway-camera locations, sorts by distance, and returns publicly posted images and optional streams. The iPhone renders publisher still images and offers the official stream directly; the backend does not scrape camera firmware, scan nearby IP ranges, or proxy footage.
 
 First integrated provider: **Caltrans CWWP2**, 12 official district JSON feeds. Source: https://cwwp2.dot.ca.gov/documentation/cctv/cctv.htm. In-service status comes from the provider's catalog and does **not** establish that the returned image is currently working or live. The camera catalog is cached for 15 minutes and partial provider outages are surfaced, not silently converted into "no cameras". Media URL hosts are constrained to documented Caltrans HTTPS hosts.
 
 The global interface is intentionally honest about coverage. For Melbourne, the endpoint currently returns `unsupported_region` plus VicTraffic's official traffic information site; it does **not** suggest that Melbourne public-safety CCTV is open to the public or that an undocumented local-stream API exists. New geography requires a verified published provider and usage rights. Worldwide device access depends on the iPhone's network, not joining a stranger's Wi-Fi/LAN.
 
 This is a camera **discovery and viewing** prototype, not yet a vision-LLM analysis pipeline; capturing and interpreting third-party camera imagery should be an explicit, provenance-labelled operation with temporal freshness checking and no stranger identification or indefinite recording. The backend-camera feature requires deploying this preparation branch, and the iPhone UI requires installing this branch's app.
+
+## Hardware-independent iPhone / Gen 1 Ray-Ban Meta path
+
+- The primary **Physical** tab is an ordinary iPhone surface. It contains one-shot public camera search and opt-in Apple Home light discovery/control. It works without possessing or pairing MemoMind.
+- A spoken **“Jarvis, find nearby public cameras”** (or “find nearby traffic cameras”) goes through the existing iPhone wake/STT/response path, returns a concise answer through iPhone or the selected Bluetooth HFP device, and populates the *same* Physical tab camera results. It does not send any camera imagery into the glasses or claim to analyze imagery.
+- Gen 1 Ray-Ban Meta serves as existing Bluetooth microphone/speaker hardware, plus any already supported Meta DAT camera functions. No Gen 1 optical display/HUD is implied; the iPhone shows photos, links and controls. The physical camera provider and Apple Home layer do not depend on Meta glasses either.
+- Apple Home light discovery is explicit, the enrolled light must be name-unambiguous, and write attempts require fresh HomeKit readback; no general unauthorized LAN discovery or arbitrary actuator control.
+- The MemoMind **Glasses** simulator remains available from **Physical → Open experimental glasses simulator**. It is an optional projection of the same Jarvis state, not the entrypoint for physical-world features.
+- Backend camera discovery requires running this branch; an older `jarvis/agency-1.0` backend returns HTTP 404 for `/physical/public-cameras`. The iPhone also needs the new build. Current automated builds do not substitute for real Gen 1 glasses/audio and physical iPhone acceptance.
 
 ## Command View usage now
 

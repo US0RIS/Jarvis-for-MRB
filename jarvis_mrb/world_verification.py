@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -165,6 +166,17 @@ def _connect() -> sqlite3.Connection:
     )
     conn.commit()
     return conn
+
+
+@contextmanager
+def _connection():
+    """Transaction context that also closes SQLite handles on every platform."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _reply_data(reply: Any) -> dict[str, Any]:
@@ -377,7 +389,7 @@ def _decision_context(decision_id: str) -> tuple[str, list[str]]:
     if not decision_id:
         return ("", [])
     try:
-        with _connect() as conn:
+        with _connection() as conn:
             row = conn.execute(
                 "SELECT intention_id FROM executive_decisions WHERE id=?",
                 (decision_id,),
@@ -406,7 +418,7 @@ def _agency_context(agency_step_id: str) -> tuple[str, str, list[str]]:
     if not agency_step_id:
         return ("", "", [])
     try:
-        with _connect() as conn:
+        with _connection() as conn:
             row = conn.execute(
                 """
                 SELECT p.desired_state_id,d.title,d.intention_id
@@ -508,7 +520,7 @@ def register_execution(
     status = str(plan["status"])
     evidence = str(plan.get("evidence") or "")[:3000]
 
-    with _connect() as conn:
+    with _connection() as conn:
         if executive_decision_id:
             conn.execute(
                 """
@@ -559,7 +571,7 @@ def register_execution(
         agency_step_id=str(agency_step_id or ""),
     )
     if event_id is not None and status in _TERMINAL:
-        with _connect() as conn:
+        with _connection() as conn:
             conn.execute(
                 "UPDATE action_verifications SET resolved_event_id=? WHERE id=?",
                 (event_id, verification_id),
@@ -730,7 +742,7 @@ def _record_observation(
     evidence: str,
     error: str = "",
 ) -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "INSERT INTO verification_observations(verification_id,observed_at,outcome,evidence,error) VALUES(?,?,?,?,?)",
             (verification_id, _now(), outcome, evidence[:3000], error[:2000]),
@@ -750,7 +762,7 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
         executive_decision_id=str(row["executive_decision_id"] or ""),
         agency_step_id=str(row["agency_step_id"] or ""),
     )
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             UPDATE action_verifications
@@ -774,7 +786,7 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
 
 def _mark_pending(row: sqlite3.Row, evidence: str, *, error: str = "") -> dict[str, Any]:
     now = _now()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             UPDATE action_verifications
@@ -803,7 +815,7 @@ def _mark_pending(row: sqlite3.Row, evidence: str, *, error: str = "") -> dict[s
 
 
 def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | None:
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT * FROM action_verifications WHERE id=?", (verification_id,)).fetchone()
     if row is None:
         return None
@@ -864,7 +876,7 @@ def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | 
 def check_due(limit: int = 20, *, force: bool = False) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 100))
     now = _now()
-    with _connect() as conn:
+    with _connection() as conn:
         if force:
             rows = conn.execute(
                 "SELECT id FROM action_verifications WHERE status='pending' ORDER BY created_at LIMIT ?",
@@ -896,7 +908,7 @@ def check_due(limit: int = 20, *, force: bool = False) -> list[dict[str, Any]]:
 
 def pending_for_intention(intention_id: str, limit: int = 12) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 50))
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT v.*
@@ -953,7 +965,7 @@ def _is_verification_query(query: str) -> bool:
 def context_for_query(query: str, limit: int = 6) -> str:
     if not _is_verification_query(query):
         return ""
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             "SELECT * FROM action_verifications ORDER BY created_at DESC LIMIT ?",
             (max(1, min(int(limit), 20)),),

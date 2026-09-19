@@ -813,7 +813,12 @@ def run_synthetic_acceptance() -> dict[str, Any]:
             _, state_a11 = _make_state(env, "Acceptance A11")
             permissions.set_policy("external_write", "confirm")
             approval_executor_a11 = _fake_audited_pending_write(env)
-            approved_events_before_a11 = wm.max_event_id()
+            with sqlite3.connect(env["db"]) as conn:
+                approved_events_before_a11 = int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(id),0) FROM events"
+                    ).fetchone()[0]
+                )
 
             for index in range(3):
                 approval_plan_a11 = ap.create_plan(
@@ -871,15 +876,20 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 or SimpleNamespace(ok=True, message="must not execute"),
             )
             authority_a11 = sm.authority_for("calendar.create")
-            inference_events_a11 = [
-                item
-                for item in wm.list_events(
-                    since_event_id=approved_events_before_a11,
-                    limit=200,
-                )
-                if str(item.get("event_type") or "")
-                == "agency.self_model.inferred"
-            ]
+            with sqlite3.connect(env["db"]) as conn:
+                conn.row_factory = sqlite3.Row
+                inference_events_a11 = [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT id,event_type,source_kind,source_ref,payload_json
+                        FROM events
+                        WHERE id>? AND event_type='agency.self_model.inferred'
+                        ORDER BY id
+                        """,
+                        (approved_events_before_a11,),
+                    ).fetchall()
+                ]
             _check(
                 checks,
                 "A11",

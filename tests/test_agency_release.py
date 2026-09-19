@@ -96,6 +96,7 @@ def evidence_for(gate: str) -> dict:
             "adapter_execution_still_confirmed": True,
         },
         "A11": {
+            "inferred_preference_learned_in_session": True,
             "preference_authority_conflict_observed": True,
             "protected_action_waited_for_approval": True,
             "permission_policy_remained_authoritative": True,
@@ -522,6 +523,12 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["adapter_sandbox_validated"] = False
         with self.assertRaisesRegex(ValueError, "adapter_sandbox_validated"):
             agency_release._validate_gate_evidence("A9", evidence, "")
+
+    def test_a11_receipt_rejects_stale_inferred_preference(self) -> None:
+        evidence = evidence_for("A11")
+        evidence["inferred_preference_learned_in_session"] = False
+        with self.assertRaisesRegex(ValueError, "inferred_preference_learned_in_session"):
+            agency_release._validate_gate_evidence("A11", evidence, "")
 
     def test_a12_requires_human_readable_trace_reference(self) -> None:
         with self.assertRaisesRegex(ValueError, "trace_ref"):

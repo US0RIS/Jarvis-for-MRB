@@ -1369,6 +1369,19 @@ def deny_step(plan_id: str, step_id: str, *, reason: str = "User denied the prop
     plan = get_plan(str(plan_id), include_steps=True)
     if plan is None:
         raise ValueError(f"Unknown Agency plan {plan_id!r}.")
+    step = next(
+        (
+            item for item in plan.get("steps") or []
+            if str(item.get("id") or "") == str(step_id)
+        ),
+        None,
+    )
+    if step is None:
+        raise ValueError(f"Unknown Agency step {step_id!r}.")
+    if str(step.get("status") or "") != "awaiting_approval":
+        raise ValueError("Agency step is not waiting for approval.")
+    if str(plan.get("status") or "") != "awaiting_approval":
+        raise ValueError("Agency plan is not waiting for approval.")
     with _connect() as conn:
         _set_step_status(
             conn,

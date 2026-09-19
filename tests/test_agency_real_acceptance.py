@@ -1942,14 +1942,19 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
 
         self.assertFalse(evaluation["passed"])
-        self.assertTrue(
-            any(
-                int(item["id"]) == external_event_id
-                for item in agency_real_acceptance._external_events_for_relevant_entities(
-                    sqlite3.connect(self.db),
+        conn = sqlite3.connect(self.db)
+        conn.row_factory = sqlite3.Row
+        try:
+            visible_external = (
+                agency_real_acceptance._external_events_for_relevant_entities(
+                    conn,
                     session,
                 )
             )
+        finally:
+            conn.close()
+        self.assertTrue(
+            any(int(item["id"]) == external_event_id for item in visible_external)
         )
         causal_check = next(
             item for item in evaluation["checks"]

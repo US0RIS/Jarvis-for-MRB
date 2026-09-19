@@ -2672,6 +2672,32 @@ def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: lis
     )
     session_started = _parse_time(str(session.get("started_at") or ""))
     preference_source_ref = str((preference or {}).get("source_ref") or "")
+    preference_value = (
+        dict((preference or {}).get("value") or {})
+        if isinstance((preference or {}).get("value"), dict)
+        else {}
+    )
+    preference_support_ids: list[int] = []
+    for value in preference_value.get("supporting_approval_event_ids") or []:
+        try:
+            preference_support_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    preference_support_ids = sorted(set(preference_support_ids))
+    expected_preference_source_ref = ""
+    if preference_support_ids:
+        digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "tool": tool.strip().lower(),
+                    "supporting_approval_event_ids": preference_support_ids,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8", errors="replace")
+        ).hexdigest()[:24]
+        expected_preference_source_ref = f"approval-history:{digest}"
     session_baseline_event_id = int(
         (session.get("baseline") or {}).get("max_event_id") or 0
     )
@@ -2747,12 +2773,21 @@ def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: lis
 
         if len(valid_support) < 3:
             continue
+        preference_value_matches = bool(
+            str(preference_value.get("tool") or "") == tool.strip().lower()
+            and str(preference_value.get("authority_effect") or "") == "none"
+            and preference_support_ids == valid_support
+            and preference_source_ref == expected_preference_source_ref
+        )
+        if not preference_value_matches:
+            continue
         inference_events.append(
             {
                 "event_id": int(item["id"]),
                 "source_ref": preference_source_ref,
                 "supporting_approval_event_ids": valid_support,
                 "distinct_supporting_steps": len(distinct_steps),
+                "preference_value_matches_provenance": True,
             }
         )
 

@@ -1058,6 +1058,179 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertTrue(evaluation["evidence"]["failure_timeout_or_unverified_observed"])
         self.assertTrue(evaluation["evidence"]["verification_feedback_observed"])
 
+    def test_a4_accepts_audited_nonverifiable_write_as_negative_outcome(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A4 Nonverifiable Gate")
+        state = desired_state.create_desired_state(
+            "A4 Nonverifiable Gate complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-nonverifiable",
+        )
+
+        def executor_with_provider_id(
+            tool: str,
+            args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted verifiable write.",
+                data={"event_id": "a4-verifiable-event"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        def executor_without_provider_id(
+            tool: str,
+            args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted write but returned no stable event ID.",
+                data={},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            positive_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "verified-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 verifiable write",
+                            "start": "2030-01-01T12:00:00-08:00",
+                            "end": "2030-01-01T12:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                positive_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            approved = agency_plan.approve_step(
+                positive_plan["id"],
+                waiting["steps"][0]["id"],
+                executor_with_provider_id,
+            )
+            positive_verification_id = str(approved["steps"][0]["verification_id"])
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Independent exact-ID calendar read-back succeeded."),
+            ):
+                positive = world_verification.check_one(
+                    positive_verification_id,
+                    force=True,
+                )
+            self.assertEqual(positive["status"], "verified")
+            agency_plan.reconcile_plan(positive_plan["id"])
+            desired_state.evaluate_desired_state(str(state["id"]))
+
+            negative_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "nonverifiable-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 nonverifiable write",
+                            "start": "2030-01-01T13:00:00-08:00",
+                            "end": "2030-01-01T13:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                negative_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            failed = agency_plan.approve_step(
+                negative_plan["id"],
+                waiting["steps"][0]["id"],
+                executor_without_provider_id,
+            )
+            negative_step = failed["steps"][0]
+            self.assertEqual(negative_step["status"], "failed")
+            negative_verification_id = str(negative_step["verification_id"])
+            row = sqlite3.connect(self.db).execute(
+                """
+                SELECT status,verifier,resolved_event_id
+                FROM action_verifications WHERE id=?
+                """,
+                (negative_verification_id,),
+            ).fetchone()
+            self.assertEqual(row[0], "unverified")
+            self.assertEqual(row[1], "no_independent_verifier")
+            self.assertTrue(row[2])
+            desired_state.evaluate_desired_state(str(state["id"]))
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertTrue(evaluation["passed"], evaluation["checks"])
+        self.assertTrue(
+            evaluation["evidence"]["failure_timeout_or_unverified_observed"]
+        )
+        negative_check = next(
+            item
+            for item in evaluation["checks"]
+            if item["name"] == "failure/timeout/unverified outcome was exercised"
+        )
+        self.assertIn(negative_verification_id, negative_check["evidence"])
+
     def test_a4_status_flip_without_observation_trail_does_not_count_as_verified(self) -> None:
         entity_id = world_model.ensure_entity("project", "Forged Verification Gate")
         state = desired_state.create_desired_state(

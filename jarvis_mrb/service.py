@@ -413,6 +413,23 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/physical/public-cameras")
+def nearby_public_cameras(
+    latitude: float,
+    longitude: float,
+    radius_km: float = 10.0,
+    limit: int = 8,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Opt-in public provider lookup. No IP scanning, location storage or video proxy."""
+    _check_auth(authorization)
+    from jarvis_mrb.public_camera_catalog import discover_public_cameras
+    try:
+        return discover_public_cameras(latitude, longitude, radius_km=radius_km, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/agency/command-view")
 def agency_command_view(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
     """Authenticated read-only status for an optional iPhone / glasses display."""

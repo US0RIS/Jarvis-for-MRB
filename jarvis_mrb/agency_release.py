@@ -556,15 +556,11 @@ def source_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def deployment_sha(root: Path | None = None) -> str:
-    env_sha = str(os.environ.get("JARVIS_BUILD_SHA") or "").strip().lower()
-    if _SHA_RE.fullmatch(env_sha):
-        return env_sha
-    candidate = root or source_root()
+def _git_head_sha(root: Path) -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=str(candidate),
+            cwd=str(root),
             capture_output=True,
             text=True,
             timeout=5,
@@ -574,6 +570,20 @@ def deployment_sha(root: Path | None = None) -> str:
         return ""
     sha = str(result.stdout or "").strip().lower()
     return sha if result.returncode == 0 and _SHA_RE.fullmatch(sha) else ""
+
+
+def deployment_sha(root: Path | None = None) -> str:
+    candidate = root or source_root()
+    git_sha = _git_head_sha(candidate)
+    env_sha = str(os.environ.get("JARVIS_BUILD_SHA") or "").strip().lower()
+    if _SHA_RE.fullmatch(env_sha):
+        # Packaged deployments may need the build-stamped SHA when .git metadata
+        # is unavailable. When a checkout is present, however, an asserted build
+        # SHA may never override contradictory source provenance.
+        if git_sha and git_sha != env_sha:
+            return ""
+        return env_sha
+    return git_sha
 
 
 def _git_worktree_clean(root: Path) -> tuple[bool, str]:

@@ -175,6 +175,20 @@ struct JarvisAPIClient {
         }
     }
 
+    func discoverNearbyPublicCameras(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
+        let (data, response) = try await postData(
+            path: "physical/public-cameras",
+            body: [
+                "latitude": latitude,
+                "longitude": longitude,
+                "radius_km": 10.0,
+                "limit": 8,
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
+    }
+
     func agencyCommandView() async throws -> MemoMindCommandSnapshot {
         let (data, response) = try await get(path: "agency/command-view", timeout: 15)
         try validate(response: response, data: data)

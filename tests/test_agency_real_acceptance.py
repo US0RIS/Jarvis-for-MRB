@@ -1573,6 +1573,26 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             summary="Read safely, then cross approval boundary",
         )
 
+        def audited_read_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Safe read completed automatically.",
+            )
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
         def protected_executor(
             tool: str,
             args: dict,
@@ -1612,10 +1632,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
 
             after_read = agency_plan.execute_next(
                 first_plan["id"],
-                lambda *_args, **_kwargs: SimpleNamespace(
-                    ok=True,
-                    message="Safe read completed automatically.",
-                ),
+                audited_read_executor,
             )
             self.assertEqual(after_read["status"], "active")
             self.assertEqual(after_read["steps"][0]["status"], "verified")
@@ -1732,6 +1749,26 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             ],
         )
 
+        def audited_read_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Safe read completed.",
+            )
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
         def protected_executor(
             tool: str,
             args: dict,
@@ -1770,10 +1807,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             )
             after_read = agency_plan.execute_next(
                 legitimate_plan["id"],
-                lambda *_args, **_kwargs: SimpleNamespace(
-                    ok=True,
-                    message="Safe read completed.",
-                ),
+                audited_read_executor,
             )
             self.assertEqual(after_read["steps"][0]["status"], "verified")
             waiting = agency_plan.execute_next(

@@ -300,11 +300,27 @@ def _validate_compiled(
             commitment_id = str(criterion.get("commitment_id") or "")
             if commitment_id not in allowed_commitments:
                 raise ValueError(f"Compiler referenced unknown commitment {commitment_id!r}.")
+            conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
+            try:
+                row = conn.execute(
+                    "SELECT status,resolution_event_id FROM commitments WHERE id=?",
+                    (commitment_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                raise ValueError(f"Compiler referenced missing commitment {commitment_id!r}.")
+            if str(row[0] or "").lower() != "pending":
+                raise ValueError(
+                    f"Compiler referenced commitment {commitment_id!r} that is already {str(row[0] or 'resolved')}; "
+                    "a newly activated goal requires future completion evidence."
+                )
             clean.append(
                 {
                     "kind": "commitment_status",
                     "commitment_id": commitment_id,
                     "status": "resolved",
+                    "min_resolution_event_id": min_event_id,
                 }
             )
             continue

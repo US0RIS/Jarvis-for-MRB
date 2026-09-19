@@ -125,6 +125,16 @@ def _validate_criterion(raw: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("commitment_status requires commitment_id.")
         if not str(raw.get("status") or "").strip():
             raise ValueError("commitment_status requires status.")
+        min_resolution_event_id = raw.get("min_resolution_event_id", 0)
+        try:
+            criterion["min_resolution_event_id"] = max(
+                0,
+                int(min_resolution_event_id or 0),
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "commitment_status min_resolution_event_id must be an integer."
+            )
     elif kind == "entity_exists":
         if not str(raw.get("entity_id") or "").strip() and not (
             str(raw.get("kind_name") or "").strip() and str(raw.get("canonical_name") or "").strip()
@@ -289,13 +299,37 @@ def _evaluate_criterion(conn: sqlite3.Connection, criterion: dict[str, Any]) -> 
 
     if kind == "commitment_status":
         commitment_id = str(criterion.get("commitment_id") or "")
-        row = conn.execute("SELECT status FROM commitments WHERE id=?", (commitment_id,)).fetchone()
+        row = conn.execute(
+            "SELECT status,resolution_event_id FROM commitments WHERE id=?",
+            (commitment_id,),
+        ).fetchone()
         actual = str(row["status"]) if row else None
         expected = str(criterion.get("status") or "")
+        resolution_event_id = (
+            int(row["resolution_event_id"])
+            if row and row["resolution_event_id"] is not None
+            else None
+        )
+        min_resolution_event_id = max(
+            0,
+            int(criterion.get("min_resolution_event_id") or 0),
+        )
+        status_matches = bool(
+            row and _normalize(actual or "") == _normalize(expected)
+        )
+        future_resolution_matches = bool(
+            min_resolution_event_id == 0
+            or (
+                resolution_event_id is not None
+                and resolution_event_id > min_resolution_event_id
+            )
+        )
         result.update({
             "actual": actual,
             "expected": expected,
-            "satisfied": bool(row and _normalize(actual or "") == _normalize(expected)),
+            "resolution_event_id": resolution_event_id,
+            "min_resolution_event_id": min_resolution_event_id,
+            "satisfied": bool(status_matches and future_resolution_matches),
         })
         return result
 

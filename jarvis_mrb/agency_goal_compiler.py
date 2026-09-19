@@ -31,6 +31,12 @@ _ACHIEVED_TERMS = {
     "launched", "deployed",
 }
 
+_GENERIC_SUBJECT_TOKENS = {
+    "agreement", "application", "booking", "commitment", "contract", "deal",
+    "document", "email", "file", "form", "goal", "item", "message", "order",
+    "project", "request", "reservation", "task", "thing", "transaction",
+}
+
 _COMPLETION_WORDS = {
     "sign": "signed",
     "signed": "signed",
@@ -270,6 +276,54 @@ def _fallback_contract(title: str, intention: dict[str, Any]) -> dict[str, Any] 
     }
 
 
+def _grounding_context(desired_state_id: str, intention: dict[str, Any]) -> str:
+    pieces: list[str] = []
+    conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
+    try:
+        row = conn.execute(
+            "SELECT title FROM desired_states WHERE id=?",
+            (str(desired_state_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is not None:
+        pieces.append(str(row[0] or ""))
+    pieces.extend(
+        [
+            str(intention.get("title") or ""),
+            str(intention.get("next_action") or ""),
+        ]
+    )
+    for item in intention.get("entities") or []:
+        if isinstance(item, dict):
+            pieces.append(str(item.get("name") or ""))
+    for item in intention.get("commitments") or []:
+        if isinstance(item, dict):
+            pieces.append(str(item.get("action") or ""))
+            pieces.append(str(item.get("owner") or ""))
+    return " ".join(" ".join(piece.split()) for piece in pieces if piece).lower()
+
+
+def _grounded_subject_anchor(term: str, context: str) -> bool:
+    clean = " ".join(str(term or "").lower().split())
+    if not clean:
+        return False
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9][a-z0-9'_-]*", clean)
+        if len(token) >= 3
+    ]
+    if not tokens:
+        return False
+    context_tokens = set(
+        re.findall(r"[a-z0-9][a-z0-9'_-]*", str(context or "").lower())
+    )
+    if not all(token in context_tokens for token in tokens):
+        return False
+    specific = [token for token in tokens if token not in _GENERIC_SUBJECT_TOKENS]
+    return bool(specific)
+
+
 def _validate_compiled(
     desired_state_id: str,
     raw: dict[str, Any],
@@ -291,6 +345,7 @@ def _validate_compiled(
         if str(item.get("id") or "")
     }
     min_event_id = _max_event_id()
+    grounding_context = _grounding_context(desired_state_id, intention)
     clean: list[dict[str, Any]] = []
     for criterion in criteria[:8]:
         if not isinstance(criterion, dict):
@@ -361,12 +416,22 @@ def _validate_compiled(
         ):
             raise ValueError("event_match contains negated or incomplete completion language in terms_all.")
 
-        if not any(
-            len(term) >= 4
-            and term.lower() not in completion_terms
+        subject_terms = [
+            term
             for term in terms_all
-        ):
+            if term.lower() not in completion_terms
+        ]
+        if not subject_terms:
             raise ValueError("event_match lacks a specific subject anchor.")
+        grounded_subjects = [
+            term
+            for term in subject_terms
+            if _grounded_subject_anchor(term, grounding_context)
+        ]
+        if not grounded_subjects:
+            raise ValueError(
+                "event_match subject anchor is not specifically grounded in the goal/intention context."
+            )
 
         terms_none = list(
             dict.fromkeys(

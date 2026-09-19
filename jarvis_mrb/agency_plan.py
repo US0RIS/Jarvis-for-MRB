@@ -280,7 +280,8 @@ def _relevance_hash(conn: sqlite3.Connection, desired_state_id: str) -> str:
             WHERE ee.entity_id=?
               AND e.source_kind NOT IN (
                 'jarvis_agency','jarvis_desired_state','proactive_monitor',
-                'jarvis_jobs','background_worker','system'
+                'jarvis_jobs','background_worker','jarvis_tool','jarvis_verifier',
+                'system'
               )
             ORDER BY e.id DESC
             LIMIT 25
@@ -379,7 +380,8 @@ def _relevance_linked_event_ids(
           AND e.id>?
           AND e.source_kind NOT IN (
             'jarvis_agency','jarvis_desired_state','proactive_monitor',
-            'jarvis_jobs','background_worker','system'
+            'jarvis_jobs','background_worker','jarvis_tool','jarvis_verifier',
+            'system'
           )
         ORDER BY e.id
         """,

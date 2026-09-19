@@ -3128,6 +3128,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 }
 
             def read_and_deliberate_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+                from jarvis_mrb.tool_audit import current_agency_step_id
+
                 if tool == "agency.deliberate":
                     result = agency_deliberation.deliberate(
                         str(args.get("question") or ""),
@@ -3143,8 +3145,23 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                             "confidence": 0.55,
                         },
                     )
-                    return SimpleNamespace(ok=True, message=str(result["synthesis"]["answer"]))
-                return SimpleNamespace(ok=True, message=f"{tool} real-path observation")
+                    reply = SimpleNamespace(
+                        ok=True,
+                        message=str(result["synthesis"]["answer"]),
+                    )
+                else:
+                    reply = SimpleNamespace(
+                        ok=True,
+                        message=f"{tool} real-path observation",
+                    )
+                world_model.record_tool_execution(
+                    tool,
+                    args,
+                    ok=True,
+                    message=reply.message,
+                    agency_step_id=current_agency_step_id(),
+                )
+                return reply
 
             agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
             agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
@@ -3327,6 +3344,8 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             args: dict,
             **_kwargs: object,
         ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
             if tool == "agency.deliberate":
                 result = agency_deliberation.deliberate(
                     str(args.get("question") or ""),
@@ -3342,14 +3361,23 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                         "confidence": 0.5,
                     },
                 )
-                return SimpleNamespace(
+                reply = SimpleNamespace(
                     ok=True,
                     message=str(result["synthesis"]["answer"]),
                 )
-            return SimpleNamespace(
+            else:
+                reply = SimpleNamespace(
+                    ok=True,
+                    message=f"{tool} disconnected research observation",
+                )
+            world_model.record_tool_execution(
+                tool,
+                args,
                 ok=True,
-                message=f"{tool} disconnected research observation",
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
             )
+            return reply
 
         def protected_executor(
             tool: str,

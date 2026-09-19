@@ -353,6 +353,21 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
             for step in (previous.get("steps") or [])
             if str(step.get("status") or "") in {"failed", "blocked"}
         ]
+        verified_steps = [
+            {
+                "step": step.get("step_key"),
+                "tool": step.get("tool"),
+                "status": step.get("status"),
+                "result": str(step.get("result_summary") or "")[:1600],
+                "verification_id": str(step.get("verification_id") or "")[:300],
+            }
+            for step in (previous.get("steps") or [])
+            if str(step.get("status") or "") in {"verified", "skipped"}
+            and (
+                str(step.get("result_summary") or "").strip()
+                or str(step.get("verification_id") or "").strip()
+            )
+        ]
         previous_text = (
             "\nPrevious plan generation "
             + str(previous.get("generation"))
@@ -361,6 +376,15 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
             + ". Do not blindly repeat a failed path. Failure details: "
             + json.dumps(failed_steps, ensure_ascii=False, sort_keys=True)
         )
+        if verified_steps:
+            previous_text += (
+                "\nAlready-completed evidence/work from the prior generation: "
+                + json.dumps(verified_steps, ensure_ascii=False, sort_keys=True)
+                + ". Reuse this evidence when it remains relevant. Do not repeat the "
+                  "same observation/action merely because a new plan generation is being "
+                  "created; repeat it only when a specific changed-world fact makes the "
+                  "prior result stale or insufficient."
+            )
     try:
         from jarvis_mrb.agency_self_model import compact_context as self_model_context
         self_context = self_model_context(max_chars=5000)

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -37,6 +39,8 @@ class AgencyPlanTests(unittest.TestCase):
         permissions.POLICY_PATH = self.base / "permissions.json"
         permissions.set_policy("external_write", "confirm")
         agent._PENDING_ACTION = None
+        with agency_plan._ACTIVE_EXECUTIONS_LOCK:
+            agency_plan._ACTIVE_EXECUTIONS.clear()
 
         world_model.status()
         world_executive.status()
@@ -48,6 +52,8 @@ class AgencyPlanTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         agent._PENDING_ACTION = None
+        with agency_plan._ACTIVE_EXECUTIONS_LOCK:
+            agency_plan._ACTIVE_EXECUTIONS.clear()
         self.temp.cleanup()
 
     def _state_for_project(self, name: str = "Project Agency") -> tuple[str, str]:
@@ -405,6 +411,123 @@ class AgencyPlanTests(unittest.TestCase):
             )
         self.assertFalse(replay.ok)
         replay_unchecked.assert_not_called()
+
+    def test_concurrent_execute_next_claims_automatic_step_exactly_once(self) -> None:
+        _, state_id = self._state_for_project("Project Atomic Automatic Claim")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "observe",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "Project Atomic Automatic Claim"},
+                }
+            ],
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        calls: list[str] = []
+        calls_lock = threading.Lock()
+
+        def executor(tool: str, _args: dict, **_kwargs: object) -> SimpleNamespace:
+            with calls_lock:
+                calls.append(tool)
+            entered.set()
+            self.assertTrue(release.wait(timeout=5))
+            return SimpleNamespace(ok=True, message="single read result")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(agency_plan.execute_next, plan["id"], executor)
+            self.assertTrue(entered.wait(timeout=5))
+            second = pool.submit(agency_plan.execute_next, plan["id"], executor)
+            second_result = second.result(timeout=5)
+
+            during = agency_plan.get_plan(plan["id"], include_steps=True)
+            self.assertIsNotNone(during)
+            assert during is not None
+            self.assertEqual(during["steps"][0]["status"], "executing")
+            self.assertEqual(during["steps"][0]["attempt_count"], 1)
+            self.assertEqual(calls, ["knowledge.search"])
+
+            release.set()
+            first_result = first.result(timeout=5)
+
+        self.assertEqual(calls, ["knowledge.search"])
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertIsNotNone(persisted)
+        assert persisted is not None
+        self.assertEqual(persisted["steps"][0]["attempt_count"], 1)
+        self.assertEqual(persisted["steps"][0]["status"], "verified")
+        self.assertIn(second_result["status"], {"active", "needs_replan"})
+        self.assertEqual(first_result["status"], "needs_replan")
+
+    def test_concurrent_approval_cannot_invoke_protected_step_twice(self) -> None:
+        _, state_id = self._state_for_project("Project Atomic Protected Claim")
+        args = {
+            "summary": "Atomic approved write",
+            "start": "2030-01-01T09:00:00-08:00",
+            "end": "2030-01-01T09:30:00-08:00",
+        }
+        plan = agency_plan.create_plan(
+            state_id,
+            [{"id": "write", "tool": "calendar.create", "arguments": args}],
+        )
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+        )
+        step_id = str(waiting["steps"][0]["id"])
+        entered = threading.Event()
+        release = threading.Event()
+        calls: list[str] = []
+        calls_lock = threading.Lock()
+
+        def executor(
+            tool: str,
+            _args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            self.assertTrue(bypass_confirmation)
+            with calls_lock:
+                calls.append(tool)
+            entered.set()
+            self.assertTrue(release.wait(timeout=5))
+            return SimpleNamespace(ok=True, message="single protected invocation")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(
+                agency_plan.approve_step,
+                plan["id"],
+                step_id,
+                executor,
+            )
+            self.assertTrue(entered.wait(timeout=5))
+            second = pool.submit(
+                agency_plan.approve_step,
+                plan["id"],
+                step_id,
+                executor,
+            )
+            with self.assertRaises(ValueError):
+                second.result(timeout=5)
+
+            during = agency_plan.get_plan(plan["id"], include_steps=True)
+            self.assertIsNotNone(during)
+            assert during is not None
+            self.assertEqual(during["steps"][0]["status"], "executing")
+            self.assertEqual(during["steps"][0]["attempt_count"], 1)
+            self.assertEqual(calls, ["calendar.create"])
+
+            release.set()
+            first.result(timeout=5)
+
+        self.assertEqual(calls, ["calendar.create"])
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertIsNotNone(persisted)
+        assert persisted is not None
+        self.assertEqual(persisted["steps"][0]["attempt_count"], 1)
+        self.assertEqual(persisted["steps"][0]["approval_digest"], "")
 
     def test_interrupted_protected_execution_is_never_replayed_automatically(self) -> None:
         _, state_id = self._state_for_project("Project Interrupted Write")

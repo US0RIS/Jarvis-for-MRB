@@ -1426,7 +1426,8 @@ def run_full_validation(*, root: Path | None = None) -> dict[str, Any]:
         "validation_run": run,
         "release_status": release_status(
             deployment_sha_value=sha,
-            diagnostics=diagnostics,
+            environment=env,
+            diagnostics={**dict(diagnostics), "ok": diagnostics_ok},
         ),
     }
 

@@ -744,7 +744,8 @@ def _causal_replan_evidence(
             continue
         plan_row = conn.execute(
             """
-            SELECT id,generation,status,relevance_hash,relevance_event_id
+            SELECT id,generation,status,relevance_hash,relevance_event_id,
+                   invalidation_event_id
             FROM agency_plans
             WHERE id=? AND desired_state_id=?
             """,
@@ -778,7 +779,8 @@ def _causal_replan_evidence(
 
         newer_rows = conn.execute(
             """
-            SELECT id,generation,status,created_at
+            SELECT id,generation,status,created_at,replaces_plan_id,
+                   replan_cause_event_id
             FROM agency_plans
             WHERE desired_state_id=? AND generation>?
             ORDER BY generation
@@ -788,6 +790,10 @@ def _causal_replan_evidence(
         newer_after_invalidation: dict[str, Any] | None = None
         newer_created_event_id = 0
         for newer in newer_rows:
+            if str(newer["replaces_plan_id"] or "") != plan_id:
+                continue
+            if int(newer["replan_cause_event_id"] or 0) != invalidation_id:
+                continue
             candidate_ids = [
                 event_id
                 for event_id in plan_created_event_ids.get(str(newer["id"]), [])
@@ -799,10 +805,14 @@ def _causal_replan_evidence(
             newer_created_event_id = min(candidate_ids)
             break
 
+        invalidation_row_matches = (
+            int(plan_row["invalidation_event_id"] or 0) == invalidation_id
+        )
         provenance_bound = bool(
             trigger_external_ids
             and baseline_event_matches
             and baseline_hash_matches
+            and invalidation_row_matches
         )
         if provenance_bound and newer_after_invalidation is not None:
             causal_pairs.append(
@@ -814,6 +824,7 @@ def _causal_replan_evidence(
                     ),
                     "baseline_event_matches": baseline_event_matches,
                     "baseline_hash_matches": baseline_hash_matches,
+                    "invalidated_plan_row_matches_event": invalidation_row_matches,
                     "invalidation_event_id": invalidation_id,
                     "invalidated_plan_id": plan_id,
                     "invalidated_generation": generation,

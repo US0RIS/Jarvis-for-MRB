@@ -1005,7 +1005,7 @@ workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
 custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}};
-agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}.
+agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}}.
 
 Routing rules:
 - web.search: current/recent/public information. Make the query self-contained; Jarvis refines conversational searches automatically.
@@ -1021,13 +1021,15 @@ Routing rules:
 - spatial.find: where an object was last seen by passive vision. This is last-seen context, not reliable turn-by-turn navigation.
 - briefing.generate: a concise current briefing from calendar, unread mail, weather/news, and background work.
 - workflow.run: user asks for a multi-step goal that needs several tools in sequence. The DAG engine may parallelize safe reads. Existing permission policy still applies to every node; do not promise confirmation-free external/destructive writes.
+- Agency is the persistent desired-state executor. agency.enable and agency.activate_goal expand autonomous scope and remain behind the security confirmation boundary. agency.monitor, agency.disable, and agency.pause_goal reduce autonomous scope. agency.status reports persisted goals/plans without changing them.
+- agency.deliberate is read-only parallel analysis for consequential questions where evidence/skeptic/feasibility/risk perspectives materially improve reasoning; preserve material disagreement instead of forcing artificial consensus.
 - agency.counterfactual.create: persist two or more materially different decision branches when the user wants alternatives compared or a consequential choice remembered. Each branch should explicitly capture assumptions, evidence, expected outcomes, cost, reversibility, and uncertainty when available.
 - agency.counterfactual.compare: retrieve a previously preserved decision case without changing it.
 - agency.counterfactual.select: record a chosen branch only when the user asks to choose/commit to a branch or clearly states the selection. Include a rationale and at least one concrete condition that would reopen the choice. This changes only Jarvis's internal decision ledger; it does not authorize external actions.
 - background.submit: long analysis/work that should continue while the live voice channel remains available.
 - state.temp_set: temporary focus/context that should expire automatically; use a sensible TTL in minutes. Use state.update only for durable context.
 - sandbox.python, sandbox.command, and custom.* are security-sensitive. Never use them unless the user explicitly asks. sandbox.command runs inside the locked-down Docker container, never the Windows host shell, and the confirmation reads the exact command aloud.
-- Custom API tool synthesis is sandboxed and allow-host constrained. Generated tools start disabled. If an enabled adapter fails structurally, Jarvis may queue a sandbox-validated repair proposal, but custom.apply_repair always requires explicit confirmation.
+- Custom API tool synthesis is sandboxed and allow-host constrained. Generated tools start disabled. If an enabled adapter fails structurally, Jarvis may queue a sandbox-validated repair proposal, but custom.apply_repair always requires explicit confirmation. When the user explicitly asks to synthesize a tool for a known Agency capability gap and an exact gap_id is available, pass that gap_id to custom.synthesize so later enablement can reactivate the blocked goal.
 - Gmail read/check/find/search/review received mail -> gmail.query. Latest inbox email: query='in:inbox', limit=1. Never request more than 10.
 - Gmail send -> gmail.send. Sending is protected by confirmation and the exact backend allowlist.
 - Calendar past -> calendar.query direction='past'; future -> direction='future'; last -> calendar.recent.

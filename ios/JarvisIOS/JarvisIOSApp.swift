@@ -71,6 +71,13 @@ struct JarvisIOSApp: App {
                         Label("Jarvis", systemImage: "waveform.circle.fill")
                     }
 
+                NavigationStack {
+                    MemoMindPreviewView()
+                }
+                .tabItem {
+                    Label("Glasses", systemImage: "eyeglasses")
+                }
+
                 LocalIntelligenceMilestoneView()
                     .tabItem {
                         Label("Local", systemImage: "brain.head.profile")
@@ -87,6 +94,7 @@ struct JarvisIOSApp: App {
                     }
             }
             .environmentObject(appModel)
+            .environmentObject(appModel.memoMind)
             .environmentObject(persistentPresence)
             .environmentObject(meetingCapture)
             .environmentObject(frontendIntelligence)

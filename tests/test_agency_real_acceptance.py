@@ -1965,6 +1965,58 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertFalse(causal_check["passed"])
         self.assertFalse(evaluation["evidence"]["external_change_observed"])
 
+    def test_a6_rejects_already_satisfied_baseline_watch(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A6 Already Satisfied Baseline",
+        )
+        state = desired_state.create_desired_state(
+            "A6 Already Satisfied Baseline complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "done",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-already-satisfied",
+        )
+        world_model.assert_belief(
+            entity_id,
+            "prerequisite",
+            value="available",
+            evidence="The watched prerequisite was already available before the REAL session.",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Artificially blocked despite an already-satisfied watch.",
+        )
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {
+                "kind": "belief_equals",
+                "entity_id": entity_id,
+                "predicate": "prerequisite",
+                "value": "available",
+            },
+        )
+
+        with self._patch_identity():
+            with self.assertRaisesRegex(
+                ValueError,
+                "wake condition.*unsatisfied",
+            ):
+                agency_real_acceptance.start_session(
+                    "A6",
+                    desired_state_id=str(state["id"]),
+                    deployment_sha_value=SHA_A,
+                    environment=ENV,
+                )
+
     def test_a6_requires_externally_grounded_wake_and_actionable_continuation(self) -> None:
         entity_id = world_model.ensure_entity("project", "Dormant Wake Gate")
         state = desired_state.create_desired_state(

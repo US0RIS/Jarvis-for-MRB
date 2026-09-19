@@ -1380,6 +1380,27 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if step_id:
             waiting_by_step.setdefault(step_id, []).append(int(item["id"]))
 
+    approved_by_step: dict[str, list[int]] = {}
+    for item in state_events:
+        if item["event_type"] != "agency.step.approved":
+            continue
+        step_id = str((item.get("payload") or {}).get("step_id") or "")
+        if step_id:
+            approved_by_step.setdefault(step_id, []).append(int(item["id"]))
+
+    audited_read_events: dict[str, list[int]] = {}
+    for item in events:
+        if item["event_type"] != "action.tool":
+            continue
+        if str(item.get("source_kind") or "") != "jarvis_tool":
+            continue
+        payload = item.get("payload") or {}
+        if not bool(payload.get("ok")):
+            continue
+        step_id = str(payload.get("agency_step_id") or "")
+        if step_id:
+            audited_read_events.setdefault(step_id, []).append(int(item["id"]))
+
     try:
         read_rows = conn.execute(
             """
@@ -1397,10 +1418,16 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
     except sqlite3.OperationalError:
         read_rows = []
     automatic_reads = [
-        dict(row)
+        {
+            **dict(row),
+            "action_event_ids": list(
+                audited_read_events.get(str(row["id"] or ""), [])
+            ),
+        }
         for row in read_rows
         if str(row["status"] or "") == "verified"
         and str(row["id"] or "") not in waiting_by_step
+        and bool(audited_read_events.get(str(row["id"] or ""), []))
     ]
 
     verifications = _verification_rows_for_state(
@@ -1424,12 +1451,18 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
             for event_id in waiting_by_step.get(step_id, [])
             if event_id < action_event_id
         ]
-        if prior_waiting:
+        approval_consumed = [
+            event_id
+            for event_id in approved_by_step.get(step_id, [])
+            if event_id > action_event_id
+        ]
+        if prior_waiting and approval_consumed:
             resumed_pairs.append(
                 {
                     "agency_step_id": step_id,
                     "waiting_event_id": max(prior_waiting),
                     "action_event_id": action_event_id,
+                    "approval_consumed_event_id": min(approval_consumed),
                     "verification_id": str(row.get("id") or ""),
                     "tool": str(row.get("tool") or ""),
                 }
@@ -1439,6 +1472,8 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
                 {
                     "agency_step_id": step_id,
                     "action_event_id": action_event_id,
+                    "prior_waiting_event_ids": prior_waiting,
+                    "approval_consumed_event_ids": approval_consumed,
                     "verification_id": str(row.get("id") or ""),
                     "tool": str(row.get("tool") or ""),
                 }
@@ -1517,7 +1552,7 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
 
     checks = [
         _check(
-            "safe read proceeded automatically without approval",
+            "safe read proceeded automatically with audited step correlation and without approval",
             bool(automatic_reads),
             automatic_reads,
         ),
@@ -1535,7 +1570,7 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
             ],
         ),
         _check(
-            "approval resumed the exact persisted step",
+            "approval consumption resumed the exact persisted step",
             bool(resumed_pairs),
             resumed_pairs,
         ),

@@ -1107,10 +1107,20 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 research_exec_a12,
             )
             trace_a12.append("approval_required")
+            approved_write_a12 = _fake_audited_pending_write(env)
+
+            def execute_approved_a12(
+                tool: str,
+                args: dict[str, Any],
+                **kwargs: Any,
+            ) -> SimpleNamespace:
+                trace_a12.append(tool)
+                return approved_write_a12(tool, args, **kwargs)
+
             approved_a12 = ap.approve_step(
                 second_a12["id"],
                 waiting_a12["steps"][0]["id"],
-                _fake_audited_pending_write(env),
+                execute_approved_a12,
             )
             trace_a12.append("approved")
             verification_a12 = approved_a12["steps"][0]["verification_id"]
@@ -1177,8 +1187,8 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                     "web.search",
                     "agency.deliberate",
                     "replan_required",
-                    "calendar.create",
                     "approval_required",
+                    "calendar.create",
                     "approved",
                     "verified_and_satisfied",
                 ]

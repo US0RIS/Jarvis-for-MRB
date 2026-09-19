@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import sqlite3
 import tempfile
@@ -116,6 +117,13 @@ def _isolated_agency_world(base: Path) -> Iterator[dict[str, Any]]:
     finally:
         for module, attribute, value in reversed(saved):
             setattr(module, attribute, value)
+        # sqlite3.Connection's context manager commits/rolls back but does not
+        # itself close the handle. Most module-local connections die immediately
+        # under CPython reference counting, but cursor/connection cycles can survive
+        # until cyclic GC. The acceptance DB is intentionally ephemeral, so force
+        # collection here after restoring global bindings and before Windows tries
+        # to remove the temporary directory.
+        gc.collect()
 
 
 def _make_state(env: dict[str, Any], name: str, *, predicate: str = "ready", expected: Any = True) -> tuple[str, str]:

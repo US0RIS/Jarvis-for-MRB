@@ -1912,8 +1912,21 @@ def _evaluate_a6(session: dict[str, Any], conn: sqlite3.Connection, events: list
     ] if first_reactivation_id else []
     surfaced_or_executed = bool(downstream)
 
+    baseline_watch_outcomes = dict(
+        (session.get("baseline") or {}).get("wake_watch_outcomes") or {}
+    )
+    baseline_unsatisfied = bool(baseline_watches) and all(
+        watch_id in baseline_watch_outcomes
+        and not bool((baseline_watch_outcomes.get(watch_id) or {}).get("satisfied"))
+        for watch_id in baseline_watches
+    )
+
     checks = [
-        _check("session began with persisted dormant watch", bool(baseline_watches), sorted(baseline_watches)),
+        _check(
+            "session began with persisted dormant watches whose conditions were unsatisfied",
+            baseline_unsatisfied,
+            baseline_watch_outcomes,
+        ),
         _check(
             "wake condition later triggered from real observed evidence",
             bool(real_trigger_events),

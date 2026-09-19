@@ -105,6 +105,30 @@ def _connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_verification_observations_verification
             ON verification_observations(verification_id,id DESC);
 
+        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_update
+        BEFORE UPDATE ON verification_observations
+        BEGIN
+            SELECT RAISE(ABORT, 'Verification observations are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_delete
+        BEFORE DELETE ON verification_observations
+        BEGIN
+            SELECT RAISE(ABORT, 'Verification observations are append-only');
+        END;
+        """
+    )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(action_verifications)").fetchall()}
+    if "agency_step_id" not in columns:
+        conn.execute("ALTER TABLE action_verifications ADD COLUMN agency_step_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_action_verifications_agency_step "
+        "ON action_verifications(agency_step_id,status,updated_at DESC)"
+    )
+    # Create triggers only after legacy installations have acquired every
+    # referenced column. Fresh databases already have the columns above.
+    conn.executescript(
+        """
         CREATE TRIGGER IF NOT EXISTS action_verifications_immutable_identity
         BEFORE UPDATE ON action_verifications
         WHEN NEW.id IS NOT OLD.id
@@ -137,26 +161,7 @@ def _connect() -> sqlite3.Connection:
         BEGIN
             SELECT RAISE(ABORT, 'Cannot append observations to a terminal action verification');
         END;
-
-        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_update
-        BEFORE UPDATE ON verification_observations
-        BEGIN
-            SELECT RAISE(ABORT, 'Verification observations are append-only');
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_delete
-        BEFORE DELETE ON verification_observations
-        BEGIN
-            SELECT RAISE(ABORT, 'Verification observations are append-only');
-        END;
         """
-    )
-    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(action_verifications)").fetchall()}
-    if "agency_step_id" not in columns:
-        conn.execute("ALTER TABLE action_verifications ADD COLUMN agency_step_id TEXT NOT NULL DEFAULT ''")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_action_verifications_agency_step "
-        "ON action_verifications(agency_step_id,status,updated_at DESC)"
     )
     conn.commit()
     return conn

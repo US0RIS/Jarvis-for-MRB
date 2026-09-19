@@ -1366,7 +1366,10 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if not step_id or not plan_id:
             continue
         step = conn.execute(
-            "SELECT id,status,blocked_reason FROM agency_steps WHERE id=? AND plan_id=?",
+            """
+            SELECT id,status,blocked_reason,risk,requires_confirmation,tool
+            FROM agency_steps WHERE id=? AND plan_id=?
+            """,
             (step_id, plan_id),
         ).fetchone()
         plan = conn.execute(
@@ -1384,10 +1387,25 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
             """,
             (state_id, int(plan["generation"])),
         ).fetchone()
+        prior_waiting = [
+            event_id
+            for event_id in waiting_by_step.get(step_id, [])
+            if event_id < int(item["id"])
+        ]
+        protected_boundary = bool(
+            str(step["risk"] or "") != "read"
+            and bool(step["requires_confirmation"])
+            and prior_waiting
+        )
         denial_outcomes.append(
             {
                 "event_id": int(item["id"]),
                 "step_id": step_id,
+                "tool": str(step["tool"] or ""),
+                "risk": str(step["risk"] or ""),
+                "requires_confirmation": bool(step["requires_confirmation"]),
+                "prior_waiting_event_ids": prior_waiting,
+                "protected_boundary": protected_boundary,
                 "step_status": str(step["status"]),
                 "blocked_reason": str(step["blocked_reason"] or ""),
                 "plan_id": plan_id,
@@ -1402,9 +1420,13 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
                 ),
             }
         )
+    protected_denials = [
+        item for item in denial_outcomes
+        if bool(item["protected_boundary"])
+    ]
     denial_effective = any(
         bool(item["path_blocked_or_replanned"])
-        for item in denial_outcomes
+        for item in protected_denials
     )
 
     checks = [
@@ -1437,14 +1459,14 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
             unguarded_external,
         ),
         _check(
-            "explicit denial case was persisted",
-            bool(denied),
-            [int(item["id"]) for item in denied],
+            "explicit denial occurred at a persisted protected approval boundary",
+            bool(protected_denials),
+            protected_denials,
         ),
         _check(
-            "denial blocked the step and forced replan or replacement",
+            "protected denial blocked the step and forced replan or replacement",
             denial_effective,
-            denial_outcomes,
+            protected_denials,
         ),
     ]
     return {

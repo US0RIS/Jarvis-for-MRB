@@ -679,45 +679,112 @@ def _causal_replan_evidence(
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
     state_id = str(session.get("desired_state_id") or "")
+    state_events = _events_for_state(events, state_id)
     invalidations = [
         item
-        for item in _events_for_state(events, state_id)
+        for item in state_events
         if item["event_type"] == "agency.plan.invalidated"
     ]
     external_events = _external_events_for_relevant_entities(conn, session)
-    external_ids = [int(item["id"]) for item in external_events]
+    external_ids = {int(item["id"]) for item in external_events}
+    session_baseline_event_id = int(
+        (session.get("baseline") or {}).get("max_event_id") or 0
+    )
+
+    plan_created_event_ids: dict[str, list[int]] = {}
+    for item in state_events:
+        if item["event_type"] != "agency.plan.created":
+            continue
+        created_plan_id = str((item.get("payload") or {}).get("plan_id") or "")
+        if created_plan_id:
+            plan_created_event_ids.setdefault(created_plan_id, []).append(
+                int(item["id"])
+            )
 
     causal_pairs: list[dict[str, Any]] = []
     for invalidation in invalidations:
         invalidation_id = int(invalidation["id"])
-        plan_id = str((invalidation.get("payload") or {}).get("plan_id") or "")
+        payload = invalidation.get("payload") or {}
+        plan_id = str(payload.get("plan_id") or "")
         if not plan_id:
             continue
         plan_row = conn.execute(
-            "SELECT id,generation,status FROM agency_plans WHERE id=? AND desired_state_id=?",
+            """
+            SELECT id,generation,status,relevance_hash,relevance_event_id
+            FROM agency_plans
+            WHERE id=? AND desired_state_id=?
+            """,
             (plan_id, state_id),
         ).fetchone()
         if plan_row is None:
             continue
+
         generation = int(plan_row["generation"])
-        prior_external = [event_id for event_id in external_ids if event_id < invalidation_id]
-        newer = conn.execute(
+        raw_trigger_ids: list[int] = []
+        for value in payload.get("trigger_event_ids") or []:
+            try:
+                raw_trigger_ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        trigger_external_ids = sorted(
+            {
+                event_id
+                for event_id in raw_trigger_ids
+                if event_id in external_ids
+                and event_id > session_baseline_event_id
+                and event_id < invalidation_id
+            }
+        )
+        baseline_event_matches = int(
+            payload.get("baseline_relevance_event_id") or 0
+        ) == int(plan_row["relevance_event_id"] or 0)
+        baseline_hash_matches = str(
+            payload.get("baseline_relevance_hash") or ""
+        ) == str(plan_row["relevance_hash"] or "")
+
+        newer_rows = conn.execute(
             """
-            SELECT id,generation,status
+            SELECT id,generation,status,created_at
             FROM agency_plans
             WHERE desired_state_id=? AND generation>?
-            ORDER BY generation DESC LIMIT 1
+            ORDER BY generation
             """,
             (state_id, generation),
-        ).fetchone()
-        if prior_external and newer is not None:
+        ).fetchall()
+        newer_after_invalidation: dict[str, Any] | None = None
+        newer_created_event_id = 0
+        for newer in newer_rows:
+            candidate_ids = [
+                event_id
+                for event_id in plan_created_event_ids.get(str(newer["id"]), [])
+                if event_id > invalidation_id
+            ]
+            if not candidate_ids:
+                continue
+            newer_after_invalidation = dict(newer)
+            newer_created_event_id = min(candidate_ids)
+            break
+
+        provenance_bound = bool(
+            trigger_external_ids
+            and baseline_event_matches
+            and baseline_hash_matches
+        )
+        if provenance_bound and newer_after_invalidation is not None:
             causal_pairs.append(
                 {
-                    "external_event_ids": prior_external,
+                    "external_event_ids": trigger_external_ids,
+                    "raw_trigger_event_ids": sorted(set(raw_trigger_ids)),
+                    "baseline_relevance_event_id": int(
+                        plan_row["relevance_event_id"] or 0
+                    ),
+                    "baseline_event_matches": baseline_event_matches,
+                    "baseline_hash_matches": baseline_hash_matches,
                     "invalidation_event_id": invalidation_id,
                     "invalidated_plan_id": plan_id,
                     "invalidated_generation": generation,
-                    "new_plan": dict(newer),
+                    "new_plan_created_event_id": newer_created_event_id,
+                    "new_plan": newer_after_invalidation,
                 }
             )
     return {
@@ -1614,18 +1681,22 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
     preservation_details: list[dict[str, Any]] = []
     preserved = False
     for pair in pairs:
-        invalidation_event_id = int(pair["invalidation_event_id"])
-        invalidation_event = conn.execute(
-            "SELECT recorded_at,occurred_at FROM events WHERE id=?",
-            (invalidation_event_id,),
-        ).fetchone()
-        invalidation_time = _parse_time(
-            str(
-                (invalidation_event["recorded_at"] if invalidation_event else "")
-                or (invalidation_event["occurred_at"] if invalidation_event else "")
-                or ""
+        trigger_times: list[datetime] = []
+        for trigger_event_id in pair.get("external_event_ids") or []:
+            trigger_event = conn.execute(
+                "SELECT recorded_at,occurred_at FROM events WHERE id=?",
+                (int(trigger_event_id),),
+            ).fetchone()
+            trigger_time = _parse_time(
+                str(
+                    (trigger_event["recorded_at"] if trigger_event else "")
+                    or (trigger_event["occurred_at"] if trigger_event else "")
+                    or ""
+                )
             )
-        )
+            if trigger_time is not None:
+                trigger_times.append(trigger_time)
+        first_change_time = min(trigger_times) if trigger_times else None
         step = conn.execute(
             """
             SELECT id,step_key,tool,arguments_json,status,attempt_count,
@@ -1642,8 +1713,8 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
             str(step["status"] or "") in {"verified", "skipped"}
             and int(step["attempt_count"] or 0) > 0
             and finished_at is not None
-            and invalidation_time is not None
-            and finished_at <= invalidation_time
+            and first_change_time is not None
+            and finished_at <= first_change_time
         )
         replays = conn.execute(
             """
@@ -1671,7 +1742,10 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "status": str(step["status"]),
             "attempt_count": int(step["attempt_count"] or 0),
             "finished_at": str(step["finished_at"] or ""),
-            "completed_before_invalidation": completed_before_change,
+            "first_external_change_at": (
+                first_change_time.isoformat() if first_change_time is not None else ""
+            ),
+            "completed_before_external_change": completed_before_change,
             "replays": [dict(row) for row in replays],
         }
         preservation_details.append(detail)
@@ -1695,7 +1769,7 @@ def _evaluate_a5(session: dict[str, Any], conn: sqlite3.Connection, events: list
             [item["new_plan"] for item in pairs],
         ),
         _check(
-            "already-valid work completed before invalidation and was not replayed",
+            "already-valid work completed before the causal external change and was not replayed",
             preserved,
             preservation_details,
         ),

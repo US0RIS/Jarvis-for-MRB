@@ -2106,12 +2106,16 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if question_scope in " ".join(str(row["question"] or "").lower().split())
     ]
 
+    from jarvis_mrb.planner_model import QUALITY_MODEL
+
     candidate = None
     workers: list[sqlite3.Row] = []
     disagreements: list[Any] = []
     provenance_ok = False
     role_coverage = False
     synthesis_after_workers = False
+    production_backend = False
+    completion_event_bound = False
 
     for row in deliberations:
         current_workers = conn.execute(
@@ -2159,6 +2163,29 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             and completed_at >= max(value for value in worker_completed if value is not None)
             and synthesis_payload
         )
+        production_backend_now = bool(
+            str(row["worker_backend"] or "") == "ollama_model"
+            and str(row["synthesizer_backend"] or "") == "ollama_model"
+            and str(row["worker_model"] or "") == QUALITY_MODEL
+            and str(row["synthesizer_model"] or "") == QUALITY_MODEL
+        )
+        completion_events = [
+            item
+            for item in events
+            if item["event_type"] == "agency.deliberation.completed"
+            and str(item.get("source_kind") or "") == "jarvis_agency"
+            and str((item.get("payload") or {}).get("deliberation_id") or "")
+            == str(row["id"])
+            and str((item.get("payload") or {}).get("worker_backend") or "")
+            == str(row["worker_backend"] or "")
+            and str((item.get("payload") or {}).get("synthesizer_backend") or "")
+            == str(row["synthesizer_backend"] or "")
+            and str((item.get("payload") or {}).get("worker_model") or "")
+            == str(row["worker_model"] or "")
+            and str((item.get("payload") or {}).get("synthesizer_model") or "")
+            == str(row["synthesizer_model"] or "")
+        ]
+        completion_event_bound_now = bool(completion_events)
 
         if (
             role_coverage_now
@@ -2166,6 +2193,8 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             and current_provenance_ok
             and current_disagreements
             and synthesis_after_now
+            and production_backend_now
+            and completion_event_bound_now
         ):
             candidate = row
             workers = list(current_workers)
@@ -2173,6 +2202,8 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             provenance_ok = current_provenance_ok
             role_coverage = role_coverage_now
             synthesis_after_workers = synthesis_after_now
+            production_backend = production_backend_now
+            completion_event_bound = completion_event_bound_now
             break
 
     roles = sorted(str(row["role"]) for row in workers)
@@ -2200,6 +2231,22 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             synthesis_after_workers,
             str(candidate["id"]) if candidate else "",
         ),
+        _check(
+            "REAL deliberation used the production model worker and synthesizer backends",
+            production_backend,
+            {
+                "worker_backend": str(candidate["worker_backend"]) if candidate else "",
+                "synthesizer_backend": str(candidate["synthesizer_backend"]) if candidate else "",
+                "worker_model": str(candidate["worker_model"]) if candidate else "",
+                "synthesizer_model": str(candidate["synthesizer_model"]) if candidate else "",
+                "expected_model": QUALITY_MODEL,
+            },
+        ),
+        _check(
+            "deliberation completion world event matches persisted backend provenance",
+            completion_event_bound,
+            str(candidate["id"]) if candidate else "",
+        ),
     ]
     return {
         "checks": checks,
@@ -2210,6 +2257,8 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
             "provenance_structurally_bounded": checks[2]["passed"],
             "material_disagreement_preserved": checks[3]["passed"],
             "synthesis_after_workers": checks[4]["passed"],
+            "production_model_backends": checks[5]["passed"],
+            "completion_event_bound": checks[6]["passed"],
             "deliberation_id": str(candidate["id"]) if candidate else "",
         },
     }
@@ -2756,6 +2805,8 @@ def _evaluate_a11(session: dict[str, Any], conn: sqlite3.Connection, events: lis
 
 
 def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: list[dict[str, Any]]) -> dict[str, Any]:
+    from jarvis_mrb.planner_model import QUALITY_MODEL
+
     state_id = session["desired_state_id"]
     steps = conn.execute(
         """
@@ -2920,12 +2971,32 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
             and str(row["tool"]) == "web.search"
             and str(row["id"]) in audited_action_event_ids
         ]
+        production_deliberation_step_ids = {
+            str(row["agency_step_id"] or "")
+            for row in deliberations
+            if str(row["worker_backend"] or "") == "ollama_model"
+            and str(row["synthesizer_backend"] or "") == "ollama_model"
+            and str(row["worker_model"] or "") == QUALITY_MODEL
+            and str(row["synthesizer_model"] or "") == QUALITY_MODEL
+            and any(
+                item["event_type"] == "agency.deliberation.completed"
+                and str(item.get("source_kind") or "") == "jarvis_agency"
+                and str((item.get("payload") or {}).get("deliberation_id") or "")
+                == str(row["id"])
+                and str((item.get("payload") or {}).get("worker_backend") or "")
+                == "ollama_model"
+                and str((item.get("payload") or {}).get("synthesizer_backend") or "")
+                == "ollama_model"
+                for item in events
+            )
+        }
         candidate_deliberations = [
             step_by_id[step_id]
             for step_id in parallel_deliberation_step_ids
             if step_id in step_by_id
             and str(step_by_id[step_id]["plan_id"]) == invalidated_plan_id
             and step_id in audited_action_event_ids
+            and step_id in production_deliberation_step_ids
         ]
 
         for deliberation_step in candidate_deliberations:

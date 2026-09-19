@@ -10,6 +10,16 @@ on:
       - ".github/workflows/memomind-ios.yml"
 
 jobs:
+  command-view-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python modules
+        run: python -m compileall -q jarvis_mrb tests
+      - name: Verify read-only command view
+        run: python -m unittest discover -s tests -p "test_agency_command_view.py" -v
+
   ios-build:
     runs-on: macos-26
     timeout-minutes: 30

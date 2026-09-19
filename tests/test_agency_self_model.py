@@ -165,6 +165,109 @@ class AgencySelfModelTests(unittest.TestCase):
         self.assertFalse(agency_self_model.is_inferred_source("explicit_policy"))
         self.assertFalse(agency_self_model.is_inferred_source("imported_context"))
 
+    def test_approval_history_inference_requires_three_distinct_approvals(self) -> None:
+        for index in range(2):
+            world_model.record_event(
+                "agency.step.approved",
+                f"Approved calendar action {index}.",
+                source_kind="jarvis_agency",
+                source_ref=f"approval:{index}",
+                payload={
+                    "desired_state_id": "desired:test",
+                    "plan_id": f"plan:{index}",
+                    "step_id": f"step:{index}",
+                    "tool": "calendar.create",
+                    "risk": "external_write",
+                    "requires_confirmation": True,
+                },
+                evidence="Explicit approval consumed.",
+            )
+
+        self.assertIsNone(
+            agency_self_model.infer_approval_preference(
+                "calendar.create"
+            )
+        )
+        self.assertIsNone(
+            agency_self_model.get(
+                "preference",
+                agency_self_model.approval_preference_key(
+                    "calendar.create"
+                ),
+            )
+        )
+
+    def test_approval_history_inference_persists_exact_event_provenance(self) -> None:
+        approval_ids: list[int] = []
+        for index in range(3):
+            approval_ids.append(
+                world_model.record_event(
+                    "agency.step.approved",
+                    f"Approved calendar action {index}.",
+                    source_kind="jarvis_agency",
+                    source_ref=f"approval:provenance:{index}",
+                    payload={
+                        "desired_state_id": "desired:test",
+                        "plan_id": f"plan:{index}",
+                        "step_id": f"step:{index}",
+                        "tool": "calendar.create",
+                        "risk": "external_write",
+                        "requires_confirmation": True,
+                    },
+                    evidence="Explicit approval consumed.",
+                )
+            )
+
+        preference = agency_self_model.infer_approval_preference(
+            "calendar.create"
+        )
+        self.assertIsNotNone(preference)
+        assert preference is not None
+        self.assertEqual(preference["source_kind"], "inferred_behavior")
+        self.assertEqual(
+            preference["entry_key"],
+            "approval_style:calendar.create",
+        )
+        self.assertEqual(
+            preference["value"]["supporting_approval_event_ids"],
+            approval_ids,
+        )
+        self.assertEqual(
+            preference["value"]["authority_effect"],
+            "none",
+        )
+
+        conn = world_model._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT payload_json,source_ref FROM events
+                WHERE event_type='agency.self_model.inferred'
+                ORDER BY id DESC LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(row)
+        payload = agency_self_model._loads(
+            str(row["payload_json"]),
+            {},
+        )
+        self.assertEqual(
+            payload["supporting_approval_event_ids"],
+            approval_ids,
+        )
+        self.assertEqual(payload["tool"], "calendar.create")
+        self.assertEqual(payload["authority_effect"], "none")
+        self.assertEqual(row["source_ref"], preference["source_ref"])
+
+        authority = agency_self_model.authority_for(
+            "calendar.create"
+        )
+        self.assertTrue(authority["allowed"])
+        self.assertTrue(authority["requires_confirmation"])
+        self.assertFalse(authority["self_model_can_override"])
+
     def test_high_confidence_preference_never_grants_external_write_authority(self) -> None:
         agency_self_model.upsert(
             "preference",

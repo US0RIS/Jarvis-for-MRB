@@ -824,7 +824,9 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             evaluation = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(evaluation["passed"], evaluation["checks"])
             self.assertEqual(evaluation["evidence"]["low_value_changes"], 6)
+            self.assertEqual(evaluation["evidence"]["high_value_candidates"], 1)
             self.assertEqual(evaluation["evidence"]["bounded_interruptions"], 1)
+            self.assertTrue(evaluation["evidence"]["duplicate_observation_exercised"])
             self.assertEqual(evaluation["evidence"]["duplicate_interruptions"], 0)
 
             finalized = agency_real_acceptance.finalize_session(session["id"])
@@ -832,6 +834,112 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertEqual(finalized["receipt"]["gate"], "A8")
 
         self.assertEqual(emitted, ["One high-value exception"])
+
+    def test_a8_requires_duplicate_observation_to_be_exercised(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Attention Duplicate Exercise")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Duplicate exercise low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"duplicate-exercise-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="High value observed only once",
+                desired_state_id=state_id,
+                dedup_key="duplicate-exercise-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        duplicate_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "a duplicate high-value observation was exercised"
+            )
+        )
+        self.assertFalse(duplicate_check["passed"])
+        self.assertFalse(
+            evaluation["evidence"]["duplicate_observation_exercised"]
+        )
+
+    def test_a8_suppressed_second_high_value_candidate_does_not_fake_single_exception(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Attention High Candidate Guard")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Candidate guard low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"candidate-guard-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            for _ in range(2):
+                agency_attention.consider(
+                    kind="exception",
+                    message="Primary high-value exception",
+                    desired_state_id=state_id,
+                    dedup_key="candidate-guard-primary",
+                    benefit=100,
+                    urgency=100,
+                    confidence=1.0,
+                    attention_cost=5,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Second distinct high-value exception",
+                desired_state_id=state_id,
+                dedup_key="candidate-guard-secondary",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                allow_emit=False,
+                emitter=emitted.append,
+            )
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        self.assertEqual(evaluation["evidence"]["bounded_interruptions"], 1)
+        self.assertEqual(evaluation["evidence"]["high_value_candidates"], 2)
+        one_high_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "exactly one interrupt-worthy high-value change"
+            )
+        )
+        self.assertFalse(one_high_check["passed"])
 
     def test_real_session_identity_and_baseline_are_immutable(self) -> None:
         state_id, _ = self._state_with_plan("Immutable Session")
@@ -881,6 +989,17 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                     attention_cost=30,
                     emitter=emitted.append,
                 )
+            agency_attention.consider(
+                kind="exception",
+                message="Immutable high",
+                desired_state_id=state_id,
+                dedup_key="immutable-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
             agency_attention.consider(
                 kind="exception",
                 message="Immutable high",
@@ -3830,6 +3949,17 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 attention_cost=5,
                 emitter=emitted.append,
             )
+            agency_attention.consider(
+                kind="exception",
+                message="Reconcile high",
+                desired_state_id=state_id,
+                dedup_key="reconcile-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
             winning = agency_real_acceptance.evaluate_session(session["id"])
             self.assertTrue(winning["passed"])
 
@@ -3931,6 +4061,17 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                 attention_cost=5,
                 emitter=emitted.append,
             )
+            agency_attention.consider(
+                kind="exception",
+                message="Concurrent finalization exception",
+                desired_state_id=state_id,
+                dedup_key="concurrent-finalize-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
 
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [
@@ -3998,6 +4139,17 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
                     attention_cost=30,
                     emitter=lambda _message: None,
                 )
+            agency_attention.consider(
+                kind="exception",
+                message="High",
+                desired_state_id=state_id,
+                dedup_key="sha-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=lambda _message: None,
+            )
             agency_attention.consider(
                 kind="exception",
                 message="High",

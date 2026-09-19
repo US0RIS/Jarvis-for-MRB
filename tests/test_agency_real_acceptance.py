@@ -424,6 +424,173 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A2")
 
+    def test_a2_replayed_same_agency_step_cannot_count_as_two_cycles(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A2 Replay Guard")
+        state = desired_state.create_desired_state(
+            "A2 Replay Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a2-replay-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "single-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A2 replay guard",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+            summary="A2 replay must not become a second causal cycle",
+        )
+
+        counter = 0
+
+        def recorded_write(
+            tool: str,
+            args: dict,
+            *,
+            agency_step_id: str,
+        ) -> str:
+            nonlocal counter
+            counter += 1
+            reply = SimpleNamespace(
+                ok=True,
+                message=f"Calendar accepted replay-guard write {counter}.",
+                data={"event_id": f"a2-replay-event-{counter}"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=agency_step_id,
+            )
+            return world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=agency_step_id,
+            )
+
+        def protected_executor(tool: str, args: dict, **_kwargs: object) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            verification_id = recorded_write(
+                tool,
+                args,
+                agency_step_id=step_id,
+            )
+            return SimpleNamespace(
+                ok=True,
+                message="Calendar accepted first replay-guard write.",
+                data={
+                    "event_id": "a2-replay-event-1",
+                    "verification_id": verification_id,
+                },
+            )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A2",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            step = waiting["steps"][0]
+            agency_plan.approve_step(
+                plan["id"],
+                step["id"],
+                protected_executor,
+            )
+            loaded = agency_plan.get_plan(plan["id"], include_steps=True)
+            first_verification_id = str(loaded["steps"][0]["verification_id"])
+            self.assertTrue(first_verification_id)
+
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "First independent replay-guard readback."),
+            ):
+                first_verified = world_verification.check_one(
+                    first_verification_id,
+                    force=True,
+                )
+            self.assertEqual(first_verified["status"], "verified")
+
+            after_first = desired_state.evaluate_desired_state(str(state["id"]))
+            self.assertFalse(after_first["satisfied"])
+            agency_plan.reconcile_plan(plan["id"])
+
+            second_verification_id = recorded_write(
+                "calendar.create",
+                {
+                    "summary": "A2 replay guard",
+                    "start": "2030-01-01T09:00:00-08:00",
+                    "end": "2030-01-01T09:30:00-08:00",
+                },
+                agency_step_id=str(step["id"]),
+            )
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Second independent replay-guard readback."),
+            ):
+                second_verified = world_verification.check_one(
+                    second_verification_id,
+                    force=True,
+                )
+            self.assertEqual(second_verified["status"], "verified")
+
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                evidence="Replay-guard goal completed after the duplicated step.",
+            )
+            desired_state.evaluate_desired_state(str(state["id"]))
+            agency_plan.reconcile_plan(plan["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            self.assertEqual(evaluation["evidence"]["action_observation_cycles"], 2)
+            self.assertEqual(evaluation["evidence"]["independent_observation_cycles"], 2)
+            self.assertEqual(evaluation["evidence"]["distinct_action_steps"], 1)
+            self.assertEqual(evaluation["evidence"]["distinct_observations"], 2)
+            distinct_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "two or more distinct non-read Agency steps"
+                )
+            )
+            self.assertFalse(distinct_check["passed"])
+            causal_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "a second action occurred only after"
+                )
+            )
+            self.assertFalse(causal_check["passed"])
+
     def test_a2_two_reads_cannot_masquerade_as_action_observation_cycles(self) -> None:
         entity_id = world_model.ensure_entity("project", "A2 Read Shortcut")
         state = desired_state.create_desired_state(
@@ -497,7 +664,7 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             independent_check = next(
                 item for item in evaluation["checks"]
                 if item["name"].startswith(
-                    "two or more non-read actions received independent"
+                    "two or more distinct non-read Agency steps received distinct independent"
                 )
             )
             self.assertFalse(independent_check["passed"])

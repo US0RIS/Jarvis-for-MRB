@@ -76,6 +76,13 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class NearbyPublicCameraRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_km: float = 10.0
+    limit: int = 8
+
+
 class CommandResponse(BaseModel):
     ok: bool
     message: str
@@ -413,19 +420,19 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.get("/physical/public-cameras")
+@app.post("/physical/public-cameras")
 def nearby_public_cameras(
-    latitude: float,
-    longitude: float,
-    radius_km: float = 10.0,
-    limit: int = 8,
+    request: NearbyPublicCameraRequest,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    """Opt-in public provider lookup. No IP scanning, location storage or video proxy."""
+    """Opt-in public provider lookup. POST avoids putting coordinates in URL access logs."""
     _check_auth(authorization)
     from jarvis_mrb.public_camera_catalog import discover_public_cameras
     try:
-        return discover_public_cameras(latitude, longitude, radius_km=radius_km, limit=limit)
+        return discover_public_cameras(
+            request.latitude, request.longitude,
+            radius_km=request.radius_km, limit=request.limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

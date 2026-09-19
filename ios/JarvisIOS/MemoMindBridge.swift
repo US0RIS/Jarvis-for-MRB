@@ -427,7 +427,9 @@ struct MemoMindPreviewView: View {
                 .frame(maxWidth: .infinity, minHeight: 240, alignment: .topLeading)
                 .background(.black, in: RoundedRectangle(cornerRadius: 18))
 
-                JarvisPhysicalControlView()
+                Text("Physical-world controls are available in the iPhone Physical tab without MemoMind.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
 
                 Toggle("Show private Jarvis replies on HUD", isOn: $bridge.showPrivateContent)
                 Text("Off by default. A physical gesture never approves, denies, sends, or deletes anything. Activation of actual glasses still requires MemoMind's documented SDK/protocol and hardware testing.")

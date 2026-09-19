@@ -413,6 +413,14 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/agency/command-view")
+def agency_command_view(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    """Authenticated read-only status for an optional iPhone / glasses display."""
+    _check_auth(authorization)
+    from jarvis_mrb.agency_command_view import build_command_view
+    return build_command_view()
+
+
 @app.post("/command", response_model=CommandResponse)
 def command(request: CommandRequest, authorization: Annotated[str | None, Header()] = None) -> CommandResponse:
     _check_auth(authorization)

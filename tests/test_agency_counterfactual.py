@@ -7,6 +7,7 @@ from pathlib import Path
 import jarvis_mrb.agency_counterfactual as agency_counterfactual
 import jarvis_mrb.agent as agent
 import jarvis_mrb.permissions as permissions
+import jarvis_mrb.world_verification as world_verification
 import jarvis_mrb.world_model as world_model
 
 
@@ -18,8 +19,10 @@ class AgencyCounterfactualTests(unittest.TestCase):
         world_model.APP_DIR = self.base
         world_model.DB_PATH = self.db
         agency_counterfactual.DB_PATH = self.db
+        world_verification.DB_PATH = self.db
         world_model.status()
         agency_counterfactual.status()
+        world_verification.status()
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -172,6 +175,70 @@ class AgencyCounterfactualTests(unittest.TestCase):
             permissions.TOOL_RISK["agency.counterfactual.select"],
             "local_write",
         )
+
+    def test_counterfactual_agent_writes_have_independent_ledger_verification(self) -> None:
+        create_args = {
+            "question": "Which deployment path?",
+            "branches": [
+                {"id": "a", "title": "Pilot"},
+                {"id": "b", "title": "Rollout"},
+            ],
+        }
+        created = agent._execute_unchecked(
+            "agency.counterfactual.create",
+            create_args,
+        )
+        self.assertTrue(created.ok, created.message)
+        create_event = world_model.record_tool_execution(
+            "agency.counterfactual.create",
+            create_args,
+            ok=True,
+            message=created.message,
+        )
+        create_verification = world_verification.register_execution(
+            "agency.counterfactual.create",
+            create_args,
+            created,
+            action_event_id=create_event,
+        )
+        create_before = world_verification.check_one(create_verification)
+        self.assertIsNone(create_before)
+        create_after = world_verification.check_one(
+            create_verification,
+            force=True,
+        )
+        self.assertEqual(create_after["status"], "verified")
+
+        case_id = str(created.data["id"])
+        select_args = {
+            "case_id": case_id,
+            "branch": "a",
+            "rationale": "Pilot is more reversible.",
+            "change_conditions": ["Reopen if rollout risk falls materially."],
+        }
+        selected = agent._execute_unchecked(
+            "agency.counterfactual.select",
+            select_args,
+        )
+        self.assertTrue(selected.ok, selected.message)
+        select_event = world_model.record_tool_execution(
+            "agency.counterfactual.select",
+            select_args,
+            ok=True,
+            message=selected.message,
+        )
+        select_verification = world_verification.register_execution(
+            "agency.counterfactual.select",
+            select_args,
+            selected,
+            action_event_id=select_event,
+        )
+        select_after = world_verification.check_one(
+            select_verification,
+            force=True,
+        )
+        self.assertEqual(select_after["status"], "verified")
+        self.assertGreater(int(select_after["resolved_event_id"]), 0)
 
     def test_case_requires_multiple_branches(self) -> None:
         with self.assertRaises(ValueError):

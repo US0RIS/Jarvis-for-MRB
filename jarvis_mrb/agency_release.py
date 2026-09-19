@@ -683,6 +683,7 @@ def _validate_gate_evidence(gate: str, evidence: dict[str, Any], trace_ref: str)
         _require_true(evidence, "goal_reactivated_after_capability", gate)
         _require_true(evidence, "adapter_execution_still_confirmed", gate)
     elif gate == "A11":
+        _require_true(evidence, "inferred_preference_learned_in_session", gate)
         _require_true(evidence, "preference_authority_conflict_observed", gate)
         _require_true(evidence, "protected_action_waited_for_approval", gate)
         _require_true(evidence, "permission_policy_remained_authoritative", gate)

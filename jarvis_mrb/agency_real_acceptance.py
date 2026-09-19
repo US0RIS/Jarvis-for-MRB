@@ -2338,7 +2338,7 @@ def _evaluate_a8(session: dict[str, Any], conn: sqlite3.Connection, events: list
     one_high_value_candidate = bool(
         len(interrupt_candidates) == 1
         and len(emitted_rows) == 1
-        and str(interrupt_candidates[0]["id"]) == str(emitted_rows[0]["id"])
+        and str(interrupt_candidates[0]["attention_key"]) == str(emitted_rows[0]["attention_key"])
         and emitted_total == 1
     )
     duplicate_observation_exercised = bool(
@@ -2360,10 +2360,10 @@ def _evaluate_a8(session: dict[str, Any], conn: sqlite3.Connection, events: list
             one_high_value_candidate,
             {
                 "interrupt_candidate_ids": [
-                    str(row["id"]) for row in interrupt_candidates
+                    str(row["attention_key"]) for row in interrupt_candidates
                 ],
                 "emitted_ids": [
-                    str(row["id"]) for row in emitted_rows
+                    str(row["attention_key"]) for row in emitted_rows
                 ],
                 "emitted_total": emitted_total,
             },

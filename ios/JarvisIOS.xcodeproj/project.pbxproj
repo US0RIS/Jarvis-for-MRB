@@ -102,7 +102,7 @@
 		100000000000000000000018 /* LocalIntelligenceMilestone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalIntelligenceMilestone.swift; sourceTree = "<group>"; };
 		100000000000000000000019 /* FrontendOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontendOperations.swift; sourceTree = "<group>"; };
 		10000000000000000000001A /* JarvisLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisLiveActivityWidget.swift; sourceTree = "<group>"; };
-		10000000000000000000001D /* HomeEnvironmentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeEnvironmentController.swift; sourceTree = "<group>"; };
+		10000000000000000000001E /* HomeEnvironmentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeEnvironmentController.swift; sourceTree = "<group>"; };
 		10000000000000000000001C /* MemoMindBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoMindBridge.swift; sourceTree = "<group>"; };
 		10000000000000000000001D /* JarvisPhysicalControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisPhysicalControlView.swift; sourceTree = "<group>"; };
 		10000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -174,7 +174,7 @@
 				100000000000000000000008 /* MetaGlassesManager.swift */,
 				10000000000000000000001C /* MemoMindBridge.swift */,
 				10000000000000000000001D /* JarvisPhysicalControlView.swift */,
-				10000000000000000000001D /* HomeEnvironmentController.swift */,
+				10000000000000000000001E /* HomeEnvironmentController.swift */,
 				100000000000000000000010 /* JarvisIOS.entitlements */,
 				10000000000000000000000B /* Info.plist */,
 			);

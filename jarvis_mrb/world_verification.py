@@ -558,7 +558,7 @@ def register_execution(
         executive_decision_id=str(executive_decision_id or ""),
         agency_step_id=str(agency_step_id or ""),
     )
-    if event_id is not None:
+    if event_id is not None and status in _TERMINAL:
         with _connect() as conn:
             conn.execute(
                 "UPDATE action_verifications SET resolved_event_id=? WHERE id=?",

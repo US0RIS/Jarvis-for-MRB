@@ -59,7 +59,10 @@ def _connect() -> sqlite3.Connection:
             completed_at TEXT,
             last_error TEXT NOT NULL DEFAULT '',
             relevance_hash TEXT NOT NULL DEFAULT '',
-            relevance_event_id INTEGER NOT NULL DEFAULT 0
+            relevance_event_id INTEGER NOT NULL DEFAULT 0,
+            invalidation_event_id INTEGER NOT NULL DEFAULT 0,
+            replaces_plan_id TEXT NOT NULL DEFAULT '',
+            replan_cause_event_id INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agency_plan_generation
             ON agency_plans(desired_state_id,generation);
@@ -99,6 +102,8 @@ def _connect() -> sqlite3.Connection:
           OR NEW.generation IS NOT OLD.generation
           OR NEW.created_at IS NOT OLD.created_at
           OR NEW.relevance_hash IS NOT OLD.relevance_hash
+          OR NEW.replaces_plan_id IS NOT OLD.replaces_plan_id
+          OR NEW.replan_cause_event_id IS NOT OLD.replan_cause_event_id
         BEGIN
             SELECT RAISE(ABORT, 'Agency plan identity and relevance baseline are immutable');
         END;
@@ -127,6 +132,18 @@ def _connect() -> sqlite3.Connection:
         conn.execute(
             "ALTER TABLE agency_plans ADD COLUMN relevance_event_id INTEGER NOT NULL DEFAULT 0"
         )
+    if "invalidation_event_id" not in plan_columns:
+        conn.execute(
+            "ALTER TABLE agency_plans ADD COLUMN invalidation_event_id INTEGER NOT NULL DEFAULT 0"
+        )
+    if "replaces_plan_id" not in plan_columns:
+        conn.execute(
+            "ALTER TABLE agency_plans ADD COLUMN replaces_plan_id TEXT NOT NULL DEFAULT ''"
+        )
+    if "replan_cause_event_id" not in plan_columns:
+        conn.execute(
+            "ALTER TABLE agency_plans ADD COLUMN replan_cause_event_id INTEGER NOT NULL DEFAULT 0"
+        )
     conn.executescript(
         """
         CREATE TRIGGER IF NOT EXISTS agency_plans_immutable_relevance_event
@@ -134,6 +151,17 @@ def _connect() -> sqlite3.Connection:
         WHEN NEW.relevance_event_id IS NOT OLD.relevance_event_id
         BEGIN
             SELECT RAISE(ABORT, 'Agency plan relevance event baseline is immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_plans_invalidation_write_once
+        BEFORE UPDATE ON agency_plans
+        WHEN NEW.invalidation_event_id IS NOT OLD.invalidation_event_id
+          AND (
+            OLD.invalidation_event_id<>0
+            OR NEW.invalidation_event_id<=0
+          )
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency plan invalidation provenance is write-once');
         END;
         """
     )
@@ -158,6 +186,9 @@ def _row_to_plan(row: sqlite3.Row) -> dict[str, Any]:
         "last_error": str(row["last_error"] or ""),
         "relevance_hash": str(row["relevance_hash"] or ""),
         "relevance_event_id": int(row["relevance_event_id"] or 0),
+        "invalidation_event_id": int(row["invalidation_event_id"] or 0),
+        "replaces_plan_id": str(row["replaces_plan_id"] or ""),
+        "replan_cause_event_id": int(row["replan_cause_event_id"] or 0),
     }
 
 
@@ -434,6 +465,28 @@ def create_plan(
             (state_id,),
         ).fetchone()
         generation = int(row["generation"] or 0) + 1
+        previous = conn.execute(
+            """
+            SELECT id,status,invalidation_event_id
+            FROM agency_plans
+            WHERE desired_state_id=?
+              AND status IN (
+                'active','awaiting_approval','awaiting_verification',
+                'needs_replan','blocked'
+              )
+            ORDER BY generation DESC LIMIT 1
+            """,
+            (state_id,),
+        ).fetchone()
+        replaces_plan_id = ""
+        replan_cause_event_id = 0
+        if (
+            previous is not None
+            and str(previous["status"] or "") == "needs_replan"
+            and int(previous["invalidation_event_id"] or 0) > 0
+        ):
+            replaces_plan_id = str(previous["id"])
+            replan_cause_event_id = int(previous["invalidation_event_id"])
         conn.execute(
             """
             UPDATE agency_plans
@@ -449,8 +502,8 @@ def create_plan(
             """
             INSERT INTO agency_plans(
                 id,desired_state_id,generation,summary,rationale,status,created_at,updated_at,
-                relevance_hash,relevance_event_id
-            ) VALUES(?,?,?,?,?,'active',?,?,?,?)
+                relevance_hash,relevance_event_id,replaces_plan_id,replan_cause_event_id
+            ) VALUES(?,?,?,?,?,'active',?,?,?,?,?,?)
             """,
             (
                 plan_id,
@@ -462,6 +515,8 @@ def create_plan(
                 now,
                 plan_relevance_hash,
                 plan_relevance_event_id,
+                replaces_plan_id,
+                replan_cause_event_id,
             ),
         )
 
@@ -583,7 +638,7 @@ def _record_event(
     desired_state_id: str,
     step_id: str = "",
     payload: dict[str, Any] | None = None,
-) -> None:
+) -> int | None:
     try:
         from jarvis_mrb.world_model import record_event
 
@@ -593,17 +648,19 @@ def _record_event(
             "step_id": step_id,
             **dict(payload or {}),
         }
-        record_event(
-            event_type,
-            summary[:1500],
-            source_kind="jarvis_agency",
-            source_ref=f"{plan_id}:{step_id or event_type}:{uuid.uuid4()}",
-            payload=data,
-            evidence="Persistent Agency plan state transition.",
-            confidence=1.0,
+        return int(
+            record_event(
+                event_type,
+                summary[:1500],
+                source_kind="jarvis_agency",
+                source_ref=f"{plan_id}:{step_id or event_type}:{uuid.uuid4()}",
+                payload=data,
+                evidence="Persistent Agency plan state transition.",
+                confidence=1.0,
+            )
         )
     except Exception:
-        pass
+        return None
 
 
 def _set_plan_status(
@@ -1216,7 +1273,7 @@ def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -
                 )
         _set_plan_status(conn, str(plan["id"]), "needs_replan", error=reason)
         conn.commit()
-    _record_event(
+    invalidation_event_id = _record_event(
         "agency.plan.invalidated",
         reason,
         plan_id=str(plan["id"]),
@@ -1229,6 +1286,24 @@ def _invalidate_stale_plan(plan: dict[str, Any], *, pending_step_id: str = "") -
             "trigger_event_ids": trigger_event_ids,
         },
     )
+    if invalidation_event_id is None:
+        raise RuntimeError(
+            "Stale Agency plan was marked needs_replan but its invalidation provenance could not be persisted."
+        )
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE agency_plans
+            SET invalidation_event_id=?,updated_at=?
+            WHERE id=? AND invalidation_event_id=0
+            """,
+            (int(invalidation_event_id), _now(), str(plan["id"])),
+        )
+        if conn.total_changes != 1:
+            raise RuntimeError(
+                "Agency plan invalidation provenance was not recorded exactly once."
+            )
+        conn.commit()
     return get_plan(str(plan["id"]), include_steps=True)
 
 

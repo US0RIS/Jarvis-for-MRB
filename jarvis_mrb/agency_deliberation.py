@@ -40,6 +40,10 @@ def _connect() -> sqlite3.Connection:
             question TEXT NOT NULL,
             context TEXT NOT NULL DEFAULT '',
             agency_step_id TEXT NOT NULL DEFAULT '',
+            worker_backend TEXT NOT NULL DEFAULT '',
+            synthesizer_backend TEXT NOT NULL DEFAULT '',
+            worker_model TEXT NOT NULL DEFAULT '',
+            synthesizer_model TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL,
             synthesis_json TEXT NOT NULL DEFAULT '{}',
             disagreement_json TEXT NOT NULL DEFAULT '[]',
@@ -69,6 +73,35 @@ def _connect() -> sqlite3.Connection:
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_deliberations)").fetchall()}
     if "agency_step_id" not in columns:
         conn.execute("ALTER TABLE agency_deliberations ADD COLUMN agency_step_id TEXT NOT NULL DEFAULT ''")
+    if "worker_backend" not in columns:
+        conn.execute(
+            "ALTER TABLE agency_deliberations ADD COLUMN worker_backend TEXT NOT NULL DEFAULT ''"
+        )
+    if "synthesizer_backend" not in columns:
+        conn.execute(
+            "ALTER TABLE agency_deliberations ADD COLUMN synthesizer_backend TEXT NOT NULL DEFAULT ''"
+        )
+    if "worker_model" not in columns:
+        conn.execute(
+            "ALTER TABLE agency_deliberations ADD COLUMN worker_model TEXT NOT NULL DEFAULT ''"
+        )
+    if "synthesizer_model" not in columns:
+        conn.execute(
+            "ALTER TABLE agency_deliberations ADD COLUMN synthesizer_model TEXT NOT NULL DEFAULT ''"
+        )
+    conn.executescript(
+        """
+        CREATE TRIGGER IF NOT EXISTS agency_deliberations_immutable_execution_provenance
+        BEFORE UPDATE ON agency_deliberations
+        WHEN NEW.worker_backend IS NOT OLD.worker_backend
+          OR NEW.synthesizer_backend IS NOT OLD.synthesizer_backend
+          OR NEW.worker_model IS NOT OLD.worker_model
+          OR NEW.synthesizer_model IS NOT OLD.synthesizer_model
+        BEGIN
+            SELECT RAISE(ABORT, 'Agency deliberation execution provenance is immutable');
+        END;
+        """
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_agency_deliberations_step "
         "ON agency_deliberations(agency_step_id,created_at DESC)"
@@ -294,6 +327,12 @@ def deliberate(
 
     deliberation_id = f"deliberation:{uuid.uuid4()}"
     created = _now()
+    worker_backend = "ollama_model" if worker is None else "injected_callable"
+    synthesizer_backend = (
+        "ollama_model" if synthesizer is None else "injected_callable"
+    )
+    worker_model = QUALITY_MODEL if worker is None else ""
+    synthesizer_model = QUALITY_MODEL if synthesizer is None else ""
     try:
         from jarvis_mrb.tool_audit import current_agency_step_id
         agency_step_id = current_agency_step_id()
@@ -302,14 +341,22 @@ def deliberate(
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO agency_deliberations(id,question,context,agency_step_id,status,created_at)
-            VALUES(?,?,?,?,'running',?)
+            INSERT INTO agency_deliberations(
+                id,question,context,agency_step_id,
+                worker_backend,synthesizer_backend,worker_model,synthesizer_model,
+                status,created_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,'running',?)
             """,
             (
                 deliberation_id,
                 clean_question[:8000],
                 str(context or "")[:20000],
                 str(agency_step_id or ""),
+                worker_backend,
+                synthesizer_backend,
+                worker_model,
+                synthesizer_model,
                 created,
             ),
         )
@@ -447,6 +494,10 @@ def deliberate(
                 "workers_requested": len(selected_roles),
                 "disagreement_count": len(disagreements),
                 "wall_ms": wall_ms,
+                "worker_backend": worker_backend,
+                "synthesizer_backend": synthesizer_backend,
+                "worker_model": worker_model,
+                "synthesizer_model": synthesizer_model,
             },
             evidence="Independent worker outputs persisted before synthesis.",
             confidence=1.0 if status == "completed" else 0.8,
@@ -459,6 +510,10 @@ def deliberate(
         "status": status,
         "question": clean_question,
         "agency_step_id": str(agency_step_id or ""),
+        "worker_backend": worker_backend,
+        "synthesizer_backend": synthesizer_backend,
+        "worker_model": worker_model,
+        "synthesizer_model": synthesizer_model,
         "roles": selected_roles,
         "outputs": outputs,
         "disagreements": disagreements,

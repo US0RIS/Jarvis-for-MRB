@@ -102,11 +102,11 @@ meeting.start {{title}}; meeting.finish {{meeting_id}}; meeting.list {{limit}};
 knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}}; briefing.generate {{}};
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_recurring {{when,command,recurrence}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}};
 background.submit {{prompt}}; background.list {{limit}}; background.status {{task_id}}; background.cancel {{task_id}};
-agency.status {{}}; agency.deliberate {{question,context}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
+agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
 workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
-custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
+custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}}.
 
 Routing rules:
 - web.search: current/recent/public information or explicit online lookup. Use a self-contained query; Jarvis will refine conversational wording automatically. External selection-risk requests are deterministically upgraded to audited multi-query research by the execution layer.
@@ -129,9 +129,12 @@ Routing rules:
 - One-time future task -> jobs.create_time. Repeating daily/weekday/weekly -> jobs.create_recurring. Home arrival -> jobs.create_event event='home_arrival'.
 - Agency is the persistent desired-state executor. agency.enable and agency.activate_goal expand autonomous scope and therefore require the security confirmation boundary. agency.monitor, agency.disable, and agency.pause_goal reduce autonomous scope and should remain immediately available.
 - agency.deliberate is for consequential questions where independent evidence/skeptic/feasibility/risk analyses materially improve reasoning; it is read-only and preserves worker disagreement.
+- agency.counterfactual.create persists materially different candidate branches when the user wants alternatives compared or a consequential choice remembered. Include assumptions, evidence, expected outcomes, cost, reversibility, and uncertainty when available.
+- agency.counterfactual.compare retrieves a preserved decision case without changing it.
+- agency.counterfactual.select records a branch only when the user asks to choose/commit or clearly states the choice; include explicit rationale and at least one condition that would reopen the decision. It does not authorize downstream external actions.
 - state.temp_set is for short-lived context/focus that should expire. state.update is for durable context.
 - sandbox.python, sandbox.command, and custom.* are security-sensitive. Use them only when explicitly requested. sandbox.command is Docker-isolated, never the host Windows shell, and requires exact-command confirmation.
-- Generated custom tools begin disabled. Structural adapter failures may queue a sandbox-validated repair proposal; custom.apply_repair still requires explicit confirmation.
+- Generated custom tools begin disabled. Structural adapter failures may queue a sandbox-validated repair proposal; custom.apply_repair still requires explicit confirmation. When the user explicitly asks to synthesize a tool for a known Agency capability gap and an exact gap_id is available, pass that gap_id to custom.synthesize so enablement can reactivate the blocked goal.
 - {background_rule}
 - Reality-check physically impossible, contradictory, or dependency-missing requests before acting. If no feasible action exists, use tool=null and say why briefly.
 - Never claim an action occurred unless a tool was selected.

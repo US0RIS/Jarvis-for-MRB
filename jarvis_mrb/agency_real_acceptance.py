@@ -956,7 +956,7 @@ def _evaluate_a1(session: dict[str, Any], conn: sqlite3.Connection, events: list
         current_step = current_by_id.get(str(step.get("id") or ""))
         preserved = bool(
             current_step
-            and str(current_step.get("status") or "") in {"verified", "skipped"}
+            and str(current_step.get("status") or "") == str(step.get("status") or "")
             and int(current_step.get("attempt_count") or 0) == int(step.get("attempt_count") or 0)
         )
         evidence_preserved = bool(

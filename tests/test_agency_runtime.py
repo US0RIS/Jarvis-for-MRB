@@ -284,6 +284,77 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertIn("capability inspection failed", state["blocked_reason"])
         self.assertIsNone(agency_plan.current_plan(state_id))
 
+    def test_replanner_receives_verified_prior_work_as_carried_forward_evidence(self) -> None:
+        _, state_id = self._make_state("Project Preserve Evidence")
+        agency_runtime.set_mode("active")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "observe",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "stable requirement"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Preserve Evidence",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["observe"],
+                },
+            ],
+        )
+        observed = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(
+                ok=True,
+                message="Stable requirement evidence.",
+            ),
+        )
+        self.assertEqual(observed["steps"][0]["status"], "verified")
+
+        # Force this generation into replan state without modifying the verified read.
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                "UPDATE agency_plans SET status='needs_replan',last_error='constraint changed' WHERE id=?",
+                (plan["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        prompts: list[str] = []
+
+        result = agency_runtime.compile_plan(
+            state_id,
+            planner=lambda prompt: prompts.append(prompt) or {
+                "summary": "Use preserved evidence.",
+                "nodes": [
+                    {
+                        "id": "new-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Preserve Evidence Revised",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                        "depends_on": [],
+                    }
+                ],
+                "missing_capability": None,
+            },
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("Already-completed evidence/work", prompts[0])
+        self.assertIn("Stable requirement evidence.", prompts[0])
+        self.assertIn("Do not repeat", prompts[0])
+
     def test_identical_failed_replan_blocks_instead_of_looping(self) -> None:
         _, state_id = self._make_state("Project Loop")
         agency_runtime.set_mode("active")

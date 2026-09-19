@@ -285,7 +285,8 @@ class AgencyRuntimeTests(unittest.TestCase):
         self.assertIsNone(agency_plan.current_plan(state_id))
 
     def test_replanner_receives_verified_prior_work_as_carried_forward_evidence(self) -> None:
-        _, state_id = self._make_state("Project Preserve Evidence")
+        entity_id, state_id = self._make_state("Project Preserve Evidence")
+        world_model.assert_belief(entity_id, "constraint", value="before")
         agency_runtime.set_mode("active")
         plan = agency_plan.create_plan(
             state_id,
@@ -316,16 +317,15 @@ class AgencyRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(observed["steps"][0]["status"], "verified")
 
-        # Force this generation into replan state without modifying the verified read.
-        conn = sqlite3.connect(self.db)
-        try:
-            conn.execute(
-                "UPDATE agency_plans SET status='needs_replan',last_error='constraint changed' WHERE id=?",
-                (plan["id"],),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        # Change relevant world state and invalidate through the production path.
+        world_model.assert_belief(entity_id, "constraint", value="after")
+        invalidated = agency_plan._invalidate_stale_plan(
+            agency_plan.get_plan(plan["id"], include_steps=True) or {}
+        )
+        self.assertIsNotNone(invalidated)
+        assert invalidated is not None
+        self.assertEqual(invalidated["status"], "needs_replan")
+        self.assertEqual(invalidated["steps"][0]["status"], "verified")
 
         prompts: list[str] = []
 

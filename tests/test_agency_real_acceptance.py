@@ -239,6 +239,84 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertEqual(protected["attempt_count"], 0)
         self.assertEqual(protected["status"], "awaiting_approval")
 
+    def test_a1_skipped_step_cannot_substitute_for_executed_verified_work(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A1 Skipped Shortcut")
+        state = desired_state.create_desired_state(
+            "A1 Skipped Shortcut ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a1-skipped-shortcut",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "skipped-read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A1 skipped shortcut"},
+                },
+                {
+                    "id": "protected",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A1 skipped shortcut follow-up",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["skipped-read"],
+                },
+            ],
+        )
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                """
+                UPDATE agency_steps
+                SET status='skipped',result_summary='Skipped without execution',
+                    attempt_count=0,finished_at=?
+                WHERE plan_id=? AND step_key='skipped-read'
+                """,
+                (datetime.now().astimezone().isoformat(), plan["id"]),
+            )
+            conn.execute(
+                """
+                UPDATE agency_steps
+                SET status='awaiting_approval'
+                WHERE plan_id=? AND step_key='protected'
+                """,
+                (plan["id"],),
+            )
+            conn.execute(
+                "UPDATE agency_plans SET status='awaiting_approval' WHERE id=?",
+                (plan["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        agency_runtime._update_runtime(str(state["id"]), tick=True)
+        agency_runtime.record_boot(deployment_sha=SHA_A)
+
+        with self._patch_identity():
+            with self.assertRaisesRegex(
+                ValueError,
+                "executed and verified work",
+            ):
+                agency_real_acceptance.start_session(
+                    "A1",
+                    desired_state_id=str(state["id"]),
+                    deployment_sha_value=SHA_A,
+                    environment=ENV,
+                )
+
     def test_a2_requires_two_causal_independently_verified_cycles(self) -> None:
         state = desired_state.create_desired_state(
             "A2 two-cycle convergence",

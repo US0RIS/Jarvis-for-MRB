@@ -153,6 +153,43 @@ def _connect() -> sqlite3.Connection:
         BEGIN
             SELECT RAISE(ABORT, 'Agency REAL sessions are append-only');
         END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_real_gate_sessions_completed_immutable
+        BEFORE UPDATE ON agency_real_gate_sessions
+        WHEN OLD.status='completed'
+          AND (
+            NEW.status IS NOT OLD.status
+            OR NEW.last_evaluation_json IS NOT OLD.last_evaluation_json
+            OR NEW.receipt_id IS NOT OLD.receipt_id
+            OR NEW.completed_at IS NOT OLD.completed_at
+          )
+        BEGIN
+            SELECT RAISE(ABORT, 'Completed Agency REAL sessions are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS agency_real_gate_sessions_valid_transition
+        BEFORE UPDATE ON agency_real_gate_sessions
+        WHEN OLD.status='running'
+          AND (
+            NEW.status NOT IN ('running','completed')
+            OR (
+                NEW.status='running'
+                AND (
+                    COALESCE(NEW.receipt_id,'')<>''
+                    OR NEW.completed_at IS NOT NULL
+                )
+            )
+            OR (
+                NEW.status='completed'
+                AND (
+                    COALESCE(NEW.receipt_id,'')=''
+                    OR NEW.completed_at IS NULL
+                )
+            )
+          )
+        BEGIN
+            SELECT RAISE(ABORT, 'Invalid Agency REAL session state transition');
+        END;
         """
     )
     conn.commit()

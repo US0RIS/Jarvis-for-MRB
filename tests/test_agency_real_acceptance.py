@@ -2881,6 +2881,102 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             )
             self.assertTrue(linked_parallel_check["passed"])
 
+    def test_receipt_reuse_reconciles_completed_session_to_winning_evidence(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Receipt Reconciliation")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Reconcile low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"reconcile-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Reconcile high",
+                desired_state_id=state_id,
+                dedup_key="reconcile-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            winning = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(winning["passed"])
+
+            context = agency_release._real_receipt_context_payload(
+                gate="A8",
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+                harness="agency-real-gate-session-v1",
+                checks=list(winning["checks"]),
+                evidence=dict(winning["evidence"]),
+                trace_ref="",
+                session_id=session["id"],
+            )
+            with agency_release._real_receipt_recording_context(context):
+                receipt = agency_release.record_real_gate_receipt(
+                    "A8",
+                    deployment_sha_value=SHA_A,
+                    environment=ENV,
+                    harness="agency-real-gate-session-v1",
+                    checks=list(winning["checks"]),
+                    evidence=dict(winning["evidence"]),
+                    session_id=session["id"],
+                )
+
+            # Simulate a later evaluator snapshot landing after the receipt was
+            # minted but before the running session was marked completed.
+            conn = sqlite3.connect(self.db)
+            try:
+                divergent = dict(winning)
+                divergent["evidence"] = {
+                    **dict(winning["evidence"]),
+                    "diagnostic_noise": "later snapshot",
+                }
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET last_evaluation_json=?
+                    WHERE id=? AND status='running'
+                    """,
+                    (
+                        json.dumps(divergent, ensure_ascii=False, sort_keys=True),
+                        session["id"],
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["passed"])
+            self.assertFalse(finalized["receipt_created"])
+            self.assertTrue(finalized["receipt_reused"])
+            self.assertEqual(finalized["receipt"]["id"], receipt["id"])
+
+            completed = agency_real_acceptance.get_session(session["id"])
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(
+                completed["last_evaluation"]["evidence"],
+                receipt["evidence"],
+            )
+            validation = agency_release.validate_real_gate_receipt(receipt["id"])
+            self.assertTrue(validation["valid"], validation)
+
     def test_concurrent_finalizers_converge_on_one_immutable_receipt(self) -> None:
         emitted: list[str] = []
         state_id, _ = self._state_with_plan("Concurrent Attention Gate")

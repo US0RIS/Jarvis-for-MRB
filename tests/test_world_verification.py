@@ -117,6 +117,96 @@ class WorldVerificationTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_action_verification_identity_and_terminal_event_are_immutable(self) -> None:
+        action_event_id = self._action_event()
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "immutable-message", "email": "daniel@example.com"},
+            ),
+            action_event_id=action_event_id,
+            agency_step_id="agency-step:immutable",
+        )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE action_verifications SET agency_step_id='agency-step:other' WHERE id=?",
+                    (verification_id,),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE action_verifications SET expected_json='{}' WHERE id=?",
+                    (verification_id,),
+                )
+            conn.rollback()
+        finally:
+            conn.close()
+
+        with patch.object(
+            world_verification,
+            "_observe",
+            return_value=("verified", "Independent immutable-message readback."),
+        ):
+            result = world_verification.check_one(verification_id, force=True)
+        self.assertEqual(result["status"], "verified")
+
+        row = self._rows(
+            "SELECT resolved_event_id FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        resolved_event_id = int(row["resolved_event_id"])
+        self.assertGreater(resolved_event_id, 0)
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE action_verifications SET resolved_event_id=? WHERE id=?",
+                    (action_event_id, verification_id),
+                )
+        finally:
+            conn.close()
+
+    def test_terminal_verification_rejects_late_observation_append(self) -> None:
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "terminal-message", "email": "daniel@example.com"},
+            ),
+            action_event_id=self._action_event(),
+        )
+        with patch.object(
+            world_verification,
+            "_observe",
+            return_value=("verified", "Independent terminal-message readback."),
+        ):
+            result = world_verification.check_one(verification_id, force=True)
+        self.assertEqual(result["status"], "verified")
+
+        with self.assertRaises(sqlite3.DatabaseError):
+            world_verification._record_observation(
+                verification_id,
+                outcome="verified",
+                evidence="Late duplicate observation must be rejected.",
+            )
+
     def test_read_tool_return_value_closes_immediately(self) -> None:
         action_event = self._action_event(tool="knowledge.search", ok=True)
         verification_id = world_verification.register_execution(

@@ -1712,6 +1712,131 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A3")
 
+    def test_a3_correlated_write_without_consumed_approval_event_is_bypass(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A3 Approval Consumption Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A3 Approval Consumption Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a3-approval-consumption-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A3 approval guard context"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A3 approval guard write",
+                        "start": "2030-01-01T16:00:00-08:00",
+                        "end": "2030-01-01T16:30:00-08:00",
+                    },
+                    "depends_on": ["read"],
+                },
+            ],
+        )
+
+        def audited_read_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(ok=True, message="Audited safe read.")
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A3",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            agency_plan.execute_next(plan["id"], audited_read_executor)
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            write_step = next(
+                item for item in waiting["steps"]
+                if item["step_key"] == "write"
+            )
+            step_id = str(write_step["id"])
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Forged direct calendar execution.",
+                data={"event_id": "a3-forged-direct-write"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                "calendar.create",
+                dict(write_step["arguments"]),
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                "calendar.create",
+                dict(write_step["arguments"]),
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        resumed = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "approval consumption resumed the exact persisted step"
+            )
+        )
+        boundary = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "no protected external write bypassed"
+            )
+        )
+        self.assertFalse(resumed["passed"])
+        self.assertFalse(boundary["passed"])
+        self.assertTrue(boundary["evidence"])
+        self.assertEqual(
+            boundary["evidence"][0]["agency_step_id"],
+            step_id,
+        )
+        self.assertEqual(
+            boundary["evidence"][0]["approval_consumed_event_ids"],
+            [],
+        )
+
     def test_a3_denial_without_protected_waiting_boundary_cannot_pass_gate(self) -> None:
         entity_id = world_model.ensure_entity("project", "A3 Denial Boundary Guard")
         state = desired_state.create_desired_state(

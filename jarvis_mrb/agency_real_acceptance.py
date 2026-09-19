@@ -2137,17 +2137,46 @@ def _evaluate_a7(session: dict[str, Any], conn: sqlite3.Connection, events: list
         overlap_now = len(current_workers) >= 4 and _workers_overlap(list(current_workers))
 
         current_provenance_ok = bool(current_workers)
+        persisted_context = str(row["context"] or "")
+        persisted_context_lower = persisted_context.lower()
         for worker_row in current_workers:
             output = dict(_loads(str(worker_row["output_json"]), {}))
-            for claim in output.get("claims") or []:
+            claims = list(output.get("claims") or [])
+            if not claims:
+                current_provenance_ok = False
+                break
+            for claim in claims:
                 if (
                     not isinstance(claim, dict)
+                    or not str(claim.get("claim") or "").strip()
+                    or not str(claim.get("evidence") or "").strip()
                     or str(claim.get("source") or "")
                     not in {"context", "reasoning", "unknown"}
                 ):
                     current_provenance_ok = False
                     break
             if not current_provenance_ok:
+                break
+            source_ids = [
+                str(value or "").strip()
+                for value in list(output.get("sources") or [])
+                if str(value or "").strip()
+            ]
+            if any(
+                source_id.lower() not in persisted_context_lower
+                for source_id in source_ids
+            ):
+                current_provenance_ok = False
+                break
+            if (
+                any(
+                    str(claim.get("source") or "") == "context"
+                    for claim in claims
+                    if isinstance(claim, dict)
+                )
+                and not source_ids
+            ):
+                current_provenance_ok = False
                 break
 
         completed_at = _parse_time(str(row["completed_at"] or ""))

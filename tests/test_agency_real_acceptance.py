@@ -1206,13 +1206,17 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             negative_step = failed["steps"][0]
             self.assertEqual(negative_step["status"], "failed")
             negative_verification_id = str(negative_step["verification_id"])
-            row = sqlite3.connect(self.db).execute(
-                """
-                SELECT status,verifier,resolved_event_id
-                FROM action_verifications WHERE id=?
-                """,
-                (negative_verification_id,),
-            ).fetchone()
+            conn = sqlite3.connect(self.db)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT status,verifier,resolved_event_id
+                    FROM action_verifications WHERE id=?
+                    """,
+                    (negative_verification_id,),
+                ).fetchone()
+            finally:
+                conn.close()
             self.assertEqual(row[0], "unverified")
             self.assertEqual(row[1], "no_independent_verifier")
             self.assertTrue(row[2])
@@ -1468,6 +1472,158 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             finalized = agency_real_acceptance.finalize_session(session["id"])
             self.assertTrue(finalized["receipt_created"])
             self.assertEqual(finalized["receipt"]["gate"], "A3")
+
+    def test_a3_denial_without_protected_waiting_boundary_cannot_pass_gate(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A3 Denial Boundary Guard")
+        state = desired_state.create_desired_state(
+            "A3 Denial Boundary Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a3-denial-boundary-guard",
+        )
+        legitimate_plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A3 denial boundary context"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A3 boundary guard approved action",
+                        "start": "2030-01-01T14:00:00-08:00",
+                        "end": "2030-01-01T14:30:00-08:00",
+                    },
+                    "depends_on": ["read"],
+                },
+            ],
+        )
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted A3 boundary-guard action.",
+                data={"event_id": "a3-boundary-guard-event"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A3",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            after_read = agency_plan.execute_next(
+                legitimate_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="Safe read completed.",
+                ),
+            )
+            self.assertEqual(after_read["steps"][0]["status"], "verified")
+            waiting = agency_plan.execute_next(
+                legitimate_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must wait",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                legitimate_plan["id"],
+                waiting["steps"][1]["id"],
+                protected_executor,
+            )
+            self.assertEqual(
+                approved["steps"][1]["status"],
+                "awaiting_verification",
+            )
+
+            forged_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "read-never-protected",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "not a protected action"},
+                    }
+                ],
+                summary="Forge a denial without an approval boundary",
+            )
+            forged_step_id = str(forged_plan["steps"][0]["id"])
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE agency_steps
+                    SET status='blocked',blocked_reason='forged denial'
+                    WHERE id=?
+                    """,
+                    (forged_step_id,),
+                )
+                conn.execute(
+                    """
+                    UPDATE agency_plans
+                    SET status='needs_replan',last_error='forged denial'
+                    WHERE id=?
+                    """,
+                    (forged_plan["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            agency_plan._record_event(
+                "agency.step.denied",
+                "Forged denial on a read step that never awaited approval.",
+                plan_id=str(forged_plan["id"]),
+                desired_state_id=str(state["id"]),
+                step_id=forged_step_id,
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        denial_check = next(
+            item
+            for item in evaluation["checks"]
+            if item["name"].startswith(
+                "explicit denial occurred at a persisted protected approval boundary"
+            )
+        )
+        self.assertFalse(denial_check["passed"])
+        self.assertFalse(evaluation["evidence"]["denial_case_observed"])
 
     def test_a5_requires_external_change_replan_and_preserved_valid_work(self) -> None:
         entity_id = world_model.ensure_entity("project", "Causal Replan Gate")

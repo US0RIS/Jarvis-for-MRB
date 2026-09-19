@@ -227,9 +227,8 @@ def trace(entity: str, limit: int = 40) -> dict[str, Any]:
                     WHERE subject_id=? AND source_event_id IS NOT NULL
                )
             ORDER BY e.id DESC
-            LIMIT ?
             """,
-            (str(target["id"]), str(target["id"]), max(safe_limit * 6, 100)),
+            (str(target["id"]), str(target["id"])),
         ).fetchall()
         events: list[dict[str, Any]] = []
         for row in rows:
@@ -340,9 +339,8 @@ def changes(
             JOIN event_entities ee ON ee.event_id=e.id
             WHERE ee.entity_id=?
             ORDER BY e.id DESC
-            LIMIT ?
             """,
-            (str(target["id"]), max(safe_limit * 6, 100)),
+            (str(target["id"]),),
         ).fetchall()
         events = []
         for row in event_rows:

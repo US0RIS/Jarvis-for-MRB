@@ -394,7 +394,7 @@ class WorldModelTestCase(unittest.TestCase):
             status="resolved",
             source_event_id=resolved_event,
         )
-        rows = self._rows(
+        rows = self._query(
             "SELECT status,resolution_event_id FROM commitments WHERE id=?",
             (commitment_id,),
         )
@@ -415,7 +415,7 @@ class WorldModelTestCase(unittest.TestCase):
             status="pending",
             source_event_id=reopened_event,
         )
-        reopened = self._rows(
+        reopened = self._query(
             "SELECT status,resolution_event_id FROM commitments WHERE id=?",
             (commitment_id,),
         )[0]

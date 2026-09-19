@@ -22,6 +22,7 @@ final class JarvisAppModel: ObservableObject {
     let speechSynthesizer: SpeechSynthesizer
     let geofenceManager: GeofenceManager
     let metaGlasses: MetaGlassesManager
+    let memoMind: MemoMindBridge
 
     var frontendCommandHandler: ((String) async -> String?)?
     var offlineQueueHandler: ((String) -> Void)?
@@ -48,6 +49,7 @@ final class JarvisAppModel: ObservableObject {
         speechSynthesizer = SpeechSynthesizer(audioRouteManager: audioRouteManager)
         geofenceManager = GeofenceManager()
         metaGlasses = MetaGlassesManager()
+        memoMind = MemoMindBridge()
 
         geofenceManager.onHomeArrival = { [weak self] in
             Task { @MainActor in
@@ -102,6 +104,12 @@ final class JarvisAppModel: ObservableObject {
         conversationLog.append(FrontendConversationTurn(role: role, text: cleaned, model: model))
         if conversationLog.count > 120 { conversationLog.removeFirst(conversationLog.count - 120) }
         FrontendConversationStore.save(conversationLog)
+        if role == "assistant" {
+            memoMind.presentAssistantReply(
+                cleaned,
+                requiresConfirmation: Self.responseRequestsConfirmation(cleaned)
+            )
+        }
     }
 
     private func finishLocalResponse(

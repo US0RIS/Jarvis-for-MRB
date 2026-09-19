@@ -3047,7 +3047,9 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
         self.assertFalse(evaluation["passed"])
         inferred_check = next(
             item for item in evaluation["checks"]
-            if item["name"].startswith("an inferred preference")
+            if item["name"].startswith(
+                "a behavior-derived preference has persisted"
+            )
         )
         self.assertFalse(inferred_check["passed"])
 

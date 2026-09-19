@@ -610,10 +610,47 @@ def upsert_commitment(
     with _connect() as conn:
         existing = conn.execute("SELECT created_at FROM commitments WHERE id=?", (cid,)).fetchone()
         created = str(existing["created_at"]) if existing else now
+        resolution_event_id = (
+            int(source_event_id)
+            if clean_status == "resolved" and source_event_id is not None
+            else None
+        )
         conn.execute(
-            "INSERT INTO commitments(id,owner_id,action,due_at,due_text,status,confidence,created_at,updated_at,source_event_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id,action=excluded.action,due_at=excluded.due_at,due_text=excluded.due_text,status=excluded.status,confidence=excluded.confidence,updated_at=excluded.updated_at,source_event_id=COALESCE(excluded.source_event_id,commitments.source_event_id),metadata_json=excluded.metadata_json",
-            (cid, owner_id, task, due_at, str(due_text or "")[:300], clean_status, max(0.0, min(float(confidence), 1.0)), created, now, source_event_id, _compact(metadata or {})),
+            """
+            INSERT INTO commitments(
+                id,owner_id,action,due_at,due_text,status,confidence,created_at,updated_at,
+                source_event_id,resolution_event_id,metadata_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                owner_id=excluded.owner_id,
+                action=excluded.action,
+                due_at=excluded.due_at,
+                due_text=excluded.due_text,
+                status=excluded.status,
+                confidence=excluded.confidence,
+                updated_at=excluded.updated_at,
+                source_event_id=COALESCE(excluded.source_event_id,commitments.source_event_id),
+                resolution_event_id=CASE
+                    WHEN excluded.status='resolved'
+                        THEN COALESCE(excluded.resolution_event_id,commitments.resolution_event_id)
+                    ELSE NULL
+                END,
+                metadata_json=excluded.metadata_json
+            """,
+            (
+                cid,
+                owner_id,
+                task,
+                due_at,
+                str(due_text or "")[:300],
+                clean_status,
+                max(0.0, min(float(confidence), 1.0)),
+                created,
+                now,
+                source_event_id,
+                resolution_event_id,
+                _compact(metadata or {}),
+            ),
         )
         conn.commit()
     return cid

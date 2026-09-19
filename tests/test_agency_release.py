@@ -48,6 +48,7 @@ def evidence_for(gate: str) -> dict:
             "safe_read_auto_proceeded": True,
             "protected_external_write_observed": True,
             "approval_resumed_same_plan": True,
+            "approval_consumption_provenance_observed": True,
             "permission_boundary_not_bypassed": True,
             "denial_case_observed": True,
             "denial_forced_replan_or_blocked": True,
@@ -59,10 +60,12 @@ def evidence_for(gate: str) -> dict:
             "failure_timeout_or_unverified_observed": True,
             "independent_readback_observed": True,
             "verification_feedback_observed": True,
+            "exact_step_reconciliation_observed": True,
         },
         "A5": {
             "external_change_observed": True,
             "stale_path_invalidated": True,
+            "causal_replan_lineage_bound": True,
             "replanned_without_goal_restatement": True,
             "already_valid_work_preserved": True,
         },
@@ -70,6 +73,7 @@ def evidence_for(gate: str) -> dict:
             "dormant_state_observed": True,
             "wake_condition_changed": True,
             "reactivated_without_goal_restatement": True,
+            "wake_reactivation_provenance_bound": True,
             "next_step_surfaced_or_executed": True,
         },
         "A7": {
@@ -79,10 +83,14 @@ def evidence_for(gate: str) -> dict:
             "provenance_structurally_bounded": True,
             "material_disagreement_preserved": True,
             "synthesis_after_workers": True,
+            "production_model_backends": True,
+            "completion_event_bound": True,
         },
         "A8": {
             "low_value_changes": 10,
+            "high_value_candidates": 1,
             "bounded_interruptions": 1,
+            "duplicate_observation_exercised": True,
             "duplicate_interruptions": 0,
             "interruption_reason_inspectable": True,
         },
@@ -92,6 +100,7 @@ def evidence_for(gate: str) -> dict:
             "blocked_or_disabled_adapter_observed": True,
             "adapter_sandbox_validated": True,
             "adapter_synthesized_disabled": True,
+            "audited_synthesis_receipt_observed": True,
             "explicit_enablement_observed": True,
             "capability_resolved_after_enable": True,
             "goal_reactivated_after_capability": True,
@@ -99,6 +108,7 @@ def evidence_for(gate: str) -> dict:
         },
         "A11": {
             "inferred_preference_learned_in_session": True,
+            "preference_inference_provenance_count": 1,
             "preference_authority_conflict_observed": True,
             "protected_action_waited_for_approval": True,
             "permission_policy_remained_authoritative": True,
@@ -107,6 +117,8 @@ def evidence_for(gate: str) -> dict:
             "private_information_retrieval": True,
             "public_research": True,
             "parallel_analysis": True,
+            "production_deliberation_provenance": True,
+            "single_causal_branch": True,
             "protected_external_action": True,
             "protected_action_approval_boundary": True,
             "independent_outcome_verification": True,
@@ -569,6 +581,44 @@ class AgencyReleaseTests(unittest.TestCase):
         evidence["required_epistemic_roles_present"] = False
         with self.assertRaisesRegex(ValueError, "required_epistemic_roles_present"):
             agency_release._validate_gate_evidence("A7", evidence, "")
+
+    def test_hardened_receipt_contract_requires_new_provenance_fields(self) -> None:
+        cases = [
+            ("A3", "approval_consumption_provenance_observed"),
+            ("A4", "exact_step_reconciliation_observed"),
+            ("A5", "causal_replan_lineage_bound"),
+            ("A6", "wake_reactivation_provenance_bound"),
+            ("A7", "production_model_backends"),
+            ("A7", "completion_event_bound"),
+            ("A8", "duplicate_observation_exercised"),
+            ("A9", "audited_synthesis_receipt_observed"),
+            ("A12", "production_deliberation_provenance"),
+            ("A12", "single_causal_branch"),
+        ]
+        for gate, key in cases:
+            with self.subTest(gate=gate, key=key):
+                evidence = evidence_for(gate)
+                evidence[key] = False
+                trace = str(self.a12_trace) if gate == "A12" else ""
+                with self.assertRaisesRegex(ValueError, key):
+                    agency_release._validate_gate_evidence(
+                        gate,
+                        evidence,
+                        trace,
+                    )
+
+        evidence = evidence_for("A8")
+        evidence["high_value_candidates"] = 2
+        with self.assertRaisesRegex(ValueError, "high_value_candidates"):
+            agency_release._validate_gate_evidence("A8", evidence, "")
+
+        evidence = evidence_for("A11")
+        evidence["preference_inference_provenance_count"] = 0
+        with self.assertRaisesRegex(
+            ValueError,
+            "preference_inference_provenance_count",
+        ):
+            agency_release._validate_gate_evidence("A11", evidence, "")
 
     def test_a12_receipt_rejects_unapproved_or_preverification_completion(self) -> None:
         evidence = evidence_for("A12")

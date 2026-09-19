@@ -36,6 +36,8 @@ def evidence_for(gate: str) -> dict:
         "A2": {
             "action_observation_cycles": 2,
             "independent_observation_cycles": 2,
+            "distinct_action_steps": 2,
+            "distinct_observations": 2,
             "second_action_followed_first_observation": True,
             "intermediate_unsatisfied_observed": True,
             "desired_state_satisfied": True,
@@ -461,6 +463,17 @@ class AgencyReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "intermediate_unsatisfied_observed"):
             agency_release._validate_gate_evidence("A2", evidence, "")
 
+    def test_a2_receipt_requires_distinct_steps_and_observations(self) -> None:
+        evidence = evidence_for("A2")
+        evidence["distinct_action_steps"] = 1
+        with self.assertRaisesRegex(ValueError, "distinct_action_steps"):
+            agency_release._validate_gate_evidence("A2", evidence, "")
+
+        evidence = evidence_for("A2")
+        evidence["distinct_observations"] = 1
+        with self.assertRaisesRegex(ValueError, "distinct_observations"):
+            agency_release._validate_gate_evidence("A2", evidence, "")
+
     def test_a3_receipt_rejects_denial_without_persisted_replan_effect(self) -> None:
         evidence = evidence_for("A3")
         evidence["denial_forced_replan_or_blocked"] = False
@@ -800,6 +813,32 @@ class AgencyReleaseTests(unittest.TestCase):
         )
         self.assertTrue(after["validation_after_real_gates"])
         self.assertTrue(after["release_ready"])
+
+    def test_validation_timestamp_must_be_strictly_after_real_receipts(self) -> None:
+        same_time = "2035-01-01T00:00:00+00:00"
+        with patch.object(agency_release, "_now", return_value=same_time):
+            for gate in sorted(agency_release.REAL_GATES):
+                self._record(gate)
+            self._validation(
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+                source_root_value=str(self.base),
+                compile_ok=True,
+                regression_ok=True,
+                synthetic_ok=True,
+                diagnostics_ok=True,
+                tree_clean_before=True,
+                tree_clean_after=True,
+                regression_summary="same-timestamp validation must not certify acceptance",
+            )
+
+        status = agency_release.release_status(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+            diagnostics={"ok": True},
+        )
+        self.assertFalse(status["validation_after_real_gates"])
+        self.assertFalse(status["release_ready"])
 
     def test_validation_hash_detects_post_run_corruption(self) -> None:
         for gate in sorted(agency_release.REAL_GATES):

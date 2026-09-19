@@ -385,6 +385,40 @@ def start_session(
                 raise ValueError("A6 REAL session must start while the desired state is blocked.")
             if not baseline["active_watches"]:
                 raise ValueError("A6 REAL session requires at least one active persisted wake watch.")
+            from jarvis_mrb import desired_state as desired_state_module
+
+            watch_ids = [str(value) for value in baseline["active_watches"]]
+            placeholders = ",".join("?" for _ in watch_ids)
+            watch_rows = conn.execute(
+                f"""
+                SELECT id,condition_json FROM desired_state_watches
+                WHERE desired_state_id=? AND status='active'
+                  AND id IN ({placeholders})
+                ORDER BY created_at
+                """,
+                (state_id, *watch_ids),
+            ).fetchall()
+            if len(watch_rows) != len(watch_ids):
+                raise ValueError(
+                    "A6 REAL session could not recover every persisted active wake watch."
+                )
+            wake_watch_outcomes: dict[str, Any] = {}
+            for watch in watch_rows:
+                condition = dict(_loads(str(watch["condition_json"] or "{}"), {}))
+                wake_watch_outcomes[str(watch["id"])] = (
+                    desired_state_module._evaluate_criterion(conn, condition)
+                )
+            baseline["wake_watch_outcomes"] = wake_watch_outcomes
+            already_satisfied = [
+                watch_id
+                for watch_id, outcome in wake_watch_outcomes.items()
+                if bool((outcome or {}).get("satisfied"))
+            ]
+            if already_satisfied:
+                raise ValueError(
+                    "A6 REAL session requires every baseline wake condition to be unsatisfied; "
+                    f"already satisfied: {already_satisfied}."
+                )
         if clean_gate == "A7" and not str(params.get("question_contains") or "").strip():
             raise ValueError("A7 REAL session requires parameters.question_contains to scope the real deliberation.")
         if clean_gate == "A11":

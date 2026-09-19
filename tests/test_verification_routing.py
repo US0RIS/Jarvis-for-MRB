@@ -55,7 +55,11 @@ class VerificationRoutingTests(unittest.TestCase):
                 "start": "{'date_time': '2026-09-08T23:55:00-07:00'}",
                 "end": "{'date_time': '2026-09-09T00:00:00-07:00'}",
             },
-            SimpleNamespace(ok=True, message="Created calendar event 'Jarvis Live Verification'."),
+            SimpleNamespace(
+                ok=True,
+                message="Created calendar event 'Jarvis Live Verification'.",
+                data={"event_id": "jarvis-live-verification-event"},
+            ),
             action_event_id=action_event_id,
         )
 
@@ -94,8 +98,14 @@ class VerificationRoutingTests(unittest.TestCase):
         self.assertEqual(str(row["id"]), verification_id)
         self.assertEqual(str(row["status"]), "verified")
         expected = json.loads(str(row["expected_json"]))
-        self.assertEqual(expected["start"], "2026-09-08T23:55:00-07:00")
-        self.assertEqual(expected["end"], "2026-09-09T00:00:00-07:00")
+        self.assertEqual(
+            expected["start"],
+            "{'date_time': '2026-09-08T23:55:00-07:00'}",
+        )
+        self.assertEqual(
+            expected["end"],
+            "{'date_time': '2026-09-09T00:00:00-07:00'}",
+        )
 
     def test_explicit_query_can_recover_timed_out_verification_when_evidence_arrives_late(self) -> None:
         verification_id = self._calendar_verification()
@@ -122,12 +132,32 @@ class VerificationRoutingTests(unittest.TestCase):
         reply = verification_routing.reply_for_query("Did that work?")
         self.assertIsNotNone(reply)
         assert reply is not None
-        self.assertTrue(reply.startswith("Yes. I independently verified"), reply)
+        self.assertTrue(
+            reply.startswith("Yes. A fresh independent recheck now verified"),
+            reply,
+        )
 
         row = self._latest()
         self.assertEqual(str(row["id"]), verification_id)
-        self.assertEqual(str(row["status"]), "verified")
+        self.assertEqual(str(row["status"]), "timed_out")
         self.assertIn("now contains the created event", str(row["last_evidence"]))
+        conn = sqlite3.connect(self.db)
+        try:
+            recheck = conn.execute(
+                """
+                SELECT event_type,payload_json
+                FROM events
+                WHERE event_type='verification.rechecked'
+                ORDER BY id DESC LIMIT 1
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(recheck)
+        payload = json.loads(str(recheck[1]))
+        self.assertEqual(payload["verification_id"], verification_id)
+        self.assertEqual(payload["historical_status"], "timed_out")
+        self.assertEqual(payload["recheck_outcome"], "verified")
 
     def test_late_inconclusive_recheck_preserves_timeout_but_records_fresh_attempt(self) -> None:
         verification_id = self._calendar_verification()

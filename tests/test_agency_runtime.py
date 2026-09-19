@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import jarvis_mrb.agency_plan as agency_plan
 import jarvis_mrb.agency_runtime as agency_runtime

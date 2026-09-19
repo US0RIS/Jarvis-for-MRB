@@ -164,6 +164,41 @@ class DesiredStateTests(unittest.TestCase):
         assert updated is not None
         self.assertEqual(updated["state"], "satisfied")
 
+    def test_event_match_does_not_match_completion_inside_larger_word(self) -> None:
+        state = desired_state.create_desired_state(
+            "United Airlines booked",
+            [
+                {
+                    "kind": "event_match",
+                    "terms_all": ["United Airlines", "booked"],
+                    "terms_none": [],
+                    "source_kinds": ["jarvis_verifier"],
+                    "min_event_id": 0,
+                }
+            ],
+            source_kind="test",
+            source_ref="boundary-match",
+        )
+        world_model.record_event(
+            "verification.observed",
+            "United Airlines remains unbooked.",
+            source_kind="jarvis_verifier",
+            source_ref="boundary:unbooked",
+            evidence="No reservation exists.",
+        )
+        before = desired_state.evaluate_desired_state(state["id"], persist=True)
+        self.assertFalse(before["satisfied"])
+
+        world_model.record_event(
+            "verification.observed",
+            "United Airlines booked.",
+            source_kind="jarvis_verifier",
+            source_ref="boundary:booked",
+            evidence="Reservation independently confirmed.",
+        )
+        after = desired_state.evaluate_desired_state(state["id"], persist=True)
+        self.assertTrue(after["satisfied"])
+
     def test_authority_and_lifecycle_mutations_are_durably_audited(self) -> None:
         entity_id = world_model.ensure_entity("project", "Project Audit")
         state = desired_state.create_desired_state(

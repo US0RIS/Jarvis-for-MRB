@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import jarvis_mrb.agent as agent
+import jarvis_mrb.streaming_agent as streaming_agent
 
 
 class AgentConfirmationSecurityTests(unittest.TestCase):
@@ -54,6 +55,18 @@ class AgentConfirmationSecurityTests(unittest.TestCase):
         self.assertIn("specification omitted", rendered)
         self.assertNotIn("TOP SECRET INTERNAL SPEC", rendered)
         self.assertNotIn("4815", rendered)
+
+    def test_streaming_planner_exposes_counterfactual_and_gap_link_tools(self) -> None:
+        prompt = streaming_agent._planner_system(
+            "2030-01-01T00:00:00+00:00",
+            allow_background=True,
+        )
+        self.assertIn("agency.counterfactual.create", prompt)
+        self.assertIn("agency.counterfactual.compare", prompt)
+        self.assertIn("agency.counterfactual.select", prompt)
+        self.assertIn("custom.synthesize {name,description,api_spec,allowed_hosts,risk,gap_id?}", prompt)
+        self.assertIn("does not authorize downstream external actions", prompt)
+        self.assertIn("pass that gap_id to custom.synthesize", prompt)
 
     def test_custom_run_http_status_controls_agent_success(self) -> None:
         with patch.object(

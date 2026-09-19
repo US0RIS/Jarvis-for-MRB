@@ -1160,7 +1160,7 @@ class AgencyPlanTests(unittest.TestCase):
         )
         self.assertEqual(waiting["status"], "awaiting_approval")
 
-        world_model.record_event(
+        external_event_id = world_model.record_event(
             "calendar.context_enriched",
             "Project Event Drift timing changed externally.",
             source_kind="calendar_enriched",
@@ -1180,6 +1180,53 @@ class AgencyPlanTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_replan")
         self.assertEqual(result["steps"][0]["status"], "pending")
         self.assertIn("Relevant world state changed", result["last_error"])
+        self.assertGreater(result["invalidation_event_id"], 0)
+
+        conn = sqlite3.connect(self.db)
+        conn.row_factory = sqlite3.Row
+        try:
+            invalidation = conn.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE id=? AND event_type='agency.plan.invalidated'
+                """,
+                (result["invalidation_event_id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(invalidation)
+        payload = json.loads(invalidation["payload_json"])
+        self.assertIn(external_event_id, payload["trigger_event_ids"])
+
+        replacement = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "replacement-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Event drift replacement",
+                        "start": "2030-01-01T10:00:00-08:00",
+                        "end": "2030-01-01T10:30:00-08:00",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(replacement["replaces_plan_id"], plan["id"])
+        self.assertEqual(
+            replacement["replan_cause_event_id"],
+            result["invalidation_event_id"],
+        )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_plans SET replaces_plan_id=? WHERE id=?",
+                    ("agency-plan:tampered", replacement["id"]),
+                )
+        finally:
+            conn.close()
 
     def test_world_change_while_waiting_for_approval_does_not_consume_approval(self) -> None:
         entity_id, state_id = self._state_for_project("Project Approval Drift")

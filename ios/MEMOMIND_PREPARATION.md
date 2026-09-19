@@ -5,12 +5,22 @@ Prepared September 18, 2026, from MemoMind's September 1 developer-access announ
 ## What is already implemented
 
 - iOS `MemoMindBridge.swift`: a vendor-agnostic, bounded monochrome HUD frame/card model, a local iPhone preview, an input-intent mapper, and a transport callback.
+- **EDITH-inspired Command View:** the existing Glasses tab now requests authenticated `GET /agency/command-view` on entry and every 15 seconds *while the tab is visible*. It renders real persisted Agency mode, active/blocked goal counts, current plans, next recorded steps, approval backlog and emitted exception events. The backend model is read-only and does not call an LLM, plan, execute or imply that unobserved conditions are current.
+- Existing authenticated companion `proactive_alert`/job-completion messages flow to opt-in HUD cards using the iPhone's existing threshold filter. Backend alert text and goal details are private by default on the glasses; they never activate voice recording.
 - Completed Jarvis replies are delivered to the *iPhone-side* bridge from the existing `JarvisAppModel.recordTurn` path; there is no additional model, memory store, network endpoint, or AI assistant.
 - New **Glasses** tab renders the same current frame as the proposed physical-device adapter and simulates taps and navigation.
 - The bridge accepts future touch, head-gesture, and KiWear ring events as **semantic** inputs, not guessed BLE bytes or guessed vendor enums.
 - Glasses pairing is never fabricated: connection status starts at `Simulator only`; a physical driver must report connected after an actual handshake.
 - Private Jarvis replies are hidden by default on the HUD. A dedicated toggle enables display; this setting does **not** enable capture/recording.
 - Approval cards direct the wearer to iPhone. A tap/nod/ring select **does not execute** a protected action, approve an Agency plan, email anyone, or dismiss the backend's pending approval.
+
+## Command View usage now
+
+1. Deploy the MemoMind-prep branch to the Windows backend to enable the read-only command-view endpoint; the Agency 1.0 backend branch alone does not include that endpoint.
+2. Build and install the MemoMind-prep iPhone client. Open **Glasses**. It displays the backend's real saved goal/plan/approval status, or an explicit error if it cannot connect. No fabricated goal counts are displayed.
+3. Turn on **Show private Jarvis replies on HUD** to inspect real cards in the iPhone simulator. Leave it off to verify redaction.
+4. The status view is not an Agency-mode switch; use the normal, confirmation-protected command flow to enable Agency. A glasses/ring gesture cannot authorize a protected action.
+5. The existing Bluetooth audio route may send Jarvis speech to compatible glasses today; actual MemoMind HUD transport still awaits the vendor interface.
 
 ## Why this is not a full hardware driver yet
 

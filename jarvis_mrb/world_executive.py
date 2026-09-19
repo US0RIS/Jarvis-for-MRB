@@ -222,17 +222,24 @@ def refresh_intentions() -> dict[str, int]:
             if clean_status != "active":
                 continue
 
-            project_rows = conn.execute(
-                """
-                SELECT r.object_id,r.confidence
-                FROM entity_relations r
-                JOIN entities e ON e.id=r.object_id
-                WHERE r.subject_id=? AND r.state='current'
-                  AND r.predicate='advances_project' AND e.kind='project'
-                ORDER BY r.confidence DESC
-                """,
-                (goal_id,),
-            ).fetchall()
+            try:
+                project_rows = conn.execute(
+                    """
+                    SELECT r.object_id,r.confidence
+                    FROM entity_relations r
+                    JOIN entities e ON e.id=r.object_id
+                    WHERE r.subject_id=? AND r.state='current'
+                      AND r.predicate='advances_project' AND e.kind='project'
+                    ORDER BY r.confidence DESC
+                    """,
+                    (goal_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # The executive must still materialize explicit goals when the
+                # optional relation/linker schema has not been initialized yet.
+                # Project enrichment can be added on a later refresh once that
+                # schema exists.
+                project_rows = []
             for project in project_rows:
                 conn.execute(
                     "INSERT OR REPLACE INTO intention_entities(intention_id,entity_id,role,confidence) VALUES(?,?,?,?)",

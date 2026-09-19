@@ -221,7 +221,7 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertEqual(criterion["terms_all"][1], "signed")
 
     def test_rejects_generic_subject_anchor_not_grounded_to_named_goal(self) -> None:
-        state_id = self._legacy_state("Have Project Apollo signed")
+        _, state_id = self._legacy_state("Have Project Apollo signed")
         with self.assertRaisesRegex(ValueError, "specifically grounded"):
             agency_goal_compiler.compile_observable_contract(
                 state_id,
@@ -241,7 +241,7 @@ class AgencyGoalCompilerTests(unittest.TestCase):
             )
 
     def test_accepts_specific_anchor_tokens_grounded_in_goal_context(self) -> None:
-        state_id = self._legacy_state("Have Project Apollo signed")
+        _, state_id = self._legacy_state("Have Project Apollo signed")
         result = agency_goal_compiler.compile_observable_contract(
             state_id,
             compiler=lambda _prompt: {
@@ -264,7 +264,7 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         )
 
     def test_rejects_completion_substring_such_as_unsigned(self) -> None:
-        state_id = self._legacy_state("Have Apollo signed")
+        _, state_id = self._legacy_state("Have Apollo signed")
         with self.assertRaisesRegex(ValueError, "exact terms_all item"):
             agency_goal_compiler.compile_observable_contract(
                 state_id,
@@ -284,7 +284,7 @@ class AgencyGoalCompilerTests(unittest.TestCase):
             )
 
     def test_rejects_negated_completion_phrase_in_terms_all(self) -> None:
-        state_id = self._legacy_state("Have Apollo signed")
+        _, state_id = self._legacy_state("Have Apollo signed")
         with self.assertRaisesRegex(ValueError, "exact terms_all item"):
             agency_goal_compiler.compile_observable_contract(
                 state_id,
@@ -304,7 +304,7 @@ class AgencyGoalCompilerTests(unittest.TestCase):
             )
 
     def test_legitimate_subject_starting_with_un_is_not_treated_as_negation(self) -> None:
-        state_id = self._legacy_state("Have United Airlines booked")
+        _, state_id = self._legacy_state("Have United Airlines booked")
         result = agency_goal_compiler.compile_observable_contract(
             state_id,
             compiler=lambda _prompt: {
@@ -324,7 +324,7 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertEqual(result["criteria"][0]["terms_all"], ["United Airlines", "booked"])
 
     def test_injects_required_negations_when_model_omits_them(self) -> None:
-        state_id = self._legacy_state("Have Apollo signed")
+        _, state_id = self._legacy_state("Have Apollo signed")
         result = agency_goal_compiler.compile_observable_contract(
             state_id,
             compiler=lambda _prompt: {

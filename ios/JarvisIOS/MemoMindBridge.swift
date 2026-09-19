@@ -12,6 +12,10 @@ enum MemoMindInput: String, CaseIterable {
     case longPress
     case headNod
     case headShake
+    case ringNext
+    case ringPrevious
+    case ringSelect
+    case ringBack
 }
 
 enum MemoMindIntent: Equatable {
@@ -193,18 +197,18 @@ final class MemoMindBridge: ObservableObject {
     func receive(_ event: MemoMindInput) -> MemoMindIntent {
         let intent: MemoMindIntent
         switch event {
-        case .swipeForward:
+        case .swipeForward, .ringNext:
             selectedIndex = min(cards.count - 1, selectedIndex + 1)
             intent = .nextCard
-        case .swipeBackward:
+        case .swipeBackward, .ringPrevious:
             selectedIndex = max(0, selectedIndex - 1)
             intent = .previousCard
-        case .tap, .headNod:
+        case .tap, .headNod, .ringSelect:
             intent = cards[selectedIndex].kind == .approval
                 ? .showApprovalOnPhone : .revealCurrentCard
         case .doubleTap, .longPress:
             intent = .requestVoiceCapture
-        case .headShake:
+        case .headShake, .ringBack:
             // Dismissing a HUD card is NOT a denial of an Agency action.
             intent = .dismissCurrentCard
             cards.remove(at: selectedIndex)

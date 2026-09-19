@@ -108,37 +108,77 @@ final class PublicCameraLocationRequest: NSObject, ObservableObject, CLLocationM
     }
 }
 
+/// Standalone iPhone control surface. No MemoMind SDK, device registration or
+/// head-worn display is needed to use any function on this screen.
+struct JarvisPhysicalHubView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                GroupBox("Portable physical-world access") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Works on iPhone alone. With your Gen 1 Ray-Ban Meta glasses, speak through Jarvis’s existing Bluetooth hands-free connection.")
+                            .font(.callout)
+                        LabeledContent("Audio route", value: appModel.audioRouteManager.routeSummary)
+                            .font(.caption)
+                        Text("The Ray-Bans supply microphone, speakers and the existing Meta camera integration. They do not display a HUD.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Try: “Jarvis, find nearby public cameras.”")
+                            .font(.caption.weight(.medium))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Public viewpoints") {
+                    JarvisPhysicalControlView()
+                }
+
+                GroupBox("Authorized physical control") {
+                    AppleHomeControlView()
+                }
+
+                GroupBox("Optional future HUD") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("MemoMind is optional. None of the controls above require it.")
+                            .font(.callout)
+                        NavigationLink("Open experimental glasses simulator") {
+                            MemoMindPreviewView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Physical")
+    }
+}
+
 struct JarvisPhysicalControlView: View {
     @EnvironmentObject var appModel: JarvisAppModel
-    @StateObject private var location = PublicCameraLocationRequest()
-    @State private var cameras: [PublicCameraListing] = []
-    @State private var sourceURL = ""
-    @State private var coverage = ""
-    @State private var feedback = "Use iPhone location to discover published nearby highway cameras."
-    @State private var searching = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("PHYSICAL WORLD")
-                .font(.headline)
-            Text("Discover official public camera feeds near you. This does not scan Wi-Fi or access private CCTV.")
+            Text("Find officially published highway cameras near your current location. Search is opt-in; no nearby Wi-Fi devices or private CCTV are scanned.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            Button(searching ? "Searching…" : "Find nearby public cameras") {
-                Task { await lookup() }
+            Button(appModel.nearbyCameraBusy ? "Searching…" : "Find nearby public cameras") {
+                Task { _ = await appModel.searchNearbyPublicCameras() }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(searching)
+            .disabled(appModel.nearbyCameraBusy)
 
-            Text(feedback)
+            Text(appModel.nearbyCameraStatus)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            if !coverage.isEmpty {
-                Text(coverage)
+            if !appModel.nearbyCameraCoverage.isEmpty {
+                Text(appModel.nearbyCameraCoverage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            ForEach(cameras) { camera in
+            ForEach(appModel.nearbyPublicCameras) { camera in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(camera.title).font(.subheadline.weight(.medium))
                     Text(String(format: "%.1f km away • %@", camera.distanceKM, camera.provider))
@@ -153,7 +193,8 @@ struct JarvisPhysicalControlView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             case .empty:
                                 ProgressView()
-                            @unknown default: EmptyView()
+                            @unknown default:
+                                EmptyView()
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -167,37 +208,12 @@ struct JarvisPhysicalControlView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
             }
-            if let source = URL(string: sourceURL), !sourceURL.isEmpty {
+            if let source = URL(string: appModel.nearbyCameraSourceURL),
+               !appModel.nearbyCameraSourceURL.isEmpty {
                 Link("Official source / coverage details", destination: source)
                     .font(.caption)
             }
         }
         .padding(.vertical, 8)
-    }
-
-    @MainActor
-    private func lookup() async {
-        guard !searching else { return }
-        searching = true
-        defer { searching = false }
-        cameras = []
-        coverage = ""
-        feedback = "Requesting a one-time location…"
-        do {
-            let position = try await location.locateOnce()
-            feedback = "Checking official public camera catalogs…"
-            let response = try await appModel.discoverNearbyPublicCameras(
-                latitude: position.coordinate.latitude,
-                longitude: position.coordinate.longitude
-            )
-            cameras = response.cameras
-            sourceURL = response.sourceURL
-            coverage = response.coverage
-            feedback = response.cameras.isEmpty
-                ? response.sourceNote
-                : "\(response.cameras.count) published cameras nearby. Publisher service status is not proof the image is current."
-        } catch {
-            feedback = "Camera search unavailable: " + error.localizedDescription
-        }
     }
 }

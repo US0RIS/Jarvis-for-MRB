@@ -1940,6 +1940,114 @@ class AgencyRealAcceptanceTests(unittest.TestCase):
             )
             self.assertFalse(wake_check["passed"])
 
+    def test_a6_unrelated_external_event_cannot_launder_internal_wake_evidence(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A6 Evidence Laundering Guard")
+        state = desired_state.create_desired_state(
+            "A6 Evidence Laundering Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "prerequisite",
+                    "value": "available",
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-evidence-laundering",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Waiting for the watched prerequisite.",
+        )
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {
+                "kind": "belief_equals",
+                "entity_id": entity_id,
+                "predicate": "prerequisite",
+                "value": "available",
+            },
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            unrelated_external_id = world_model.record_event(
+                "calendar.context_enriched",
+                "An unrelated external calendar fact changed on the same project.",
+                source_kind="calendar_enriched",
+                source_ref="real-a6:unrelated-external",
+                evidence="Real external evidence, but not evidence for the watched prerequisite.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            internal_source_id = world_model.record_event(
+                "agency.synthetic_change",
+                "Jarvis internally marked the watched prerequisite available.",
+                source_kind="jarvis_agency",
+                source_ref="real-a6:internal-trigger",
+                evidence="Internal-only source for the actual watched condition.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "prerequisite",
+                value="available",
+                source_event_id=internal_source_id,
+                evidence="Internal-only watched-condition evidence.",
+            )
+            wake = desired_state.check_wake_watches()
+            self.assertEqual(wake["triggered"], 1)
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "active",
+            )
+
+            continuation = agency_runtime.tick_desired_state(
+                str(state["id"]),
+                executor=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("protected continuation must await approval")
+                ),
+                planner=lambda _prompt: {
+                    "summary": "Continue after internally sourced wake.",
+                    "nodes": [
+                        {
+                            "id": "continue",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": "A6 laundering guard continuation",
+                                "start": "2030-01-01T15:00:00-08:00",
+                                "end": "2030-01-01T15:30:00-08:00",
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
+            self.assertEqual(continuation["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        wake_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("wake condition later triggered")
+        )
+        self.assertFalse(wake_check["passed"])
+        evidence_ids = {
+            event_id
+            for ids in wake_check["evidence"].values()
+            for event_id in ids
+        }
+        self.assertNotIn(unrelated_external_id, evidence_ids)
+
     def test_a7_is_scoped_to_matching_real_deliberation(self) -> None:
         with self._patch_identity():
             session = agency_real_acceptance.start_session(

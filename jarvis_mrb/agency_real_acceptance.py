@@ -3569,6 +3569,25 @@ def finalize_session(session_id: str) -> dict[str, Any]:
         receipt = get_receipt_for_session(str(session["id"]))
         if receipt is None:
             raise
+    except ValueError as exc:
+        # A competing finalizer can win after this caller observed status=running
+        # but before record_real_gate_receipt re-checks the live session. In that
+        # narrow race the session is now completed and already owns the immutable
+        # receipt. Treat it exactly like the unique-index race; never swallow any
+        # other validation failure.
+        current = get_session(str(session["id"]))
+        receipt = get_receipt_for_session(str(session["id"]))
+        if (
+            str(exc) != "REAL receipt can only be minted while its acceptance session is running."
+            or current is None
+            or str(current.get("status") or "") != "completed"
+            or receipt is None
+        ):
+            raise
+        validation = validate_real_gate_receipt(str(receipt.get("id") or ""))
+        if not bool(validation.get("valid")):
+            raise
+        receipt_created = False
     completed_at = _now()
     completion_evaluation = dict(evaluation)
     if not receipt_created:

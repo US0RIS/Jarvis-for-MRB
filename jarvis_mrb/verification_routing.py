@@ -98,139 +98,165 @@ def _verification_by_id(verification_id: str) -> sqlite3.Row | None:
         conn.close()
 
 
-def _repair_calendar_expectation(row: sqlite3.Row) -> bool:
-    if str(row["tool"]) != "calendar.create":
-        return False
+def _observation_expected(row: sqlite3.Row) -> dict[str, Any]:
+    """Return an observer-ready expectation without rewriting immutable provenance."""
     try:
         expected = json.loads(str(row["expected_json"] or "{}"))
     except (json.JSONDecodeError, TypeError, ValueError):
-        return False
+        expected = {}
     if not isinstance(expected, dict):
-        return False
+        expected = {}
+
+    if str(row["tool"] or "") != "calendar.create":
+        return expected
 
     try:
         from jarvis_mrb.tools.google import _normalize_calendar_datetime
     except Exception:
-        return False
+        return expected
 
-    changed = False
+    normalized_expected = dict(expected)
     for key in ("start", "end"):
-        normalized, parsed = _normalize_calendar_datetime(expected.get(key))
-        if parsed is not None and normalized and normalized != expected.get(key):
-            expected[key] = normalized
-            changed = True
-    if not changed:
-        return False
+        normalized, parsed = _normalize_calendar_datetime(
+            normalized_expected.get(key)
+        )
+        if parsed is not None and normalized:
+            normalized_expected[key] = normalized
+    return normalized_expected
 
-    from jarvis_mrb.world_model import DB_PATH
 
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
-    try:
+def _record_terminal_recheck(
+    row: sqlite3.Row,
+    *,
+    outcome: str,
+    evidence: str,
+    error: str = "",
+) -> None:
+    """Audit a post-terminal user-requested observation without rewriting history."""
+    from jarvis_mrb.world_model import DB_PATH, record_event
+
+    now = datetime.now().astimezone().isoformat()
+    verification_id = str(row["id"])
+    with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
         conn.execute(
-            "UPDATE action_verifications SET expected_json=?,updated_at=? WHERE id=?",
+            """
+            UPDATE action_verifications
+            SET attempts=attempts+1,last_checked_at=?,last_evidence=?,
+                last_error=?,updated_at=?
+            WHERE id=?
+            """,
             (
-                json.dumps(expected, ensure_ascii=False, sort_keys=True),
-                datetime.now().astimezone().isoformat(),
-                str(row["id"]),
+                now,
+                str(evidence)[:3000],
+                str(error)[:2000],
+                now,
+                verification_id,
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
-    return True
+
+    try:
+        record_event(
+            "verification.rechecked",
+            (
+                f"Fresh post-terminal verification recheck for "
+                f"{str(row['tool'])}: {outcome}. {str(evidence)[:1200]}"
+            ),
+            source_kind="jarvis_verifier",
+            source_ref=f"{verification_id}:recheck:{now}",
+            occurred_at=now,
+            payload={
+                "verification_id": verification_id,
+                "historical_status": str(row["status"] or ""),
+                "recheck_outcome": str(outcome),
+                "tool": str(row["tool"] or ""),
+                "evidence": str(evidence)[:3000],
+            },
+            evidence=(
+                "Explicit user-requested fresh observation recorded separately "
+                "from the immutable terminal verification verdict."
+            ),
+            confidence=1.0 if outcome in {"verified", "failed"} else 0.9,
+        )
+    except Exception:
+        pass
 
 
 def _fresh_check(verification_id: str) -> dict[str, Any] | None:
-    """Perform a fresh observer pass, including for a prior timeout.
-
-    ``world_verification.check_one`` intentionally treats terminal states as immutable
-    during background polling. That is correct for autonomous deadline processing, but
-    an explicit user question such as "Did that work?" is different: a timeout means
-    Jarvis failed to establish the outcome *by the deadline*, not that the real-world
-    effect is forever unknowable. If independent evidence becomes visible later, the
-    explicit query should be allowed to move timed_out -> verified/failed while keeping
-    the earlier timeout event in world history.
-    """
+    """Perform a fresh observer pass without rewriting terminal verification history."""
     from jarvis_mrb import world_verification
 
-    result = world_verification.check_one(verification_id, force=True)
     row = _verification_by_id(verification_id)
-    if row is None or str(row["status"] or "") != "timed_out":
-        return result
+    if row is None:
+        return None
 
-    try:
-        expected = json.loads(str(row["expected_json"] or "{}"))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        expected = {}
-    if not isinstance(expected, dict):
-        expected = {}
-
+    status = str(row["status"] or "")
+    expected = _observation_expected(row)
     verifier = str(row["verifier"] or "")
-    now = datetime.now().astimezone().isoformat()
+
+    if status == "pending":
+        # Current records should already contain normalized arguments. This explicit
+        # observer path also supports legacy rows whose calendar date-times were
+        # serialized in older dict-string form, without mutating expected_json.
+        try:
+            outcome, evidence = world_verification._observe(verifier, expected)
+            world_verification._record_observation(
+                verification_id,
+                outcome=outcome,
+                evidence=evidence,
+            )
+            if outcome in {"verified", "failed"}:
+                return world_verification._transition(row, outcome, evidence)
+            return world_verification._mark_pending(row, evidence)
+        except Exception as exc:
+            return world_verification._mark_pending(
+                row,
+                str(row["last_evidence"] or ""),
+                error=str(exc),
+            )
+
+    if status != "timed_out":
+        return {
+            "id": verification_id,
+            "status": status,
+            "tool": str(row["tool"] or ""),
+            "evidence": str(row["last_evidence"] or "")[:1500],
+        }
+
+    # A timeout is an immutable statement about what Jarvis knew by its deadline.
+    # A later explicit user query may inspect reality again, but it must not mutate
+    # timed_out -> verified/failed or append to the closed observation ledger.
     try:
         outcome, evidence = world_verification._observe(verifier, expected)
-        world_verification._record_observation(
-            verification_id,
+        _record_terminal_recheck(
+            row,
             outcome=outcome,
             evidence=evidence,
         )
-        if outcome in {"verified", "failed"}:
-            return world_verification._transition(row, outcome, evidence)
-
-        # A late observer can remain inconclusive. Preserve the historical timeout
-        # classification, but record that a fresh user-requested check actually ran.
-        from jarvis_mrb.world_model import DB_PATH
-
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        try:
-            conn.execute(
-                """
-                UPDATE action_verifications
-                SET attempts=attempts+1,last_checked_at=?,last_evidence=?,last_error='',updated_at=?
-                WHERE id=?
-                """,
-                (now, str(evidence)[:3000], now, verification_id),
-            )
-            conn.commit()
-        finally:
-            conn.close()
         return {
             "id": verification_id,
-            "status": "timed_out",
-            "tool": str(row["tool"]),
+            "status": outcome if outcome in {"verified", "failed"} else "timed_out",
+            "historical_status": "timed_out",
+            "late_recheck": True,
+            "tool": str(row["tool"] or ""),
             "evidence": str(evidence)[:1500],
         }
     except Exception as exc:
         error = str(exc)[:2000]
-        try:
-            world_verification._record_observation(
-                verification_id,
-                outcome="observer_error",
-                evidence=str(row["last_evidence"] or ""),
-                error=error,
-            )
-        except Exception:
-            pass
-        from jarvis_mrb.world_model import DB_PATH
-
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        try:
-            conn.execute(
-                """
-                UPDATE action_verifications
-                SET attempts=attempts+1,last_checked_at=?,last_error=?,updated_at=?
-                WHERE id=?
-                """,
-                (now, error, now, verification_id),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        evidence = str(row["last_evidence"] or "")
+        _record_terminal_recheck(
+            row,
+            outcome="observer_error",
+            evidence=evidence,
+            error=error,
+        )
         return {
             "id": verification_id,
             "status": "timed_out",
-            "tool": str(row["tool"]),
-            "evidence": str(row["last_evidence"] or "")[:1500],
+            "historical_status": "timed_out",
+            "late_recheck": True,
+            "tool": str(row["tool"] or ""),
+            "evidence": evidence[:1500],
             "error": error,
         }
 
@@ -265,16 +291,11 @@ def reply_for_query(text: str) -> str | None:
     if row is None:
         return "I do not have a recorded action outcome to verify yet."
 
-    try:
-        _repair_calendar_expectation(row)
-    except Exception:
-        pass
-
     verification_id = str(row["id"])
     try:
-        _fresh_check(verification_id)
+        fresh = _fresh_check(verification_id)
     except Exception:
-        pass
+        fresh = None
 
     try:
         refreshed = _latest_verification(text)
@@ -283,16 +304,35 @@ def reply_for_query(text: str) -> str | None:
     if refreshed is None:
         refreshed = row
 
-    status = str(refreshed["status"] or "pending")
-    tool = str(refreshed["tool"] or "")
+    if fresh is not None and bool(fresh.get("late_recheck")):
+        status = str(fresh.get("status") or "timed_out")
+        tool = str(fresh.get("tool") or refreshed["tool"] or "")
+        evidence = str(fresh.get("evidence") or "").strip()
+        late_recheck = True
+    else:
+        status = str(refreshed["status"] or "pending")
+        tool = str(refreshed["tool"] or "")
+        evidence = str(refreshed["last_evidence"] or "").strip()
+        late_recheck = False
     label = _human_tool(tool)
-    evidence = str(refreshed["last_evidence"] or "").strip()
 
     if status == "verified":
         detail = f" {evidence}" if evidence else ""
-        return f"Yes. I independently verified the {label}.{detail}".strip()
+        prefix = (
+            "Yes. A fresh independent recheck now verified"
+            if late_recheck
+            else "Yes. I independently verified"
+        )
+        return f"{prefix} the {label}.{detail}".strip()
     if status == "failed":
         detail = f" {evidence}" if evidence else ""
+        prefix = (
+            "No. A fresh independent recheck now shows"
+            if late_recheck
+            else "No."
+        )
+        if late_recheck:
+            return f"{prefix} the {label} failed.{detail}".strip()
         return f"No. The {label} failed.{detail}".strip()
     if status == "timed_out":
         detail = f" {evidence}" if evidence else ""

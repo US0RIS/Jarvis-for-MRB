@@ -323,6 +323,60 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
             "evidence": "Browser close request completed; waiting for matching tab to disappear.",
         }
 
+    if tool == "agency.counterfactual.create":
+        case_id = str(data.get("id") or "").strip()
+        branches = data.get("branches") if isinstance(data.get("branches"), list) else []
+        if not case_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": {"tool": tool},
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Counterfactual creation returned success without a stable case identifier.",
+            }
+        return {
+            "verifier": "counterfactual_case_persisted",
+            "expected": {
+                "case_id": case_id,
+                "branch_count": len(branches),
+            },
+            "status": "pending",
+            "next_check_at": now.isoformat(),
+            "deadline_at": (now + timedelta(minutes=1)).isoformat(),
+            "evidence": f"Counterfactual case {case_id} was created; waiting for independent ledger read-back.",
+        }
+
+    if tool == "agency.counterfactual.select":
+        case_id = str(data.get("id") or "").strip()
+        selected_branch_id = str(data.get("selected_branch_id") or "").strip()
+        change_conditions = (
+            list(data.get("change_conditions") or [])
+            if isinstance(data.get("change_conditions"), list)
+            else []
+        )
+        if not case_id or not selected_branch_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": {"tool": tool},
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Counterfactual selection returned success without stable case/branch identity.",
+            }
+        return {
+            "verifier": "counterfactual_selection_persisted",
+            "expected": {
+                "case_id": case_id,
+                "selected_branch_id": selected_branch_id,
+                "change_conditions": change_conditions,
+            },
+            "status": "pending",
+            "next_check_at": now.isoformat(),
+            "deadline_at": (now + timedelta(minutes=1)).isoformat(),
+            "evidence": f"Counterfactual selection for {case_id} was written; waiting for independent ledger read-back.",
+        }
+
     if tool == "state.update":
         return {
             "verifier": "persistent_state_value",
@@ -695,6 +749,52 @@ def _observe(verifier: str, expected: dict[str, Any]) -> tuple[str, str]:
     if verifier == "browser_tab_absent":
         present, evidence = _tab_present(str(expected.get("query") or ""))
         return ("pending" if present else "verified", evidence)
+    if verifier == "counterfactual_case_persisted":
+        from jarvis_mrb.agency_counterfactual import get_case
+
+        case_id = str(expected.get("case_id") or "")
+        item = get_case(case_id)
+        expected_count = int(expected.get("branch_count") or 0)
+        actual_count = len(item.get("branches") or []) if isinstance(item, dict) else 0
+        matches = bool(
+            item
+            and str(item.get("id") or "") == case_id
+            and actual_count == expected_count
+            and actual_count >= 2
+        )
+        return (
+            "verified" if matches else "pending",
+            (
+                f"Counterfactual ledger read-back found case {case_id} with "
+                f"{actual_count} branch(es); expected {expected_count}."
+            ),
+        )
+    if verifier == "counterfactual_selection_persisted":
+        from jarvis_mrb.agency_counterfactual import get_case
+
+        case_id = str(expected.get("case_id") or "")
+        selected_branch_id = str(expected.get("selected_branch_id") or "")
+        expected_conditions = list(expected.get("change_conditions") or [])
+        item = get_case(case_id)
+        actual_conditions = (
+            list(item.get("change_conditions") or [])
+            if isinstance(item, dict)
+            else []
+        )
+        matches = bool(
+            item
+            and str(item.get("status") or "") == "selected"
+            and str(item.get("selected_branch_id") or "") == selected_branch_id
+            and actual_conditions == expected_conditions
+        )
+        return (
+            "verified" if matches else "pending",
+            (
+                f"Counterfactual ledger read-back for {case_id}: "
+                f"selected_branch_id={str((item or {}).get('selected_branch_id') or '')!r}; "
+                f"reopen_conditions={len(actual_conditions)}."
+            ),
+        )
     if verifier == "persistent_state_value":
         from jarvis_mrb.environment_state import get_state
 

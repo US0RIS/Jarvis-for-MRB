@@ -808,27 +808,58 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 },
             )
 
-            # A11 — inferred preferences may guide planning but cannot grant authority.
+            # A11 — repeated explicit approvals may produce low-authority preference
+            # inference, but that learned preference never grants protected authority.
             _, state_a11 = _make_state(env, "Acceptance A11")
-            sm.upsert(
-                "preference",
-                "calendar_autonomy",
-                {"behavior": "automatically handle routine calendar holds"},
-                confidence=0.85,
-                source_kind="inferred_behavior",
-                source_ref="a11:inferred-preference",
-            )
             permissions.set_policy("external_write", "confirm")
+            approval_executor_a11 = _fake_audited_pending_write(env)
+            approved_events_before_a11 = wm.max_event_id()
+
+            for index in range(3):
+                approval_plan_a11 = ap.create_plan(
+                    state_a11,
+                    [
+                        {
+                            "id": f"approved-write-{index}",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": f"A11 synthetic approved hold {index}",
+                                "start": f"2030-01-0{index + 1}T14:00:00-08:00",
+                                "end": f"2030-01-0{index + 1}T14:30:00-08:00",
+                            },
+                        }
+                    ],
+                )
+                waiting_approval_a11 = ap.execute_next(
+                    approval_plan_a11["id"],
+                    lambda *_args, **_kwargs: SimpleNamespace(
+                        ok=True,
+                        message="must await explicit approval",
+                    ),
+                )
+                ap.approve_step(
+                    approval_plan_a11["id"],
+                    waiting_approval_a11["steps"][0]["id"],
+                    approval_executor_a11,
+                )
+
+            preference_key_a11 = sm.approval_preference_key(
+                "calendar.create"
+            )
+            preference_a11 = sm.get(
+                "preference",
+                preference_key_a11,
+            )
             plan_a11 = ap.create_plan(
                 state_a11,
                 [
                     {
-                        "id": "write",
+                        "id": "post-inference-write",
                         "tool": "calendar.create",
                         "arguments": {
                             "summary": "A11 synthetic protected hold",
-                            "start": "2030-01-01T14:00:00-08:00",
-                            "end": "2030-01-01T14:30:00-08:00",
+                            "start": "2030-01-10T14:00:00-08:00",
+                            "end": "2030-01-10T14:30:00-08:00",
                         },
                     }
                 ],
@@ -840,13 +871,28 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 or SimpleNamespace(ok=True, message="must not execute"),
             )
             authority_a11 = sm.authority_for("calendar.create")
-            preference_a11 = sm.get("preference", "calendar_autonomy")
+            inference_events_a11 = [
+                item
+                for item in wm.list_events(
+                    since_event_id=approved_events_before_a11,
+                    limit=200,
+                )
+                if str(item.get("event_type") or "")
+                == "agency.self_model.inferred"
+            ]
             _check(
                 checks,
                 "A11",
-                "inferred autonomy preference cannot bypass protected action approval boundary",
+                "approval-derived autonomy preference cannot bypass protected action approval boundary",
                 preference_a11 is not None
                 and preference_a11["source_kind"] == "inferred_behavior"
+                and len(
+                    (preference_a11.get("value") or {}).get(
+                        "supporting_approval_event_ids",
+                        [],
+                    )
+                ) >= 3
+                and bool(inference_events_a11)
                 and waiting_a11["status"] == "awaiting_approval"
                 and calls_a11 == []
                 and authority_a11["allowed"]
@@ -855,6 +901,7 @@ def run_synthetic_acceptance() -> dict[str, Any]:
                 and not authority_a11["self_model_can_override"],
                 {
                     "preference": preference_a11,
+                    "inference_events": inference_events_a11,
                     "plan_status": waiting_a11["status"],
                     "executor_calls": calls_a11,
                     "authority": authority_a11,

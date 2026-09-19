@@ -315,6 +315,30 @@ def synthesize_adapter(
     }
 
 
+def _capability_generated_block_reason(
+    reason: str,
+    *,
+    capability: str,
+    proposed_tool: str,
+) -> bool:
+    clean = " ".join(str(reason or "").lower().split())
+    if not clean:
+        return False
+    generated_prefixes = (
+        "missing capability:",
+        "agency scope does not permit ",
+        "permission policy currently denies agency use of ",
+    )
+    if not clean.startswith(generated_prefixes):
+        return False
+    needles = [
+        str(value or "").strip().lower()
+        for value in (capability, proposed_tool)
+        if str(value or "").strip()
+    ]
+    return any(needle in clean for needle in needles)
+
+
 def reconcile_gaps() -> dict[str, Any]:
     """Resume blocked goals when a previously missing/proposed capability becomes usable."""
     from jarvis_mrb.desired_state import get_desired_state, set_state
@@ -341,10 +365,12 @@ def reconcile_gaps() -> dict[str, Any]:
         state = get_desired_state(state_id) if state_id else None
         if state is None or str(state.get("state") or "") != "blocked":
             continue
-        blocked_reason = str(state.get("blocked_reason") or "").lower()
-        capability_matches = bool(capability and capability.lower() in blocked_reason)
-        proposed_matches = bool(proposed and proposed.lower() in blocked_reason)
-        if not (capability_matches or proposed_matches):
+        blocked_reason = str(state.get("blocked_reason") or "")
+        if not _capability_generated_block_reason(
+            blocked_reason,
+            capability=capability,
+            proposed_tool=proposed,
+        ):
             continue
 
         remaining = [

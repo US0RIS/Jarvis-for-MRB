@@ -2121,21 +2121,78 @@ def _evaluate_a8(session: dict[str, Any], conn: sqlite3.Connection, events: list
         (session["started_at"], session["desired_state_id"]),
     ).fetchall()
     low = [row for row in rows if str(row["decision"]) == "log"]
+    interrupt_candidates = [
+        row for row in rows
+        if str(row["decision"]) == "interrupt"
+    ]
     emitted_total = sum(int(row["emitted_count"] or 0) for row in rows)
-    duplicate_interruptions = sum(max(0, int(row["emitted_count"] or 0) - 1) for row in rows)
-    emitted_rows = [row for row in rows if int(row["emitted_count"] or 0) > 0]
-    inspectable = bool(emitted_rows) and all(str(row["rationale"] or "").strip() for row in emitted_rows)
+    duplicate_interruptions = sum(
+        max(0, int(row["emitted_count"] or 0) - 1)
+        for row in rows
+    )
+    emitted_rows = [
+        row for row in rows
+        if int(row["emitted_count"] or 0) > 0
+    ]
+    one_high_value_candidate = bool(
+        len(interrupt_candidates) == 1
+        and len(emitted_rows) == 1
+        and str(interrupt_candidates[0]["id"]) == str(emitted_rows[0]["id"])
+        and emitted_total == 1
+    )
+    duplicate_observation_exercised = bool(
+        len(emitted_rows) == 1
+        and int(emitted_rows[0]["observation_count"] or 0) >= 2
+    )
+    inspectable = bool(emitted_rows) and all(
+        str(row["rationale"] or "").strip()
+        for row in emitted_rows
+    )
     checks = [
-        _check("many low-value changes remained logged only", len(low) >= 5, len(low)),
-        _check("exactly one bounded interruption occurred", emitted_total == 1, emitted_total),
-        _check("duplicate observations did not duplicate interruption", duplicate_interruptions == 0, duplicate_interruptions),
-        _check("interruption reason is inspectable", inspectable, [str(row["rationale"]) for row in emitted_rows]),
+        _check(
+            "many low-value changes remained logged only",
+            len(low) >= 5,
+            len(low),
+        ),
+        _check(
+            "exactly one interrupt-worthy high-value change produced one bounded interruption",
+            one_high_value_candidate,
+            {
+                "interrupt_candidate_ids": [
+                    str(row["id"]) for row in interrupt_candidates
+                ],
+                "emitted_ids": [
+                    str(row["id"]) for row in emitted_rows
+                ],
+                "emitted_total": emitted_total,
+            },
+        ),
+        _check(
+            "a duplicate high-value observation was exercised without duplicating interruption",
+            duplicate_observation_exercised
+            and duplicate_interruptions == 0,
+            {
+                "duplicate_observation_exercised": duplicate_observation_exercised,
+                "observation_count": (
+                    int(emitted_rows[0]["observation_count"] or 0)
+                    if len(emitted_rows) == 1 else 0
+                ),
+                "duplicate_interruptions": duplicate_interruptions,
+            },
+        ),
+        _check(
+            "interruption reason is inspectable",
+            inspectable,
+            [str(row["rationale"]) for row in emitted_rows],
+        ),
     ]
     return {
         "checks": checks,
         "evidence": {
             "low_value_changes": len(low),
+            "high_value_candidates": len(interrupt_candidates),
             "bounded_interruptions": emitted_total,
+            "duplicate_observation_exercised": duplicate_observation_exercised,
             "duplicate_interruptions": duplicate_interruptions,
             "interruption_reason_inspectable": inspectable,
         },

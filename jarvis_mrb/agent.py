@@ -392,6 +392,99 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "spatial.find":
         return AgentReply(True, describe_last_seen(str(args.get("object") or args.get("query") or "")))
 
+    if tool == "chronos.trace":
+        from jarvis_mrb.world_chronos import trace as chronos_trace
+        entity = str(args.get("entity") or args.get("query") or "").strip()
+        if not entity:
+            return AgentReply(False, "Chronos trace requires an entity.")
+        try:
+            result = chronos_trace(entity, limit=int(args.get("limit") or 20))
+        except (TypeError, ValueError) as exc:
+            return AgentReply(False, str(exc))
+        events = list(result.get("events") or [])
+        if not events:
+            return AgentReply(
+                True,
+                f"Chronos has no linked events for {result['entity']['name']}.",
+                data=result,
+            )
+        rendered = "; ".join(
+            f"{item.get('occurred_at')}: {item.get('summary')}"
+            for item in events[:8]
+        )
+        return AgentReply(
+            True,
+            f"Chronos trace for {result['entity']['name']}: {rendered}",
+            data=result,
+        )
+
+    if tool == "chronos.state_at":
+        from jarvis_mrb.world_chronos import state_at as chronos_state_at
+        entity = str(args.get("entity") or args.get("query") or "").strip()
+        at = str(args.get("at") or "").strip()
+        if not entity or not at:
+            return AgentReply(False, "Chronos state_at requires entity and at.")
+        try:
+            result = chronos_state_at(entity, at)
+        except (TypeError, ValueError) as exc:
+            return AgentReply(False, str(exc))
+        facts: list[str] = []
+        for predicate, payload in (result.get("predicates") or {}).items():
+            preferred = dict(payload.get("preferred") or {})
+            value = preferred.get("value")
+            if isinstance(value, dict) and value.get("name"):
+                rendered_value = str(value.get("name"))
+            else:
+                rendered_value = json.dumps(value, ensure_ascii=False, default=str)
+            uncertainty = " (contested)" if payload.get("uncertain") else ""
+            facts.append(f"{predicate}={rendered_value}{uncertainty}")
+        message = (
+            f"Chronos state for {result['entity']['name']} at {result['at']}: "
+            + ("; ".join(facts[:12]) if facts else "no belief state was recorded.")
+        )
+        return AgentReply(True, message, data=result)
+
+    if tool == "chronos.changes":
+        from jarvis_mrb.world_chronos import changes as chronos_changes
+        entity = str(args.get("entity") or args.get("query") or "").strip()
+        since = str(args.get("since") or "").strip()
+        until = str(args.get("until") or "").strip()
+        if not entity or not since:
+            return AgentReply(False, "Chronos changes requires entity and since.")
+        try:
+            result = chronos_changes(
+                entity,
+                since,
+                until or None,
+                limit=int(args.get("limit") or 40),
+            )
+        except (TypeError, ValueError) as exc:
+            return AgentReply(False, str(exc))
+        belief_changes = list(result.get("belief_changes") or [])
+        events = list(result.get("events") or [])
+        pieces = [
+            (
+                f"{item.get('observed_at')}: {item.get('predicate')} changed "
+                f"from {json.dumps(item.get('from'), ensure_ascii=False, default=str)} "
+                f"to {json.dumps(item.get('to'), ensure_ascii=False, default=str)}"
+            )
+            for item in belief_changes[:6]
+        ]
+        if not pieces:
+            pieces = [
+                f"{item.get('occurred_at')}: {item.get('summary')}"
+                for item in events[:6]
+            ]
+        return AgentReply(
+            True,
+            (
+                f"Chronos changes for {result['entity']['name']} from "
+                f"{result['since']} to {result['until']}: "
+                + ("; ".join(pieces) if pieces else "no linked changes were recorded.")
+            ),
+            data=result,
+        )
+
     if tool == "briefing.generate":
         return AgentReply(True, generate_briefing())
 
@@ -998,6 +1091,7 @@ vision.recall {{query,seconds,max_frames}}; vision.ocr_clipboard {{}};
 expense.capture {{}}; expense.list {{limit}}; expense.export {{}}; fact.check {{claim}}; journal.generate {{}};
 meeting.start {{title}}; meeting.finish {{meeting_id}}; meeting.list {{limit}};
 knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}};
+chronos.trace {{entity,limit}}; chronos.state_at {{entity,at}}; chronos.changes {{entity,since,until,limit}};
 briefing.generate {{}};
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_recurring {{when,command,recurrence}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}};
 background.submit {{prompt}}; background.list {{limit}}; background.status {{task_id}}; background.cancel {{task_id}};
@@ -1019,6 +1113,9 @@ Routing rules:
 - meeting.start/finish: only when the user explicitly asks to start or stop local meeting notes. Do not start background transcription merely because a meeting is present on the calendar.
 - knowledge.search: natural-language search across indexed mail, calendar, local notes, and prior conversation memory. Use this when the user asks to find something across their own data without naming one app.
 - spatial.find: where an object was last seen by passive vision. This is last-seen context, not reliable turn-by-turn navigation.
+- chronos.trace: reconstruct the occurrence-time-ordered history attached to a known person/project/object/other world entity.
+- chronos.state_at: answer what Jarvis's persisted world beliefs said about an entity at a specific ISO date/time. Treat contested alternatives as uncertainty, not certainty.
+- chronos.changes: explain belief revisions and linked events within a time window. Use occurred/observed time, not ingestion order.
 - briefing.generate: a concise current briefing from calendar, unread mail, weather/news, and background work.
 - workflow.run: user asks for a multi-step goal that needs several tools in sequence. The DAG engine may parallelize safe reads. Existing permission policy still applies to every node; do not promise confirmation-free external/destructive writes.
 - Agency is the persistent desired-state executor. agency.enable and agency.activate_goal expand autonomous scope and remain behind the security confirmation boundary. agency.monitor, agency.disable, and agency.pause_goal reduce autonomous scope. agency.status reports persisted goals/plans without changing them.

@@ -2343,7 +2343,7 @@ def _evaluate_a8(session: dict[str, Any], conn: sqlite3.Connection, events: list
     )
     duplicate_observation_exercised = bool(
         len(emitted_rows) == 1
-        and int(emitted_rows[0]["observation_count"] or 0) >= 2
+        and int(emitted_rows[0]["occurrence_count"] or 0) >= 2
     )
     inspectable = bool(emitted_rows) and all(
         str(row["rationale"] or "").strip()
@@ -2374,8 +2374,8 @@ def _evaluate_a8(session: dict[str, Any], conn: sqlite3.Connection, events: list
             and duplicate_interruptions == 0,
             {
                 "duplicate_observation_exercised": duplicate_observation_exercised,
-                "observation_count": (
-                    int(emitted_rows[0]["observation_count"] or 0)
+                "occurrence_count": (
+                    int(emitted_rows[0]["occurrence_count"] or 0)
                     if len(emitted_rows) == 1 else 0
                 ),
                 "duplicate_interruptions": duplicate_interruptions,

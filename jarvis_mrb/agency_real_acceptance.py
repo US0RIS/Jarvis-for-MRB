@@ -1388,7 +1388,7 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if step_id:
             approved_by_step.setdefault(step_id, []).append(int(item["id"]))
 
-    audited_read_events: dict[str, list[int]] = {}
+    audited_read_events: dict[str, list[dict[str, Any]]] = {}
     for item in events:
         if item["event_type"] != "action.tool":
             continue
@@ -1398,8 +1398,14 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
         if not bool(payload.get("ok")):
             continue
         step_id = str(payload.get("agency_step_id") or "")
+        tool = str(payload.get("tool") or "")
         if step_id:
-            audited_read_events.setdefault(step_id, []).append(int(item["id"]))
+            audited_read_events.setdefault(step_id, []).append(
+                {
+                    "event_id": int(item["id"]),
+                    "tool": tool,
+                }
+            )
 
     try:
         read_rows = conn.execute(
@@ -1417,18 +1423,27 @@ def _evaluate_a3(session: dict[str, Any], conn: sqlite3.Connection, events: list
         ).fetchall()
     except sqlite3.OperationalError:
         read_rows = []
-    automatic_reads = [
-        {
-            **dict(row),
-            "action_event_ids": list(
-                audited_read_events.get(str(row["id"] or ""), [])
-            ),
-        }
-        for row in read_rows
-        if str(row["status"] or "") == "verified"
-        and str(row["id"] or "") not in waiting_by_step
-        and bool(audited_read_events.get(str(row["id"] or ""), []))
-    ]
+    automatic_reads = []
+    for row in read_rows:
+        step_id = str(row["id"] or "")
+        matching_receipts = [
+            item
+            for item in audited_read_events.get(step_id, [])
+            if str(item.get("tool") or "") == str(row["tool"] or "")
+        ]
+        if (
+            str(row["status"] or "") == "verified"
+            and step_id not in waiting_by_step
+            and matching_receipts
+        ):
+            automatic_reads.append(
+                {
+                    **dict(row),
+                    "action_event_ids": [
+                        int(item["event_id"]) for item in matching_receipts
+                    ],
+                }
+            )
 
     verifications = _verification_rows_for_state(
         conn,

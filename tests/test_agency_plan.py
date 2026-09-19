@@ -871,6 +871,36 @@ class AgencyPlanTests(unittest.TestCase):
         assert recovered is not None
         self.assertEqual(recovered["id"], waiting["steps"][0]["id"])
 
+    def test_denial_rejects_step_that_never_reached_approval_boundary(self) -> None:
+        _, state_id = self._state_for_project("Project Invalid Denial")
+        plan = agency_plan.create_plan(
+            state_id,
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "Project Invalid Denial"},
+                }
+            ],
+        )
+        step_id = str(plan["steps"][0]["id"])
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "not waiting for approval",
+        ):
+            agency_plan.deny_step(
+                plan["id"],
+                step_id,
+                reason="This read never crossed a protected approval boundary.",
+            )
+
+        persisted = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertIsNotNone(persisted)
+        assert persisted is not None
+        self.assertEqual(persisted["status"], "active")
+        self.assertEqual(persisted["steps"][0]["status"], "pending")
+
     def test_denial_moves_plan_to_replan_instead_of_losing_goal(self) -> None:
         _, state_id = self._state_for_project("Project Denial")
         plan = agency_plan.create_plan(

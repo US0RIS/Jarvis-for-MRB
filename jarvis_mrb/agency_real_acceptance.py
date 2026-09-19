@@ -3072,6 +3072,10 @@ def _evaluate_a12(session: dict[str, Any], conn: sqlite3.Connection, events: lis
                 == "ollama_model"
                 and str((item.get("payload") or {}).get("synthesizer_backend") or "")
                 == "ollama_model"
+                and str((item.get("payload") or {}).get("worker_model") or "")
+                == str(row["worker_model"] or "")
+                and str((item.get("payload") or {}).get("synthesizer_model") or "")
+                == str(row["synthesizer_model"] or "")
                 for item in events
             )
         }

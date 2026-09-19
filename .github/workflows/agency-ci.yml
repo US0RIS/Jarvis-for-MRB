@@ -22,6 +22,31 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q jarvis_mrb tests
 
+  agency-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install package
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Run Agency synthetic acceptance smoke
+        shell: pwsh
+        env:
+          JARVIS_AGENCY_MODE: monitor
+        run: python -m unittest discover -s tests -p "test_agency_acceptance.py" -v
+
   windows-regression:
     runs-on: windows-latest
     timeout-minutes: 30

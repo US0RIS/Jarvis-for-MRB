@@ -460,7 +460,8 @@ def stream_natural_language(
         "think": False,
         "keep_alive": active_keep_alive,
         "messages": messages,
-        "options": {"temperature": 0},
+        # Conservative creativity: maintain tool-first JSON reliability.
+        "options": {"temperature": 0.2},
     }
 
     plan_buffer = ""

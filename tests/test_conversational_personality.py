@@ -123,6 +123,21 @@ class ConversationalVoiceTests(unittest.TestCase):
         )
         self.assertIn("rejected_tool_call=False", entry)
 
+    def test_iphone_fallback_and_proactive_audio_do_not_inject_honorifics(self) -> None:
+        speech = (_ROOT / "ios/JarvisIOS/SpeechSynthesizer.swift").read_text(encoding="utf-8")
+        presence = (_ROOT / "ios/JarvisIOS/PersistentPresenceController.swift").read_text(encoding="utf-8")
+        model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
+        self.assertNotIn("respectfulSpeechText", speech)
+        self.assertIn("let cleaned = text.trimmingCharacters(in:", speech)
+        start = presence.index("private func speakProactive(")
+        end = presence.index("private static func collapseRepeatedSir(", start)
+        delivery = presence[start:end]
+        self.assertNotIn('"Sir, "', delivery)
+        self.assertIn("client.synthesizeSpeech(trimmed)", delivery)
+        self.assertIn("text: trimmed,", delivery)
+        self.assertNotIn('"Ready, sir. Say confirm or cancel."', model)
+        self.assertIn('"Ready. Say confirm or cancel."', model)
+
     def test_guarded_actions_are_unaffected_by_personality(self) -> None:
         agent = (_ROOT / "jarvis_mrb/agent.py").read_text(encoding="utf-8")
         stream = (_ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")

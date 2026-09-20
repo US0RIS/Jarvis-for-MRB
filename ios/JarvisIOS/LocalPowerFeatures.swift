@@ -318,6 +318,8 @@ final class LocalPowerFeaturesController: ObservableObject {
         let proactiveThreshold: String
         let rollingAudioMemoryEnabled: Bool
         let localSensorContextEnabled: Bool
+        let sensorOpportunitiesEnabled: Bool
+        let weatherContextEnabled: Bool
     }
 
     init(
@@ -895,7 +897,9 @@ final class LocalPowerFeaturesController: ObservableObject {
                 knownPeopleRecognitionEnabled: appModel.settings.knownPeopleRecognitionEnabled,
                 proactiveThreshold: appModel.settings.proactiveThreshold,
                 rollingAudioMemoryEnabled: appModel.settings.rollingAudioMemoryEnabled,
-                localSensorContextEnabled: appModel.settings.localSensorContextEnabled
+                localSensorContextEnabled: appModel.settings.localSensorContextEnabled,
+                sensorOpportunitiesEnabled: appModel.settings.sensorOpportunitiesEnabled,
+                weatherContextEnabled: appModel.settings.weatherContextEnabled
             )
         }
 
@@ -914,6 +918,8 @@ final class LocalPowerFeaturesController: ObservableObject {
             appModel.settings.localVisualHistoryEnabled = false
             appModel.settings.knownPeopleRecognitionEnabled = false
             appModel.settings.rollingAudioMemoryEnabled = false
+            appModel.settings.sensorOpportunitiesEnabled = false
+            appModel.settings.weatherContextEnabled = false
         }
     }
 
@@ -927,6 +933,8 @@ final class LocalPowerFeaturesController: ObservableObject {
         appModel.settings.proactiveThreshold = snapshot.proactiveThreshold
         appModel.settings.rollingAudioMemoryEnabled = snapshot.rollingAudioMemoryEnabled
         appModel.settings.localSensorContextEnabled = snapshot.localSensorContextEnabled
+        appModel.settings.sensorOpportunitiesEnabled = snapshot.sensorOpportunitiesEnabled
+        appModel.settings.weatherContextEnabled = snapshot.weatherContextEnabled
         savedModeState = nil
     }
 

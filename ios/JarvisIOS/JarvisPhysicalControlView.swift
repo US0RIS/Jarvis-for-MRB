@@ -36,6 +36,21 @@ struct PublicCameraDiscoveryResponse: Decodable {
     }
 }
 
+struct DiligenceMatterSummary: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let projectEntityID: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, label
+        case projectEntityID = "project_entity_id"
+    }
+}
+
+struct DiligenceMatterList: Decodable {
+    let matters: [DiligenceMatterSummary]
+}
+
 struct ExternalWatchSummary: Decodable, Identifiable {
     let id: String
     let scope: String
@@ -315,6 +330,18 @@ struct JarvisPhysicalHubView: View {
                             .foregroundStyle(.secondary)
                         Text("Try: “Jarvis, find nearby public cameras.”")
                             .font(.caption.weight(.medium))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Independent public-record diligence") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Matter-isolated SEC filing checks and source-linked XBRL comparisons. Requires exact CIKs and explicit client/matter authorization.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        NavigationLink("Open local diligence workbench") {
+                            JarvisPublicDiligenceView()
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

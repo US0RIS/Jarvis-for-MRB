@@ -462,11 +462,11 @@ struct JarvisAPIClient {
 
         let explanation: String
         if Self.safeToRetryAsReadOnlyRequest(originalText) {
-            explanation = "I couldn't finish that request. The Jarvis backend completed that request but returned no answer."
+            explanation = "Jarvis finished without returning an answer."
         } else if backendOK == false {
-            explanation = "I couldn't finish that request. The Jarvis backend failed that request before returning an answer. I did not retry it automatically because doing so could duplicate an action."
+            explanation = "The backend failed before returning an answer. I didn't retry automatically because that could duplicate an action."
         } else {
-            explanation = "I couldn't finish that request. The Jarvis backend returned no answer. I did not retry that request automatically because doing so could duplicate an action."
+            explanation = "The backend returned no answer. I didn't retry automatically because that could duplicate an action."
         }
         continuation.yield(.delta(explanation))
         continuation.yield(.done(ok: false))
@@ -475,10 +475,8 @@ struct JarvisAPIClient {
     private static func normalizeStreamText(_ raw: String, previousTail: String) -> String {
         var value = collapseRepeatedSir(raw)
 
-        // The backend intentionally emits its transport-level “Sir, ” as one
-        // streamed delta. If the model itself begins the next delta with another
-        // “sir”, suppress that second address before the frontend ever displays or
-        // speaks it. This makes the invariant hold even across packet boundaries.
+        // A model or legacy backend may still produce an honorific at a chunk
+        // boundary. Collapse adjacent duplicates without adding any new address.
         let tail = previousTail.lowercased().trimmingCharacters(in: .newlines)
         let tailEndsInSir = tail.range(
             of: #"sir\s*[,;:!.-]?\s*$"#,

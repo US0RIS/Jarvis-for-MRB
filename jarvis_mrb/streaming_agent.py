@@ -19,6 +19,7 @@ from jarvis_mrb.agent import (
     handle_natural_language,
 )
 from jarvis_mrb.conversation import ConversationMessage, requests_extended_context
+from jarvis_mrb.deterministic_dispatch import note_model_planner
 from jarvis_mrb.personality import full_personality_context
 from jarvis_mrb.planner_model import QUALITY_MODEL, get_auto_route
 
@@ -445,6 +446,7 @@ def stream_natural_language(
     if announce_analysis:
         yield "Analyzing that now, sir. "
 
+    note_model_planner()
     selected_history = _history_for_current_turn(stripped, history)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": _planner_system(datetime.now().astimezone().isoformat(), allow_background)}

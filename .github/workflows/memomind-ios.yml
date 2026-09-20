@@ -29,6 +29,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_deterministic_dispatch.py" -v
       - name: Verify conversational voice and non-compulsory Jarvis address
         run: python -m unittest discover -s tests -p "test_conversational_personality.py" -v
+      - name: Verify opportunistic glass sightings require explicit goals and never actuate
+        run: python -m unittest discover -s tests -p "test_opportunity_radar.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback
         run: python -m unittest discover -s tests -p "test_explicit_meeting_actions.py" -v
       - name: Install provider HTTP client for isolated tests

@@ -159,6 +159,7 @@ def compare_explicit_claim(
     claim_value: float,
     claim_end: str,
     claim_unit: str,
+    claim_start: str = "",
     concept_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Flag only an exact period/unit candidate; never decide a legal contradiction."""
@@ -169,6 +170,12 @@ def compare_explicit_claim(
     equal_period = [p for p in concept_result.get("facts") or [] if p.get("end") == claim_end]
     if not equal_period:
         return {"status": "not_comparable", "reason": "No fact found for same period end."}
+    if claim_start:
+        equal_period = [p for p in equal_period if p.get("start") == claim_start]
+        if not equal_period:
+            return {"status": "not_comparable", "reason": "No matching start/end period."}
+    elif len({str(p.get("start") or "") for p in equal_period}) > 1:
+        return {"status": "not_comparable", "reason": "Multiple reporting durations share the same end date; specify start."}
     latest = max(equal_period, key=lambda p: (p.get("filed") or "", p.get("accession") or ""))
     actual = float(latest["value"])
     tolerance = max(0.01, abs(actual) * 0.000001)

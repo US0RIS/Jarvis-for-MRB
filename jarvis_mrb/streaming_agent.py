@@ -19,6 +19,7 @@ from jarvis_mrb.agent import (
     handle_natural_language,
 )
 from jarvis_mrb.conversation import ConversationMessage, requests_extended_context
+from jarvis_mrb.conversation_intent import is_explicit_in_context_opinion
 from jarvis_mrb.deterministic_dispatch import note_model_planner
 from jarvis_mrb.personality import full_personality_context
 from jarvis_mrb.planner_model import QUALITY_MODEL, get_auto_route
@@ -362,12 +363,24 @@ def _direct_answer_without_tools(
     *,
     model: str,
     keep_alive: str,
+    rejected_tool_call: bool = True,
 ) -> Iterator[str]:
     now = datetime.now().astimezone().isoformat()
+    routing_note = (
+        "The previous planner attempted an unnecessary tool call, so correct "
+        "that mistake by answering from ordinary knowledge, conversation "
+        "context, reasoning, arithmetic, and the supplied current date/time."
+        if rejected_tool_call else
+        "This is a conversational request about ideas already supplied. Give "
+        "your actual take rather than a generic pros-and-cons list. Ground the "
+        "response in the immediately preceding exchange, not an unrelated "
+        "older topic. If the subject is unclear, ask one short clarification. "
+        "Do not claim to have checked external or private sources."
+    )
     system = f"""{full_personality_context()}
 Current local date/time: {now}.
 Answer the user's request DIRECTLY. Do not call, suggest, simulate, or describe any tool use.
-The previous planner attempted an unnecessary tool call, so correct that mistake by answering from ordinary knowledge, conversation context, reasoning, arithmetic, and the current date/time above.
+{routing_note}
 For current-time questions in another city, calculate the timezone conversion directly from the supplied current time and known timezone rules. Do not discuss the Clock app.
 Keep the answer natural and voice-friendly. Have a clear, context-sensitive point of view if the user asks for your take. Address the user as "sir" only when it naturally fits; the transport adds nothing.
 """
@@ -460,6 +473,20 @@ def stream_natural_language(
         message = _respectful(fast).message
         if message and message != "__EXIT__":
             yield message
+        return
+
+    # Standalone requests for a take on the ideas already being discussed do
+    # not require a JSON tool-planner preamble. They use the more natural
+    # conversational streaming path, with no data fetch or action authority.
+    # This runs AFTER public research and permission-aware deterministic routes.
+    if is_explicit_in_context_opinion(stripped):
+        yield from _direct_answer_without_tools(
+            stripped,
+            _history_for_current_turn(stripped, history),
+            model=active_model,
+            keep_alive=active_keep_alive,
+            rejected_tool_call=False,
+        )
         return
 
     if announce_analysis:

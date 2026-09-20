@@ -62,13 +62,17 @@ def fetch_company_filings(cik: str | int, *, limit: int = 15) -> dict[str, Any]:
     forms = recent.get("form") or []
     if not isinstance(forms, list):
         raise ValueError("SEC filing forms have unexpected format.")
+    def column(name: str, i: int) -> str:
+        values = recent.get(name)
+        return str(values[i] or "") if isinstance(values, list) and i < len(values) else ""
+
     results: list[dict[str, Any]] = []
     for i, form in enumerate(forms):
         if not isinstance(form, str):
             continue
-        accession = str((recent.get("accessionNumber") or [""] * len(forms))[i])
-        filed = str((recent.get("filingDate") or [""] * len(forms))[i])
-        document = str((recent.get("primaryDocument") or [""] * len(forms))[i])
+        accession = column("accessionNumber", i)
+        filed = column("filingDate", i)
+        document = column("primaryDocument", i)
         if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
             continue
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", filed):

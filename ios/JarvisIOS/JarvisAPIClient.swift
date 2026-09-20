@@ -175,6 +175,60 @@ struct JarvisAPIClient {
         }
     }
 
+    func listDiligenceMatters() async throws -> [DiligenceMatterSummary] {
+        let (data, response) = try await postData(
+            path: "external/diligence/list", body: [:]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(DiligenceMatterList.self, from: data).matters
+    }
+
+    func createDiligenceMatter(label: String, projectEntityID: String) async throws -> DiligenceMatterSummary {
+        let (data, response) = try await postData(
+            path: "external/diligence/matter",
+            body: ["label": label, "project_entity_id": projectEntityID]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(DiligenceMatterSummary.self, from: data)
+    }
+
+    func registerDiligenceIssuer(matterID: String, cik: String, name: String) async throws {
+        let (data, response) = try await postData(
+            path: "external/diligence/issuer",
+            body: ["matter_id": matterID, "cik": cik, "asserted_name": name]
+        )
+        try validate(response: response, data: data)
+    }
+
+    func registerNumericDiligenceClaim(
+        matterID: String, cik: String, taxonomy: String, tag: String,
+        value: Double, unit: String, start: String, end: String, sourceRef: String
+    ) async throws {
+        let (data, response) = try await postData(
+            path: "external/diligence/claim",
+            body: [
+                "matter_id": matterID, "cik": cik, "taxonomy": taxonomy,
+                "tag": tag, "value": value, "unit": unit,
+                "start": start, "end": end, "source_ref": sourceRef,
+            ]
+        )
+        try validate(response: response, data: data)
+    }
+
+    func checkDiligenceMatter(matterID: String, includeSanctions: Bool) async throws -> [String: Any] {
+        let (data, response) = try await postData(
+            path: "external/diligence/check",
+            body: ["matter_id": matterID, "include_sanctions": includeSanctions]
+        )
+        try validate(response: response, data: data)
+        guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "JarvisDiligence", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Diligence response is not an object."
+            ])
+        }
+        return parsed
+    }
+
     func createExternalWatch(
         kind: String, label: String, config: [String: Any],
         seconds: Int, scope: String = "personal"

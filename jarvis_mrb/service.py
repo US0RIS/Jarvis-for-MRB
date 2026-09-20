@@ -897,7 +897,7 @@ def command_stream(
                 first_output = False
                 emit_thinking(False)
             ok = False
-            message = f"I'm sorry, sir. Streaming failed: {exc}"
+            message = f"Streaming failed: {exc}"
             pieces.append(message)
             yield json.dumps({"type": "delta", "text": message}, ensure_ascii=False) + "\n"
         finally:

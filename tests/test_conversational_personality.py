@@ -80,6 +80,49 @@ class ConversationalVoiceTests(unittest.TestCase):
             with self.subTest(prompt=prompt):
                 self.assertTrue(_requires_audited_web(prompt))
 
+    def test_explicit_in_context_takes_skip_json_planner_only_if_unambiguous(self) -> None:
+        from jarvis_mrb.conversation_intent import is_explicit_in_context_opinion
+
+        for prompt in (
+            "What do you think?",
+            "Honestly, what's your take on this design?",
+            "Which of these ideas would you choose?",
+            "Do you prefer that approach?",
+            "Would you go with this plan?",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertTrue(is_explicit_in_context_opinion(prompt))
+
+        for prompt in (
+            "What do you think about the latest stock price?",
+            "Do you like this design and send it to my boss?",
+            "What do you think of my unread email?",
+            "Which of these models is currently available?",
+            "What do you think about political candidates?",
+            "Choose the best hotel in Melbourne",
+            "Please watch the nearest CCTV camera for smoke",
+            "What do you think? Also turn off the lights.",
+            "What do you think about this contract's actual liabilities?",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertFalse(is_explicit_in_context_opinion(prompt))
+
+        stream = (_ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")
+        entry = stream[stream.index("def stream_natural_language("):]
+        self.assertLess(
+            entry.index("if _requires_audited_web(stripped):"),
+            entry.index("if is_explicit_in_context_opinion(stripped):"),
+        )
+        self.assertLess(
+            entry.index("fast = _fast_path(stripped)"),
+            entry.index("if is_explicit_in_context_opinion(stripped):"),
+        )
+        self.assertLess(
+            entry.index("if is_explicit_in_context_opinion(stripped):"),
+            entry.index("note_model_planner()"),
+        )
+        self.assertIn("rejected_tool_call=False", entry)
+
     def test_guarded_actions_are_unaffected_by_personality(self) -> None:
         agent = (_ROOT / "jarvis_mrb/agent.py").read_text(encoding="utf-8")
         stream = (_ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")

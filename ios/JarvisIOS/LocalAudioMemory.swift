@@ -159,6 +159,75 @@ struct LocalSoundEvent: Equatable {
     let timestamp: Date
 }
 
+/// Opt-in, foreground-only *sound-class* perception when Jarvis is not in a
+/// voice/meeting session. It never transcribes conversation, writes PCM, or
+/// opens a second tap while SpeechRecognizer owns the microphone. SoundAnalysis
+/// receives short PCM buffers in memory and exports only a label/confidence.
+@MainActor
+final class AmbientSoundCapture: ObservableObject {
+    static let shared = AmbientSoundCapture()
+
+    @Published private(set) var status = "Off"
+    @Published private(set) var isCapturing = false
+
+    private let engine = AVAudioEngine()
+    private var tapInstalled = false
+    private var lastAttempt = Date.distantPast
+    private var permissionGranted: Bool?
+
+    private init() {}
+
+    func refresh(enabled: Bool, audioRouteManager: AudioRouteManager, preferBluetooth: Bool) async {
+        guard enabled else {
+            stop()
+            status = "Off"
+            return
+        }
+        if isCapturing { return }
+        // Avoid repeated permission prompts/session restarts on a denied or
+        // temporarily unavailable microphone.
+        guard Date().timeIntervalSince(lastAttempt) >= 20 else { return }
+        lastAttempt = Date()
+        if permissionGranted == nil {
+            permissionGranted = await AVAudioApplication.requestRecordPermission()
+        }
+        guard permissionGranted == true else {
+            status = "Microphone permission unavailable"
+            return
+        }
+        do {
+            try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
+            let input = engine.inputNode
+            let format = input.inputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                status = "Selected microphone not ready"
+                return
+            }
+            // A nil tap format accommodates Bluetooth HFP renegotiation.
+            input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
+                LocalSoundClassifier.shared.analyze(buffer, at: when.sampleTime)
+            }
+            tapInstalled = true
+            engine.prepare()
+            try engine.start()
+            isCapturing = true
+            status = "Foreground sound classification"
+        } catch {
+            stop()
+            status = "Ambient microphone unavailable"
+        }
+    }
+
+    func stop() {
+        if engine.isRunning { engine.stop() }
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        isCapturing = false
+    }
+}
+
 final class LocalSoundClassifier: NSObject, SNResultsObserving {
     static let shared = LocalSoundClassifier()
 

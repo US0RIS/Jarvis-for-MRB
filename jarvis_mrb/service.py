@@ -66,6 +66,7 @@ streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
 app = FastAPI(title="Jarvis for MRB", version="0.13.0")
 _scheduler_started = False
+_external_watches_started = False
 _tts_start_attempted = False
 _knowledge_started = False
 _proactive_started = False
@@ -292,6 +293,31 @@ def _ensure_scheduler() -> None:
     threading.Thread(target=_scheduler_loop, name="jarvis-scheduler", daemon=True).start()
 
 
+def _external_watch_loop() -> None:
+    # Explicitly created watches only. Runs in a separate daemon so a slow
+    # third-party provider cannot block normal task scheduling or phone commands.
+    time.sleep(5)
+    while True:
+        try:
+            from jarvis_mrb.external_watches import run_due_watches
+            run_due_watches(limit=2)
+            record_runtime_success("external_watches")
+        except Exception as exc:
+            record_runtime_failure("external_watches", exc)
+        time.sleep(60)
+
+
+def _ensure_external_watch_runner() -> None:
+    global _external_watches_started
+    if _external_watches_started:
+        return
+    _external_watches_started = True
+    threading.Thread(
+        target=_external_watch_loop,
+        name="jarvis-public-evidence-watches", daemon=True,
+    ).start()
+
+
 def _knowledge_loop() -> None:
     time.sleep(20)
     while True:
@@ -432,6 +458,7 @@ def startup() -> None:
         raise
 
     _ensure_scheduler()
+    _ensure_external_watch_runner()
     _ensure_knowledge_refresh()
     _start_tts_in_background()
     start_proactive_monitor()
@@ -474,6 +501,7 @@ def health() -> dict[str, Any]:
         "tool_audit": "ready" if bool(audit.get("installed")) else "degraded",
         "runtime_health": "ready" if int(runtime.get("degraded") or 0) == 0 else "degraded",
         "scheduler": "running" if _scheduler_started else "stopped",
+        "external_watches": "running" if _external_watches_started else "stopped",
         "knowledge_refresh": "running" if _knowledge_started else "stopped",
         "proactive_monitor": "running" if _proactive_started else "stopped",
         "agency": "ready" if bool(agency.get("ready")) else "degraded",

@@ -36,6 +36,24 @@ struct PublicCameraDiscoveryResponse: Decodable {
     }
 }
 
+struct PublicCameraAnalysisResponse: Decodable {
+    let status: String
+    let cameraID: String
+    let cameraName: String
+    let description: String
+    let retrievedAt: String
+    let model: String
+    let sourceNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, description, model
+        case cameraID = "camera_id"
+        case cameraName = "camera_name"
+        case retrievedAt = "retrieved_at"
+        case sourceNote = "source_note"
+    }
+}
+
 struct NearbyFacility: Decodable, Identifiable {
     let id: String
     let title: String
@@ -306,6 +324,19 @@ struct JarvisPhysicalControlView: View {
                     if let stream = URL(string: camera.streamURL), !camera.streamURL.isEmpty {
                         Link("Open official public camera stream", destination: stream)
                             .font(.caption)
+                    }
+                    if !camera.imageURL.isEmpty {
+                        Button(appModel.analyzingPublicCameraID == camera.id ? "Analyzing published still…" : "Analyze this public still with Jarvis") {
+                            Task { _ = await appModel.analyzePublishedCameraStill(camera.id) }
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .disabled(appModel.analyzingPublicCameraID != nil)
+                    }
+                    if let analysis = appModel.publicCameraAnalyses[camera.id] {
+                        Text(analysis)
+                            .font(.caption)
+                            .accessibilityIdentifier("public-camera-analysis")
                     }
                 }
                 .padding(12)

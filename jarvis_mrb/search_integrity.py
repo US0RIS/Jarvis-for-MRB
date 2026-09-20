@@ -293,6 +293,12 @@ def verify_receipt_ledger(receipt_id: str) -> tuple[bool, str]:
 
 
 def _plan_queries(question: str) -> list[QuerySpec]:
+    # The eight-family audit protocol is a deterministic coverage contract.
+    # A small model must not silently drop requirements while inventing search
+    # families or paraphrasing product identifiers. Semantic expansion remains
+    # opt-in; the default plan preserves the supplied question in each family.
+    if os.environ.get("JARVIS_RESEARCH_PLAN_USE_QWEN", "").strip().lower() not in {"1", "true", "yes"}:
+        return _fallback_plan(question)
     system = """Create an auditable web-search plan for a high-stakes comparison/discovery request.
 Return JSON only as {"queries":[{"family":"...","query":"...","rationale":"..."}]}.
 Use exactly these eight families once each: precision, breadth, constraints, authoritative, independent, disconfirming, long_tail, adversarial.

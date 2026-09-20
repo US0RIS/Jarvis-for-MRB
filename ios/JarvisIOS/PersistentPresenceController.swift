@@ -114,6 +114,8 @@ final class PersistentPresenceController: ObservableObject {
     @Published private(set) var lastProactiveMessage = ""
 
     let healthContext = HealthContextManager()
+    private weak var frontend: FrontendIntelligenceController?
+    private var lastHomeStateObservedAt = Date.distantPast
 
     private unowned let appModel: JarvisAppModel
     private let companion: CompanionConnection
@@ -149,6 +151,7 @@ final class PersistentPresenceController: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.locationLabel = isHome ? "home" : "away"
+                self.lastHomeStateObservedAt = Date()
                 if self.appModel.settings.geofencedProfilesEnabled {
                     self.profileLabel = isHome ? "home" : "mobile"
                 }
@@ -158,6 +161,10 @@ final class PersistentPresenceController: ObservableObject {
                 await self.sendEnvironmentState()
             }
         }
+    }
+
+    func attach(frontend: FrontendIntelligenceController) {
+        self.frontend = frontend
     }
 
     private var client: JarvisAPIClient {
@@ -409,6 +416,60 @@ final class PersistentPresenceController: ObservableObject {
         environment["health"] = healthState
         environment["preferences"] = preferenceState
         environment["devices"] = deviceState
+
+        // The MemoMind interface needs no camera. Independently opted-in
+        // microphone classifications, motion and GPS/geofence metadata reuse
+        // the already authenticated companion link, with no raw audio, image,
+        // transcript or biometric measurements in this transient snapshot.
+        var opportunity: [String: Any] = [
+            "source_id": appModel.settings.conversationSessionID,
+            "enabled": appModel.settings.sensorOpportunitiesEnabled
+        ]
+        if appModel.settings.sensorOpportunitiesEnabled {
+            let formatter = ISO8601DateFormatter()
+            let now = Date()
+            opportunity["observed_at"] = formatter.string(from: now)
+            opportunity["weather_opt_in"] = appModel.settings.weatherContextEnabled
+                && appModel.settings.localSensorContextEnabled
+            opportunity["audio"] = ["conversation_active": conversationActive]
+
+            if appModel.settings.localSensorContextEnabled, let sensors = frontend?.sensors {
+                if let observed = sensors.lastMotionAt, now.timeIntervalSince(observed) <= 90 {
+                    var motion: [String: Any] = ["activity": sensors.activity.lowercased()]
+                    if let speed = sensors.speedMPS, speed.isFinite, speed >= 0 {
+                        motion["speed_mps"] = speed
+                    }
+                    motion["observed_at"] = formatter.string(from: observed)
+                    opportunity["motion"] = motion
+                }
+                var location: [String: Any] = [:]
+                if let coordinates = sensors.coordinate,
+                   let observed = sensors.lastLocationAt,
+                   now.timeIntervalSince(observed) <= 120,
+                   coordinates.latitude.isFinite, coordinates.longitude.isFinite {
+                    // ~100-m resolution suffices for contextual opportunities.
+                    location["latitude"] = (coordinates.latitude * 1_000).rounded() / 1_000
+                    location["longitude"] = (coordinates.longitude * 1_000).rounded() / 1_000
+                    location["observed_at"] = formatter.string(from: observed)
+                }
+                if appModel.settings.geofencedProfilesEnabled,
+                   now.timeIntervalSince(lastHomeStateObservedAt) <= 300,
+                   locationLabel == "home" || locationLabel == "away" {
+                    location["home_state"] = locationLabel
+                    location["home_observed_at"] = formatter.string(from: lastHomeStateObservedAt)
+                }
+                if !location.isEmpty { opportunity["location"] = location }
+            }
+            if appModel.settings.soundRecognitionEnabled,
+               let sound = LocalSoundClassifier.shared.latestEvent(maxAge: 8) {
+                opportunity["sound"] = [
+                    "identifier": sound.identifier,
+                    "confidence": sound.confidence,
+                    "observed_at": formatter.string(from: sound.timestamp)
+                ]
+            }
+        }
+        environment["sensor_snapshot"] = opportunity
 
         do {
             try await companion.sendEnvironment(environment)

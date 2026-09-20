@@ -62,7 +62,7 @@ from jarvis_mrb.tools.google import (
 from jarvis_mrb.tools.pc import app_status, close_app, launch_app, launch_minecraft, list_running_apps, minecraft_status, open_path, open_url
 from jarvis_mrb.tools.web import web_answer, web_status
 from jarvis_mrb.visual_history import copy_visible_text_to_pc_clipboard, query_recent as query_recent_vision
-from jarvis_mrb.workflow_engine import execute_workflow
+from jarvis_mrb.workflow_engine import execute_workflow, _deterministic_read_workflow
 
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("JARVIS_MODEL", "qwen3.8:27b")
@@ -1018,6 +1018,11 @@ def _fast_path(text: str) -> AgentReply | None:
 
     if n in {"write today's journal", "generate today's journal", "generate my daily journal", "write my daily journal"}:
         return execute_tool("journal.generate", {})
+
+    # Deterministically compile an explicit two-source read before the generic
+    # "check <claim>" rule. Reads remain independently permission-checked.
+    if _deterministic_read_workflow(text) is not None:
+        return execute_tool("workflow.run", {"goal": text})
 
     m = re.fullmatch(r"(?:fact check|check) (?:this claim: )?(.+)", n)
     if m and len(m.group(1).split()) >= 3:

@@ -453,10 +453,14 @@ final class PersistentPresenceController: ObservableObject {
                     location["observed_at"] = formatter.string(from: observed)
                 }
                 if appModel.settings.geofencedProfilesEnabled,
-                   now.timeIntervalSince(lastHomeStateObservedAt) <= 300,
+                   lastHomeStateObservedAt != .distantPast,
+                   let fix = sensors.lastLocationAt,
+                   now.timeIntervalSince(fix) <= 120,
                    locationLabel == "home" || locationLabel == "away" {
+                    // The latest valid location fix refreshes a stable geofence
+                    // state without requiring another arrival callback.
                     location["home_state"] = locationLabel
-                    location["home_observed_at"] = formatter.string(from: lastHomeStateObservedAt)
+                    location["home_observed_at"] = formatter.string(from: fix)
                 }
                 if !location.isEmpty { opportunity["location"] = location }
             }

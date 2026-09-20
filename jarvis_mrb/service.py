@@ -652,6 +652,20 @@ def external_diligence_view(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/physical/incidents")
+def public_incident_region(
+    request: PhysicalConditionsRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Official recent earthquake detections, not comprehensive emergency dispatch."""
+    _check_auth(authorization)
+    from jarvis_mrb.public_incidents import regional_earthquakes
+    try:
+        return regional_earthquakes(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.post("/physical/airspace")
 def public_airspace_region(
     request: RegionalAirspaceRequest,

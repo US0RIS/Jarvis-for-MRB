@@ -21,6 +21,7 @@ from jarvis_mrb.custom_tools import run as run_custom_tool
 from jarvis_mrb.custom_tools import set_enabled as set_custom_tool_enabled
 from jarvis_mrb.custom_tools import synthesize as synthesize_custom_tool
 from jarvis_mrb.daily_journal import generate_message as generate_journal
+from jarvis_mrb.deterministic_dispatch import dispatch as deterministic_dispatch
 from jarvis_mrb.environment_state import get_state, set_value
 from jarvis_mrb.ephemeral_state import clear_temporary, get_all as get_temporary_state, set_temporary
 from jarvis_mrb.expense_tracker import capture_recent_receipt, export_message as export_expenses, list_recent as list_expenses
@@ -892,6 +893,13 @@ def _current_goals_reply() -> AgentReply:
 
 def _fast_path(text: str) -> AgentReply | None:
     n = _normalize(text)
+    # Match explicit operations without Qwen. Every selected action still
+    # goes through the existing permission-aware tool executor.
+    deterministic = deterministic_dispatch(text)
+    if deterministic is not None:
+        if deterministic.tool:
+            return execute_tool(deterministic.tool, dict(deterministic.args))
+        return AgentReply(True, deterministic.answer)
     goal_query = n.rstrip("?.!")
     if goal_query in {
         "what are my goals",

@@ -26,8 +26,8 @@ class AmbientFrontendContractTests(unittest.TestCase):
         self.assertIn("LocalSoundClassifier.shared.latestEvent(maxAge: 8)", presence)
         self.assertIn("appModel.settings.soundRecognitionEnabled", presence)
         self.assertIn('environment["sensor_snapshot"] = opportunity', presence)
-        self.assertIn('opportunity["enabled"] = ', presence.replace('            "enabled": appModel.settings.sensorOpportunitiesEnabled', 'opportunity["enabled"] = ' ))
-        self.assertIn('snapshot["enabled"]', (_ROOT / "jarvis_mrb/sensor_opportunities.py").read_text())
+        self.assertIn('"enabled": appModel.settings.sensorOpportunitiesEnabled', presence)
+        self.assertIn('snapshot.get("enabled")', (_ROOT / "jarvis_mrb/sensor_opportunities.py").read_text())
         self.assertIn("UserDefaults.standard.object(forKey: \"jarvis.soundRecognitionEnabled\")", sound)
         self.assertNotIn("sendFrame(", presence[presence.index("private func sendEnvironmentState"):presence.index("private func thresholdRank")])
 

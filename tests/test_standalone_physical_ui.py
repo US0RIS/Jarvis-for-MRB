@@ -23,6 +23,19 @@ class StandalonePhysicalExperienceTests(unittest.TestCase):
         self.assertIn("fromHandsFree: fromHandsFree", route)
         self.assertIn("iPhone location + official public camera discovery", route)
 
+    def test_gen1_meta_voice_can_enroll_nearest_camera_watch_without_hud(self) -> None:
+        model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
+        route = model[model.index("private func performCommand("):]
+        self.assertLess(route.index("nearestCameraWatchCondition(text)"), route.index("if let frontendCommandHandler,"))
+        self.assertIn('case "watch the nearest public camera for smoke"', model)
+        self.assertIn('kind: "camera", label: nearest.title', model)
+        self.assertIn("createNearestPublicCameraWatch(condition:", model)
+        physical = (_ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text(encoding="utf-8")
+        self.assertIn("Remote place name", physical)
+        self.assertIn("Resolve place to coordinates", physical)
+        self.assertIn("Create 24-hour camera watch", physical)
+        self.assertIn("JarvisPublicDiligenceView()", physical)
+
     def test_one_voice_physical_briefing_is_a_first_class_phone_surface(self) -> None:
         model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
         route = model[model.index("private func performCommand("):]

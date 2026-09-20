@@ -581,6 +581,15 @@ def external_watch_history(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/external/diligence/list")
+def external_diligence_list(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import list_matters
+    return {"matters": list_matters()}
+
+
 @app.post("/external/diligence/matter")
 def external_diligence_matter(
     request: DiligenceMatterRequest,

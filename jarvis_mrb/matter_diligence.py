@@ -46,6 +46,15 @@ def _db() -> Any:
             registered_at TEXT NOT NULL,
             PRIMARY KEY(matter_id,cik)
         );
+        CREATE TABLE IF NOT EXISTS matter_epa_facilities (
+            matter_id TEXT NOT NULL,
+            cik TEXT NOT NULL,
+            frs_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            registered_at TEXT NOT NULL,
+            PRIMARY KEY(matter_id,cik,frs_id),
+            FOREIGN KEY(matter_id,cik) REFERENCES matter_issuers(matter_id,cik)
+        );
         CREATE TABLE IF NOT EXISTS numeric_claims (
             id TEXT PRIMARY KEY,
             matter_id TEXT NOT NULL,
@@ -125,6 +134,29 @@ def add_issuer(matter_id: str, cik: str, asserted_name: str) -> dict[str, Any]:
     }
 
 
+def add_epa_facility(matter_id: str, cik: str, frs_id: str, label: str) -> dict[str, Any]:
+    from jarvis_mrb.public_epa import normalize_frs
+    if not _SCOPE.fullmatch(matter_id):
+        raise ValueError("Invalid matter ID.")
+    cik = normalize_cik(cik)
+    frs = normalize_frs(frs_id)
+    if not 1 <= len(label.strip()) <= 160:
+        raise ValueError("Facility label must contain 1–160 characters.")
+    with _db() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM matter_issuers WHERE matter_id=? AND cik=?", (matter_id, cik)
+        ).fetchone():
+            raise ValueError("Register issuer CIK in matter before linking an EPA facility.")
+        conn.execute(
+            """INSERT INTO matter_epa_facilities(matter_id,cik,frs_id,label,registered_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(matter_id,cik,frs_id) DO UPDATE SET label=excluded.label""",
+            (matter_id, cik, frs, label.strip(), _date()),
+        )
+        conn.commit()
+    return {"matter_id": matter_id, "cik": cik, "frs_id": frs, "label": label.strip()}
+
+
 def get_matter(matter_id: str) -> dict[str, Any]:
     if not _SCOPE.fullmatch(matter_id):
         raise ValueError("Invalid matter ID.")
@@ -140,11 +172,16 @@ def get_matter(matter_id: str) -> dict[str, Any]:
             "SELECT * FROM numeric_claims WHERE matter_id=? ORDER BY created_at",
             (matter_id,),
         ).fetchall()
+        epa_facilities = conn.execute(
+            "SELECT * FROM matter_epa_facilities WHERE matter_id=? ORDER BY registered_at",
+            (matter_id,),
+        ).fetchall()
     result = {
         "id": m["id"], "label": m["label"],
         "project_entity_id": m["project_entity_id"],
         "issuers": [dict(x) for x in issuers],
         "claims": [dict(x) for x in claims],
+        "epa_facilities": [dict(x) for x in epa_facilities],
     }
     project_id = result["project_entity_id"]
     if project_id:
@@ -259,6 +296,23 @@ def check_matter(matter_id: str, *, claims: bool = True, include_sanctions: bool
                 "asserted_name": issuer["asserted_name"],
                 "screening": screening,
             })
+    facility_reviews: list[dict[str, Any]] = []
+    if state["epa_facilities"]:
+        from jarvis_mrb.public_epa import fetch_epa_facility
+        for linked in state["epa_facilities"][:30]:
+            try:
+                response = fetch_epa_facility(linked["frs_id"])
+            except Exception as exc:
+                response = {
+                    "status": "unavailable", "facilities": [],
+                    "source_note": "EPA ECHO check failed: " + type(exc).__name__,
+                    "source_url": "https://echo.epa.gov/tools/web-services",
+                }
+            facility_reviews.append({
+                "cik": linked["cik"], "frs_id": linked["frs_id"],
+                "user_confirmed_facility_link": linked["label"],
+                "evidence": response,
+            })
     if claims:
         for claim in state["claims"][:30]:
             try:
@@ -288,6 +342,7 @@ def check_matter(matter_id: str, *, claims: bool = True, include_sanctions: bool
         "matter_id": matter_id,
         "issuer_checks": reports, "claim_checks": discrepancies,
         "sanctions_candidate_reviews": sanctions_reviews,
+        "epa_facility_reviews": facility_reviews,
         "checked_at": _date(),
         "scope_note": (
             "Matter and document contents remain in local matter-isolated storage. "

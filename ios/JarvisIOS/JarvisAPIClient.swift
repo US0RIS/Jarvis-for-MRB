@@ -175,6 +175,15 @@ struct JarvisAPIClient {
         }
     }
 
+    func physicalAwareness(latitude: Double, longitude: Double) async throws -> PhysicalAwarenessResponse {
+        let (data, response) = try await postData(
+            path: "physical/awareness",
+            body: ["latitude": latitude, "longitude": longitude]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(PhysicalAwarenessResponse.self, from: data)
+    }
+
     func analyzeOfficialPublicCamera(_ cameraID: String) async throws -> PublicCameraAnalysisResponse {
         let (data, response) = try await postData(
             path: "physical/public-cameras/analyze",

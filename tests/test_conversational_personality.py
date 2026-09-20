@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -48,7 +49,17 @@ class ConversationalVoiceTests(unittest.TestCase):
         self.assertIn("yield chunk", stream)
 
     def test_existing_ideas_get_opinions_not_unrequested_global_research(self) -> None:
-        from jarvis_mrb.streaming_agent import _requires_audited_web
+        # Extract just the pure-Python function: early CI runs without all of
+        # streaming_agent's optional runtime/provider dependencies installed.
+        stream = (_ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")
+        func = next(
+            node for node in ast.parse(stream).body
+            if isinstance(node, ast.FunctionDef) and node.name == "_requires_audited_web"
+        )
+        ns = {"re": re}
+        exec(compile(ast.Module(body=[func], type_ignores=[]),
+                     filename="streaming_agent.py", mode="exec"), ns)
+        _requires_audited_web = ns["_requires_audited_web"]
 
         local_opinion_prompts = (
             "Which of these ideas would you recommend?",

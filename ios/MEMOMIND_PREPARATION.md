@@ -24,6 +24,16 @@ The global interface is intentionally honest about coverage. For Melbourne, the 
 
 This is a camera **discovery and viewing** prototype, not yet a vision-LLM analysis pipeline; capturing and interpreting third-party camera imagery should be an explicit, provenance-labelled operation with temporal freshness checking and no stranger identification or indefinite recording. The backend-camera feature requires deploying this preparation branch, and the iPhone UI requires installing this branch's app.
 
+## Additional portable real-world capabilities
+
+1. **Air quality / UV**: `POST /physical/conditions` queries Open-Meteo's documented global CAMS-based air-quality model with a one-shot iPhone location. Reports model timestamp, US AQI reference scale, PM₂.₅, UV and the distinction between regional *model output* and an actual local sensor. Free API is for this private non-commercial use; any commercialization requires a paid licence or another provider. https://open-meteo.com/en/docs/air-quality-api
+2. **Official US weather alerts**: the same request checks NWS active warnings/advisories specific to the current coordinates for supported US locations. It omits expired alerts. In Melbourne or other unsupported areas, the answer clearly says `unsupported_region`; network errors also never become a false “all clear.” https://www.weather.gov/documentation/services-web-alerts
+3. **Worldwide public facilities**: `POST /physical/facilities` runs a bounded, rate-limited Overpass/OpenStreetMap query for mapped toilets, drinking water and defibrillators within 1.5 km. iPhone shows distance, publisher record and walking directions, and preserves mapped access/hours when present. Community tags can be missing or wrong: not a life-safety or emergency locator. It uses one explicit request and does not attempt generic LAN/device discovery. © OpenStreetMap contributors https://www.openstreetmap.org/copyright and https://wiki.openstreetmap.org/wiki/Overpass_API
+
+In the standalone **Physical** tab, **Check conditions around me**, **Find public resources near me**, and **Find nearby public cameras** share the existing one-shot iPhone Core Location flow. On the existing Gen 1 Meta audio route, voice intents such as “Jarvis, check conditions around me” and “Jarvis, find public resources near me” are handled locally before the generic LLM; the answer is spoken without claiming any glasses display.
+
+The backend uses authenticated POST bodies for coordinates to avoid application access logs that capture URLs, but public external data providers necessarily see the query location and may retain their own network logs. No background sampling/ambient location surveillance is implemented. iPhone results are retained only in the current session's app-model state. The Mac CI builds the source; the final physical-device acceptance still requires installing this branch's backend and iPhone binary.
+
 ## Hardware-independent iPhone / Gen 1 Ray-Ban Meta path
 
 - The primary **Physical** tab is an ordinary iPhone surface. It contains one-shot public camera search and opt-in Apple Home light discovery/control. It works without possessing or pairing MemoMind.

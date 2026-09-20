@@ -40,6 +40,9 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var nearbyFacilities: NearbyFacilitiesResponse?
     @Published private(set) var nearbyFacilitiesStatus = "Tap Find or ask Jarvis about nearby public resources."
     @Published private(set) var nearbyFacilitiesBusy = false
+    @Published private(set) var latestPhysicalAwareness: PhysicalAwarenessResponse?
+    @Published private(set) var physicalAwarenessStatus = "Tap Brief or say: Jarvis, establish situational awareness."
+    @Published private(set) var physicalAwarenessBusy = false
     private lazy var nearbyCameraLocation = PublicCameraLocationRequest()
 
     var frontendCommandHandler: ((String) async -> String?)?
@@ -88,6 +91,51 @@ final class JarvisAppModel: ObservableObject {
 
     func discoverNearbyPublicCameras(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
         try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
+    }
+
+    func establishPhysicalAwareness() async -> String {
+        guard !physicalAwarenessBusy else { return "A physical-world briefing is already in progress." }
+        physicalAwarenessBusy = true
+        physicalAwarenessStatus = "Requesting a one-time iPhone location…"
+        defer { physicalAwarenessBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            physicalAwarenessStatus = "Checking public viewpoints, air model, official alerts and mapped facilities…"
+            let overview = try await client.physicalAwareness(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            latestPhysicalAwareness = overview
+            nearbyPublicCameras = overview.cameras.cameras
+            nearbyCameraCoverage = overview.cameras.coverage
+            nearbyCameraSourceURL = overview.cameras.sourceURL
+            nearbyCameraStatus = overview.cameras.sourceNote
+            publicCameraAnalyses = [:]
+            nearbyConditions = overview.conditions
+            nearbyConditionsStatus = overview.conditions.airQuality.sourceNote
+            nearbyFacilities = overview.facilities
+            nearbyFacilitiesStatus = overview.facilities.sourceNote
+            physicalAwarenessStatus = overview.summary
+            return overview.summary + " Details and source caveats are in the Physical tab."
+        } catch {
+            physicalAwarenessStatus = "Physical-world briefing unavailable: " + error.localizedDescription
+            return physicalAwarenessStatus
+        }
+    }
+
+    private static func isPhysicalAwarenessIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "establish situational awareness", "give me a physical world briefing",
+            "physical world briefing", "brief me on my surroundings",
+            "check my surroundings", "what do the public sensors say around me",
+        ].contains(normalized)
     }
 
     func analyzePublishedCameraStill(_ cameraID: String) async -> String {
@@ -412,6 +460,17 @@ final class JarvisAppModel: ObservableObject {
 
         // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
         // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if Self.isPhysicalAwarenessIntent(text) {
+            let briefing = await establishPhysicalAwareness()
+            await finishLocalResponse(
+                briefing,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "One-shot sourced physical situational briefing"
+            )
+            return
+        }
+
         if Self.isAnalyzePublicStillIntent(text) {
             let nearest = nearbyPublicCameras.first(where: { !$0.imageURL.isEmpty })
             let description = nearest == nil

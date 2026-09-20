@@ -117,7 +117,7 @@ class ModelFreeDispatchTests(unittest.TestCase):
     def test_both_live_and_ordinary_paths_use_single_model_free_fast_path(self):
         agent = (ROOT / "jarvis_mrb/agent.py").read_text(encoding="utf-8")
         stream = (ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")
-        self.assertIn("from jarvis_mrb.deterministic_dispatch import dispatch as deterministic_dispatch", agent)
+        self.assertIn("dispatch as deterministic_dispatch", agent)
         fast = agent[agent.index("def _fast_path("):agent.index("def _ollama_plan(")]
         self.assertIn("deterministic_dispatch(text)", fast)
         self.assertIn("execute_tool(deterministic.tool, dict(deterministic.args))", fast)

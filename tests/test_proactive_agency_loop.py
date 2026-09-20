@@ -123,6 +123,7 @@ class ProactiveAgencyLoopTests(unittest.TestCase):
             [
                 "proactive_calendar",
                 "proactive_urgent_mail",
+                "sensor_weather",
                 "action_verification",
                 "desired_state_evaluation",
                 "agency_runtime",

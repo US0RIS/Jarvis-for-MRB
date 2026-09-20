@@ -24,6 +24,12 @@ The global interface is intentionally honest about coverage. For Melbourne, the 
 
 Camera **discovery, viewing and explicit one-still interpretation** are now included. Tap **Analyze this public still with Jarvis**, or after finding cameras say **“Jarvis, analyze the nearest public camera.”** The backend verifies the selected camera ID against the live official district catalog, fetches only its official still image with bounded MIME/byte checks, and uses the existing local Ollama vision model without adding the image to first-person vision/memory. Images are not retained or continuously recorded. It reports retrieval time but does NOT claim to know when the publisher captured the frame or whether it covers a requested street corner. No person/license plate identification or arbitrary image URL is allowed. The backend-camera feature requires deploying this preparation branch, and the iPhone UI requires installing this branch's app.
 
+## One-command physical-world briefing
+
+**Physical → JARVIS • Situational briefing** or **“Jarvis, establish situational awareness”** on the existing iPhone/Gen 1 Meta hands-free route uses a single one-shot iPhone location request followed by three parallel, independent public-source checks: published Caltrans highway cameras when integrated, global Open-Meteo air/UV model with data timestamp, US NWS active point alerts where supported, and OpenStreetMap public facilities. The response is a deterministic, sourced summary that makes missing feeds and unsupported regional alert coverage explicit. It does not assert traffic safety, detect hidden conditions, constantly track the user or claim that Meta can display a HUD.
+
+The request populates the ordinary Physical tab's individual source cards so the user can inspect still images, optionally analyze one selected public still with local vision, see warnings, and open walking directions. MemoMind remains an optional output surface of existing Jarvis state.
+
 ## Additional portable real-world capabilities
 
 1. **Air quality / UV**: `POST /physical/conditions` queries Open-Meteo's documented global CAMS-based air-quality model with a one-shot iPhone location. Reports model timestamp, US AQI reference scale, PM₂.₅, UV and the distinction between regional *model output* and an actual local sensor. Free API is for this private non-commercial use; any commercialization requires a paid licence or another provider. https://open-meteo.com/en/docs/air-quality-api

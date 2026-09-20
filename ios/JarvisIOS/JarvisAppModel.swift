@@ -351,6 +351,14 @@ final class JarvisAppModel: ObservableObject {
         try await client.registerDiligenceIssuer(matterID: matterID, cik: cik, name: name)
     }
 
+    func registerDiligenceEPAFacility(
+        matterID: String, cik: String, frsID: String, label: String
+    ) async throws {
+        try await client.registerDiligenceEPAFacility(
+            matterID: matterID, cik: cik, frsID: frsID, label: label
+        )
+    }
+
     func registerNumericDiligenceClaim(
         matterID: String, cik: String, taxonomy: String, tag: String,
         value: Double, unit: String, start: String, end: String, sourceRef: String

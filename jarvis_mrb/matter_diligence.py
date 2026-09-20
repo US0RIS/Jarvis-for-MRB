@@ -94,6 +94,14 @@ def create_matter(label: str, *, project_entity_id: str = "") -> dict[str, Any]:
     return {"id": uid, "label": label.strip(), "project_entity_id": project_entity_id}
 
 
+def list_matters() -> list[dict[str, Any]]:
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT id,label,project_entity_id,created_at FROM matters ORDER BY created_at DESC LIMIT 100"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def add_issuer(matter_id: str, cik: str, asserted_name: str) -> dict[str, Any]:
     if not _SCOPE.fullmatch(matter_id):
         raise ValueError("Invalid matter ID.")

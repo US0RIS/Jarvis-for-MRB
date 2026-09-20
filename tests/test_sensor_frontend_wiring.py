@@ -31,6 +31,25 @@ class AmbientFrontendContractTests(unittest.TestCase):
         self.assertIn("UserDefaults.standard.object(forKey: \"jarvis.soundRecognitionEnabled\")", sound)
         self.assertNotIn("sendFrame(", presence[presence.index("private func sendEnvironmentState"):presence.index("private func thresholdRank")])
 
+    def test_idle_sound_capture_yields_microphone_to_voice_meetings_and_tts(self) -> None:
+        audio = (_ROOT / "ios/JarvisIOS/LocalAudioMemory.swift").read_text()
+        frontend = (_ROOT / "ios/JarvisIOS/FrontendIntelligence.swift").read_text()
+        speech = (_ROOT / "ios/JarvisIOS/SpeechRecognizer.swift").read_text()
+        tts = (_ROOT / "ios/JarvisIOS/SpeechSynthesizer.swift").read_text()
+        meeting = (_ROOT / "ios/JarvisIOS/MainView.swift").read_text()
+        self.assertIn("final class AmbientSoundCapture", audio)
+        self.assertIn("AVAudioApplication.requestRecordPermission()", audio)
+        self.assertIn("LocalSoundClassifier.shared.analyze(buffer, at: when.sampleTime)", audio)
+        segment = audio[audio.index("final class AmbientSoundCapture"):audio.index("final class LocalSoundClassifier")]
+        self.assertNotIn("SFSpeech", segment)
+        self.assertNotIn("LocalAudioRingBuffer.shared.append", segment)
+        self.assertIn("UIApplication.shared.applicationState == .active", frontend)
+        self.assertIn("!appModel.speechRecognizer.isActive", frontend)
+        self.assertIn("!(meetingCapture?.isActive ?? false)", frontend)
+        self.assertIn("AmbientSoundCapture.shared.stop()", speech)
+        self.assertIn("AmbientSoundCapture.shared.stop()", tts)
+        self.assertIn("AmbientSoundCapture.shared.stop()", meeting)
+
     def test_physical_actions_are_individually_preapproved_and_verified(self) -> None:
         home = (_ROOT / "ios/JarvisIOS/HomeEnvironmentController.swift").read_text()
         presence = (_ROOT / "ios/JarvisIOS/PersistentPresenceController.swift").read_text()

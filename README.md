@@ -2498,6 +2498,12 @@ Future self-improvement is plausible only if the evaluator and safety constraint
 
 ---
 
+# External evidence branch addendum
+
+The `jarvis/memomind-prep` feature branch adds an **iPhone-first Physical** tab (Gen 1 Ray-Ban Meta voice compatible; MemoMind optional) and independently sourced public-world infrastructure. This includes bounded Caltrans remote camera/still watches; USGS earthquakes, NWS alerts, global modelled air data, OpenStreetMap public utilities, and regional OpenSky aircraft counts; plus an explicitly enrolled, separate local SEC/OFAC/EPA matter-diligence workbench. All watches require active enrollment and expire; camera detection is an uncertain two-distinct-frame model indication, never a verified incident. Personal watch source metadata may be mirrored into the canonical world graph; matter-specific source/claim data stays in the separate local matter and watch ledgers.
+
+**`EXTERNAL_EVIDENCE_OPERATIONS.md` is the definitive feature/deployment/provider-coverage and privacy contract for this new branch.** It distinguishes implemented official adapters from unsupported worldwide CCTV, AIS, court/UCC/corporate-registry/OSHA and licensed 911/ALERTCalifornia sources. These source additions require a *new backend and iPhone build*, are not already deployed by an old Agency 1.0 install, and have not had real provider/account/device acceptance by merely passing simulator or synthetic CI tests.
+
 # Related documentation
 
 For deeper/reference material:

@@ -129,6 +129,9 @@ def analyze_official_still(camera_id: str, *, condition: str = "") -> dict[str, 
         except (ValueError, TypeError):
             # Models often fail strict output contracts; never assume a match.
             text = text[:380]
+        if not text:
+            condition_status = "uncertain"
+            text = "Local vision model returned no usable visible evidence."
 
     return {
         "status": "ok",

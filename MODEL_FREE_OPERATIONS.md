@@ -20,6 +20,7 @@ The purpose is **reliable tool selection and factual source retrieval**, not bla
 | `tools.web.refine_query` sent long voice queries to Qwen to remove filler | Default strips only known fixed prefixes and otherwise retains the original query, preserving requirements, negations and identifiers. Opt-in: `JARVIS_WEB_QUERY_USE_QWEN=1`. |
 | `search_integrity._plan_queries` used Qwen to generate the mandatory eight search families | Default builds and audits all eight families deterministically. Opt-in semantic expansion: `JARVIS_RESEARCH_PLAN_USE_QWEN=1`. |
 | `agency_goal_compiler.compile_observable_contract` used Qwen even for explicit achieved-state goals | Existing safe, grounded `_fallback_contract` is validated **first** for directly observable states; Qwen remains necessary for goals whose actual completion evidence is not spelled out. Tests that inject a custom compiler retain exact behavior. |
+| `meeting_notes._extract_actions` used Qwen even for explicit machine-readable action records | Strictly structured `ACTION: owner | task | deadline` lines are extracted with a bounded parser and quoted evidence; mixed/ordinary speech still uses semantic extraction. |
 
 ## Already deterministic before this work
 
@@ -57,5 +58,6 @@ Check confirmations separately for literal structured writes. The last two examp
 1. Case/proper nouns, requested time windows and Gmail unread filters must survive deterministic extraction.
 2. No matching user utterance means **no deterministic action**. Do not default to an older topic or infer a recipient/meeting duration from memory.
 3. Writes are still subject to `permissions.decide`, staged explicit confirmation where applicable, and action readback/verification.
+   The literal phrase “this week” uses the current calendar week, not the next seven days; ambiguous “messages” and “meeting” are left for context-aware selection rather than assumed to be Gmail or Calendar.
 4. A model-free briefing quotes source snippets as excerpts, not a verified forecast or definitive current-news summary.
 5. The work changes the backend routing/synthesis defaults, not the iPhone layout or which local models are installed. The physical iPhone and Windows host still require a new deployment from this feature branch.

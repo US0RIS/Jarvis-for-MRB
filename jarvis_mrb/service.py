@@ -76,6 +76,11 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class PhysicalConditionsRequest(BaseModel):
+    latitude: float
+    longitude: float
+
+
 class NearbyPublicCameraRequest(BaseModel):
     latitude: float
     longitude: float
@@ -418,6 +423,20 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.post("/physical/conditions")
+def nearby_physical_conditions(
+    request: PhysicalConditionsRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """On-demand, authenticated external weather/air lookup. Never an all clear."""
+    _check_auth(authorization)
+    from jarvis_mrb.physical_conditions import physical_conditions
+    try:
+        return physical_conditions(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/physical/public-cameras")

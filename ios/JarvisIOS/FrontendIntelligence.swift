@@ -421,21 +421,21 @@ final class FrontendIntelligenceController: ObservableObject {
         guard !localOCRText.isEmpty else { return "I couldn't find clearly readable text in the current glasses frame." }
         UIPasteboard.general.string = localOCRText
         lastLocalAction = "Copied recognized text to iPhone clipboard"
-        return "I copied the visible text to the iPhone clipboard, sir."
+        return "I copied the visible text to the iPhone clipboard."
     }
 
     func readRecognizedText() async -> String {
         if localOCRText.isEmpty {
             _ = await scanLatestFrame(copyText: false)
         }
-        guard !localOCRText.isEmpty else { return "I couldn't find clearly readable text in the current glasses frame, sir." }
+        guard !localOCRText.isEmpty else { return "I couldn't find clearly readable text in the current glasses frame." }
         let compact = localOCRText.replacingOccurrences(of: "\n", with: " ")
         return String(compact.prefix(1200))
     }
 
     func scanBarcode() async -> String {
         _ = await scanLatestFrame(copyText: false)
-        guard let first = barcodeValues.first else { return "I don't see a readable QR code or barcode in the current frame, sir." }
+        guard let first = barcodeValues.first else { return "I don't see a readable QR code or barcode in the current frame." }
         UIPasteboard.general.string = first
         lastLocalAction = "Copied barcode/QR payload to iPhone clipboard"
         return "I found a code and copied its contents to the iPhone clipboard: \(String(first.prefix(500)))"
@@ -465,7 +465,7 @@ final class FrontendIntelligenceController: ObservableObject {
     }
 
     func sendNextQueuedCommand() async -> String {
-        guard let item = offlineQueue.items.first else { return "There are no queued commands, sir." }
+        guard let item = offlineQueue.items.first else { return "There are no queued commands." }
         let client = JarvisAPIClient(
             baseURL: appModel.settings.baseURL,
             fallbackBaseURL: appModel.settings.fallbackBaseURL,
@@ -478,7 +478,7 @@ final class FrontendIntelligenceController: ObservableObject {
             appModel.lastResponse = response.message
             return response.message
         } catch {
-            return "The server is still unreachable, sir. I left the queued command untouched."
+            return "The server is still unreachable. I left the queued command untouched."
         }
     }
 
@@ -539,19 +539,19 @@ final class FrontendIntelligenceController: ObservableObject {
         }
         if text.contains(" passive vision off ") || text.contains(" turn vision off ") || text.contains(" vision off ") {
             appModel.settings.passiveVisionEnabled = false
-            return "Passive vision is off, sir."
+            return "Passive vision is off."
         }
         if text.contains(" passive vision on ") || text.contains(" turn vision on ") || text.contains(" vision on ") {
             appModel.settings.passiveVisionEnabled = true
-            return "Passive vision is on, sir."
+            return "Passive vision is on."
         }
         if text.contains(" mute alerts ") || text.contains(" stop proactive alerts ") {
             appModel.settings.proactiveAnnouncements = false
-            return "Proactive spoken alerts are muted, sir."
+            return "Proactive spoken alerts are muted."
         }
         if text.contains(" unmute alerts ") || text.contains(" resume proactive alerts ") {
             appModel.settings.proactiveAnnouncements = true
-            return "Proactive spoken alerts are enabled, sir."
+            return "Proactive spoken alerts are enabled."
         }
         if text.contains(" mute responses ") || text.contains(" stop speaking responses ") {
             appModel.settings.speakResponses = false
@@ -559,18 +559,18 @@ final class FrontendIntelligenceController: ObservableObject {
         }
         if text.contains(" unmute responses ") || text.contains(" speak responses ") {
             appModel.settings.speakResponses = true
-            return "Spoken responses are enabled, sir."
+            return "Spoken responses are enabled."
         }
         if text.contains(" whisper for ") {
             let minutes = Self.firstInteger(in: text) ?? 10
             let bounded = max(1, min(minutes, 120))
             let until = Date().addingTimeInterval(Double(bounded) * 60)
             UserDefaults.standard.set(until.timeIntervalSince1970, forKey: "jarvis.forceWhisperUntil")
-            return "Whisper mode is forced for \(bounded) minute\(bounded == 1 ? "" : "s"), sir."
+            return "Whisper mode is forced for \(bounded) minute\(bounded == 1 ? "" : "s")."
         }
         if text.contains(" stop whispering ") || text.contains(" normal voice ") {
             UserDefaults.standard.removeObject(forKey: "jarvis.forceWhisperUntil")
-            return "Normal voice restored, sir."
+            return "Normal voice restored."
         }
         if text.contains(" connection diagnostics ") || text.contains(" network diagnostics ") {
             await probeConnections()

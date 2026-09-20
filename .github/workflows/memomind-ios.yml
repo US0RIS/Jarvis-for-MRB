@@ -33,6 +33,10 @@ jobs:
         run: python -m pip install httpx
       - name: Verify model-free research, briefs and safe read-only workflows
         run: python -m unittest discover -s tests -p "test_model_free_subsystems.py" -v
+      - name: Verify research receipt invariants after deterministic query planning
+        run: python -m unittest discover -s tests -p "test_search_integrity.py" -v
+      - name: Verify Agency completion contract safeguards after deterministic first pass
+        run: python -m unittest discover -s tests -p "test_agency_goal_compiler.py" -v
       - name: Verify weather and air-quality source handling
         run: python -m unittest discover -s tests -p "test_physical_conditions.py" -v
       - name: Verify multisource situational briefing

@@ -83,8 +83,7 @@ def _database() -> Any:
             summary TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             source_url TEXT NOT NULL DEFAULT '',
-            change_kind TEXT NOT NULL,
-            UNIQUE(watch_id,digest)
+            change_kind TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_external_watch_observations
           ON watch_observations(watch_id,id DESC);
@@ -336,7 +335,7 @@ def _mirror_personal_watch_observation(
             "external.watch_observation",
             "External watch " + current["kind"] + " " + change_kind + ": " + summary[:350],
             source_kind="external_watch",
-            source_ref=current["id"] + ":" + digest,
+            source_ref=current["id"] + ":" + digest + ":" + checked_at,
             occurred_at=checked_at,
             payload={
                 "watch_id": current["id"], "kind": current["kind"],
@@ -430,15 +429,16 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
             "UPDATE watches SET last_digest=?,last_checked_at=?,last_status=?,last_summary=? WHERE id=? AND scope=?",
             (digest, checked_at, status, summary, watch_id, scope),
         )
-        conn.execute(
-            """INSERT OR IGNORE INTO watch_observations
-              (watch_id,scope,observed_at,checked_at,status,digest,summary,payload_json,source_url,change_kind)
-              VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (watch_id, scope, str(evidence.get("observed_at") or "")[:100],
-             checked_at, status, digest, summary,
-             json.dumps(payload, ensure_ascii=False, default=str)[:25000],
-             str(evidence.get("source_url") or "")[:1000], change_kind),
-        )
+        if change_kind != "unchanged":
+            conn.execute(
+                """INSERT INTO watch_observations
+                  (watch_id,scope,observed_at,checked_at,status,digest,summary,payload_json,source_url,change_kind)
+                  VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (watch_id, scope, str(evidence.get("observed_at") or "")[:100],
+                 checked_at, status, digest, summary,
+                 json.dumps(payload, ensure_ascii=False, default=str)[:25000],
+                 str(evidence.get("source_url") or "")[:1000], change_kind),
+            )
         conn.execute(
             """DELETE FROM watch_observations WHERE watch_id=? AND id NOT IN
               (SELECT id FROM watch_observations WHERE watch_id=? ORDER BY id DESC LIMIT 100)""",

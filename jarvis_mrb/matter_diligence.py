@@ -195,7 +195,7 @@ def add_numeric_claim(
     return item
 
 
-def check_matter(matter_id: str, *, claims: bool = True) -> dict[str, Any]:
+def check_matter(matter_id: str, *, claims: bool = True, include_sanctions: bool = False) -> dict[str, Any]:
     state = get_matter(matter_id)
     reports = []
     discrepancies = []
@@ -227,6 +227,24 @@ def check_matter(matter_id: str, *, claims: bool = True) -> dict[str, Any]:
                 "cik": cik, "status": "unavailable",
                 "reason": str(exc)[:240], "filings": [],
             })
+    sanctions_reviews: list[dict[str, Any]] = []
+    if include_sanctions:
+        from jarvis_mrb.ofac_screen import screen_exact_name
+        for issuer in state["issuers"]:
+            try:
+                screening = screen_exact_name(issuer["asserted_name"])
+            except Exception as exc:
+                screening = {
+                    "status": "unavailable",
+                    "source_url": "https://ofac.treasury.gov/sanctions-list-service",
+                    "source_note": "Official SDN export unavailable: " + type(exc).__name__,
+                    "candidates": [],
+                }
+            sanctions_reviews.append({
+                "cik": issuer["cik"],
+                "asserted_name": issuer["asserted_name"],
+                "screening": screening,
+            })
     if claims:
         for claim in state["claims"][:30]:
             try:
@@ -255,6 +273,7 @@ def check_matter(matter_id: str, *, claims: bool = True) -> dict[str, Any]:
         "status": "ok" if reports and all(r["status"] == "ok" for r in reports) else "partial",
         "matter_id": matter_id,
         "issuer_checks": reports, "claim_checks": discrepancies,
+        "sanctions_candidate_reviews": sanctions_reviews,
         "checked_at": _date(),
         "scope_note": (
             "Matter and document contents remain in local matter-isolated storage. "

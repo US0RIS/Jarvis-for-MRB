@@ -76,6 +76,10 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class OfficialCameraAnalysisRequest(BaseModel):
+    camera_id: str
+
+
 class NearbyFacilitiesRequest(BaseModel):
     latitude: float
     longitude: float
@@ -430,6 +434,25 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.post("/physical/public-cameras/analyze")
+def analyze_public_camera_still(
+    request: OfficialCameraAnalysisRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Explicit one-still vision pass for a catalog-verified public camera ID."""
+    _check_auth(authorization)
+    from jarvis_mrb.public_camera_vision import analyze_official_still
+    try:
+        return analyze_official_still(request.camera_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Published camera or local vision service is unavailable.",
+        ) from exc
 
 
 @app.post("/physical/facilities")

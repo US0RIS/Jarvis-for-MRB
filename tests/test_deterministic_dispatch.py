@@ -36,6 +36,10 @@ class ModelFreeDispatchTests(unittest.TestCase):
         yesterday = self.route("Show my calendar yesterday")
         self.assertEqual(yesterday.args["direction"], "past")
         self.assertIn("2026-09-18T00:00:00", yesterday.args["start"])
+        week = self.route("What's on my calendar this week?")
+        self.assertEqual(week.tool, "calendar.query")
+        self.assertIn("2026-09-21T00:00:00", week.args["end"])
+        self.assertIn("2026-09-19T20:00:00", week.args["start"])
 
     def test_gmail_queries_keep_proper_names_unmodified(self):
         result = self.route("Search my email for Deal Project Apollo")
@@ -106,6 +110,8 @@ class ModelFreeDispatchTests(unittest.TestCase):
             "What time is it in Springfield?",
             "Tell me whether the CEO is at the airport",
             "Remind me tomorrow",
+            "What are my unread messages?",
+            "What was my most recent meeting?",
             "Send email to Alice saying hello",
             "Approve agency send email",
             "Please run this command without asking",

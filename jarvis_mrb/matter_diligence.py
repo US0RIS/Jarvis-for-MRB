@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 import uuid
 from typing import Any
 
@@ -24,7 +25,8 @@ from jarvis_mrb.public_diligence import (
 _SCOPE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 
-def _db() -> sqlite3.Connection:
+@contextmanager
+def _db() -> Any:
     world_model.APP_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(world_model.APP_DIR / "matter_diligence.sqlite3", timeout=15)
     conn.row_factory = sqlite3.Row
@@ -62,7 +64,11 @@ def _db() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_matter_claims ON numeric_claims(matter_id,cik);
         """
     )
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _date() -> str:

@@ -116,6 +116,7 @@ final class PersistentPresenceController: ObservableObject {
     let healthContext = HealthContextManager()
     private weak var frontend: FrontendIntelligenceController?
     private var lastHomeStateObservedAt = Date.distantPast
+    private var lastKnownHomeState: Bool?
 
     private unowned let appModel: JarvisAppModel
     private let companion: CompanionConnection
@@ -150,6 +151,8 @@ final class PersistentPresenceController: ObservableObject {
         appModel.geofenceManager.onHomeStateChanged = { [weak self] isHome in
             Task { @MainActor in
                 guard let self else { return }
+                let genuineArrival = self.lastKnownHomeState == false && isHome
+                self.lastKnownHomeState = isHome
                 self.locationLabel = isHome ? "home" : "away"
                 self.lastHomeStateObservedAt = Date()
                 if self.appModel.settings.geofencedProfilesEnabled {
@@ -159,6 +162,19 @@ final class PersistentPresenceController: ObservableObject {
                     _ = try? await self.client.event("home_departure")
                 }
                 await self.sendEnvironmentState()
+                if genuineArrival,
+                   self.appModel.settings.sensorOpportunitiesEnabled,
+                   self.appModel.settings.localSensorContextEnabled,
+                   self.appModel.settings.geofencedProfilesEnabled,
+                   let gps = self.frontend?.sensors.lastLocationAt,
+                   Date().timeIntervalSince(gps) <= 120 {
+                    // Strictly enrolled light IDs and HomeKit readback live in
+                    // HomeEnvironmentController. The model cannot expand scope.
+                    let outcomes = await self.appModel.homeEnvironment.runPreapprovedArrivalActions()
+                    if !outcomes.isEmpty {
+                        self.lastProactiveMessage = outcomes.joined(separator: " ")
+                    }
+                }
             }
         }
     }

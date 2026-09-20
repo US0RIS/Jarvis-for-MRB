@@ -25,12 +25,12 @@ jobs:
         run: python -m unittest discover -s tests -p "test_agency_command_view.py" -v
       - name: Verify standalone phone and Gen 1 Meta UI routing
         run: python -m unittest discover -s tests -p "test_standalone_physical_ui.py" -v
+      - name: Install provider HTTP client for isolated tests
+        run: python -m pip install httpx
       - name: Verify weather and air-quality source handling
         run: python -m unittest discover -s tests -p "test_physical_conditions.py" -v
       - name: Verify worldwide public resource boundaries
         run: python -m unittest discover -s tests -p "test_public_facilities.py" -v
-      - name: Install public-camera provider dependency
-        run: python -m pip install httpx
       - name: Verify official camera provider boundaries
         run: python -m unittest discover -s tests -p "test_public_camera_catalog.py" -v
 

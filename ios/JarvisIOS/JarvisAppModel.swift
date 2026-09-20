@@ -32,6 +32,9 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var nearbyCameraCoverage = ""
     @Published private(set) var nearbyCameraSourceURL = ""
     @Published private(set) var nearbyCameraBusy = false
+    @Published private(set) var nearbyConditions: PhysicalConditionsResponse?
+    @Published private(set) var nearbyConditionsStatus = "Tap Check or ask Jarvis for nearby conditions."
+    @Published private(set) var nearbyConditionsBusy = false
     private lazy var nearbyCameraLocation = PublicCameraLocationRequest()
 
     var frontendCommandHandler: ((String) async -> String?)?
@@ -128,6 +131,71 @@ final class JarvisAppModel: ObservableObject {
             "what public cameras are nearby", "show nearby public cameras",
             "find nearby traffic cameras", "find traffic cameras near me",
             "show nearby traffic cameras", "what traffic cameras are nearby",
+        ].contains(normalized)
+    }
+
+    func searchPhysicalConditions() async -> String {
+        guard !nearbyConditionsBusy else { return "A local conditions check is already running." }
+        nearbyConditionsBusy = true
+        nearbyConditions = nil
+        nearbyConditionsStatus = "Requesting a one-time iPhone location…"
+        defer { nearbyConditionsBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            nearbyConditionsStatus = "Checking published physical-world conditions…"
+            let response = try await client.discoverPhysicalConditions(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            nearbyConditions = response
+            let air = response.airQuality
+            let alerts = response.weatherAlerts
+            var parts: [String] = []
+            if air.status == "ok" {
+                if let aqi = air.usAQI {
+                    parts.append("Modelled air quality is US AQI \(Int(aqi))")
+                } else {
+                    parts.append("Air quality data is incomplete")
+                }
+                if let uv = air.uvIndex {
+                    parts.append("UV index \(String(format: "%.1f", uv))")
+                }
+            } else {
+                parts.append("Air quality is \(air.status)")
+            }
+            if alerts.status == "ok" {
+                if alerts.alerts.isEmpty {
+                    parts.append("no active NWS weather alerts were returned for this point; other hazards have not been checked")
+                } else {
+                    let events = alerts.alerts.prefix(3).map { $0.event }
+                    parts.append("\(alerts.alerts.count) NWS alerts: " + events.joined(separator: ", "))
+                }
+            } else if alerts.status == "unsupported_region" {
+                parts.append("official weather alerts are not integrated for this region")
+            } else {
+                parts.append("official weather alerts could not be checked")
+            }
+            nearbyConditionsStatus = parts.joined(separator: "; ") + "."
+            return nearbyConditionsStatus + " More detail and source times are in the Physical tab."
+        } catch {
+            nearbyConditionsStatus = "Physical conditions unavailable: " + error.localizedDescription
+            return nearbyConditionsStatus
+        }
+    }
+
+    private static func isPhysicalConditionsIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "check conditions around me", "what are the conditions around me",
+            "check nearby air quality", "what's the air quality near me",
+            "what is the air quality near me", "check nearby weather alerts",
+            "are there weather alerts near me", "what are the weather alerts near me",
         ].contains(normalized)
     }
 
@@ -252,6 +320,17 @@ final class JarvisAppModel: ObservableObject {
 
         // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
         // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if Self.isPhysicalConditionsIntent(text) {
+            let conditionsReply = await searchPhysicalConditions()
+            await finishLocalResponse(
+                conditionsReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone location + official weather warnings / global air model"
+            )
+            return
+        }
+
         if Self.isPublicCameraIntent(text) {
             let cameraReply = await searchNearbyPublicCameras()
             await finishLocalResponse(

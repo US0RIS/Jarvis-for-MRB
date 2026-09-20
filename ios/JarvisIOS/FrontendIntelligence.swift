@@ -310,11 +310,27 @@ final class FrontendIntelligenceController: ObservableObject {
         loopTask?.cancel()
         loopTask = nil
         sensors.setEnabled(false)
+        AmbientSoundCapture.shared.stop()
     }
 
     private func runLoop() async {
         while !Task.isCancelled && started {
             sensors.setEnabled(appModel.settings.localSensorContextEnabled)
+            // Primary camera-free perception. Reuse speech/meeting capture when
+            // it owns the mic; only run a separate SoundAnalysis-only tap when
+            // idle, in foreground, and both user opt-ins are still enabled.
+            let ambientAllowed = appModel.settings.sensorOpportunitiesEnabled
+                && appModel.settings.soundRecognitionEnabled
+                && UIApplication.shared.applicationState == .active
+                && !appModel.speechRecognizer.isActive
+                && !appModel.speechSynthesizer.isSpeaking
+                && !appModel.isSending
+                && !(meetingCapture?.isActive ?? false)
+            await AmbientSoundCapture.shared.refresh(
+                enabled: ambientAllowed,
+                audioRouteManager: appModel.audioRouteManager,
+                preferBluetooth: appModel.settings.preferBluetoothAudio
+            )
             await captureLatestFrameIfNeeded()
 
             if appModel.settings.localFastPerceptionEnabled,

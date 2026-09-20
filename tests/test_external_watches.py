@@ -50,6 +50,44 @@ class ExternalWatchTests(unittest.TestCase):
         self.assertEqual(history[0]["payload"]["description"], "cars moving")
         self.assertEqual(history[0]["change_kind"], "changed")
 
+    def test_condition_alert_needs_two_distinct_positive_frames_and_rearms(self) -> None:
+        watch = watches.create_watch(
+            "personal", "camera", "Pass",
+            {"camera_id": "caltrans-d7-196", "condition": "smoke_visible"},
+            interval_seconds=900, expires_hours=2,
+        )
+        def frame(state: str, sha: str) -> dict:
+            return {
+                "status": "ok", "summary": "Unconfirmed camera model result",
+                "source_url": "https://cwwp2.dot.ca.gov",
+                "signature": [state, sha],
+                "payload": {
+                    "description": "candidate smoke",
+                    "condition_status": state, "image_sha256": sha,
+                },
+            }
+        with patch("jarvis_mrb.event_bus.emit_proactive") as notify:
+            for data in (
+                frame("observed", "image1"),
+                frame("observed", "image1"),
+            ):
+                with patch("jarvis_mrb.external_watches._fetch", return_value=data):
+                    watches.check_watch(watch["id"], "personal")
+            notify.assert_not_called()
+            with patch("jarvis_mrb.external_watches._fetch", return_value=frame("observed", "image2")):
+                watches.check_watch(watch["id"], "personal")
+            notify.assert_called_once()
+            with patch("jarvis_mrb.external_watches._fetch", return_value=frame("observed", "image3")):
+                watches.check_watch(watch["id"], "personal")
+            notify.assert_called_once()
+            with patch("jarvis_mrb.external_watches._fetch", return_value=frame("not_observed", "image4")):
+                watches.check_watch(watch["id"], "personal")
+            with patch("jarvis_mrb.external_watches._fetch", return_value=frame("observed", "image5")):
+                watches.check_watch(watch["id"], "personal")
+            with patch("jarvis_mrb.external_watches._fetch", return_value=frame("observed", "image6")):
+                watches.check_watch(watch["id"], "personal")
+            self.assertEqual(notify.call_count, 2)
+
     def test_matter_scope_is_isolated_and_stop_disables(self) -> None:
         watch = self._create("matter:deal123")
         self.assertEqual(len(watches.list_watches("personal")), 0)

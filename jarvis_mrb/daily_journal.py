@@ -100,7 +100,63 @@ def _task_summary() -> list[dict[str, Any]]:
     ][:12]
 
 
+def _deterministic_render(day: date, source: dict[str, Any]) -> str:
+    """Evidence-only journal: no invented highlights, emotion or narrative."""
+    import re
+
+    lines = [f"# {day.isoformat()}"]
+    conversations = [
+        item for item in (source.get("conversations") or [])
+        if isinstance(item, dict) and item.get("role") == "user"
+    ]
+    if conversations:
+        lines.extend(["", "## Requests and decisions discussed"])
+        for item in conversations[:10]:
+            statement = " ".join(str(item.get("content") or "").split())[:180]
+            if not statement:
+                continue
+            if re.search(
+                r"(?i)\\b(password|passcode|api[ -]?key|secret|access token|"
+                r"bearer|recovery phrase|private key)\\b",
+                statement,
+            ):
+                lines.append("- A sensitive request occurred (content omitted).")
+            else:
+                lines.append("- User asked/discussed: " + statement)
+    tasks = source.get("background_tasks") or []
+    if tasks:
+        lines.extend(["", "## Recorded background outcomes"])
+        for item in tasks[:10]:
+            title = " ".join(str(item.get("prompt") or "").split())[:120]
+            state = str(item.get("status") or "unknown")
+            lines.append(f"- #{item.get('id')}: {state}; {title}")
+    sightings = source.get("spatial_sightings") or []
+    if sightings:
+        lines.extend(["", "## Recent object/location sightings"])
+        for item in sightings[:8]:
+            object_name = " ".join(str(item.get("object") or "Object").split())[:90]
+            location = " ".join(str(item.get("location") or "unverified").split())[:130]
+            seen = str(item.get("seen_at") or "")[:40]
+            lines.append(f"- {object_name}: last observed near {location} ({seen}).")
+    mail = source.get("mail") or {}
+    if isinstance(mail, dict):
+        lines.extend([
+            "", "## Communications index",
+            "- Inbox: " + " ".join(str(mail.get("received") or "unavailable").split())[:450],
+            "- Sent: " + " ".join(str(mail.get("sent") or "unavailable").split())[:450],
+        ])
+    if len(lines) == 1:
+        lines.extend(["", "No local Jarvis activity was recorded for this date."])
+    lines.extend([
+        "", "_Derived from recorded local activity; omissions or absent "
+        "records are not proof an event did not occur._",
+    ])
+    return "\n".join(lines) + "\n"
+
+
 def _render_with_model(day: date, source: dict[str, Any]) -> str:
+    if os.environ.get("JARVIS_JOURNAL_USE_QWEN", "").strip().lower() not in {"1", "true", "yes"}:
+        return _deterministic_render(day, source)
     system = """Create a concise private daily journal entry from the supplied local Jarvis activity.
 Return Markdown only. Use these headings when relevant: # date, ## Highlights, ## Commitments & Follow-ups, ## Work Completed, ## Communications, ## Seen / Places, ## Notes for Tomorrow.
 Do not invent events, emotions, motives, or sensitive interpretations. Prefer 5-12 useful bullets total. Omit empty sections. Do not include API credentials or raw URLs."""
@@ -125,17 +181,7 @@ Do not invent events, emotions, motives, or sensitive interpretations. Prefer 5-
             return text
     except (httpx.HTTPError, ValueError, TypeError):
         pass
-    lines = [f"# {day.isoformat()}", "", "## Highlights"]
-    conversations = source.get("conversations") or []
-    if conversations:
-        lines.append(f"- Jarvis recorded {len(conversations)} conversation messages today.")
-    tasks = source.get("background_tasks") or []
-    if tasks:
-        lines.append(f"- {len(tasks)} background task outcomes were recorded.")
-    sightings = source.get("spatial_sightings") or []
-    if sightings:
-        lines.append(f"- {len(sightings)} recent object/location sightings were retained.")
-    return "\n".join(lines) + "\n"
+    return _deterministic_render(day, source)
 
 
 def _mirror_journal(target_day: date, markdown: str, path: Path) -> None:

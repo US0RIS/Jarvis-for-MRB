@@ -896,6 +896,7 @@ struct JarvisPublicDiligenceView: View {
     @State private var claimEnd = ""
     @State private var claimSource = ""
     @State private var includeSanctions = false
+    @State private var matterSECWatches: [ExternalWatchSummary] = []
     @State private var working = false
     @State private var message = "Select a local matter and explicitly confirm the issuer's SEC CIK."
     @State private var evidenceLines: [String] = []
@@ -939,6 +940,12 @@ struct JarvisPublicDiligenceView: View {
                             .textFieldStyle(.roundedBorder)
                         Button("Register exact CIK in selected matter") {
                             Task { await registerIssuer() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(working || selectedMatterID.isEmpty
+                                  || issuerCIK.isEmpty || issuerName.isEmpty)
+                        Button("Watch this issuer’s SEC filings for 24 hours") {
+                            Task { await enrollSECWatch() }
                         }
                         .buttonStyle(.bordered)
                         .disabled(working || selectedMatterID.isEmpty
@@ -1000,6 +1007,34 @@ struct JarvisPublicDiligenceView: View {
                                   || issuerCIK.isEmpty || claimTag.isEmpty
                                   || claimValue.isEmpty || claimEnd.isEmpty
                                   || claimSource.isEmpty)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GroupBox("Time-limited SEC filing watches in this matter") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("Refresh matter watches") {
+                            Task { await refreshSECWatches() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(working || selectedMatterID.isEmpty)
+                        ForEach(matterSECWatches) { watch in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(watch.label).font(.caption.weight(.medium))
+                                Text(watch.lastStatus + " • " + watch.lastSummary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Expires " + watch.expiresAt)
+                                    .font(.caption2)
+                                Button("Stop SEC watch") {
+                                    Task { await stopSECWatch(watch.id) }
+                                }
+                                .font(.caption)
+                                .disabled(!watch.enabled || working)
+                            }
+                        }
+                        Text("Watches are locally matter-scoped and never auto-renew. All users of the same Jarvis API token can still access this prototype matter ledger.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -1079,6 +1114,49 @@ struct JarvisPublicDiligenceView: View {
             message = "Registered user-confirmed SEC CIK. No name-based external lookup performed."
         } catch {
             message = "CIK registration failed: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func enrollSECWatch() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            let watch = try await appModel.createMatterSECWatch(
+                matterID: selectedMatterID, cik: issuerCIK,
+                label: issuerName + " • SEC filing changes"
+            )
+            matterSECWatches = try await appModel.getMatterSECWatches(selectedMatterID)
+            message = "Created expiring SEC watch " + watch.id + "."
+        } catch {
+            message = "Unable to watch SEC issuer: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func refreshSECWatches() async {
+        guard !working, !selectedMatterID.isEmpty else { return }
+        working = true
+        defer { working = false }
+        do {
+            matterSECWatches = try await appModel.getMatterSECWatches(selectedMatterID)
+        } catch {
+            message = "Matter watch list unavailable: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func stopSECWatch(_ id: String) async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            _ = try await appModel.stopMatterSECWatch(id, matterID: selectedMatterID)
+            matterSECWatches = try await appModel.getMatterSECWatches(selectedMatterID)
+            message = "SEC watch stopped."
+        } catch {
+            message = "Cannot stop SEC watch: " + error.localizedDescription
         }
     }
 

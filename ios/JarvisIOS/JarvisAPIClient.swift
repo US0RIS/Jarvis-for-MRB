@@ -175,6 +175,18 @@ struct JarvisAPIClient {
         }
     }
 
+    func discoverNearbyFacilities(latitude: Double, longitude: Double) async throws -> NearbyFacilitiesResponse {
+        let (data, response) = try await postData(
+            path: "physical/facilities",
+            body: [
+                "latitude": latitude, "longitude": longitude,
+                "radius_m": 1500, "limit": 18,
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(NearbyFacilitiesResponse.self, from: data)
+    }
+
     func discoverPhysicalConditions(latitude: Double, longitude: Double) async throws -> PhysicalConditionsResponse {
         let (data, response) = try await postData(
             path: "physical/conditions",

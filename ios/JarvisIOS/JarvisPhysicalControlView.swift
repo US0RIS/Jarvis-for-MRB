@@ -887,6 +887,8 @@ struct JarvisPublicDiligenceView: View {
     @State private var projectEntityID = ""
     @State private var issuerName = ""
     @State private var issuerCIK = ""
+    @State private var facilityFRS = ""
+    @State private var facilityLabel = ""
     @State private var claimTag = ""
     @State private var claimValue = ""
     @State private var claimUnit = "USD"
@@ -942,6 +944,26 @@ struct JarvisPublicDiligenceView: View {
                         .disabled(working || selectedMatterID.isEmpty
                                   || issuerCIK.isEmpty || issuerName.isEmpty)
                         Text("Jarvis does not guess a CIK from a company name or infer that similarly named legal entities are the same.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GroupBox("Explicit EPA-regulated facility") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("EPA FRS registry ID (12 digits)", text: $facilityFRS)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Confirmed facility/site label", text: $facilityLabel)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Associate this EPA site with selected issuer") {
+                            Task { await addEPAFacility() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(working || selectedMatterID.isEmpty
+                                  || issuerCIK.isEmpty || facilityFRS.isEmpty
+                                  || facilityLabel.isEmpty)
+                        Text("An EPA facility is not the same as a company. Only associate sites you have independently confirmed belong to the transaction perimeter.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1061,6 +1083,22 @@ struct JarvisPublicDiligenceView: View {
     }
 
     @MainActor
+    private func addEPAFacility() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await appModel.registerDiligenceEPAFacility(
+                matterID: selectedMatterID, cik: issuerCIK,
+                frsID: facilityFRS, label: facilityLabel
+            )
+            message = "Registered exact EPA FRS site for this issuer; no ownership was inferred."
+        } catch {
+            message = "Facility registration failed: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func addClaim() async {
         guard !working, let value = Double(claimValue), value.isFinite else { return }
         working = true
@@ -1117,6 +1155,29 @@ struct JarvisPublicDiligenceView: View {
                 )
                 if let reason = comparison["reason"] as? String {
                     evidenceLines.append(reason)
+                }
+            }
+            for review in result["epa_facility_reviews"] as? [[String: Any]] ?? [] {
+                let evidence = review["evidence"] as? [String: Any] ?? [:]
+                evidenceLines.append(
+                    "EPA site " + (review["frs_id"] as? String ?? "")
+                    + " • " + (evidence["status"] as? String ?? "unavailable")
+                )
+                for facility in evidence["facilities"] as? [[String: Any]] ?? [] {
+                    evidenceLines.append(
+                        (facility["facility_name"] as? String ?? "Facility")
+                        + " • formal actions: "
+                        + String(describing: facility["formal_action_count"] ?? "not reported")
+                        + " • penalties: "
+                        + String(describing: facility["total_penalties"] ?? "not reported")
+                    )
+                    if let source = facility["detail_url"] as? String,
+                       !source.isEmpty {
+                        sourceLinks.append((title: "EPA facility report", url: source))
+                    }
+                }
+                if let note = evidence["source_note"] as? String {
+                    evidenceLines.append(note)
                 }
             }
             for sanctions in result["sanctions_candidate_reviews"] as? [[String: Any]] ?? [] {

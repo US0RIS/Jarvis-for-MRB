@@ -17,12 +17,29 @@ def _safe_call(function: Any, label: str, latitude: float, longitude: float) -> 
     try:
         return function(latitude, longitude)
     except Exception as exc:
+        reason = label + " failed: " + type(exc).__name__
+        if label == "camera catalog":
+            return {
+                "status": "unavailable", "source_note": reason,
+                "cameras": [], "coverage": "official camera service unavailable",
+                "source_url": "", "coordinates_stored": False,
+            }
+        if label == "public mapping":
+            return {
+                "status": "unavailable", "source_note": reason,
+                "facilities": [], "source_url": "", "coordinates_stored": False,
+            }
         return {
-            "status": "unavailable", "source_note": (
-                label + " failed: " + type(exc).__name__
-            ),
-            "cameras": [] if label == "camera catalog" else None,
-            "facilities": [] if label == "public mapping" else None,
+            "status": "unavailable",
+            "air_quality": {
+                "status": "unavailable", "source_url": "", "source_note": reason,
+            },
+            "weather_alerts": {
+                "status": "unavailable", "alerts": [],
+                "source_url": "", "source_note": reason,
+            },
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "location_sharing_note": "Environmental providers could not be checked.",
         }
 
 

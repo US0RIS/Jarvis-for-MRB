@@ -61,6 +61,7 @@ def _parse_sdn_csv(body: bytes, *, retrieved_at: str) -> dict[str, Any]:
 
 
 def _download() -> dict[str, Any]:
+    global _snapshot
     now = monotonic()
     with _lock:
         previous = _snapshot
@@ -82,7 +83,6 @@ def _download() -> dict[str, Any]:
                     raise ValueError("OFAC SDN file exceeded configured bound.")
     result = _parse_sdn_csv(bytes(body), retrieved_at=datetime.now(timezone.utc).isoformat())
     with _lock:
-        global _snapshot
         _snapshot = (monotonic(), result)
     return result
 

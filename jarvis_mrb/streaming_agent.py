@@ -228,6 +228,26 @@ def _requires_audited_web(text: str) -> bool:
     if any(cue in n for cue in private_context) and not any(cue in n for cue in explicit_web):
         return False
 
+    # Jarvis should be able to offer an actual opinion on the plans and designs
+    # ALREADY on the table. A generic "recommend" or "best" must not turn
+    # "which of these ideas do you prefer?" into a global product search.
+    # An explicit request for new/public options still gets audited research.
+    local_ideas = (
+        " this idea ", " that idea ", " these ideas ", " those ideas ",
+        " this plan ", " that plan ", " these plans ",
+        " this design ", " that design ", " these designs ",
+        " our plan ", " our project ", " this project ",
+        " what we discussed ", " the ideas we discussed ",
+        " the options i gave you ", " the options we discussed ",
+    )
+    if any(cue in n for cue in local_ideas) and not any(
+        cue in n for cue in explicit_web + (
+            " latest ", " current ", " currently ", " new options ",
+            " all available ", " every option ", " market ",
+        )
+    ):
+        return False
+
     strong = (
         " recommend ", " recommends ", " recommendation ", " recommendations ",
         " compare ", " comparison ", " alternatives ", " options ", " shortlist ",

@@ -55,7 +55,7 @@ struct NearbyFacility: Decodable, Identifiable {
     }
 
     var appleMapsURL: URL? {
-        URL(string: "https://maps.apple.com/?daddr=\\(latitude),\\(longitude)&dirflg=w")
+        URL(string: "https://maps.apple.com/?daddr=\(latitude),\(longitude)&dirflg=w")
     }
 }
 

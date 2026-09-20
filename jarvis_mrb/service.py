@@ -76,6 +76,54 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class ExternalWatchCreateRequest(BaseModel):
+    scope: str = "personal"
+    kind: str
+    label: str
+    config: dict[str, Any]
+    interval_seconds: int = 3600
+    expires_hours: int = 24
+
+
+class ExternalWatchLookupRequest(BaseModel):
+    id: str
+    scope: str = "personal"
+
+
+class DiligenceMatterRequest(BaseModel):
+    label: str
+    project_entity_id: str = ""
+
+
+class DiligenceIssuerRequest(BaseModel):
+    matter_id: str
+    cik: str
+    asserted_name: str
+
+
+class DiligenceClaimRequest(BaseModel):
+    matter_id: str
+    cik: str
+    taxonomy: str
+    tag: str
+    unit: str = "USD"
+    value: float
+    end: str
+    start: str = ""
+    source_ref: str
+    context: str = ""
+
+
+class DiligenceLookupRequest(BaseModel):
+    matter_id: str
+
+
+class RegionalAirspaceRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_km: float = 20.0
+
+
 class OfficialCameraAnalysisRequest(BaseModel):
     camera_id: str
 
@@ -434,6 +482,160 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.post("/external/watch/create")
+def external_watch_create(
+    request: ExternalWatchCreateRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import create_watch
+    try:
+        return create_watch(
+            request.scope, request.kind, request.label, request.config,
+            interval_seconds=request.interval_seconds, expires_hours=request.expires_hours,
+        )
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
+
+
+@app.post("/external/watch/list")
+def external_watch_list(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import list_watches
+    try:
+        return {"watches": list_watches(request.scope)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/watch/check")
+def external_watch_check(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import check_watch
+    try:
+        return check_watch(request.id, request.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/watch/stop")
+def external_watch_stop(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import stop_watch
+    try:
+        return stop_watch(request.id, request.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/watch/history")
+def external_watch_history(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import watch_history
+    try:
+        return {"observations": watch_history(request.id, request.scope)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/diligence/matter")
+def external_diligence_matter(
+    request: DiligenceMatterRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import create_matter
+    try:
+        return create_matter(request.label, project_entity_id=request.project_entity_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/diligence/issuer")
+def external_diligence_issuer(
+    request: DiligenceIssuerRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import add_issuer
+    try:
+        return add_issuer(request.matter_id, request.cik, request.asserted_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/diligence/claim")
+def external_diligence_claim(
+    request: DiligenceClaimRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import add_numeric_claim
+    try:
+        return add_numeric_claim(
+            request.matter_id, request.cik,
+            taxonomy=request.taxonomy, tag=request.tag,
+            unit=request.unit, value=request.value,
+            end=request.end, start=request.start,
+            source_ref=request.source_ref, context=request.context,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/diligence/check")
+def external_diligence_check(
+    request: DiligenceLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import check_matter
+    try:
+        return check_matter(request.matter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/diligence/view")
+def external_diligence_view(
+    request: DiligenceLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import get_matter
+    try:
+        return get_matter(request.matter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/physical/airspace")
+def public_airspace_region(
+    request: RegionalAirspaceRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.public_airspace import airspace_region
+    try:
+        return airspace_region(
+            request.latitude, request.longitude, radius_km=request.radius_km,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/physical/awareness")

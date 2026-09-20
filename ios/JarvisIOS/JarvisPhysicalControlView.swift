@@ -611,6 +611,7 @@ struct JarvisWorldWatchesView: View {
     @State private var latitude = ""
     @State private var longitude = ""
     @State private var remoteCameras: [PublicCameraListing] = []
+    @State private var cameraCondition = ""
     @State private var watches: [ExternalWatchSummary] = []
     @State private var status = "No active remote view selected."
     @State private var sourceNote = ""
@@ -675,6 +676,12 @@ struct JarvisWorldWatchesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Picker("Camera watch condition", selection: $cameraCondition) {
+                Text("Change log only").tag("")
+                Text("Possible visible smoke").tag("smoke_visible")
+                Text("Apparent road congestion").tag("road_congestion")
+            }
+            .font(.caption)
             ForEach(remoteCameras) { camera in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(camera.title).font(.callout.weight(.medium))
@@ -685,8 +692,11 @@ struct JarvisWorldWatchesView: View {
                             Task {
                                 await createWatch(
                                     kind: "camera", label: camera.title,
-                                    config: ["camera_id": camera.id],
-                                    seconds: 3600
+                                    config: [
+                                        "camera_id": camera.id,
+                                        "condition": cameraCondition
+                                    ],
+                                    seconds: cameraCondition.isEmpty ? 3600 : 900
                                 )
                             }
                         }

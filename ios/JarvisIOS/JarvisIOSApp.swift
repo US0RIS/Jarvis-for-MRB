@@ -51,6 +51,7 @@ struct JarvisIOSApp: App {
             power: power
         )
         frontend.attach(persistentPresence: presence, meetingCapture: meeting)
+        presence.attach(frontend: frontend)
 
         _appModel = StateObject(wrappedValue: model)
         _persistentPresence = StateObject(wrappedValue: presence)

@@ -23,6 +23,18 @@ class StandalonePhysicalExperienceTests(unittest.TestCase):
         self.assertIn("fromHandsFree: fromHandsFree", route)
         self.assertIn("iPhone location + official public camera discovery", route)
 
+    def test_conditions_and_facilities_voice_routes_precede_generic_frontend(self) -> None:
+        model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
+        route = model[model.index("private func performCommand("):]
+        for handler in ("isPhysicalConditionsIntent", "isNearbyFacilitiesIntent"):
+            self.assertLess(route.index("if Self." + handler + "(text) {"), route.index("if let frontendCommandHandler,"))
+        client = (_ROOT / "ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        self.assertIn('path: "physical/conditions"', client)
+        self.assertIn('path: "physical/facilities"', client)
+        physical = (_ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text(encoding="utf-8")
+        self.assertIn("JarvisPhysicalConditionsView()", physical)
+        self.assertIn("JarvisPublicFacilitiesView()", physical)
+
     def test_home_control_and_camera_view_are_not_duplicate_swift_structs(self) -> None:
         home = (_ROOT / "ios/JarvisIOS/HomeEnvironmentController.swift").read_text(encoding="utf-8")
         camera = (_ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text(encoding="utf-8")

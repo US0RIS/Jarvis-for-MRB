@@ -208,6 +208,7 @@ final class AmbientSoundCapture: ObservableObject {
                 return
             }
             // A nil tap format accommodates Bluetooth HFP renegotiation.
+            LocalSoundClassifier.shared.resetStream()
             input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
                 LocalSoundClassifier.shared.analyze(buffer, at: when.sampleTime)
             }
@@ -245,6 +246,22 @@ final class LocalSoundClassifier: NSObject, SNResultsObserving {
     private var latest: LocalSoundEvent?
 
     private override init() { super.init() }
+
+    /// Each new audio engine/tap has its own sample-time origin. A reused
+    /// SNAudioStreamAnalyzer must not receive positions from two clocks.
+    func resetStream() {
+        lock.lock()
+        latest = nil
+        lock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.analyzer?.removeAllRequests()
+            self.analyzer = nil
+            self.request = nil
+            self.configuredSampleRate = 0
+            self.configuredChannels = 0
+        }
+    }
 
     func analyze(_ buffer: AVAudioPCMBuffer, at framePosition: AVAudioFramePosition) {
         guard UserDefaults.standard.object(forKey: "jarvis.soundRecognitionEnabled") as? Bool ?? false,

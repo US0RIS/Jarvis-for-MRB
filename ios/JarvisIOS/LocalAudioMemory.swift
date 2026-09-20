@@ -187,7 +187,8 @@ final class AmbientSoundCapture: ObservableObject {
         if isCapturing { return }
         // Avoid repeated permission prompts/session restarts on a denied or
         // temporarily unavailable microphone.
-        guard Date().timeIntervalSince(lastAttempt) >= 20 else { return }
+        let retryDelay = permissionGranted == true ? 2.0 : 20.0
+        guard Date().timeIntervalSince(lastAttempt) >= retryDelay else { return }
         lastAttempt = Date()
         let generation = captureGeneration
         if permissionGranted == nil {

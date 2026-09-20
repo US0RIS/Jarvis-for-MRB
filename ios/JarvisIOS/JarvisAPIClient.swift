@@ -200,6 +200,19 @@ struct JarvisAPIClient {
         try validate(response: response, data: data)
     }
 
+    func registerDiligenceEPAFacility(
+        matterID: String, cik: String, frsID: String, label: String
+    ) async throws {
+        let (data, response) = try await postData(
+            path: "external/diligence/epa-facility",
+            body: [
+                "matter_id": matterID, "cik": cik,
+                "frs_id": frsID, "label": label,
+            ]
+        )
+        try validate(response: response, data: data)
+    }
+
     func registerNumericDiligenceClaim(
         matterID: String, cik: String, taxonomy: String, tag: String,
         value: Double, unit: String, start: String, end: String, sourceRef: String

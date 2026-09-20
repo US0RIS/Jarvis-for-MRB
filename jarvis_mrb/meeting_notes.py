@@ -117,9 +117,47 @@ def append_transcript(meeting_id: int, text: str) -> None:
         _FACT_POOL.submit(_check_metric_claims, chunk)
 
 
+def _explicit_structured_actions(transcript: str) -> list[dict[str, str]] | None:
+    """Skip Qwen only if every non-empty transcript line is an action record.
+
+    A strictly structured transcription is different from free-form discussion.
+    If even one line is ordinary speech, fail closed to semantic extraction.
+    Format: ACTION: owner | task | explicit due date or -
+    """
+    lines = [line.strip() for line in transcript.splitlines() if line.strip()]
+    if not lines or len(lines) > 12:
+        return None
+    actions: list[dict[str, str]] = []
+    for line in lines:
+        matched = re.fullmatch(
+            r"(?:action|action item|todo):\\s*([^|]{2,120})\\s*\\|\\s*"
+            r"([^|]{2,500})\\s*\\|\\s*([^|]{1,160})",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if not matched:
+            return None
+        owner, task, due = (" ".join(value.split()) for value in matched.groups())
+        if (
+            not owner or not task or not due
+            or owner.lower() in {"unknown", "them", "someone", "he", "she", "they"}
+        ):
+            return None
+        if due.lower() in {"-", "none", "no deadline", "not specified"}:
+            due = ""
+        actions.append({
+            "owner": owner[:120], "task": task[:500], "due": due[:160],
+            "evidence": line[:300],
+        })
+    return actions
+
+
 def _extract_actions(transcript: str) -> list[dict[str, str]]:
     if not transcript.strip():
         return []
+    structured = _explicit_structured_actions(transcript)
+    if structured is not None:
+        return structured
     system = """Extract only concrete follow-up commitments and action items from a meeting transcript.
 Do not infer hidden intentions or assign an action to a person unless the transcript explicitly supports it.
 Return JSON only: {"actions":[{"owner":"speaker label/name if explicit, otherwise unspecified","task":"concise action","due":"explicit due date/time or empty","evidence":"short supporting phrase"}]}

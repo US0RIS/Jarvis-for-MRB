@@ -152,6 +152,8 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
     @Published private(set) var altitudeMeters: Double?
     @Published private(set) var coordinate: CLLocationCoordinate2D?
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var lastLocationAt: Date?
+    @Published private(set) var lastMotionAt: Date?
 
     private let motion = CMMotionActivityManager()
     private let location = CLLocationManager()
@@ -183,6 +185,7 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
                     else if sample.walking { self.activity = "Walking" }
                     else if sample.stationary { self.activity = "Stationary" }
                     else { self.activity = "Unknown" }
+                    self.lastMotionAt = Date()
                     self.lastUpdated = Date()
                 }
             }
@@ -222,6 +225,7 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
         guard let current = locations.last else { return }
         Task { @MainActor in
             coordinate = current.coordinate
+            lastLocationAt = current.timestamp
             altitudeMeters = current.verticalAccuracy >= 0 ? current.altitude : nil
             speedMPS = current.speed >= 0 ? current.speed : nil
             if current.course >= 0 { courseDegrees = current.course }

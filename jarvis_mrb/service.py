@@ -76,6 +76,13 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class NearbyFacilitiesRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_m: int = 1500
+    limit: int = 18
+
+
 class PhysicalConditionsRequest(BaseModel):
     latitude: float
     longitude: float
@@ -423,6 +430,23 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.post("/physical/facilities")
+def nearby_public_facilities(
+    request: NearbyFacilitiesRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """On-demand public utility map, not a medical/emergency locator guarantee."""
+    _check_auth(authorization)
+    from jarvis_mrb.public_facilities import nearby_mapped_facilities
+    try:
+        return nearby_mapped_facilities(
+            request.latitude, request.longitude,
+            radius_m=request.radius_m, limit=request.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/physical/conditions")

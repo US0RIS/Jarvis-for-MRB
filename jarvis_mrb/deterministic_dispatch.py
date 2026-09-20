@@ -22,8 +22,8 @@ class Route:
     answer: str = ""
 
 
-def _tool(family: str, name: str, **args: Any) -> Route:
-    return Route(family, name, args)
+def _tool(family: str, tool_name: str, **args: Any) -> Route:
+    return Route(family, tool_name, args)
 
 
 def _match(pattern: str, text: str) -> re.Match[str] | None:

@@ -65,7 +65,10 @@ def _database() -> Any:
             last_checked_at TEXT,
             last_status TEXT NOT NULL DEFAULT 'never_checked',
             last_digest TEXT,
-            last_summary TEXT NOT NULL DEFAULT ''
+            last_summary TEXT NOT NULL DEFAULT '',
+            last_image_hash TEXT NOT NULL DEFAULT '',
+            camera_positive_streak INTEGER NOT NULL DEFAULT 0,
+            camera_alert_armed INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_external_watch_due
           ON watches(enabled,next_check_at,expires_at);
@@ -87,6 +90,15 @@ def _database() -> Any:
           ON watch_observations(watch_id,id DESC);
         """
     )
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(watches)")}
+    for column, spec in (
+        ("last_image_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("camera_positive_streak", "INTEGER NOT NULL DEFAULT 0"),
+        ("camera_alert_armed", "INTEGER NOT NULL DEFAULT 1"),
+    ):
+        if column not in columns:
+            conn.execute("ALTER TABLE watches ADD COLUMN " + column + " " + spec)
+    conn.commit()
     try:
         with conn:
             yield conn
@@ -108,7 +120,10 @@ def _validate(scope: str, kind: str, config: dict[str, Any], cadence_seconds: in
         camera_id = str(config.get("camera_id") or "")
         if not _CAMERA.fullmatch(camera_id):
             raise ValueError("Camera must be selected from the official catalog.")
-        return {"camera_id": camera_id}
+        condition = str(config.get("condition") or "")
+        if condition not in {"", "smoke_visible", "road_congestion"}:
+            raise ValueError("Unsupported public camera watch condition.")
+        return {"camera_id": camera_id, "condition": condition}
     if kind == "sec_filings":
         from jarvis_mrb.public_diligence import normalize_cik
         return {"cik": normalize_cik(str(config.get("cik") or ""))}
@@ -220,12 +235,18 @@ def _fetch(row: dict[str, Any]) -> dict[str, Any]:
     cfg = row["config"]
     if kind == "camera":
         from jarvis_mrb.public_camera_vision import analyze_official_still
-        result = analyze_official_still(cfg["camera_id"])
+        result = analyze_official_still(
+            cfg["camera_id"], condition=cfg.get("condition", "")
+        )
         return {
             "status": "ok", "summary": result["camera_name"] + ": " + result["description"],
             "source_url": result["source_url"],
             "observed_at": result["capture_time"],
-            "signature": result["description"],
+            "signature": {
+                "text": result["description"],
+                "condition_status": result.get("condition_status"),
+                "image_sha256": result.get("image_sha256"),
+            },
             "payload": result,
         }
     if kind == "sec_filings":
@@ -371,12 +392,37 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
     payload = evidence.get("payload") or {}
     # Camera images are inspected in memory, never stored. Keep only text and
     # provider metadata in the watch ledger.
+    camera_candidate_alert = False
     with _LOCK, _database() as conn:
         previous = conn.execute(
-            "SELECT last_digest FROM watches WHERE id=? AND scope=?", (watch_id, scope)
+            """SELECT last_digest,last_image_hash,camera_positive_streak,camera_alert_armed
+               FROM watches WHERE id=? AND scope=?""", (watch_id, scope)
         ).fetchone()
         if previous is None:
             return {"status": "stopped_or_expired", "watch_id": watch_id}
+        old_hash = str(previous["last_image_hash"] or "")
+        streak = int(previous["camera_positive_streak"] or 0)
+        armed = bool(previous["camera_alert_armed"])
+        if current["kind"] == "camera" and current["config"].get("condition"):
+            camera_payload = payload
+            frame_hash = str(camera_payload.get("image_sha256") or "")
+            match_state = camera_payload.get("condition_status")
+            if frame_hash and frame_hash != old_hash:
+                if match_state == "observed":
+                    streak += 1
+                else:
+                    streak = 0
+                    if match_state == "not_observed":
+                        armed = True
+                if streak >= 2 and armed:
+                    camera_candidate_alert = True
+                    armed = False
+                conn.execute(
+                    """UPDATE watches SET last_image_hash=?,
+                       camera_positive_streak=?,camera_alert_armed=?
+                       WHERE id=? AND scope=?""",
+                    (frame_hash, streak, int(armed), watch_id, scope),
+                )
         older = previous["last_digest"]
         changed = older is not None and older != digest
         change_kind = "changed" if changed else ("baseline" if older is None else "unchanged")
@@ -410,6 +456,16 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
 
     # Baselines do not alert; camera/airspace remain inspectable but never
     # claim automatic person tracking or confirmed emergencies from ML output.
+    if camera_candidate_alert:
+        from jarvis_mrb.event_bus import emit_proactive
+        safe_label = current["label"] if scope == "personal" else "matter-scoped camera watch"
+        emit_proactive(
+            "Possible " + current["config"]["condition"].replace("_", " ")
+            + " in published camera " + safe_label
+            + " (two distinct stills, local ML classification). Unconfirmed; "
+              "capture times unknown. Inspect the source; do not treat as an emergency finding.",
+            cue="attention", severity="info",
+        )
     if changed and current["kind"] in {"sec_filings", "nws_alerts", "usgs_earthquakes", "air_quality"}:
         from jarvis_mrb.event_bus import emit_proactive
         safe_label = current["label"] if scope == "personal" else "matter-scoped external watch"

@@ -375,6 +375,51 @@ final class JarvisAppModel: ObservableObject {
         )
     }
 
+    func createNearestPublicCameraWatch(condition: String) async -> String {
+        guard let nearest = nearbyPublicCameras.first(where: { !$0.imageURL.isEmpty }) else {
+            return "Find published public cameras in the iPhone Physical tab first. "
+                + "I will not choose an unverified camera on your behalf."
+        }
+        do {
+            let watch = try await client.createExternalWatch(
+                kind: "camera", label: nearest.title,
+                config: ["camera_id": nearest.id, "condition": condition],
+                seconds: condition.isEmpty ? 3600 : 900
+            )
+            return "Created a 24-hour public-camera watch on \(nearest.title). "
+                + (condition.isEmpty
+                    ? "Jarvis will record a change log without speculative alerts. "
+                    : "Jarvis will report a possible \(condition.replacingOccurrences(of: "_", with: " ")) only after two different still images receive conservative model matches. ")
+                + "View or stop the watch on your iPhone. Watch ID: \(watch.id)."
+        } catch {
+            return "Could not start public-camera watch: " + error.localizedDescription
+        }
+    }
+
+    private static func nearestCameraWatchCondition(_ rawText: String) -> String? {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        switch normalized {
+        case "watch the nearest public camera", "watch nearest public camera",
+             "watch the nearest traffic camera":
+            return ""
+        case "watch the nearest public camera for smoke",
+             "watch nearest public camera for smoke",
+             "watch the nearest traffic camera for smoke":
+            return "smoke_visible"
+        case "watch the nearest public camera for congestion",
+             "watch the nearest traffic camera for congestion":
+            return "road_congestion"
+        default:
+            return nil
+        }
+    }
+
     func findPublicCamerasAt(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
         try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
     }
@@ -520,6 +565,17 @@ final class JarvisAppModel: ObservableObject {
 
         // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
         // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if let cameraCondition = Self.nearestCameraWatchCondition(text) {
+            let response = await createNearestPublicCameraWatch(condition: cameraCondition)
+            await finishLocalResponse(
+                response,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "Explicit expiring official camera watch"
+            )
+            return
+        }
+
         if Self.isPhysicalAwarenessIntent(text) {
             let briefing = await establishPhysicalAwareness()
             await finishLocalResponse(

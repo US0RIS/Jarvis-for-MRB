@@ -19,6 +19,16 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
     @Published private(set) var lastResult = ""
     @Published private(set) var discovered = false
     @Published private(set) var busy = false
+    @Published private(set) var arrivalLightIDs: Set<UUID> = []
+
+    private static let arrivalKey = "jarvis.home.preapprovedArrivalLights"
+    private var lastArrivalRun = Date.distantPast
+
+    override init() {
+        let ids = UserDefaults.standard.stringArray(forKey: Self.arrivalKey) ?? []
+        arrivalLightIDs = Set(ids.compactMap(UUID.init(uuidString:)))
+        super.init()
+    }
 
     private var manager: HMHomeManager?
     private var characteristics: [UUID: HMCharacteristic] = [:]
@@ -76,6 +86,37 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         }
         discovered = true
         status = "Apple Home connected • \(lights.count) controllable light\(lights.count == 1 ? "" : "s")"
+    }
+
+    /// Exact, individually enrolled and reversible physical action. This is a
+    /// location-triggered HomeKit rule, not a permission granted by an LLM or
+    /// sound classifier. Auto control cannot be enrolled without discovery.
+    func setArrivalControl(_ id: UUID, enabled: Bool) {
+        guard discovered, lights.contains(where: { $0.id == id }) else { return }
+        if enabled { arrivalLightIDs.insert(id) }
+        else { arrivalLightIDs.remove(id) }
+        UserDefaults.standard.set(
+            arrivalLightIDs.map(\.uuidString).sorted(),
+            forKey: Self.arrivalKey
+        )
+        lastResult = enabled
+            ? "Preauthorized arrival action for this light. Runs only while Jarvis is active, and only on a fresh home-arrival event."
+            : "Automatic arrival action revoked."
+    }
+
+    func runPreapprovedArrivalActions() async -> [String] {
+        guard discovered, !busy, !arrivalLightIDs.isEmpty else { return [] }
+        let now = Date()
+        // A bouncing geofence must never repeatedly toggle physical devices.
+        guard now.timeIntervalSince(lastArrivalRun) >= 300 else { return [] }
+        lastArrivalRun = now
+        var outcomes: [String] = []
+        // Bound the work per transition, preserve exact enrollment and keep
+        // fresh readback for each action. No new Home permission prompt here.
+        for light in lights.filter({ arrivalLightIDs.contains($0.id) }).prefix(5) {
+            outcomes.append(await setLight(light.id, on: true))
+        }
+        return outcomes
     }
 
     func listLightNames() -> String {
@@ -183,7 +224,7 @@ struct AppleHomeControlView: View {
             Button("Discover Apple Home") { home.discover() }
                 .buttonStyle(.borderedProminent)
             if home.discovered {
-                Text("Only HomeKit light services appear here. This does not expose locks, garage doors, outlets, or scenes.")
+                Text("Only HomeKit light services appear here. Individually enroll Auto on arrival for an explicit reversible light action when fresh GPS/geofence and ambient opportunity controls are enabled. It runs only while Jarvis is active; there are no locks, garage doors, outlets, or scenes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 ForEach(home.lights) { light in
@@ -201,6 +242,13 @@ struct AppleHomeControlView: View {
                         Button("Off") {
                             Task { _ = await home.setLight(light.id, on: false) }
                         }
+                        Button(home.arrivalLightIDs.contains(light.id) ? "Auto on arrival ✓" : "Auto on arrival") {
+                            home.setArrivalControl(
+                                light.id,
+                                enabled: !home.arrivalLightIDs.contains(light.id)
+                            )
+                        }
+                        .accessibilityIdentifier("home-auto-arrival-\(light.id.uuidString)")
                     }
                     .buttonStyle(.bordered)
                     .disabled(home.busy || !light.reachable)

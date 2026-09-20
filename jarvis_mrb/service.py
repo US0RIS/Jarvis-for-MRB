@@ -534,6 +534,15 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/ambient/status")
+def ambient_opportunity_status(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.sensor_opportunities import status
+    return status()
+
+
 @app.post("/external/watch/create")
 def external_watch_create(
     request: ExternalWatchCreateRequest,

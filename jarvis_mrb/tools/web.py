@@ -83,9 +83,8 @@ def _should_refine(query: str) -> bool:
 def refine_query(query: str) -> str:
     """Condense conversational speech into a search-engine query when useful.
 
-    Short, already-search-like queries bypass the model entirely. Longer voice
-    requests get one tiny 8B rewrite that preserves named entities, dates, and
-    constraints while removing conversational filler.
+    Default: strip only certain unambiguous conversational prefixes. Qwen
+    rewriting is an explicit opt-in for operators who want semantic expansion.
     """
     original = " ".join(query.strip().split())
     if not original or not _should_refine(original):
@@ -94,18 +93,18 @@ def refine_query(query: str) -> str:
         # Drop only fixed conversational prefixes, never rewrite a proper noun,
         # technical identifier, date, qualifier, negative or quoted search term.
         prefix = re.match(
-            r"(?i)^(?:can you|could you|please) (?:find|look up|search for)\\s+",
+            r"(?i)^(?:can you|could you|please) (?:find|look up|search for)\s+",
             original,
         )
         if prefix:
             return original[prefix.end():].strip() or original
         specific = re.match(
-            r"(?i)^(?:what's|what is) the latest on\\s+(.+)$",
+            r"(?i)^(?:what's|what is) the latest on\s+(.+)$",
             original,
         )
         if specific:
             return (specific.group(1).strip() + " latest")[:400]
-        prefix = re.match(r"(?i)^look up information about\\s+", original)
+        prefix = re.match(r"(?i)^look up information about\s+", original)
         if prefix:
             return original[prefix.end():].strip() or original
         # For complex compound requests, passing the original verbatim is

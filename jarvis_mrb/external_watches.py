@@ -22,6 +22,7 @@ _LOCK = threading.RLock()
 _KINDS = {
     "camera": (900, 86400),
     "nws_alerts": (900, 86400),
+    "usgs_earthquakes": (900, 86400),
     "sec_filings": (3600, 86400),
     "airspace_region": (1800, 86400),
     "air_quality": (1800, 86400),
@@ -252,6 +253,17 @@ def _fetch(row: dict[str, Any]) -> dict[str, Any]:
             "source_url": result["source_url"], "observed_at": result["checked_at"],
             "signature": ids, "payload": result,
         }
+    if kind == "usgs_earthquakes":
+        from jarvis_mrb.public_incidents import regional_earthquakes
+        result = regional_earthquakes(cfg["latitude"], cfg["longitude"])
+        return {
+            "status": result["status"],
+            "summary": str(len(result.get("events") or [])) + " recent USGS earthquakes in region",
+            "source_url": result["source_url"],
+            "observed_at": result["checked_at"],
+            "signature": sorted(x["id"] for x in result.get("events") or []),
+            "payload": result,
+        }
     if kind == "airspace_region":
         from jarvis_mrb.public_airspace import airspace_region
         result = airspace_region(cfg["latitude"], cfg["longitude"], radius_km=cfg["radius_km"])
@@ -346,7 +358,7 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
 
     # Baselines do not alert; camera/airspace remain inspectable but never
     # claim automatic person tracking or confirmed emergencies from ML output.
-    if changed and current["kind"] in {"sec_filings", "nws_alerts", "air_quality"}:
+    if changed and current["kind"] in {"sec_filings", "nws_alerts", "usgs_earthquakes", "air_quality"}:
         from jarvis_mrb.event_bus import emit_proactive
         safe_label = current["label"] if scope == "personal" else "matter-scoped external watch"
         emit_proactive(

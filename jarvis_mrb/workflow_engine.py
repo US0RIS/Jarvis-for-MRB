@@ -26,6 +26,7 @@ _ALLOWED_NODE_TOOLS = {
     "expense.capture", "expense.list", "expense.export", "fact.check", "journal.generate",
     "state.get", "state.update", "state.temp_set", "state.temp_clear",
     "knowledge.search", "spatial.find", "agency.deliberate", "custom.run",
+    "background.list",
 }
 
 
@@ -94,6 +95,7 @@ _EXPLICIT_READ_WORKFLOW_SOURCES: dict[str, tuple[str, dict[str, Any]]] = {
     "inbox": ("gmail.query", {"query": "in:inbox", "limit": 5}),
     "email": ("gmail.query", {"query": "in:inbox", "limit": 5}),
     "unread email": ("gmail.query", {"query": "is:unread in:inbox", "limit": 5}),
+    "unread emails": ("gmail.query", {"query": "is:unread in:inbox", "limit": 5}),
     "background tasks": ("background.list", {"limit": 5}),
     "pc resources": ("system.resources", {}),
     "browser tabs": ("browser.list_tabs", {}),

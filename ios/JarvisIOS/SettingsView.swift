@@ -104,6 +104,12 @@ struct SettingsView: View {
 
                     Toggle("Geofenced system profiles", isOn: $settings.geofencedProfilesEnabled)
                     Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
+                    Toggle("Proactive microphone + sensor opportunities", isOn: $settings.sensorOpportunitiesEnabled)
+                    Toggle("Use modelled outdoor temperature (Open-Meteo)", isOn: $settings.weatherContextEnabled)
+                        .disabled(!settings.sensorOpportunitiesEnabled || !settings.localSensorContextEnabled)
+                    Text("Camera-free opportunity detection uses opt-in iPhone motion/GPS, geofence transitions and sound labels from the existing microphone capture when Sound Recognition is enabled. It matches explicit standing reminder goals, never authorizes physical actions, and does not upload raw audio or transcripts. GPS coordinates are rounded and transient. Apple Health remains separately opt-in. Outdoor temperature is a source-labelled weather-model estimate, not a thermometer in the phone or glasses.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     TextField("Current project focus", text: $settings.projectFocus)
 
                     Text("Passive vision sends sampled glasses frames to the existing PC backend. The separate iPhone visual cache below does not depend on the backend and is intentionally not presented as general scene understanding.")

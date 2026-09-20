@@ -210,7 +210,7 @@ def _requires_audited_web(text: str) -> bool:
     'best/recommend/rank' request from memory. Explicitly private or in-context
     comparisons stay available to Gmail/Calendar/knowledge/local reasoning instead.
     """
-    n = " " + re.sub(r"\s+", " ", text.strip().lower()) + " "
+    n = " " + re.sub(r"\s+", " ", text.strip().lower().rstrip("?.!")) + " "
     receipt_cues = (
         " research receipt ", " search receipt ", " show me how you searched ",
         " prove you searched ", " verify your search ", " audit the search ",

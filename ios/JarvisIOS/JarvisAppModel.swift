@@ -1375,7 +1375,7 @@ final class JarvisAppModel: ObservableObject {
 
     static func spokenResponse(for response: String) -> String {
         if responseRequestsConfirmation(response) {
-            return "Ready, sir. Say confirm or cancel."
+            return "Ready. Say confirm or cancel."
         }
         return response
     }

@@ -175,6 +175,46 @@ struct JarvisAPIClient {
         }
     }
 
+    func createExternalWatch(
+        kind: String, label: String, config: [String: Any],
+        seconds: Int, scope: String = "personal"
+    ) async throws -> ExternalWatchSummary {
+        let (data, response) = try await postData(
+            path: "external/watch/create",
+            body: [
+                "scope": scope, "kind": kind, "label": label,
+                "config": config, "interval_seconds": seconds,
+                "expires_hours": 24,
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ExternalWatchSummary.self, from: data)
+    }
+
+    func getExternalWatches(scope: String = "personal") async throws -> [ExternalWatchSummary] {
+        let (data, response) = try await postData(
+            path: "external/watch/list", body: ["scope": scope]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ExternalWatchListResponse.self, from: data).watches
+    }
+
+    func checkExternalWatch(_ id: String, scope: String = "personal") async throws -> ExternalWatchCheckResponse {
+        let (data, response) = try await postData(
+            path: "external/watch/check", body: ["id": id, "scope": scope]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ExternalWatchCheckResponse.self, from: data)
+    }
+
+    func stopExternalWatch(_ id: String, scope: String = "personal") async throws -> ExternalWatchSummary {
+        let (data, response) = try await postData(
+            path: "external/watch/stop", body: ["id": id, "scope": scope]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ExternalWatchSummary.self, from: data)
+    }
+
     func physicalAwareness(latitude: Double, longitude: Double) async throws -> PhysicalAwarenessResponse {
         let (data, response) = try await postData(
             path: "physical/awareness",

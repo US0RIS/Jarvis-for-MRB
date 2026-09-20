@@ -33,6 +33,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_public_facilities.py" -v
       - name: Verify official camera provider boundaries
         run: python -m unittest discover -s tests -p "test_public_camera_catalog.py" -v
+      - name: Verify opt-in official camera vision boundary
+        run: python -m unittest discover -s tests -p "test_public_camera_vision.py" -v
 
   ios-build:
     runs-on: macos-26

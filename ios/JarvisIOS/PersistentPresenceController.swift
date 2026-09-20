@@ -532,21 +532,16 @@ final class PersistentPresenceController: ObservableObject {
     private func speakProactive(_ text: String) async {
         let trimmed = Self.collapseRepeatedSir(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !trimmed.isEmpty else { return }
-        let spoken = trimmed.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil
-            ? trimmed
-            : "Sir, " + trimmed.prefix(1).lowercased() + String(trimmed.dropFirst())
-        let normalizedSpoken = Self.collapseRepeatedSir(spoken)
-
         do {
-            let audio = try await client.synthesizeSpeech(normalizedSpoken)
+            let audio = try await client.synthesizeSpeech(trimmed)
             try await appModel.speechSynthesizer.speakRemoteAudio(
                 audio,
-                text: normalizedSpoken,
+                text: trimmed,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         } catch {
             await appModel.speechSynthesizer.speak(
-                normalizedSpoken,
+                trimmed,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         }

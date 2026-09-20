@@ -227,9 +227,11 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     m = _match(r"(?:show|find|list|read) (?:emails|email|messages) from (" + email + r")", spoken)
     if m:
         return _tool("gmail.sender", "gmail.query", query="from:" + m.group(1), limit=10)
-    m = _match(r"(?:show|list|find) (?:my )?(?:unread )?(?:emails|email|messages) (?:about|with subject|containing) (.{2,160})", spoken)
+    m = _match(r"(?:show|list|find) (?:my )?(unread )?(?:emails|email|messages) (?:about|with subject|containing) (.{2,160})", spoken)
     if m:
-        return _tool("gmail.search", "gmail.query", query=m.group(1).strip(), limit=10)
+        qualifier = "is:unread in:inbox " if m.group(1) else ""
+        return _tool("gmail.search", "gmail.query",
+                     query=qualifier + m.group(2).strip(), limit=10)
 
     m = _match(r"(?:find|search) (?:in )?(?:my )?(?:local records|notes|knowledge|memory|all my data) (?:for|about|containing) (.{2,220})", spoken)
     if m:

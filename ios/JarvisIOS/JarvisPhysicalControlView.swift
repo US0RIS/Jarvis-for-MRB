@@ -36,6 +36,44 @@ struct PublicCameraDiscoveryResponse: Decodable {
     }
 }
 
+struct NearbyFacility: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let category: String
+    let distanceM: Int
+    let latitude: Double
+    let longitude: Double
+    let access: String
+    let openingHours: String
+    let sourceURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, category, latitude, longitude, access
+        case distanceM = "distance_m"
+        case openingHours = "opening_hours"
+        case sourceURL = "source_url"
+    }
+
+    var appleMapsURL: URL? {
+        URL(string: "https://maps.apple.com/?daddr=\\(latitude),\\(longitude)&dirflg=w")
+    }
+}
+
+struct NearbyFacilitiesResponse: Decodable {
+    let status: String
+    let facilities: [NearbyFacility]
+    let sourceURL: String
+    let attributionURL: String?
+    let sourceNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, facilities
+        case sourceURL = "source_url"
+        case attributionURL = "attribution_url"
+        case sourceNote = "source_note"
+    }
+}
+
 struct PhysicalConditionsResponse: Decodable {
     struct AirQuality: Decodable {
         let status: String
@@ -191,6 +229,10 @@ struct JarvisPhysicalHubView: View {
 
                 GroupBox("Air and weather signals") {
                     JarvisPhysicalConditionsView()
+                }
+
+                GroupBox("Nearby mapped resources") {
+                    JarvisPublicFacilitiesView()
                 }
 
                 GroupBox("Public viewpoints") {
@@ -359,6 +401,66 @@ struct JarvisPhysicalConditionsView: View {
                 Text(data.locationSharingNote)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+
+struct JarvisPublicFacilitiesView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Find community-mapped drinking water, toilets and public defibrillators wherever OpenStreetMap has coverage.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button(appModel.nearbyFacilitiesBusy ? "Searching…" : "Find public resources near me") {
+                Task { _ = await appModel.searchNearbyPublicFacilities() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(appModel.nearbyFacilitiesBusy)
+            Text(appModel.nearbyFacilitiesStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let response = appModel.nearbyFacilities {
+                ForEach(response.facilities) { facility in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(facility.title)
+                            .font(.subheadline.weight(.medium))
+                        Text("\(facility.category) • \(facility.distanceM) m")
+                            .font(.caption)
+                        if facility.access != "unknown" {
+                            Text("Mapped access: " + facility.access)
+                                .font(.caption)
+                        }
+                        if facility.openingHours != "unknown" {
+                            Text("Mapped hours: " + facility.openingHours)
+                                .font(.caption)
+                        }
+                        HStack(spacing: 12) {
+                            if let route = facility.appleMapsURL {
+                                Link("Walking directions", destination: route)
+                                    .font(.caption)
+                            }
+                            if let source = URL(string: facility.sourceURL) {
+                                Link("Map record", destination: source)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Text(response.sourceNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let attribution = response.attributionURL,
+                   let url = URL(string: attribution) {
+                    Link("© OpenStreetMap contributors", destination: url)
+                        .font(.caption)
+                }
             }
         }
         .padding(.vertical, 8)

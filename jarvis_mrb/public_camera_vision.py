@@ -23,8 +23,8 @@ _MAX_IMAGE_BYTES = 3_000_000
 def _jpeg_or_png(body: bytes, mime: str) -> bool:
     content = mime.split(";", 1)[0].strip().lower()
     return (
-        (content in {"image/jpeg", "image/jpg"} and body.startswith(b"\\xff\\xd8\\xff"))
-        or (content == "image/png" and body.startswith(b"\\x89PNG\\r\\n\\x1a\\n"))
+        (content in {"image/jpeg", "image/jpg"} and body.startswith(b"\xff\xd8\xff"))
+        or (content == "image/png" and body.startswith(b"\x89PNG\r\n\x1a\n"))
     )
 
 

@@ -22,7 +22,7 @@ MemoMind does not have to supply a camera. Jarvis's primary presence inputs are 
 
 ### Implemented, opt-in signals
 
-- **Microphone:** existing iPhone/Bluetooth HFP audio route; on-device SoundAnalysis class, confidence and timestamp when the Sound Recognition setting is enabled. Classification currently runs only while the existing speech-recognition microphone tap is active; this does not establish an independent 24/7 microphone or access to unshipped MemoMind audio.
+- **Microphone:** existing iPhone/Bluetooth HFP audio route; on-device SoundAnalysis class, confidence and timestamp when the Sound Recognition setting is enabled. While voice capture is active it reuses the existing speech-recognition microphone tap; when idle and foregrounded, an independent on-device sound-label-only microphone tap can run after separate opt-in and iOS permission. It yields audio ownership before speech, meeting capture and TTS, and never claims iOS background persistence or access to unshipped MemoMind audio.
 - **GPS / geofence:** existing Core Location home/away callbacks, rounded transient coordinates, fresh separate GPS and motion timestamps. Requires active iPhone app, permissions and opt-in Motion / travel context. A first fix at home is not treated as an arrival.
 - **Motion:** Core Motion activity; driving or an active conversation suppresses nonessential sensor interruptions. Motion cannot establish destination or user intent.
 - **Health:** separately opt-in Apple Health / Watch heart rate, HRV and sleep data over the existing authenticated companion link. Read-only; no diagnoses, clinical interventions or inferred emotional state.

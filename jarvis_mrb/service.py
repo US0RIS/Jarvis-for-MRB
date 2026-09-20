@@ -87,7 +87,7 @@ class ExternalWatchCreateRequest(BaseModel):
 
 
 class ExternalWatchLookupRequest(BaseModel):
-    id: str
+    id: str = ""
     scope: str = "personal"
 
 
@@ -117,6 +117,7 @@ class DiligenceClaimRequest(BaseModel):
 
 class DiligenceLookupRequest(BaseModel):
     matter_id: str
+    include_sanctions: bool = False
 
 
 class RegionalAirspaceRequest(BaseModel):
@@ -633,7 +634,7 @@ def external_diligence_check(
     _check_auth(authorization)
     from jarvis_mrb.matter_diligence import check_matter
     try:
-        return check_matter(request.matter_id)
+        return check_matter(request.matter_id, include_sanctions=request.include_sanctions)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

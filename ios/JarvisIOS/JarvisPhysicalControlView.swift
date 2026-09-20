@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import MapKit
 import SwiftUI
 
 struct PublicCameraListing: Decodable, Identifiable {
@@ -608,6 +609,7 @@ struct JarvisPublicFacilitiesView: View {
 /// No MemoMind hardware or geolocation permission is required for this view.
 struct JarvisWorldWatchesView: View {
     @EnvironmentObject var appModel: JarvisAppModel
+    @State private var placeQuery = ""
     @State private var latitude = ""
     @State private var longitude = ""
     @State private var remoteCameras: [PublicCameraListing] = []
@@ -630,6 +632,13 @@ struct JarvisWorldWatchesView: View {
             Text("Choose a remote location or published official camera. Watches expire automatically; stop or recheck at any time.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            TextField("Remote place name (e.g. Mount Hotham, Victoria)", text: $placeQuery)
+                .textFieldStyle(.roundedBorder)
+            Button("Resolve place to coordinates") {
+                Task { await resolvePlace() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(working || placeQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             HStack {
                 TextField("Latitude", text: $latitude)
                     .keyboardType(.numbersAndPunctuation)
@@ -753,6 +762,31 @@ struct JarvisWorldWatchesView: View {
         }
         .padding(.vertical, 8)
         .task { await refreshWatches() }
+    }
+
+    @MainActor
+    private func resolvePlace() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            let query = MKLocalSearch.Request()
+            query.naturalLanguageQuery = placeQuery
+            let response = try await MKLocalSearch(request: query).start()
+            guard let place = response.mapItems.first else {
+                status = "MapKit did not resolve that place. Add city/region and retry."
+                return
+            }
+            let point = place.placemark.coordinate
+            latitude = String(format: "%.6f", point.latitude)
+            longitude = String(format: "%.6f", point.longitude)
+            status = "MapKit selected " + (place.name ?? placeQuery)
+                + " at " + latitude + ", " + longitude
+                + ". Verify the location before starting a watch."
+            remoteCameras = []
+        } catch {
+            status = "Place resolution unavailable: " + error.localizedDescription
+        }
     }
 
     @MainActor

@@ -655,6 +655,12 @@ struct JarvisWorldWatchesView: View {
             .font(.caption)
             .buttonStyle(.bordered)
             .disabled(coordinates == nil || working)
+            Button("Watch regional USGS earthquakes") {
+                Task { await createLocationWatch("usgs_earthquakes") }
+            }
+            .font(.caption)
+            .buttonStyle(.bordered)
+            .disabled(coordinates == nil || working)
             Button("Watch regional aircraft count") {
                 Task { await createLocationWatch("airspace_region") }
             }
@@ -822,6 +828,272 @@ struct JarvisWorldWatchesView: View {
             status = "Watch stopped."
         } catch {
             status = "Unable to stop watch: " + error.localizedDescription
+        }
+    }
+}
+
+
+/// Entirely optional workbench; matter labels and claim source references are
+/// kept in a separate backend matter ledger, not used for name-based searches.
+struct JarvisPublicDiligenceView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+    @State private var matters: [DiligenceMatterSummary] = []
+    @State private var matterLabel = ""
+    @State private var selectedMatterID = ""
+    @State private var projectEntityID = ""
+    @State private var issuerName = ""
+    @State private var issuerCIK = ""
+    @State private var claimTag = ""
+    @State private var claimValue = ""
+    @State private var claimUnit = "USD"
+    @State private var claimStart = ""
+    @State private var claimEnd = ""
+    @State private var claimSource = ""
+    @State private var includeSanctions = false
+    @State private var working = false
+    @State private var message = "Select a local matter and explicitly confirm the issuer's SEC CIK."
+    @State private var evidenceLines: [String] = []
+    @State private var sourceLinks: [(title: String, url: String)] = []
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                GroupBox("Scope and limitations") {
+                    Text("Only use this with appropriate client/organization authorization. Exact CIK queries reach the SEC; your private matter label and document-source references stay in Jarvis's separate local matter ledger. This is an evidence review aid, not sanctions clearance, legal advice or a finding of misrepresentation.")
+                        .font(.footnote)
+                }
+                GroupBox("Local matter") {
+                    VStack(alignment: .leading, spacing: 9) {
+                        TextField("New matter label", text: $matterLabel)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Existing world project entity ID (optional)", text: $projectEntityID)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Create isolated matter") { Task { await createMatter() } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(working || matterLabel.trimmingCharacters(in: .whitespaces).isEmpty)
+                        if !matters.isEmpty {
+                            Picker("Matter", selection: $selectedMatterID) {
+                                ForEach(matters) { matter in
+                                    Text(matter.label).tag(matter.id)
+                                }
+                            }
+                        }
+                        Button("Refresh local matter list") { Task { await refreshMatters() } }
+                            .buttonStyle(.bordered)
+                            .disabled(working)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GroupBox("Explicit SEC issuer") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("CIK (digits only)", text: $issuerCIK)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Company name as supplied", text: $issuerName)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Register exact CIK in selected matter") {
+                            Task { await registerIssuer() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(working || selectedMatterID.isEmpty
+                                  || issuerCIK.isEmpty || issuerName.isEmpty)
+                        Text("Jarvis does not guess a CIK from a company name or infer that similarly named legal entities are the same.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GroupBox("Optional source-linked numeric claim") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Compare only a deliberately selected SEC XBRL concept, unit and identical reporting period.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("US-GAAP tag, e.g. LongTermDebt", text: $claimTag)
+                            .textFieldStyle(.roundedBorder)
+                        HStack {
+                            TextField("Claim value", text: $claimValue)
+                                .keyboardType(.decimalPad)
+                                .textFieldStyle(.roundedBorder)
+                            Picker("Unit", selection: $claimUnit) {
+                                Text("USD").tag("USD")
+                                Text("shares").tag("shares")
+                                Text("pure").tag("pure")
+                            }
+                        }
+                        TextField("Start YYYY-MM-DD (duration facts)", text: $claimStart)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("End YYYY-MM-DD", text: $claimEnd)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Document citation/source reference", text: $claimSource)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Record claim for independent comparison") {
+                            Task { await addClaim() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(working || selectedMatterID.isEmpty
+                                  || issuerCIK.isEmpty || claimTag.isEmpty
+                                  || claimValue.isEmpty || claimEnd.isEmpty
+                                  || claimSource.isEmpty)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GroupBox("Independent evidence check") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Include local OFAC SDN name-candidate check", isOn: $includeSanctions)
+                        Text("OFAC check downloads the primary-name SDN list for local matching. Neither a candidate nor an exact-name nonmatch determines legal status; other lists, aliases, and ownership remain unreviewed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button(working ? "Checking…" : "Check selected matter") {
+                            Task { await checkMatter() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(working || selectedMatterID.isEmpty)
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                        ForEach(Array(evidenceLines.enumerated()), id: \.offset) { _, line in
+                            Text(line).font(.caption)
+                        }
+                        ForEach(Array(sourceLinks.enumerated()), id: \.offset) { _, source in
+                            if let url = URL(string: source.url) {
+                                Link(source.title, destination: url)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Public Diligence")
+        .task { await refreshMatters() }
+    }
+
+    @MainActor
+    private func refreshMatters() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            matters = try await appModel.listDiligenceMatters()
+            if !matters.contains(where: { $0.id == selectedMatterID }) {
+                selectedMatterID = matters.first?.id ?? ""
+            }
+        } catch {
+            message = "Matter registry unavailable: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func createMatter() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            let created = try await appModel.createDiligenceMatter(
+                label: matterLabel, projectEntityID: projectEntityID
+            )
+            matters = try await appModel.listDiligenceMatters()
+            selectedMatterID = created.id
+            matterLabel = ""
+            message = "Created local matter " + created.label + "."
+        } catch {
+            message = "Matter creation failed: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func registerIssuer() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await appModel.registerDiligenceIssuer(
+                matterID: selectedMatterID, cik: issuerCIK, name: issuerName
+            )
+            message = "Registered user-confirmed SEC CIK. No name-based external lookup performed."
+        } catch {
+            message = "CIK registration failed: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func addClaim() async {
+        guard !working, let value = Double(claimValue), value.isFinite else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await appModel.registerNumericDiligenceClaim(
+                matterID: selectedMatterID, cik: issuerCIK,
+                taxonomy: "us-gaap", tag: claimTag,
+                value: value, unit: claimUnit, start: claimStart,
+                end: claimEnd, sourceRef: claimSource
+            )
+            message = "Saved cited numeric assertion for review, not yet verified."
+        } catch {
+            message = "Claim registration failed: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func checkMatter() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        evidenceLines = []
+        sourceLinks = []
+        do {
+            let result = try await appModel.checkDiligenceMatter(
+                matterID: selectedMatterID, includeSanctions: includeSanctions
+            )
+            message = "Independent sources checked • " + String(describing: result["status"] ?? "unknown")
+            for issuer in (result["issuer_checks"] as? [[String: Any]] ?? []) {
+                let name = issuer["registrant_name"] as? String ?? issuer["cik"] as? String ?? "Issuer"
+                let state = issuer["status"] as? String ?? "unknown"
+                evidenceLines.append(name + " • SEC " + state)
+                if issuer["name_review_needed"] as? Bool == true {
+                    evidenceLines.append("Registrant name differs from asserted name: verify legal-entity history.")
+                }
+                for filing in (issuer["filings"] as? [[String: Any]] ?? []).prefix(5) {
+                    let title = (filing["form"] as? String ?? "Filing")
+                        + " • " + (filing["filed"] as? String ?? "")
+                    if let url = filing["document_url"] as? String, !url.isEmpty {
+                        sourceLinks.append((title: title, url: url))
+                    }
+                }
+                if let reason = issuer["reason"] as? String {
+                    evidenceLines.append("Source unavailable: " + reason)
+                }
+            }
+            for claim in result["claim_checks"] as? [[String: Any]] ?? [] {
+                let comparison = claim["comparison"] as? [String: Any] ?? [:]
+                let kind = comparison["status"] as? String ?? "unavailable"
+                evidenceLines.append(
+                    "Claim " + (claim["source_ref"] as? String ?? "")
+                    + " • " + (claim["concept"] as? String ?? "") + ": " + kind
+                )
+                if let reason = comparison["reason"] as? String {
+                    evidenceLines.append(reason)
+                }
+            }
+            for sanctions in result["sanctions_candidate_reviews"] as? [[String: Any]] ?? [] {
+                let screening = sanctions["screening"] as? [String: Any] ?? [:]
+                evidenceLines.append(
+                    "OFAC primary-name review • "
+                    + (sanctions["asserted_name"] as? String ?? "")
+                    + ": " + (screening["status"] as? String ?? "unavailable")
+                )
+                if let note = screening["source_note"] as? String {
+                    evidenceLines.append(note)
+                }
+                if let source = screening["source_url"] as? String {
+                    sourceLinks.append((title: "OFAC sanctions source", url: source))
+                }
+            }
+            if let note = result["scope_note"] as? String {
+                evidenceLines.append(note)
+            }
+        } catch {
+            message = "Diligence check unavailable: " + error.localizedDescription
         }
     }
 }

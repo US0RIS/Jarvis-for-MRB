@@ -32,6 +32,8 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var nearbyCameraCoverage = ""
     @Published private(set) var nearbyCameraSourceURL = ""
     @Published private(set) var nearbyCameraBusy = false
+    @Published private(set) var analyzingPublicCameraID: String?
+    @Published private(set) var publicCameraAnalyses: [String: String] = [:]
     @Published private(set) var nearbyConditions: PhysicalConditionsResponse?
     @Published private(set) var nearbyConditionsStatus = "Tap Check or ask Jarvis for nearby conditions."
     @Published private(set) var nearbyConditionsBusy = false
@@ -88,10 +90,50 @@ final class JarvisAppModel: ObservableObject {
         try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
     }
 
+    func analyzePublishedCameraStill(_ cameraID: String) async -> String {
+        guard analyzingPublicCameraID == nil else {
+            return "I am already analyzing a published camera still."
+        }
+        guard let camera = nearbyPublicCameras.first(where: { $0.id == cameraID }),
+              !camera.imageURL.isEmpty else {
+            return "Select an available official still from the Physical tab first."
+        }
+        analyzingPublicCameraID = cameraID
+        defer { analyzingPublicCameraID = nil }
+        publicCameraAnalyses[cameraID] = "Retrieving one official still for local analysis…"
+        do {
+            let analysis = try await client.analyzeOfficialPublicCamera(cameraID)
+            let response = analysis.description + " " + analysis.sourceNote
+            publicCameraAnalyses[cameraID] = response
+            return "\(analysis.cameraName): " + response
+        } catch {
+            let error = "Image analysis unavailable: " + error.localizedDescription
+            publicCameraAnalyses[cameraID] = error
+            return error
+        }
+    }
+
+    private static func isAnalyzePublicStillIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "analyze the nearest public camera",
+            "analyze nearest public camera",
+            "describe the nearest public camera",
+            "analyze the nearest traffic camera",
+        ].contains(normalized)
+    }
+
     func searchNearbyPublicCameras() async -> String {
         guard !nearbyCameraBusy else { return "A public camera search is already running." }
         nearbyCameraBusy = true
         nearbyPublicCameras = []
+        publicCameraAnalyses = [:]
         nearbyCameraCoverage = ""
         nearbyCameraSourceURL = ""
         nearbyCameraStatus = "Requesting a one-time iPhone location…"
@@ -370,6 +412,20 @@ final class JarvisAppModel: ObservableObject {
 
         // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
         // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if Self.isAnalyzePublicStillIntent(text) {
+            let nearest = nearbyPublicCameras.first(where: { !$0.imageURL.isEmpty })
+            let description = nearest == nil
+                ? "Discover published public cameras in the Physical tab first."
+                : await analyzePublishedCameraStill(nearest!.id)
+            await finishLocalResponse(
+                description,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "Explicit selected public still + local vision model"
+            )
+            return
+        }
+
         if Self.isNearbyFacilitiesIntent(text) {
             let facilityReply = await searchNearbyPublicFacilities()
             await finishLocalResponse(

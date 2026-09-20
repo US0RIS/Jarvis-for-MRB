@@ -2498,6 +2498,10 @@ Future self-improvement is plausible only if the evaluator and safety constraint
 
 ---
 
+# Deterministic routing / smaller local model
+
+The `jarvis/memomind-prep` branch now routes dozens of exact read/action patterns **without** invoking the Ollama Qwen planner. Shared streaming and non-streaming dispatch preserves existing approval gates; common calendar/Gmail/PC/browser/system/world operations, explicit structured writes, selected read-only workflows, routine briefings, daily journals, web-query cleanup, eight-family audited research plans and simple achieved-state goal contracts have deterministic paths. Nuanced open-ended language, semantic synthesis, novel workflows and model-based perception still use the appropriate model. `MODEL_FREE_OPERATIONS.md` documents the call-site inventory, default/opt-in model settings, tests and authenticated `/routing/status` telemetry.
+
 # External evidence branch addendum
 
 The `jarvis/memomind-prep` feature branch adds an **iPhone-first Physical** tab (Gen 1 Ray-Ban Meta voice compatible; MemoMind optional) and independently sourced public-world infrastructure. This includes bounded Caltrans remote camera/still watches; USGS earthquakes, NWS alerts, global modelled air data, OpenStreetMap public utilities, and regional OpenSky aircraft counts; plus an explicitly enrolled, separate local SEC/OFAC/EPA matter-diligence workbench. All watches require active enrollment and expire; camera detection is an uncertain two-distinct-frame model indication, never a verified incident. Personal watch source metadata may be mirrored into the canonical world graph; matter-specific source/claim data stays in the separate local matter and watch ledgers.

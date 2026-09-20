@@ -205,6 +205,7 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     private func startListening(prepareAudio: () throws -> Void) throws {
+        AmbientSoundCapture.shared.stop()
         stopAudioOnly(cancelRecognition: true)
         recognitionPrefix = BargeInBuffer.take()
         transcript = recognitionPrefix

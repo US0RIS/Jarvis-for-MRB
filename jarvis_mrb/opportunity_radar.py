@@ -20,7 +20,7 @@ _OBJECT_GOAL = re.compile(
     r"[.!?]?\s*$",
     re.IGNORECASE,
 )
-_COMPOUND_ACTION = re.compile(r"\\b(?:and|then|after|before|while|plus|also)\\b", re.IGNORECASE)
+_COMPOUND_ACTION = re.compile(r"\b(?:and|then|after|before|while|plus|also)\b", re.IGNORECASE)
 _DISALLOWED = frozenset({
     "person", "people", "someone", "anyone", "child", "children", "stranger",
     "face", "faces", "driver", "passenger", "neighbor", "neighbour",

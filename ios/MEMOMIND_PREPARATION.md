@@ -5,14 +5,16 @@ Prepared September 18, 2026, from MemoMind's September 1 developer-access announ
 ## What is already implemented
 
 - iOS `MemoMindBridge.swift`: a vendor-agnostic, bounded monochrome HUD frame/card model, a local iPhone preview, an input-intent mapper, and a transport callback.
-- **EDITH-inspired Command View:** the existing Glasses tab now requests authenticated `GET /agency/command-view` on entry and every 15 seconds *while the tab is visible*. It renders real persisted Agency mode, active/blocked goal counts, current plans, next recorded steps, approval backlog and emitted exception events. The backend model is read-only and does not call an LLM, plan, execute or imply that unobserved conditions are current.
+- **EDITH-inspired Command View:** the optional Glasses simulator (under Physical) now requests authenticated `GET /agency/command-view` on entry and every 15 seconds *while the tab is visible*. It renders real persisted Agency mode, active/blocked goal counts, current plans, next recorded steps, approval backlog and emitted exception events. The backend model is read-only and does not call an LLM, plan, execute or imply that unobserved conditions are current.
 - Existing authenticated companion `proactive_alert`/job-completion messages flow to opt-in HUD cards using the iPhone's existing threshold filter. Backend alert text and goal details are private by default on the glasses; they never activate voice recording.
 - Completed Jarvis replies are delivered to the *iPhone-side* bridge from the existing `JarvisAppModel.recordTurn` path; there is no additional model, memory store, network endpoint, or AI assistant.
-- New **Glasses** tab renders the same current frame as the proposed physical-device adapter and simulates taps and navigation.
+- The optional **Glasses simulator** renders the same current frame as the proposed physical-device adapter and simulates taps and navigation.
 - The bridge accepts future touch, head-gesture, and KiWear ring events as **semantic** inputs, not guessed BLE bytes or guessed vendor enums.
 - Glasses pairing is never fabricated: connection status starts at `Simulator only`; a physical driver must report connected after an actual handshake.
 - Private Jarvis replies are hidden by default on the HUD. A dedicated toggle enables display; this setting does **not** enable capture/recording.
 - Approval cards direct the wearer to iPhone. A tap/nod/ring select **does not execute** a protected action, approve an Agency plan, email anyone, or dismiss the backend's pending approval.
+
+For operational details of the broader remote-eye watches, regional airspace/USGS detections and matter-scoped SEC/OFAC/EPA diligence, see `EXTERNAL_EVIDENCE_OPERATIONS.md` in the repository root.
 
 ## Portable physical-world sensor: official public camera catalog
 
@@ -26,7 +28,7 @@ Camera **discovery, viewing and explicit one-still interpretation** are now incl
 
 ## One-command physical-world briefing
 
-**Physical → JARVIS • Situational briefing** or **“Jarvis, establish situational awareness”** on the existing iPhone/Gen 1 Meta hands-free route uses a single one-shot iPhone location request followed by three parallel, independent public-source checks: published Caltrans highway cameras when integrated, global Open-Meteo air/UV model with data timestamp, US NWS active point alerts where supported, and OpenStreetMap public facilities. The response is a deterministic, sourced summary that makes missing feeds and unsupported regional alert coverage explicit. It does not assert traffic safety, detect hidden conditions, constantly track the user or claim that Meta can display a HUD.
+**Physical → JARVIS • Situational briefing** or **“Jarvis, establish situational awareness”** on the existing iPhone/Gen 1 Meta hands-free route uses a single one-shot iPhone location request followed by four parallel, independent public-source checks: published Caltrans highway cameras when integrated, global Open-Meteo air/UV model with data timestamp, US NWS active point alerts where supported, OpenStreetMap public facilities, and USGS earthquake detections. The response is a deterministic, sourced summary that makes missing feeds and unsupported regional alert coverage explicit. It does not assert traffic safety, detect hidden conditions, constantly track the user or claim that Meta can display a HUD.
 
 The request populates the ordinary Physical tab's individual source cards so the user can inspect still images, optionally analyze one selected public still with local vision, see warnings, and open walking directions. MemoMind remains an optional output surface of existing Jarvis state.
 

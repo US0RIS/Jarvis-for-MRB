@@ -39,6 +39,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_external_watches.py" -v
       - name: Verify SEC source facts and matter diligence
         run: python -m unittest discover -s tests -p "test_public_diligence.py" -v
+      - name: Verify exact EPA ECHO facility evidence
+        run: python -m unittest discover -s tests -p "test_public_epa.py" -v
       - name: Verify local OFAC candidate screening
         run: python -m unittest discover -s tests -p "test_ofac_screen.py" -v
       - name: Verify worldwide public resource boundaries

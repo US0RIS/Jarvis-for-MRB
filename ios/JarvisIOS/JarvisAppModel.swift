@@ -339,6 +339,30 @@ final class JarvisAppModel: ObservableObject {
         ].contains(normalized)
     }
 
+    func findPublicCamerasAt(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
+        try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
+    }
+
+    func createExternalWatch(
+        kind: String, label: String, config: [String: Any], seconds: Int
+    ) async throws -> ExternalWatchSummary {
+        try await client.createExternalWatch(
+            kind: kind, label: label, config: config, seconds: seconds
+        )
+    }
+
+    func getExternalWatches() async throws -> [ExternalWatchSummary] {
+        try await client.getExternalWatches()
+    }
+
+    func checkExternalWatch(_ id: String) async throws -> ExternalWatchCheckResponse {
+        try await client.checkExternalWatch(id)
+    }
+
+    func stopExternalWatch(_ id: String) async throws -> ExternalWatchSummary {
+        try await client.stopExternalWatch(id)
+    }
+
     func refreshMemoMindCommandView() async throws {
         let snapshot = try await client.agencyCommandView()
         memoMind.presentCommandView(snapshot)

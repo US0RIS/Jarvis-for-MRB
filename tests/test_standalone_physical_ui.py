@@ -23,6 +23,16 @@ class StandalonePhysicalExperienceTests(unittest.TestCase):
         self.assertIn("fromHandsFree: fromHandsFree", route)
         self.assertIn("iPhone location + official public camera discovery", route)
 
+    def test_one_voice_physical_briefing_is_a_first_class_phone_surface(self) -> None:
+        model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
+        route = model[model.index("private func performCommand("):]
+        self.assertLess(route.index("if Self.isPhysicalAwarenessIntent(text) {"), route.index("if let frontendCommandHandler,"))
+        self.assertIn("establishPhysicalAwareness()", route)
+        client = (_ROOT / "ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        self.assertIn('path: "physical/awareness"', client)
+        physical = (_ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text(encoding="utf-8")
+        self.assertIn("Establish situational awareness", physical)
+
     def test_public_still_is_explicit_and_not_memomind_dependent(self) -> None:
         model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
         route = model[model.index("private func performCommand("):]

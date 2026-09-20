@@ -436,6 +436,20 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.post("/physical/awareness")
+def nearby_physical_awareness(
+    request: PhysicalConditionsRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """On-demand multisource briefing; no background surveillance."""
+    _check_auth(authorization)
+    from jarvis_mrb.physical_awareness import physical_awareness
+    try:
+        return physical_awareness(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.post("/physical/public-cameras/analyze")
 def analyze_public_camera_still(
     request: OfficialCameraAnalysisRequest,

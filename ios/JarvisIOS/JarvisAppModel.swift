@@ -35,6 +35,9 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var nearbyConditions: PhysicalConditionsResponse?
     @Published private(set) var nearbyConditionsStatus = "Tap Check or ask Jarvis for nearby conditions."
     @Published private(set) var nearbyConditionsBusy = false
+    @Published private(set) var nearbyFacilities: NearbyFacilitiesResponse?
+    @Published private(set) var nearbyFacilitiesStatus = "Tap Find or ask Jarvis about nearby public resources."
+    @Published private(set) var nearbyFacilitiesBusy = false
     private lazy var nearbyCameraLocation = PublicCameraLocationRequest()
 
     var frontendCommandHandler: ((String) async -> String?)?
@@ -131,6 +134,53 @@ final class JarvisAppModel: ObservableObject {
             "what public cameras are nearby", "show nearby public cameras",
             "find nearby traffic cameras", "find traffic cameras near me",
             "show nearby traffic cameras", "what traffic cameras are nearby",
+        ].contains(normalized)
+    }
+
+    func searchNearbyPublicFacilities() async -> String {
+        guard !nearbyFacilitiesBusy else { return "A public resources search is already running." }
+        nearbyFacilitiesBusy = true
+        nearbyFacilities = nil
+        nearbyFacilitiesStatus = "Requesting a one-time iPhone location…"
+        defer { nearbyFacilitiesBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            nearbyFacilitiesStatus = "Checking OpenStreetMap public facilities…"
+            let response = try await client.discoverNearbyFacilities(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            nearbyFacilities = response
+            if response.status != "ok" {
+                nearbyFacilitiesStatus = response.sourceNote
+                return nearbyFacilitiesStatus
+            }
+            if response.facilities.isEmpty {
+                nearbyFacilitiesStatus = "No mapped toilets, water or defibrillators returned within 1.5 km. This does not mean none exist."
+                return nearbyFacilitiesStatus
+            }
+            let nearest = response.facilities[0]
+            nearbyFacilitiesStatus = "\(response.facilities.count) mapped public facilities within 1.5 km. Nearest: \(nearest.title), approximately \(nearest.distanceM) meters away. Mapping may be incomplete."
+            return nearbyFacilitiesStatus + " Open Physical on your iPhone for walking directions."
+        } catch {
+            nearbyFacilitiesStatus = "Public resources unavailable: " + error.localizedDescription
+            return nearbyFacilitiesStatus
+        }
+    }
+
+    private static func isNearbyFacilitiesIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "find public resources near me", "find nearby public resources",
+            "find nearby water fountains", "find drinking water near me",
+            "where is the nearest public toilet", "find public toilets near me",
+            "find a public defibrillator near me", "find defibrillators near me",
         ].contains(normalized)
     }
 
@@ -320,6 +370,17 @@ final class JarvisAppModel: ObservableObject {
 
         // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
         // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if Self.isNearbyFacilitiesIntent(text) {
+            let facilityReply = await searchNearbyPublicFacilities()
+            await finishLocalResponse(
+                facilityReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone location + public mapped resources"
+            )
+            return
+        }
+
         if Self.isPhysicalConditionsIntent(text) {
             let conditionsReply = await searchPhysicalConditions()
             await finishLocalResponse(

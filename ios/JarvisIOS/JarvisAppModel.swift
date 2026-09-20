@@ -432,6 +432,24 @@ final class JarvisAppModel: ObservableObject {
         )
     }
 
+    func createMatterSECWatch(
+        matterID: String, cik: String, label: String
+    ) async throws -> ExternalWatchSummary {
+        try await client.createExternalWatch(
+            kind: "sec_filings", label: label,
+            config: ["cik": cik], seconds: 3600,
+            scope: "matter:" + matterID
+        )
+    }
+
+    func getMatterSECWatches(_ matterID: String) async throws -> [ExternalWatchSummary] {
+        try await client.getExternalWatches(scope: "matter:" + matterID)
+    }
+
+    func stopMatterSECWatch(_ id: String, matterID: String) async throws -> ExternalWatchSummary {
+        try await client.stopExternalWatch(id, scope: "matter:" + matterID)
+    }
+
     func getExternalWatches() async throws -> [ExternalWatchSummary] {
         try await client.getExternalWatches()
     }

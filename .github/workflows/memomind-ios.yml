@@ -31,6 +31,16 @@ jobs:
         run: python -m unittest discover -s tests -p "test_physical_conditions.py" -v
       - name: Verify multisource situational briefing
         run: python -m unittest discover -s tests -p "test_physical_awareness.py" -v
+      - name: Verify official earthquake source
+        run: python -m unittest discover -s tests -p "test_public_incidents.py" -v
+      - name: Verify aggregated regional airspace
+        run: python -m unittest discover -s tests -p "test_public_airspace.py" -v
+      - name: Verify external watch persistence and matter isolation
+        run: python -m unittest discover -s tests -p "test_external_watches.py" -v
+      - name: Verify SEC source facts and matter diligence
+        run: python -m unittest discover -s tests -p "test_public_diligence.py" -v
+      - name: Verify local OFAC candidate screening
+        run: python -m unittest discover -s tests -p "test_ofac_screen.py" -v
       - name: Verify worldwide public resource boundaries
         run: python -m unittest discover -s tests -p "test_public_facilities.py" -v
       - name: Verify official camera provider boundaries

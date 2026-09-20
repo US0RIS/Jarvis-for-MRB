@@ -137,6 +137,18 @@ def _remember_objects(objects: list[str], scene: str, now: float) -> None:
             _last_object_seen[name] = now
             try:
                 remember_object(name, location_context=context, scene=scene, confidence=0.65)
+                # A user may have an explicit "find my keys" goal. Surface a
+                # tentative sighting via durable Agency Attention, never act on
+                # a vision inference or infer permission from a goal.
+                try:
+                    from jarvis_mrb.opportunity_radar import consider_object_sighting
+                    consider_object_sighting(
+                        name, location_context=context, confidence=0.65
+                    )
+                except Exception:
+                    # Opportunity discovery must never stall the vision worker
+                    # or prevent the underlying spatial sighting from saving.
+                    pass
             except (ValueError, OSError):
                 pass
 

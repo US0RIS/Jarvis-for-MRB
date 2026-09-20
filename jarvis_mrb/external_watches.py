@@ -295,6 +295,44 @@ def _fetch(row: dict[str, Any]) -> dict[str, Any]:
     raise ValueError("Unsupported watch.")
 
 
+def _mirror_personal_watch_observation(
+    current: dict[str, Any], *,
+    checked_at: str, observed_at: str, source_url: str,
+    change_kind: str, summary: str, digest: str,
+) -> None:
+    """Best-effort metadata-only world graph mirror, never for private matters."""
+    if current["scope"] != "personal":
+        return
+    try:
+        from jarvis_mrb.world_model import ensure_entity, record_event
+        node = ensure_entity(
+            "external_watch", current["label"],
+            external_namespace="jarvis_external_watch",
+            external_id=current["id"],
+            confidence=1.0,
+        )
+        record_event(
+            "external.watch_observation",
+            "External watch " + current["kind"] + " " + change_kind + ": " + summary[:350],
+            source_kind="external_watch",
+            source_ref=current["id"] + ":" + digest,
+            occurred_at=checked_at,
+            payload={
+                "watch_id": current["id"], "kind": current["kind"],
+                "change_kind": change_kind, "source_url": source_url,
+                "source_observed_at": observed_at or None,
+                "source_capture_time_known": bool(observed_at),
+            },
+            evidence=source_url,
+            confidence=0.8 if current["kind"] == "camera" else 0.95,
+            participants=[(node, "monitored_source", 1.0)],
+        )
+    except Exception:
+        # Independent watch ledger remains authoritative if general world graph
+        # happens to be unavailable. Never interrupt the surveillance controls.
+        pass
+
+
 def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[str, Any]:
     with _LOCK:
         current = get_watch(watch_id, scope)
@@ -361,6 +399,14 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
             (watch_id, watch_id),
         )
         conn.commit()
+
+    if change_kind in {"baseline", "changed"}:
+        _mirror_personal_watch_observation(
+            current, checked_at=checked_at,
+            observed_at=str(evidence.get("observed_at") or "")[:100],
+            source_url=str(evidence.get("source_url") or "")[:1000],
+            change_kind=change_kind, summary=summary, digest=digest,
+        )
 
     # Baselines do not alert; camera/airspace remain inspectable but never
     # claim automatic person tracking or confirmed emergencies from ML output.

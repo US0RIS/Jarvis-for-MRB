@@ -62,7 +62,7 @@ def airspace_region(latitude: float, longitude: float, *, radius_km: float = 20)
             "source_url": _DOCS, "aircraft_count": count,
             "source_note": (
                 "Regional OpenSky state vectors, coverage incomplete. Counts are not "
-                "airport schedules, identification of passengers or proof of all aircraft. "
+                "airport schedules, identification of passengers, and are not proof of all aircraft. "
                 "OpenSky access is credit-limited and subject to non-commercial licensing."
             ),
         }

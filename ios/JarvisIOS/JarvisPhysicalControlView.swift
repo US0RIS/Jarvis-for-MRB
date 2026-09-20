@@ -54,6 +54,22 @@ struct PublicCameraAnalysisResponse: Decodable {
     }
 }
 
+struct PhysicalAwarenessResponse: Decodable {
+    let status: String
+    let summary: String
+    let checkedAt: String
+    let cameras: PublicCameraDiscoveryResponse
+    let conditions: PhysicalConditionsResponse
+    let facilities: NearbyFacilitiesResponse
+    let locationNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, summary, cameras, conditions, facilities
+        case checkedAt = "checked_at"
+        case locationNote = "location_note"
+    }
+}
+
 struct NearbyFacility: Decodable, Identifiable {
     let id: String
     let title: String
@@ -230,6 +246,31 @@ struct JarvisPhysicalHubView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                GroupBox("JARVIS • Situational briefing") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("A single deliberate lookup across available public cameras, modelled air quality, official point alerts, and mapped facilities.")
+                            .font(.callout)
+                        Button(appModel.physicalAwarenessBusy ? "Checking sources…" : "Establish situational awareness") {
+                            Task { _ = await appModel.establishPhysicalAwareness() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(appModel.physicalAwarenessBusy)
+                        Text(appModel.physicalAwarenessStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        if let overview = appModel.latestPhysicalAwareness {
+                            Text("Checked: " + overview.checkedAt)
+                                .font(.caption)
+                            Text(overview.locationNote)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Voice: “Jarvis, establish situational awareness.”")
+                            .font(.caption.weight(.medium))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 GroupBox("Portable physical-world access") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Works on iPhone alone. With your Gen 1 Ray-Ban Meta glasses, speak through Jarvis’s existing Bluetooth hands-free connection.")

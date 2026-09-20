@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 import threading
 import uuid
 from typing import Any
@@ -39,7 +40,8 @@ def _iso(value: datetime) -> str:
     return value.isoformat()
 
 
-def _database() -> sqlite3.Connection:
+@contextmanager
+def _database() -> Any:
     folder = world_model.APP_DIR
     folder.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(folder / "external_watches.sqlite3", timeout=15)
@@ -85,7 +87,11 @@ def _database() -> sqlite3.Connection:
           ON watch_observations(watch_id,id DESC);
         """
     )
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _validate(scope: str, kind: str, config: dict[str, Any], cadence_seconds: int, hours: int) -> dict[str, Any]:

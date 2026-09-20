@@ -172,17 +172,16 @@ _EXACT: dict[str, tuple[str, str, dict[str, Any]]] = {
     "what is on my calendar": ("calendar", "calendar.list", {"days": 7, "limit": 10}),
     "show my upcoming meetings": ("calendar", "calendar.list", {"days": 7, "limit": 10}),
     "what are my upcoming appointments": ("calendar", "calendar.list", {"days": 7, "limit": 10}),
-    "what's on my calendar this week": ("calendar", "calendar.list", {"days": 7, "limit": 20}),
-    "what is on my calendar this week": ("calendar", "calendar.list", {"days": 7, "limit": 20}),
+
     "find conflicts on my calendar": ("calendar", "calendar.conflicts", {"days": 7}),
     "what is in my inbox": ("gmail", "gmail.query", {"query": "in:inbox", "limit": 5}),
     "show my inbox": ("gmail", "gmail.query", {"query": "in:inbox", "limit": 5}),
-    "what are my unread messages": ("gmail", "gmail.query", {"query": "is:unread in:inbox", "limit": 5}),
+    "what are my unread emails": ("gmail", "gmail.query", {"query": "is:unread in:inbox", "limit": 5}),
     "what is my latest sent email": ("gmail", "gmail.query", {"query": "in:sent", "limit": 1}),
     "what was my last sent email": ("gmail", "gmail.query", {"query": "in:sent", "limit": 1}),
     "show my sent emails": ("gmail", "gmail.query", {"query": "in:sent", "limit": 5}),
     "list recent emails": ("gmail", "gmail.query", {"query": "in:inbox", "limit": 5}),
-    "what was my most recent meeting": ("calendar", "calendar.recent", {"days_back": 3650}),
+    "what was my most recent calendar event": ("calendar", "calendar.recent", {"days_back": 3650}),
     "list my background tasks": ("background", "background.list", {"limit": 10}),
 }
 
@@ -201,6 +200,15 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     if lower in _EXACT:
         family, tool, arguments = _EXACT[lower]
         return Route(family, tool, dict(arguments))
+
+    if lower in {"what's on my calendar this week", "what is on my calendar this week"}:
+        # This week means the remainder of the current Monday-Sunday calendar
+        # week, not the next seven days (which would include next week's events).
+        midnight = current.replace(hour=0, minute=0, second=0, microsecond=0)
+        following_monday = midnight + timedelta(days=7 - midnight.weekday())
+        return _tool("calendar.week", "calendar.query",
+                     direction="future", start=current.isoformat(),
+                     end=following_monday.isoformat(), limit=20)
 
     m = _match(r"(?:what(?:'s| is) on|show|list|check) my (?:calendar|schedule|appointments)(?: for)? (today|tomorrow|yesterday)", spoken)
     if m:

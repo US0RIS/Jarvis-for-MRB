@@ -46,6 +46,10 @@ class ModelFreeDispatchTests(unittest.TestCase):
             self.route("Read emails from Alice.Example@Firm.com").args["query"],
             "from:Alice.Example@Firm.com",
         )
+        self.assertEqual(
+            self.route("Show my unread emails about Project Apollo").args["query"],
+            "is:unread in:inbox Project Apollo",
+        )
 
     def test_explicit_app_browser_and_private_read_routing(self):
         probes = {

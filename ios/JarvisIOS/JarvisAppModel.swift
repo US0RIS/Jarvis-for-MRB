@@ -339,6 +339,34 @@ final class JarvisAppModel: ObservableObject {
         ].contains(normalized)
     }
 
+    func listDiligenceMatters() async throws -> [DiligenceMatterSummary] {
+        try await client.listDiligenceMatters()
+    }
+
+    func createDiligenceMatter(label: String, projectEntityID: String) async throws -> DiligenceMatterSummary {
+        try await client.createDiligenceMatter(label: label, projectEntityID: projectEntityID)
+    }
+
+    func registerDiligenceIssuer(matterID: String, cik: String, name: String) async throws {
+        try await client.registerDiligenceIssuer(matterID: matterID, cik: cik, name: name)
+    }
+
+    func registerNumericDiligenceClaim(
+        matterID: String, cik: String, taxonomy: String, tag: String,
+        value: Double, unit: String, start: String, end: String, sourceRef: String
+    ) async throws {
+        try await client.registerNumericDiligenceClaim(
+            matterID: matterID, cik: cik, taxonomy: taxonomy, tag: tag,
+            value: value, unit: unit, start: start, end: end, sourceRef: sourceRef
+        )
+    }
+
+    func checkDiligenceMatter(matterID: String, includeSanctions: Bool) async throws -> [String: Any] {
+        try await client.checkDiligenceMatter(
+            matterID: matterID, includeSanctions: includeSanctions
+        )
+    }
+
     func findPublicCamerasAt(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
         try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
     }

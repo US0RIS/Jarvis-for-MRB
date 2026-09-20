@@ -12,6 +12,8 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
 from zoneinfo import ZoneInfo
+from collections import Counter
+from threading import Lock
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,38 @@ class Route:
     tool: str = ""
     args: dict[str, Any] = field(default_factory=dict)
     answer: str = ""
+
+
+_COUNTERS = Counter()
+_COUNTER_LOCK = Lock()
+
+
+def note_routed(family: str) -> None:
+    """In-memory counts only; no command text or user content is recorded."""
+    with _COUNTER_LOCK:
+        _COUNTERS["model_bypass"] += 1
+        _COUNTERS["direct:" + family] += 1
+
+
+def note_model_planner() -> None:
+    """A top-level Qwen planner attempt, not an Ollama synthesis or vision call."""
+    with _COUNTER_LOCK:
+        _COUNTERS["model_planner_attempt"] += 1
+
+
+def routing_status() -> dict[str, Any]:
+    with _COUNTER_LOCK:
+        return {
+            "model_bypass": _COUNTERS["model_bypass"],
+            "model_planner_attempt": _COUNTERS["model_planner_attempt"],
+            "families": {
+                k.removeprefix("direct:"): v
+                for k, v in _COUNTERS.items() if k.startswith("direct:")
+            },
+            "scope": "Current backend process, top-level command planner only; "
+                     "Qwen vision, research synthesis and optional semantic analysis "
+                     "are separate operations.",
+        }
 
 
 def _tool(family: str, tool_name: str, **args: Any) -> Route:

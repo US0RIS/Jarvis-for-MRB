@@ -79,7 +79,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
     }
 
     func listLightNames() -> String {
-        guard discovered else { return "Open the Glasses tab and tap Discover Apple Home first." }
+        guard discovered else { return "Open the Physical tab and tap Discover Apple Home first." }
         guard !lights.isEmpty else { return "No controllable lights were found in Apple Home." }
         let catalog = lights.prefix(20).map { "\($0.name), \($0.room)" }.joined(separator: "; ")
         return "Apple Home lights: " + catalog

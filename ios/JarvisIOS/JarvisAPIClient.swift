@@ -462,11 +462,11 @@ struct JarvisAPIClient {
 
         let explanation: String
         if Self.safeToRetryAsReadOnlyRequest(originalText) {
-            explanation = "I'm sorry, sir. The Jarvis backend completed that request but returned no answer."
+            explanation = "I couldn't finish that request. The Jarvis backend completed that request but returned no answer."
         } else if backendOK == false {
-            explanation = "I'm sorry, sir. The Jarvis backend failed that request before returning an answer. I did not retry it automatically because doing so could duplicate an action."
+            explanation = "I couldn't finish that request. The Jarvis backend failed that request before returning an answer. I did not retry it automatically because doing so could duplicate an action."
         } else {
-            explanation = "I'm sorry, sir. The Jarvis backend returned no answer. I did not retry that request automatically because doing so could duplicate an action."
+            explanation = "I couldn't finish that request. The Jarvis backend returned no answer. I did not retry that request automatically because doing so could duplicate an action."
         }
         continuation.yield(.delta(explanation))
         continuation.yield(.done(ok: false))

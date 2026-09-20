@@ -291,10 +291,35 @@ final class PublicCameraLocationRequest: NSObject, ObservableObject, CLLocationM
 /// head-worn display is needed to use any function on this screen.
 struct JarvisPhysicalHubView: View {
     @EnvironmentObject var appModel: JarvisAppModel
+    @EnvironmentObject var frontend: FrontendIntelligenceController
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                GroupBox("JARVIS • Ambient presence (camera-free)") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("First-class inputs: Bluetooth/iPhone microphone, iPhone motion and GPS, optional Apple Health, and source-labelled public outdoor temperature. MemoMind does not need a camera.")
+                            .font(.callout)
+                        LabeledContent("Opportunity detection", value: appModel.settings.sensorOpportunitiesEnabled ? "Enabled by you" : "Off — opt in under Settings")
+                            .font(.caption)
+                        LabeledContent("Motion/GPS", value: appModel.settings.localSensorContextEnabled ? frontend.sensors.activity : "Off")
+                            .font(.caption)
+                        LabeledContent("Sound classification", value: appModel.settings.soundRecognitionEnabled ? "During active microphone capture" : "Off")
+                            .font(.caption)
+                        LabeledContent("Apple Health", value: appModel.settings.healthContextEnabled ? "Opted in" : "Off")
+                            .font(.caption)
+                        LabeledContent("Outdoor temperature", value: appModel.settings.weatherContextEnabled && appModel.settings.sensorOpportunitiesEnabled ? "Opted-in model data" : "Off")
+                            .font(.caption)
+                        Text("Matches explicit standing goals to fresh geofence, microphone and weather changes. Advisory only: this does not authorize HomeKit actions, start the microphone, or claim that an iPhone contains an ambient thermometer.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        NavigationLink("Configure ambient presence") {
+                            SettingsView(settings: appModel.settings, geofence: appModel.geofenceManager)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 GroupBox("JARVIS • Situational briefing") {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("A single deliberate lookup across available public cameras, modelled air quality, official point alerts, and mapped facilities.")

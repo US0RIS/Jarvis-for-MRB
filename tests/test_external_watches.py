@@ -88,6 +88,22 @@ class ExternalWatchTests(unittest.TestCase):
                 watches.check_watch(watch["id"], "personal")
             self.assertEqual(notify.call_count, 2)
 
+    def test_return_to_old_condition_creates_new_change_evidence(self) -> None:
+        watch = self._create()
+        values = ["a", "b", "a"]
+        for value in values:
+            with patch("jarvis_mrb.external_watches._fetch", return_value={
+                "status": "ok", "summary": "Source now " + value,
+                "source_url": "https://cwwp2.dot.ca.gov",
+                "signature": value,
+                "payload": {"description": value},
+            }):
+                watches.check_watch(watch["id"], "personal")
+        history = watches.watch_history(watch["id"], "personal")
+        self.assertEqual(len(history), 3)
+        self.assertEqual(history[0]["change_kind"], "changed")
+        self.assertEqual(history[0]["payload"]["description"], "a")
+
     def test_matter_scope_is_isolated_and_stop_disables(self) -> None:
         watch = self._create("matter:deal123")
         self.assertEqual(len(watches.list_watches("personal")), 0)

@@ -36,6 +36,39 @@ struct PublicCameraDiscoveryResponse: Decodable {
     }
 }
 
+struct ExternalWatchSummary: Decodable, Identifiable {
+    let id: String
+    let scope: String
+    let kind: String
+    let label: String
+    let enabled: Bool
+    let lastStatus: String
+    let lastSummary: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, scope, kind, label, enabled
+        case lastStatus = "last_status"
+        case lastSummary = "last_summary"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct ExternalWatchListResponse: Decodable {
+    let watches: [ExternalWatchSummary]
+}
+
+struct ExternalWatchCheckResponse: Decodable {
+    let status: String
+    let summary: String?
+    let changeKind: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, summary
+        case changeKind = "change_kind"
+    }
+}
+
 struct PublicCameraAnalysisResponse: Decodable {
     let status: String
     let cameraID: String
@@ -284,6 +317,10 @@ struct JarvisPhysicalHubView: View {
                             .font(.caption.weight(.medium))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Remote observation and standing watches") {
+                    JarvisWorldWatchesView()
                 }
 
                 GroupBox("Air and weather signals") {
@@ -536,5 +573,228 @@ struct JarvisPublicFacilitiesView: View {
             }
         }
         .padding(.vertical, 8)
+    }
+}
+
+
+/// The user can select any location, not only where the phone is standing.
+/// No MemoMind hardware or geolocation permission is required for this view.
+struct JarvisWorldWatchesView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+    @State private var latitude = ""
+    @State private var longitude = ""
+    @State private var remoteCameras: [PublicCameraListing] = []
+    @State private var watches: [ExternalWatchSummary] = []
+    @State private var status = "No active remote view selected."
+    @State private var sourceNote = ""
+    @State private var working = false
+
+    private var coordinates: (Double, Double)? {
+        guard let lat = Double(latitude), let lon = Double(longitude),
+              lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 else {
+            return nil
+        }
+        return (lat, lon)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Choose a remote location or published official camera. Watches expire automatically; stop or recheck at any time.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                TextField("Latitude", text: $latitude)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("remote-watch-latitude")
+                TextField("Longitude", text: $longitude)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("remote-watch-longitude")
+            }
+            Button("Find official cameras at these coordinates") {
+                Task { await findRemoteCameras() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(coordinates == nil || working)
+            HStack(spacing: 8) {
+                Button("Watch weather warnings") {
+                    Task { await createLocationWatch("nws_alerts") }
+                }
+                Button("Watch regional air quality") {
+                    Task { await createLocationWatch("air_quality") }
+                }
+            }
+            .font(.caption)
+            .buttonStyle(.bordered)
+            .disabled(coordinates == nil || working)
+            Button("Watch regional aircraft count") {
+                Task { await createLocationWatch("airspace_region") }
+            }
+            .font(.caption)
+            .buttonStyle(.bordered)
+            .disabled(coordinates == nil || working)
+            Text(status)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if !sourceNote.isEmpty {
+                Text(sourceNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(remoteCameras) { camera in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(camera.title).font(.callout.weight(.medium))
+                    Text(camera.provider + " • " + String(format: "%.1f km from selected location", camera.distanceKM))
+                        .font(.caption)
+                    if !camera.imageURL.isEmpty {
+                        Button("Create 24-hour camera watch") {
+                            Task {
+                                await createWatch(
+                                    kind: "camera", label: camera.title,
+                                    config: ["camera_id": camera.id],
+                                    seconds: 3600
+                                )
+                            }
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .disabled(working)
+                    }
+                    if let url = URL(string: camera.streamURL), !camera.streamURL.isEmpty {
+                        Link("Published stream", destination: url).font(.caption)
+                    }
+                }
+                .padding(.vertical, 5)
+            }
+
+            Divider()
+            Button("Refresh my standing watches") {
+                Task { await refreshWatches() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(working)
+            ForEach(watches) { watch in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(watch.label)
+                        .font(.callout.weight(.medium))
+                    Text(watch.kind + " • " + watch.lastStatus
+                         + (watch.enabled ? "" : " • stopped"))
+                        .font(.caption)
+                    if !watch.lastSummary.isEmpty {
+                        Text(watch.lastSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Expires: " + watch.expiresAt)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Check now") {
+                            Task { await checkWatch(watch.id) }
+                        }
+                        Button("Stop watch") {
+                            Task { await stopWatch(watch.id) }
+                        }
+                        .disabled(!watch.enabled)
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .disabled(working)
+                }
+                .padding(.vertical, 5)
+            }
+            Text("Only published feeds, NWS warnings, modelled AQI, and regional aircraft counts are integrated. A camera's capture time is not verified; ML descriptions are not confirmed emergencies. Airspace counts identify no passengers.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 8)
+        .task { await refreshWatches() }
+    }
+
+    @MainActor
+    private func findRemoteCameras() async {
+        guard let (lat, lon) = coordinates, !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            let data = try await appModel.findPublicCamerasAt(latitude: lat, longitude: lon)
+            remoteCameras = data.cameras
+            sourceNote = data.sourceNote
+            status = data.status == "unsupported_region"
+                ? "No integrated published camera provider at this location."
+                : "\(data.cameras.count) published cameras at selected remote location."
+        } catch {
+            status = "Remote camera lookup unavailable: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func createLocationWatch(_ kind: String) async {
+        guard let (lat, lon) = coordinates else { return }
+        let seconds = kind == "nws_alerts" ? 900 : 3600
+        var config: [String: Any] = ["latitude": lat, "longitude": lon]
+        if kind == "air_quality" { config["us_aqi_threshold"] = 100 }
+        if kind == "airspace_region" { config["radius_km"] = 20 }
+        await createWatch(
+            kind: kind, label: kind + " at " + latitude + ", " + longitude,
+            config: config, seconds: seconds
+        )
+    }
+
+    @MainActor
+    private func createWatch(kind: String, label: String, config: [String: Any], seconds: Int) async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            let watch = try await appModel.createExternalWatch(
+                kind: kind, label: label, config: config, seconds: seconds
+            )
+            status = "Created \(watch.kind) watch. Automatic expiry: \(watch.expiresAt)."
+            watches = try await appModel.getExternalWatches()
+        } catch {
+            status = "Could not create watch: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func refreshWatches() async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            watches = try await appModel.getExternalWatches()
+        } catch {
+            status = "Watch list unavailable: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func checkWatch(_ id: String) async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            let result = try await appModel.checkExternalWatch(id)
+            status = result.summary ?? result.status
+            watches = try await appModel.getExternalWatches()
+        } catch {
+            status = "Watch check unavailable: " + error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func stopWatch(_ id: String) async {
+        guard !working else { return }
+        working = true
+        defer { working = false }
+        do {
+            _ = try await appModel.stopExternalWatch(id)
+            watches = try await appModel.getExternalWatches()
+            status = "Watch stopped."
+        } catch {
+            status = "Unable to stop watch: " + error.localizedDescription
+        }
     }
 }

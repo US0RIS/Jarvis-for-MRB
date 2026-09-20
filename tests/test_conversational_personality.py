@@ -27,7 +27,7 @@ class ConversationalVoiceTests(unittest.TestCase):
         stream = (_ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")
         self.assertIn("system = f\"\"\"{full_personality_context()}", agent)
         self.assertIn("return f\"\"\"{full_personality_context()}", stream)
-        self.assertIn("have a discernible point of view", agent)
+        self.assertIn("with a discernible point of view", agent)
         self.assertIn("have an actual opinion when asked", stream)
 
     def test_no_compulsory_sir_or_uncapitalizing_streamed_sentences(self) -> None:

@@ -94,12 +94,27 @@ def update_state(patch: dict[str, Any]) -> dict[str, Any]:
     # snapshot contract excludes biometric feature prints and raw camera/audio data.
     working_patch = copy.deepcopy(patch)
     frontend_world_snapshot = working_patch.pop("world_snapshot", None)
+    # Ambient sensor data is a short-lived signal, not a durable world snapshot.
+    # In particular, never save raw GPS coordinates or a health series to
+    # environment_state.json or record_environment_snapshot on every phone ping.
+    sensor_snapshot = working_patch.pop("sensor_snapshot", None)
 
     with _LOCK:
         state = _deep_merge(get_state(), working_patch)
         state["updated_at"] = datetime.now().astimezone().isoformat()
         APP_DIR.mkdir(parents=True, exist_ok=True)
         STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if isinstance(sensor_snapshot, dict):
+        try:
+            from jarvis_mrb.sensor_opportunities import ingest
+            ingest(sensor_snapshot)
+        except Exception as exc:
+            try:
+                from jarvis_mrb.runtime_health import record_failure
+                record_failure("ambient_opportunities", exc)
+            except Exception:
+                pass
 
     # World-model mirroring is intentionally best-effort. A graph/database problem
     # must never prevent the live companion state from being updated.

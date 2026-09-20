@@ -61,6 +61,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         guard !cleaned.isEmpty else { return }
         let quiet = resolveWhisper(whisper)
 
+        AmbientSoundCapture.shared.stop()
         stopSpeaking()
         prepareOutput(text: cleaned, preferBluetooth: preferBluetooth, whisper: quiet)
 
@@ -90,6 +91,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         guard !cleaned.isEmpty else { return }
         let quiet = resolveWhisper(whisper)
 
+        AmbientSoundCapture.shared.stop()
         stopSpeaking()
         prepareOutput(text: cleaned, preferBluetooth: preferBluetooth, whisper: quiet)
 

@@ -37,6 +37,12 @@ The existing `agent._fast_path` already covered many literal commands such as Ag
 - **Moondream/vision transcription/OCR, speech recognition and speech synthesis:** inherently model-based perception/generation, but do not need a Qwen *tool planner* for a correctly routed request.
 - **Future broader physical-world control and third-party licensed interfaces:** need actual authorized integrations, not simply a stronger model or guessed endpoints.
 
+## Conversation and opinions (without sacrificing precision)
+
+The shared `personality.JARVIS_PERSONALITY` applies to **both** normal JSON-planned requests and streaming voice replies. Jarvis should have an actual, context-sensitive point of view on non-political taste, design, engineering trade-offs, and what to pursue; it should react to what was said, disagree when warranted, and distinguish a subjective preference from a verified fact. Natural dialogue must not default to generic pros/cons recitals, flattery or compulsory "Sir" preambles.
+
+The streaming transport and ordinary `agent._respectful` **no longer inject a form of address or downcase the generated answer**. The model can use "sir" occasionally where it fits. Briefings and hardcoded status/tool responses remain deterministic; the new tone does not create imagined personal experiences or bypass actions/permission checks. A small streaming creativity allowance improves phrasing while retaining a conservative first-line JSON tool protocol. Recovery-only, tool-free answers can be more expressive.
+
 ## Runtime verification
 
 Authenticated `GET /routing/status` reports per-process counts for `model_bypass`, `model_planner_attempt`, and selected direct-route families **without storing utterances or arguments**. The normal `GET /health` includes the same process-local counters as `model_free_routing`. These counts are not a CPU/GPU benchmark, and they do not include intentional Qwen research/vision/subsystem synthesis.

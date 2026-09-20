@@ -479,6 +479,15 @@ def startup() -> None:
     _warm_fast_model()
 
 
+@app.get("/routing/status")
+def model_routing_status(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.deterministic_dispatch import routing_status
+    return routing_status()
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     settings = planner_settings()
@@ -514,6 +523,7 @@ def health() -> dict[str, Any]:
         "runtime_health": "ready" if int(runtime.get("degraded") or 0) == 0 else "degraded",
         "scheduler": "running" if _scheduler_started else "stopped",
         "external_watches": "running" if _external_watches_started else "stopped",
+        "model_free_routing": __import__("jarvis_mrb.deterministic_dispatch", fromlist=["routing_status"]).routing_status(),
         "knowledge_refresh": "running" if _knowledge_started else "stopped",
         "proactive_monitor": "running" if _proactive_started else "stopped",
         "agency": "ready" if bool(agency.get("ready")) else "degraded",

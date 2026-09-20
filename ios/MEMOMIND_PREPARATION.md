@@ -16,6 +16,26 @@ Prepared September 18, 2026, from MemoMind's September 1 developer-access announ
 
 For operational details of the broader remote-eye watches, regional airspace/USGS detections and matter-scoped SEC/OFAC/EPA diligence, see `EXTERNAL_EVIDENCE_OPERATIONS.md` in the repository root.
 
+## Primary camera-free MemoMind / ambient runtime
+
+MemoMind does not have to supply a camera. Jarvis's primary presence inputs are authorized microphone capture, iPhone GPS/geofence and motion, separately opted-in Apple Health data, and source-labelled public environmental models. The prior camera-to-opportunity bridge has been removed. Meta first-person vision and official public-camera searches remain optional, separate features, not architectural prerequisites.
+
+### Implemented, opt-in signals
+
+- **Microphone:** existing iPhone/Bluetooth HFP audio route; on-device SoundAnalysis class, confidence and timestamp when the Sound Recognition setting is enabled. Classification currently runs only while the existing speech-recognition microphone tap is active; this does not establish an independent 24/7 microphone or access to unshipped MemoMind audio.
+- **GPS / geofence:** existing Core Location home/away callbacks, rounded transient coordinates, fresh separate GPS and motion timestamps. Requires active iPhone app, permissions and opt-in Motion / travel context. A first fix at home is not treated as an arrival.
+- **Motion:** Core Motion activity; driving or an active conversation suppresses nonessential sensor interruptions. Motion cannot establish destination or user intent.
+- **Health:** separately opt-in Apple Health / Watch heart rate, HRV and sleep data over the existing authenticated companion link. Read-only; no diagnoses, clinical interventions or inferred emotional state.
+- **Outdoor temperature:** separately opt-in Open-Meteo current modelled 2-m temperature, up to one provider request per 15 minutes when a fresh coarse GPS fix exists. An iPhone/MemoMind ambient thermometer is not assumed. The alert includes the model timestamp and provenance.
+
+The camera-free ambient engine matches exact standing reminder goals of the form “Remind me to X when I get/leave home”, “... when the doorbell rings”, and “... when it's cold/hot”. It produces only source-labelled, deduplicated Agency Attention messages. It does not treat ambient speech or a sound classifier output as an instruction to send messages, unlock devices or make purchases.
+
+**Verified physical step:** after the user explicitly discovers HomeKit, they may individually enroll one of the discovered *lights* as Auto on arrival. With proactive sensor opportunities, Motion / travel context and geofenced profile enabled, Jarvis can turn that light on upon a new observed away→home transition while the iPhone app is running. At most five preapproved lights are processed; each command uses HomeKit's fresh readback. The first home fix at startup is not an arrival; repeated geofence toggles are debounced for five minutes. Per-light revocation, disabling sensor opportunities, or Privacy mode prevents additional automatic actions. No lights are implicitly enrolled or remotely controlled by Qwen.
+
+Sensor snapshots travel through the existing authenticated companion link and are stripped before the persistent environment/world snapshot pathway. Only expiring in-memory rounded GPS and sound baselines are used; no raw audio, transcripts, image frames or GPS trails are persisted by this new engine. `/ambient/status` is authenticated and reports capability status rather than personal readings. Public weather providers see query coordinates and have their own logging and terms.
+
+**Next architectural target:** explicit user objective → fresh acoustic/geographic/temporal/environmental evidence → independently generated intervention candidates → deterministic actuator affordance/authority check → execution and observed outcome → rollback or escalation. This is not complete cinematic improvisation yet; safe autonomy must be bounded by real device interfaces and individual authorizations, not broad model-inferred permission.
+
 ## Portable physical-world sensor: official public camera catalog
 
 A standalone physical-world discovery panel lives in **Physical → Public viewpoints** on the normal iPhone tab bar; it has no MemoMind runtime prerequisite. A button asks the iPhone for its position once, then calls the authenticated Jarvis backend via `POST /physical/public-cameras` with coordinates in the JSON body (not URL access logs). The backend does not persist the location. It looks up published government highway-camera locations, sorts by distance, and returns publicly posted images and optional streams. The iPhone renders publisher still images and offers the official stream directly; the backend does not scrape camera firmware, scan nearby IP ranges, or proxy footage.

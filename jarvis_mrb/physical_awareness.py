@@ -47,13 +47,15 @@ def physical_awareness(latitude: float, longitude: float) -> dict[str, Any]:
     from jarvis_mrb.physical_conditions import physical_conditions
     from jarvis_mrb.public_camera_catalog import discover_public_cameras
     from jarvis_mrb.public_facilities import nearby_mapped_facilities
+    from jarvis_mrb.public_incidents import regional_earthquakes
 
     _validate_position(latitude, longitude)
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
             "cameras": pool.submit(_safe_call, discover_public_cameras, "camera catalog", latitude, longitude),
             "conditions": pool.submit(_safe_call, physical_conditions, "environmental data", latitude, longitude),
             "facilities": pool.submit(_safe_call, nearby_mapped_facilities, "public mapping", latitude, longitude),
+            "incidents": pool.submit(_safe_call, regional_earthquakes, "USGS incidents", latitude, longitude),
         }
         results = {key: future.result() for key, future in futures.items()}
     cameras, conditions, facilities = (
@@ -94,6 +96,15 @@ def physical_awareness(latitude: float, longitude: float) -> dict[str, Any]:
     else:
         parts.append("official weather alerts unavailable")
 
+    incidents = results["incidents"]
+    if incidents.get("status") == "ok":
+        events = list(incidents.get("events") or [])
+        parts.append(
+            f"{len(events)} USGS earthquakes reported within 100 km in past 24 h (M2.5+)"
+        )
+    else:
+        parts.append("USGS earthquake detections unavailable")
+
     facility_status = facilities.get("status")
     if facility_status == "ok":
         listed = facilities.get("facilities") or []
@@ -108,6 +119,7 @@ def physical_awareness(latitude: float, longitude: float) -> dict[str, Any]:
         air.get("status"),
         warning.get("status"),
         facility_status,
+        incidents.get("status"),
     ]
     status = "partial" if any(value != "ok" for value in statuses) else "ok"
     return {
@@ -117,6 +129,7 @@ def physical_awareness(latitude: float, longitude: float) -> dict[str, Any]:
         "cameras": cameras,
         "conditions": conditions,
         "facilities": facilities,
+        "incidents": incidents,
         "location_note": (
             "One opt-in location snapshot shared with relevant official/public "
             "providers. This does not observe through walls, establish personal "

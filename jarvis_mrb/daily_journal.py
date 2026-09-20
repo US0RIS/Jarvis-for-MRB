@@ -116,8 +116,8 @@ def _deterministic_render(day: date, source: dict[str, Any]) -> str:
             if not statement:
                 continue
             if re.search(
-                r"(?i)\\b(password|passcode|api[ -]?key|secret|access token|"
-                r"bearer|recovery phrase|private key)\\b",
+                r"(?i)\b(password|passcode|api[ -]?key|secret|access token|"
+                r"bearer|recovery phrase|private key)\b",
                 statement,
             ):
                 lines.append("- A sensitive request occurred (content omitted).")

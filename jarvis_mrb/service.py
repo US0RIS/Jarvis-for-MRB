@@ -102,6 +102,17 @@ class DiligenceIssuerRequest(BaseModel):
     asserted_name: str
 
 
+class DiligenceEPAFacilityRequest(BaseModel):
+    matter_id: str
+    cik: str
+    frs_id: str
+    label: str
+
+
+class EPADirectLookupRequest(BaseModel):
+    frs_id: str
+
+
 class DiligenceClaimRequest(BaseModel):
     matter_id: str
     cik: str
@@ -614,6 +625,36 @@ def external_diligence_issuer(
         return add_issuer(request.matter_id, request.cik, request.asserted_name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/diligence/epa-facility")
+def external_diligence_epa_facility(
+    request: DiligenceEPAFacilityRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.matter_diligence import add_epa_facility
+    try:
+        return add_epa_facility(
+            request.matter_id, request.cik, request.frs_id, request.label
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/epa/facility")
+def external_epa_facility(
+    request: EPADirectLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.public_epa import fetch_epa_facility
+    try:
+        return fetch_epa_facility(request.frs_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="EPA ECHO source unavailable.") from exc
 
 
 @app.post("/external/diligence/claim")

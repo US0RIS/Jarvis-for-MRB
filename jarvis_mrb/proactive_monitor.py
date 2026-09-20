@@ -362,11 +362,18 @@ def _check_desired_states() -> None:
         evaluate_desired_state(str(item["id"]), persist=True)
 
 
+def _check_sensor_weather() -> None:
+    """Source-labelled, opt-in weather context for explicit ambient goals."""
+    from jarvis_mrb.sensor_opportunities import check_weather
+    check_weather()
+
+
 def check_once() -> None:
     proactive = _proactive_enabled()
     if proactive:
         _run_isolated("proactive_calendar", _check_calendar)
         _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+        _run_isolated("sensor_weather", _check_sensor_weather)
 
     # Verification and persistent desired-state control are correctness/safety
     # loops, not optional notification features. Disabling general proactive
@@ -385,6 +392,7 @@ def _loop() -> None:
             _run_isolated("proactive_calendar", _check_calendar)
             if cycle % 3 == 0:
                 _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+            _run_isolated("sensor_weather", _check_sensor_weather)
 
         # Always keep outcome verification and the persistent Agency control loop
         # alive. Agency's own mode/permissions determine whether any action occurs.

@@ -13,10 +13,13 @@ class ExternalWatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.old_dir = world_model.APP_DIR
+        self.old_db = world_model.DB_PATH
         world_model.APP_DIR = Path(self.temp.name)
+        world_model.DB_PATH = world_model.APP_DIR / "world_model.sqlite3"
 
     def tearDown(self) -> None:
         world_model.APP_DIR = self.old_dir
+        world_model.DB_PATH = self.old_db
         self.temp.cleanup()
 
     def _create(self, scope: str = "personal") -> dict:

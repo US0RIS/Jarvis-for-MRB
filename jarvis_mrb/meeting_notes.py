@@ -130,8 +130,8 @@ def _explicit_structured_actions(transcript: str) -> list[dict[str, str]] | None
     actions: list[dict[str, str]] = []
     for line in lines:
         matched = re.fullmatch(
-            r"(?:action|action item|todo):\\s*([^|]{2,120})\\s*\\|\\s*"
-            r"([^|]{2,500})\\s*\\|\\s*([^|]{1,160})",
+            r"(?:action|action item|todo):\s*([^|]{2,120})\s*\\|\s*"
+            r"([^|]{2,500})\s*\\|\s*([^|]{1,160})",
             line,
             flags=re.IGNORECASE,
         )

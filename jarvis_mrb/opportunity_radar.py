@@ -20,6 +20,7 @@ _OBJECT_GOAL = re.compile(
     r"[.!?]?\s*$",
     re.IGNORECASE,
 )
+_COMPOUND_ACTION = re.compile(r"\\b(?:and|then|after|before|while|plus|also)\\b", re.IGNORECASE)
 _DISALLOWED = frozenset({
     "person", "people", "someone", "anyone", "child", "children", "stranger",
     "face", "faces", "driver", "passenger", "neighbor", "neighbour",
@@ -40,7 +41,7 @@ def _object_sought(intention: dict[str, Any]) -> str:
         if not match:
             continue
         target = _normalize_object(match.group(1))
-        if not target or target in _DISALLOWED:
+        if not target or target in _DISALLOWED or _COMPOUND_ACTION.search(target):
             continue
         if len(target.split()) > 5 or len(target) > 70:
             continue
@@ -93,7 +94,11 @@ def consider_object_sighting(
         if sought != name:
             continue
         goal_id = str(goal.get("id") or "")
-        if not goal_id or str(goal.get("confidence", 1.0)) and float(goal.get("confidence", 1.0)) < 0.7:
+        try:
+            eligible = bool(goal_id) and float(goal.get("confidence", 0.0)) >= 0.7
+        except (TypeError, ValueError):
+            eligible = False
+        if not eligible:
             continue
         # Don't tell the user an object has been "found"; Moondream's
         # identification and ownership are not independently verified.

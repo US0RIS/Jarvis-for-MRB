@@ -174,6 +174,7 @@ final class AmbientSoundCapture: ObservableObject {
     private var tapInstalled = false
     private var lastAttempt = Date.distantPast
     private var permissionGranted: Bool?
+    private var captureGeneration = 0
 
     private init() {}
 
@@ -188,9 +189,11 @@ final class AmbientSoundCapture: ObservableObject {
         // temporarily unavailable microphone.
         guard Date().timeIntervalSince(lastAttempt) >= 20 else { return }
         lastAttempt = Date()
+        let generation = captureGeneration
         if permissionGranted == nil {
             permissionGranted = await AVAudioApplication.requestRecordPermission()
         }
+        guard generation == captureGeneration else { return }
         guard permissionGranted == true else {
             status = "Microphone permission unavailable"
             return
@@ -219,6 +222,7 @@ final class AmbientSoundCapture: ObservableObject {
     }
 
     func stop() {
+        captureGeneration += 1
         if engine.isRunning { engine.stop() }
         if tapInstalled {
             engine.inputNode.removeTap(onBus: 0)

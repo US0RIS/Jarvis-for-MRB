@@ -36,6 +36,64 @@ struct PublicCameraDiscoveryResponse: Decodable {
     }
 }
 
+struct PhysicalConditionsResponse: Decodable {
+    struct AirQuality: Decodable {
+        let status: String
+        let usAQI: Double?
+        let europeanAQI: Double?
+        let pm25: Double?
+        let uvIndex: Double?
+        let modelTimeUTC: String?
+        let sourceURL: String
+        let sourceNote: String
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case usAQI = "us_aqi"
+            case europeanAQI = "european_aqi"
+            case pm25 = "pm2_5_ug_m3"
+            case uvIndex = "uv_index"
+            case modelTimeUTC = "model_time_utc"
+            case sourceURL = "source_url"
+            case sourceNote = "source_note"
+        }
+    }
+
+    struct WeatherAlert: Decodable, Identifiable {
+        let id: String
+        let event: String
+        let headline: String
+        let severity: String
+        let instruction: String
+        let expires: String
+    }
+
+    struct WeatherAlerts: Decodable {
+        let status: String
+        let alerts: [WeatherAlert]
+        let sourceURL: String
+        let sourceNote: String
+
+        enum CodingKeys: String, CodingKey {
+            case status, alerts
+            case sourceURL = "source_url"
+            case sourceNote = "source_note"
+        }
+    }
+
+    let airQuality: AirQuality
+    let weatherAlerts: WeatherAlerts
+    let checkedAt: String
+    let locationSharingNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case airQuality = "air_quality"
+        case weatherAlerts = "weather_alerts"
+        case checkedAt = "checked_at"
+        case locationSharingNote = "location_sharing_note"
+    }
+}
+
 /// Location is requested only after an explicit button press; no continuous
 /// tracking, background camera search, or raw location telemetry is added.
 @MainActor
@@ -131,6 +189,10 @@ struct JarvisPhysicalHubView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                GroupBox("Air and weather signals") {
+                    JarvisPhysicalConditionsView()
+                }
+
                 GroupBox("Public viewpoints") {
                     JarvisPhysicalControlView()
                 }
@@ -212,6 +274,91 @@ struct JarvisPhysicalControlView: View {
                !appModel.nearbyCameraSourceURL.isEmpty {
                 Link("Official source / coverage details", destination: source)
                     .font(.caption)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+
+struct JarvisPhysicalConditionsView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("One-time location check: global modelled air quality / UV, plus official NWS point alerts where supported.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button(appModel.nearbyConditionsBusy ? "Checking…" : "Check conditions around me") {
+                Task { _ = await appModel.searchPhysicalConditions() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(appModel.nearbyConditionsBusy)
+            Text(appModel.nearbyConditionsStatus)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let data = appModel.nearbyConditions {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("AIR QUALITY • " + data.airQuality.status.uppercased())
+                        .font(.subheadline.weight(.semibold))
+                    if let value = data.airQuality.usAQI {
+                        Text("Modelled US AQI: " + String(format: "%.0f", value))
+                    }
+                    if let value = data.airQuality.pm25 {
+                        Text("PM₂.₅: " + String(format: "%.1f μg/m³", value))
+                    }
+                    if let value = data.airQuality.uvIndex {
+                        Text("UV index: " + String(format: "%.1f", value))
+                    }
+                    if let modelTime = data.airQuality.modelTimeUTC {
+                        Text("Model time: " + modelTime)
+                            .font(.caption)
+                    }
+                    Text(data.airQuality.sourceNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let url = URL(string: data.airQuality.sourceURL) {
+                        Link("Air-quality source", destination: url)
+                            .font(.caption)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("OFFICIAL WEATHER ALERTS • " + data.weatherAlerts.status.uppercased())
+                        .font(.subheadline.weight(.semibold))
+                    if data.weatherAlerts.status == "ok", data.weatherAlerts.alerts.isEmpty {
+                        Text("No active NWS point alerts returned. Not an all-hazards clearance.")
+                    }
+                    ForEach(data.weatherAlerts.alerts) { alert in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(alert.event + " • " + alert.severity)
+                                .font(.callout.weight(.medium))
+                            Text(alert.headline)
+                                .font(.caption)
+                            if !alert.instruction.isEmpty {
+                                Text(alert.instruction)
+                                    .font(.caption)
+                            }
+                            if !alert.expires.isEmpty {
+                                Text("Expires: " + alert.expires).font(.caption)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    Text(data.weatherAlerts.sourceNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let url = URL(string: data.weatherAlerts.sourceURL) {
+                        Link("Official weather-alert source", destination: url)
+                            .font(.caption)
+                    }
+                }
+                Text(data.locationSharingNote)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 8)

@@ -362,7 +362,7 @@ Keep the answer natural and voice-friendly. Have a clear, context-sensitive poin
         "think": False,
         "keep_alive": keep_alive,
         "messages": messages,
-        "options": {"temperature": 0},
+        "options": {"temperature": 0.45},
     }
 
     emitted = False

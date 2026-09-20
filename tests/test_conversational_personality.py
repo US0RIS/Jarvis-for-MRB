@@ -47,6 +47,28 @@ class ConversationalVoiceTests(unittest.TestCase):
         self.assertIn("yield remainder", stream)
         self.assertIn("yield chunk", stream)
 
+    def test_existing_ideas_get_opinions_not_unrequested_global_research(self) -> None:
+        from jarvis_mrb.streaming_agent import _requires_audited_web
+
+        local_opinion_prompts = (
+            "Which of these ideas would you recommend?",
+            "Compare this design with that plan",
+            "Which is the best option from the options we discussed?",
+            "Recommend an approach for this project",
+        )
+        for prompt in local_opinion_prompts:
+            with self.subTest(prompt=prompt):
+                self.assertFalse(_requires_audited_web(prompt))
+        public_discovery_prompts = (
+            "Recommend the best laptop available now",
+            "Compare all available cameras for travel",
+            "Search online for alternatives to this idea",
+            "Recommend new options for this project",
+        )
+        for prompt in public_discovery_prompts:
+            with self.subTest(prompt=prompt):
+                self.assertTrue(_requires_audited_web(prompt))
+
     def test_guarded_actions_are_unaffected_by_personality(self) -> None:
         agent = (_ROOT / "jarvis_mrb/agent.py").read_text(encoding="utf-8")
         stream = (_ROOT / "jarvis_mrb/streaming_agent.py").read_text(encoding="utf-8")

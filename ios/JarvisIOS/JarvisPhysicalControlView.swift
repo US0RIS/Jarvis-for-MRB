@@ -304,7 +304,7 @@ struct JarvisPhysicalHubView: View {
                             .font(.caption)
                         LabeledContent("Motion/GPS", value: appModel.settings.localSensorContextEnabled ? frontend.sensors.activity : "Off")
                             .font(.caption)
-                        LabeledContent("Sound classification", value: appModel.settings.soundRecognitionEnabled ? "During active microphone capture" : "Off")
+                        LabeledContent("Sound classification", value: appModel.settings.soundRecognitionEnabled ? "Foreground or voice capture" : "Off")
                             .font(.caption)
                         LabeledContent("Apple Health", value: appModel.settings.healthContextEnabled ? "Opted in" : "Off")
                             .font(.caption)

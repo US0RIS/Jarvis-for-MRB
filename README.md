@@ -15,47 +15,48 @@ This README is the canonical high-level guide to the repository. It is intention
 3. [System architecture](#system-architecture)
 4. [Core design invariants](#core-design-invariants)
 5. [Hardware and software requirements](#hardware-and-software-requirements)
-6. [Backend installation and update](#backend-installation-and-update)
-7. [Models and local AI services](#models-and-local-ai-services)
-8. [Google, web, browser, Tailscale, and Docker setup](#google-web-browser-tailscale-and-docker-setup)
-9. [iPhone build and configuration](#iphone-build-and-configuration)
-10. [Voice and conversation](#voice-and-conversation)
-11. [Audio routing and speech](#audio-routing-and-speech)
-12. [Ray-Ban Meta integration](#ray-ban-meta-integration)
-13. [Vision and recent visual memory](#vision-and-recent-visual-memory)
-14. [Known People](#known-people)
-15. [Personal inventory](#personal-inventory)
-16. [Personal Notecard](#personal-notecard)
-17. [Turn-by-turn navigation](#turn-by-turn-navigation)
-18. [Local iPhone intelligence](#local-iphone-intelligence)
-19. [World synchronization](#world-synchronization)
-20. [Persistent world model](#persistent-world-model)
-21. [Identity, provenance, chronology, and relation safety](#identity-provenance-chronology-and-relation-safety)
-22. [Persistent goals and intentions](#persistent-goals-and-intentions)
-23. [Situational awareness and meeting prebriefs](#situational-awareness-and-meeting-prebriefs)
-24. [Gmail attachments, document lineage, and term conflicts](#gmail-attachments-document-lineage-and-term-conflicts)
-25. [Executive Loop](#executive-loop)
-26. [Tools, permissions, and action authority](#tools-permissions-and-action-authority)
-27. [Closed-loop action verification](#closed-loop-action-verification)
-28. [Proactivity, HUD, Attention Inbox, and Live Activities](#proactivity-hud-attention-inbox-and-live-activities)
-29. [Meeting Notes and Room Listening](#meeting-notes-and-room-listening)
-30. [Automation, jobs, background work, and workflows](#automation-jobs-background-work-and-workflows)
-31. [Web research integrity and Research Receipts](#web-research-integrity-and-research-receipts)
-32. [COVER and COVER-U benchmarks](#cover-and-cover-u-benchmarks)
-33. [JARVIS-20 behavioral evaluation](#jarvis-20-behavioral-evaluation)
-34. [Expenses, journals, PC context, and system guardrails](#expenses-journals-pc-context-and-system-guardrails)
-35. [Sandbox and custom tools](#sandbox-and-custom-tools)
-36. [Privacy and security model](#privacy-and-security-model)
-37. [Data stores and retention](#data-stores-and-retention)
-38. [Health, diagnostics, migrations, and rollback](#health-diagnostics-migrations-and-rollback)
-39. [Testing and acceptance](#testing-and-acceptance)
-40. [Canonical Project Apollo acceptance story](#canonical-project-apollo-acceptance-story)
-41. [Repository layout](#repository-layout)
-42. [Common command reference](#common-command-reference)
-43. [Known limitations and deliberate non-features](#known-limitations-and-deliberate-non-features)
-44. [Troubleshooting](#troubleshooting)
-45. [Development philosophy and finish line](#development-philosophy-and-finish-line)
-46. [Related documentation](#related-documentation)
+6. [Experimental physical actuation: CrunchLabs IR Turret](#experimental-physical-actuation-crunchlabs-ir-turret)
+7. [Backend installation and update](#backend-installation-and-update)
+8. [Models and local AI services](#models-and-local-ai-services)
+9. [Google, web, browser, Tailscale, and Docker setup](#google-web-browser-tailscale-and-docker-setup)
+10. [iPhone build and configuration](#iphone-build-and-configuration)
+11. [Voice and conversation](#voice-and-conversation)
+12. [Audio routing and speech](#audio-routing-and-speech)
+13. [Ray-Ban Meta integration](#ray-ban-meta-integration)
+14. [Vision and recent visual memory](#vision-and-recent-visual-memory)
+15. [Known People](#known-people)
+16. [Personal inventory](#personal-inventory)
+17. [Personal Notecard](#personal-notecard)
+18. [Turn-by-turn navigation](#turn-by-turn-navigation)
+19. [Local iPhone intelligence](#local-iphone-intelligence)
+20. [World synchronization](#world-synchronization)
+21. [Persistent world model](#persistent-world-model)
+22. [Identity, provenance, chronology, and relation safety](#identity-provenance-chronology-and-relation-safety)
+23. [Persistent goals and intentions](#persistent-goals-and-intentions)
+24. [Situational awareness and meeting prebriefs](#situational-awareness-and-meeting-prebriefs)
+25. [Gmail attachments, document lineage, and term conflicts](#gmail-attachments-document-lineage-and-term-conflicts)
+26. [Executive Loop](#executive-loop)
+27. [Tools, permissions, and action authority](#tools-permissions-and-action-authority)
+28. [Closed-loop action verification](#closed-loop-action-verification)
+29. [Proactivity, HUD, Attention Inbox, and Live Activities](#proactivity-hud-attention-inbox-and-live-activities)
+30. [Meeting Notes and Room Listening](#meeting-notes-and-room-listening)
+31. [Automation, jobs, background work, and workflows](#automation-jobs-background-work-and-workflows)
+32. [Web research integrity and Research Receipts](#web-research-integrity-and-research-receipts)
+33. [COVER and COVER-U benchmarks](#cover-and-cover-u-benchmarks)
+34. [JARVIS-20 behavioral evaluation](#jarvis-20-behavioral-evaluation)
+35. [Expenses, journals, PC context, and system guardrails](#expenses-journals-pc-context-and-system-guardrails)
+36. [Sandbox and custom tools](#sandbox-and-custom-tools)
+37. [Privacy and security model](#privacy-and-security-model)
+38. [Data stores and retention](#data-stores-and-retention)
+39. [Health, diagnostics, migrations, and rollback](#health-diagnostics-migrations-and-rollback)
+40. [Testing and acceptance](#testing-and-acceptance)
+41. [Canonical Project Apollo acceptance story](#canonical-project-apollo-acceptance-story)
+42. [Repository layout](#repository-layout)
+43. [Common command reference](#common-command-reference)
+44. [Known limitations and deliberate non-features](#known-limitations-and-deliberate-non-features)
+45. [Troubleshooting](#troubleshooting)
+46. [Development philosophy and finish line](#development-philosophy-and-finish-line)
+47. [Related documentation](#related-documentation)
 
 ---
 
@@ -88,6 +89,10 @@ The following have been observed working in the real deployment during the curre
 - a recent full Python regression run completed with **108 tests passing** before the final Calendar/goal-routing fixes; later fixes added additional targeted regression tests, so a fresh full-suite run is still required before treating the present Git head as a release candidate.
 
 Deployment validation is not finished. Remaining device/runtime checks include transport failover/deduplication, authoritative-deletion edge cases, explicit snapshot privacy inspection, local-iPhone routing, room-microphone behavior, welcome-back behavior, current Ray-Ban hardware behavior, navigation/Notecard behavior, and a final representative real-world acceptance pass.
+
+### Physical actuation bench — September 20, 2026 (Pacific)
+
+A separate **MacBook Air + CrunchLabs Nano + IR Turret PITCH servo** prototype was physically exercised. The Nano accepted a custom Arduino sketch, obeyed angles 60/90/120 from Arduino IDE's Serial Monitor, then obeyed the same class of commands sent by Python 3.9.6/pyserial over USB. A Flask HTTP server on the MacBook subsequently moved the servo from local browser requests and returned the Nano's `DONE` acknowledgement. The exact experimental configuration, safety boundaries, and next integration steps are documented in [Experimental physical actuation](#experimental-physical-actuation-crunchlabs-ir-turret). **Jarvis's Windows backend has not yet been connected to this hardware**; Tailscale setup/remote access was pending at the last verified checkpoint.
 
 ### Version-number caveat
 
@@ -283,7 +288,97 @@ The project treats DAT availability as an external platform dependency and does 
 
 ## Mac/Xcode
 
-A Mac with current Xcode is required to build/sign/install the iPhone companion and its Live Activity extension.
+A Mac with current Xcode is required to build/sign/install the iPhone companion and its Live Activity extension. Separately, a MacBook Air has been used as a USB-connected experimental physical-actuation host; this does not make the Mac a replacement for the Windows reasoning/tool host.
+
+---
+
+# Experimental physical actuation: CrunchLabs IR Turret
+
+> **Status: working local bench prototype; not yet a Jarvis tool or a deployed remote actuator.** Verified September 20, 2026 (Pacific). This section records an independent hardware experiment and an integration proposal, not an additional fixed-endpoint acceptance criterion.
+
+## Purpose and verified path
+
+The experiment establishes that software can command real physical motion using inexpensive, USB-connected hardware. It is a potential future output modality for Jarvis: pointing, pressing a lightweight button, or other bounded, permission-controlled physical interactions. The immediate result is **one functioning positional axis**, not a completed robotic arm, autonomous tracker, or remotely available Jarvis action.
+
+```text
+Browser on MacBook Air
+  -> Flask local API (127.0.0.1:8765)
+  -> pyserial (/dev/cu.usbserial-110, 9600 baud; example device path)
+  -> Nano programming USB-C port
+  -> D11 pitch control signal, with separate servo power/ground
+  -> #2 PITCH servo moves
+  -> Nano prints "Moving to <angle>" and "DONE"
+  -> Flask reports success based on the Nano's serial acknowledgement
+```
+
+The browser requests `http://127.0.0.1:8765/pitch?angle=60` and `?angle=120` were tested and caused distinct physical motion. This local HTTP service is **not** the Windows Jarvis FastAPI service, even though both prototypes use port `8765` on different hosts.
+
+## Hardware available and wiring learned
+
+Two CrunchLabs Hack Packs were on hand: **IR Turret** and **Laser Synthesizer**. The combined parts include two Nano-class controller assemblies, two portable battery packs, three Turret servos labeled YAW/PITCH/ROLL, an IR remote and receiver, X/Y resistive touch surface, an IR proximity/reflectance sensor, potentiometers, laser, speaker, cables, and mechanical components. The Laser Synthesizer's Bluetooth/audio board was accidentally damaged and is **not available** for this project; Bluetooth or BLE data transport must not be assumed.
+
+Only the **#2 PITCH** servo has been electrically and functionally validated in the new setup. The tested Arduino pin is **D11**, established by actually moving the motor using `Servo.attach(11)`. Its green lead is the servo signal; red is servo power; black is ground. The Turret's multicolored four-wire jumper carries the signal separately from the red/black supply wiring. Preserve the working physical connections; do not infer that adjacent headers, other motors, or similarly shaped connectors share the same pinout. The uploaded Turret booklet, especially build steps **28–32 on pages 16–19**, is the original assembly reference.
+
+The carrier has **two distinct USB-C connections**: the power assembly's USB-C can power the board, but the USB-C **on the Nano itself** is the one that made the device appear in Chrome's CrunchLabs IDE and on the Mac serial port. On the Mac, it appeared as `/dev/cu.usbserial-110`; this path may change after reconnection. The Anker Prime desktop charger displayed `0.0 W` for an idle Nano, which is a meter-resolution observation, **not** evidence that the Nano received no power or proof of electrical safety.
+
+Power off/unplug before rewiring. Avoid stalled servos, tight mechanical stops, exposed connector shorts, and relying on the USB power display to protect components. Keep the loose PITCH servo unloaded until a mount and travel limits have been checked. Do not use the laser as a roaming room pointer without a controlled eye-safe optical arrangement.
+
+## How the working prototype was established
+
+1. Connected the Nano's **programming** USB-C port to the MacBook Air and selected `CrunchLabs Nano (#1)` in the CrunchLabs web IDE. A one-second `LED_BUILTIN` blink test compiled, uploaded, and blinked successfully.
+2. Wired the #2 PITCH servo using the Turret hardware and confirmed the motor moved from a `Servo.h` sketch using `attach(11)`.
+3. Replaced the sweep sketch with serial angle control. Arduino IDE 2.3.10 selected **Arduino Nano** and the `/dev/cu.usbserial-110` port. Unlike the CrunchLabs page's observed monitor, Arduino IDE's Serial Monitor offered a text input; commands `90`, `60`, `120` physically moved the servo.
+4. Python 3.9.6 on the MacBook installed `pyserial`, opened the port at 9600 baud, waited approximately two seconds for the Nano to reset, sent ASCII `90\n`, and received `Moving to 90` / `DONE`.
+5. A persistent Python command-line loop at `~/servo_control.py` moved the servo repeatedly. Flask was then installed and a local-only API at `~/servo_server.py` successfully moved the motor from a browser. These files and the saved CrunchLabs `.ino` sketch were created **on the MacBook**, not added to this Git repository by this documentation update.
+
+The tested Nano firmware used `Servo.h`, D11, 9600 baud, an initial angle of 100°, a test limit of **60–120°**, and incremental 1° movement with 15 ms between steps. It prints `DONE` on completing the commanded step sequence. If reproducing the experiment, the essential serial command protocol is:
+
+```text
+Host -> Nano:  90\n
+Nano -> Host:  Moving to 90
+Nano -> Host:  DONE
+```
+
+Messages must end with a newline. The Arduino serial port can normally have **one owner at a time**: close Arduino IDE's Serial Monitor and the CrunchLabs monitor before starting the Python client/server. Opening the Python serial connection can reset the Nano; wait for boot before issuing commands.
+
+### Reproducing the working MacBook-side controls
+
+```bash
+python3 --version                    # tested on 3.9.6
+python3 -m pip install --user pyserial flask
+
+# On this MacBook, while no other serial monitor has the port open:
+python3 ~/servo_control.py           # interactive: type 60, 90, 120, or quit
+
+# OR, after exiting the interactive controller:
+python3 ~/servo_server.py            # keeps the serial port open
+```
+
+With the server running, on the **same MacBook**:
+
+```text
+GET http://127.0.0.1:8765/health
+GET http://127.0.0.1:8765/pitch?angle=60
+GET http://127.0.0.1:8765/pitch?angle=120
+```
+
+The experimental `/pitch` handler rejects missing, non-integer, and out-of-range angles; serializes requests with a lock; sends `<angle>\n`; and waits up to approximately four seconds for `DONE`. The `/health` handler checks the Python serial object's `is_open`, which is **not** a live servo-function test. `DONE` proves the Nano processed the command; it is **not independent confirmation** that the shaft actually reached the commanded angle, since there is no separate angle sensor or observation loop.
+
+The initial Flask server binds to **`127.0.0.1` only**. This is intentional. Its present `GET /pitch` operation causes motion and has **no authentication**; it is a local experiment, not a safe remote-control endpoint.
+
+## Next integration: MacBook Air -> private Tailscale -> Windows Jarvis
+
+At the last checkpoint, Tailscale was **being downloaded on the MacBook Air**. The Mac's Tailscale IPv4 address was not yet confirmed and the server was not reachable from Jarvis's Windows PC. Do not record an invented address or describe cross-machine control as working.
+
+Recommended sequence:
+
+1. Confirm both MacBook and Windows host are authenticated to the intended tailnet and can reach one another; inspect the MacBook's current Tailscale IP.
+2. Evolve the **Mac** service before making it remotely reachable: prefer authenticated `POST` for motion (not unauthenticated state-changing `GET`), add a narrow actuator-specific credential, bounded rate and range limits, and explicit error/fail-safe behavior. Bind to the Mac's **Tailscale interface/address only**, not `0.0.0.0`; do not port-forward the service onto the public internet. Account for Mac sleep/disconnect and servo power loss.
+3. Test from the **Windows PC** through Tailscale, then implement a narrowly scoped Jarvis physical-actuation tool. Route tool calls through the existing permissions/action-audit layer rather than letting model-generated text choose arbitrary URLs, pins, speeds, or angles.
+4. Represent requested command, Nano acknowledgement, and any separately sensed physical result as **distinct evidence** in Jarvis's world model. A successful HTTP 200/`DONE` is not verified external-world motion.
+5. Only after a safe single-axis loop works remotely, consider connecting other Turret motors, calibrating joint directions/mechanical stops, and designing an actual pointing/manipulation mechanism. YAW and ROLL behavior and wiring have **not** been validated in this session.
+
+This adds a possible **physical action tool** without changing the project's fixed twelve-criterion finish line or claiming the experimental MacBook server is already part of the main Windows backend.
 
 ---
 
@@ -2156,7 +2251,8 @@ Some properties cannot be proven by unit tests and remain real-device tests:
 - GPS/background navigation behavior;
 - iOS background execution;
 - DAT camera behavior;
-- LAN/Tailscale transition behavior.
+- LAN/Tailscale transition behavior;
+- experimental Nano/PITCH-servo physical travel vs. serial acknowledgement, power interruption, servo stall, and MacBook sleep/reconnect **if** the physical-actuation prototype is integrated.
 
 ---
 

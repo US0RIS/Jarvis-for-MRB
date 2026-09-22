@@ -4,6 +4,15 @@ import SwiftUI
 
 /// Opt-in, phone-local physical control. Never gives the backend generic
 /// HomeKit characteristic writes or exposes arbitrary devices as actuators.
+struct HomeInterventionReceipt: Codable, Identifiable {
+    let id: UUID
+    let at: Date
+    let lightName: String
+    let trigger: String
+    let verified: Bool
+    let reportedOutcome: String
+}
+
 @MainActor
 final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManagerDelegate {
     struct Light: Identifiable, Equatable {
@@ -20,13 +29,24 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
     @Published private(set) var discovered = false
     @Published private(set) var busy = false
     @Published private(set) var arrivalLightIDs: Set<UUID> = []
+    @Published private(set) var doorbellLightIDs: Set<UUID> = []
+    @Published private(set) var interventionHistory: [HomeInterventionReceipt] = []
 
     private static let arrivalKey = "jarvis.home.preapprovedArrivalLights"
+    private static let doorbellKey = "jarvis.home.preapprovedEveningDoorbellLights"
+    private static let receiptKey = "jarvis.home.physicalInterventionReceipts.v1"
     private var lastArrivalRun = Date.distantPast
+    private var lastDoorbellRun = Date.distantPast
 
     override init() {
         let ids = UserDefaults.standard.stringArray(forKey: Self.arrivalKey) ?? []
         arrivalLightIDs = Set(ids.compactMap(UUID.init(uuidString:)))
+        let doorbellIDs = UserDefaults.standard.stringArray(forKey: Self.doorbellKey) ?? []
+        doorbellLightIDs = Set(doorbellIDs.compactMap(UUID.init(uuidString:)))
+        if let data = UserDefaults.standard.data(forKey: Self.receiptKey),
+           let previous = try? JSONDecoder().decode([HomeInterventionReceipt].self, from: data) {
+            interventionHistory = Array(previous.suffix(40))
+        }
         super.init()
     }
 
@@ -104,6 +124,54 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
             : "Automatic arrival action revoked."
     }
 
+    func setDoorbellControl(_ id: UUID, enabled: Bool) {
+        guard discovered, lights.contains(where: { $0.id == id }) else { return }
+        if enabled { doorbellLightIDs.insert(id) }
+        else { doorbellLightIDs.remove(id) }
+        UserDefaults.standard.set(
+            doorbellLightIDs.map(\.uuidString).sorted(),
+            forKey: Self.doorbellKey
+        )
+        lastResult = enabled
+            ? "Preauthorized evening doorbell action for this light. Requires two high-confidence sound detections while you are home and Jarvis is foregrounded."
+            : "Automatic evening doorbell action revoked."
+    }
+
+    private func saveReceipt(lightName: String, trigger: String, result: String) {
+        let receipt = HomeInterventionReceipt(
+            id: UUID(), at: Date(), lightName: lightName,
+            trigger: trigger, verified: result.hasPrefix("Verified in Apple Home:"),
+            reportedOutcome: result
+        )
+        interventionHistory.append(receipt)
+        if interventionHistory.count > 40 {
+            interventionHistory.removeFirst(interventionHistory.count - 40)
+        }
+        if let data = try? JSONEncoder().encode(interventionHistory) {
+            UserDefaults.standard.set(data, forKey: Self.receiptKey)
+        }
+    }
+
+    /// Only an explicitly enrolled, low-consequence action can be performed
+    /// from uncertain sound classification, and only in this precise context.
+    /// Other household actuators are not in this allowlist.
+    func runPreapprovedDoorbellActions(confidence: Double) async -> [String] {
+        guard discovered, !busy, !doorbellLightIDs.isEmpty,
+              confidence.isFinite, confidence >= 0.90 else { return [] }
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour >= 18 || hour < 7 else { return [] }
+        let now = Date()
+        guard now.timeIntervalSince(lastDoorbellRun) >= 300 else { return [] }
+        lastDoorbellRun = now
+        var outcomes: [String] = []
+        for light in lights.filter({ doorbellLightIDs.contains($0.id) }).prefix(5) {
+            let result = await setLight(light.id, on: true)
+            saveReceipt(lightName: light.name, trigger: "two classified doorbell sounds at home after dark", result: result)
+            outcomes.append(result)
+        }
+        return outcomes
+    }
+
     func runPreapprovedArrivalActions() async -> [String] {
         guard discovered, !busy, !arrivalLightIDs.isEmpty else { return [] }
         let now = Date()
@@ -114,7 +182,9 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         // Bound the work per transition, preserve exact enrollment and keep
         // fresh readback for each action. No new Home permission prompt here.
         for light in lights.filter({ arrivalLightIDs.contains($0.id) }).prefix(5) {
-            outcomes.append(await setLight(light.id, on: true))
+            let result = await setLight(light.id, on: true)
+            saveReceipt(lightName: light.name, trigger: "verified home-arrival geofence", result: result)
+            outcomes.append(result)
         }
         return outcomes
     }
@@ -224,7 +294,10 @@ struct AppleHomeControlView: View {
             Button("Discover Apple Home") { home.discover() }
                 .buttonStyle(.borderedProminent)
             if home.discovered {
-                Text("Only HomeKit light services appear here. Individually enroll Auto on arrival for an explicit reversible light action when fresh GPS/geofence and ambient opportunity controls are enabled. It runs only while Jarvis is active; there are no locks, garage doors, outlets, or scenes.")
+                Text("Only HomeKit light services appear here. Individually authorize an arrival action, or an evening action after two high-confidence doorbell sound classifications while GPS confirms you are home. Actions have a fresh HomeKit readback and a visible receipt. No locks, garage doors, outlets, or scenes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("Doorbell actions work only while the app is foregrounded with Ambient opportunities, Motion / travel context and Sound Recognition all enabled. A classifier label is not proof of an actual visitor.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 ForEach(home.lights) { light in
@@ -249,9 +322,32 @@ struct AppleHomeControlView: View {
                             )
                         }
                         .accessibilityIdentifier("home-auto-arrival-\(light.id.uuidString)")
+                        Button(home.doorbellLightIDs.contains(light.id) ? "Doorbell after dark ✓" : "Doorbell after dark") {
+                            home.setDoorbellControl(
+                                light.id,
+                                enabled: !home.doorbellLightIDs.contains(light.id)
+                            )
+                        }
+                        .accessibilityIdentifier("home-auto-doorbell-\(light.id.uuidString)")
                     }
                     .buttonStyle(.bordered)
-                    .disabled(home.busy || !light.reachable)
+                    .disabled(home.busy)
+                }
+            }
+            if !home.interventionHistory.isEmpty {
+                Text("Verified intervention history")
+                    .font(.headline)
+                ForEach(Array(home.interventionHistory.suffix(5).reversed())) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.verified ? "Verified • \(item.lightName)" : "Unverified / blocked • \(item.lightName)")
+                            .font(.caption.weight(.semibold))
+                        Text("\(item.trigger) • \(item.at.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption2)
+                        Text(item.reportedOutcome)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("home-intervention-\(item.id.uuidString)")
                 }
             }
             if !home.lastResult.isEmpty {

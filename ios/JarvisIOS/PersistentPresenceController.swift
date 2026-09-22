@@ -176,9 +176,7 @@ final class PersistentPresenceController: ObservableObject {
                     // Strictly enrolled light IDs and HomeKit readback live in
                     // HomeEnvironmentController. The model cannot expand scope.
                     let outcomes = await self.appModel.homeEnvironment.runPreapprovedArrivalActions()
-                    if !outcomes.isEmpty {
-                        self.lastProactiveMessage = outcomes.joined(separator: " ")
-                    }
+                    self.reportLocalIntervention(outcomes)
                 }
             }
         }
@@ -251,8 +249,24 @@ final class PersistentPresenceController: ObservableObject {
         let outcomes = await appModel.homeEnvironment.runPreapprovedDoorbellActions(
             confidence: confidence
         )
-        if !outcomes.isEmpty {
-            lastProactiveMessage = outcomes.joined(separator: " ")
+        reportLocalIntervention(outcomes)
+    }
+
+    private func reportLocalIntervention(_ outcomes: [String]) {
+        guard !outcomes.isEmpty else { return }
+        let text = outcomes.joined(separator: " ")
+        lastProactiveMessage = text
+        let verified = outcomes.allSatisfy { $0.hasPrefix("Verified in Apple Home:") }
+        // This is an *actual local readback*, not a fabricated cloud-agent
+        // completion. Optional HUD display never approves another action.
+        appModel.memoMind.presentProactiveAlert(
+            text, severity: verified ? "info" : "warning"
+        )
+        if appModel.settings.ambientCuesEnabled {
+            cuePlayer.play(
+                verified ? "task_complete" : "error",
+                preferBluetooth: appModel.settings.preferBluetoothAudio
+            )
         }
     }
 

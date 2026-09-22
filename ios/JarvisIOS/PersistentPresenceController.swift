@@ -192,6 +192,10 @@ final class PersistentPresenceController: ObservableObject {
     /// the camera, the LLM and the glasses HUD. Two distinct on-device
     /// classifications, a current home-position fix, and a per-device grant
     /// must all agree before the reversible light action is even attempted.
+    func clearAmbientOpportunityEvidence() {
+        pendingDoorbellAt = nil
+    }
+
     func observeAmbientSound() async {
         guard appModel.settings.sensorOpportunitiesEnabled,
               appModel.settings.soundRecognitionEnabled,
@@ -199,6 +203,7 @@ final class PersistentPresenceController: ObservableObject {
               appModel.settings.geofencedProfilesEnabled,
               UIApplication.shared.applicationState == .active,
               !conversationActive,
+              !frontendMeetingActive,
               !appModel.speechRecognizer.isActive,
               appModel.voiceStatus != "Speaking offline…",
               let frontend,
@@ -248,6 +253,8 @@ final class PersistentPresenceController: ObservableObject {
             lastProactiveMessage = outcomes.joined(separator: " ")
         }
     }
+
+    private var frontendMeetingActive: Bool { frontend?.isMeetingActive ?? false }
 
     private var client: JarvisAPIClient {
         JarvisAPIClient(

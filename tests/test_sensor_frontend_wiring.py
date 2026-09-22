@@ -90,6 +90,8 @@ class AmbientFrontendContractTests(unittest.TestCase):
         self.assertIn("!frontendMeetingActive", presence)
         self.assertIn("appModel.settings.sensorOpportunitiesEnabled", presence)
         self.assertIn("runPreapprovedDoorbellActions(", presence)
+        self.assertIn("memoMind.presentProactiveAlert(", presence)
+        self.assertIn('verified ? "info" : "warning"', presence)
         self.assertIn("await persistentPresence?.observeAmbientSound()", frontend)
         self.assertIn("persistentPresence?.clearAmbientOpportunityEvidence()", frontend)
         self.assertIn("UIApplication.willResignActiveNotification", audio)

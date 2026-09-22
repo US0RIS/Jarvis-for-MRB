@@ -312,12 +312,17 @@ def check_weather(*, now: datetime | None = None, client: Any = None) -> list[di
 
 
 def status() -> dict[str, Any]:
+    instant = datetime.now(timezone.utc)
     with _LOCK:
+        active = sum(
+            (instant - state["updated_at"]).total_seconds() <= 300
+            for state in _LIVE.values()
+        )
         return {
             "camera_required": False,
             "signal_sources": ["Opt-in foreground iPhone microphone sound classes",
                                "iPhone motion and fresh GPS/geofence", "opt-in Open-Meteo modelled outdoor temperature"],
-            "active_opt_in_sources": len(_LIVE),
+            "active_opt_in_sources": active,
             "can_actuate": False,
             "transcripts_or_raw_audio_persisted": False,
             "gps_trails_persisted": False,

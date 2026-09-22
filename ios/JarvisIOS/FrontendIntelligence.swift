@@ -320,19 +320,26 @@ final class FrontendIntelligenceController: ObservableObject {
             // Primary camera-free perception. Reuse speech/meeting capture when
             // it owns the mic; only run a separate SoundAnalysis-only tap when
             // idle, in foreground, and both user opt-ins are still enabled.
-            let ambientAllowed = appModel.settings.sensorOpportunitiesEnabled
+            let ambientOpportunityAllowed = appModel.settings.sensorOpportunitiesEnabled
                 && appModel.settings.soundRecognitionEnabled
                 && UIApplication.shared.applicationState == .active
-                && !appModel.speechRecognizer.isActive
                 && !appModel.speechSynthesizer.isSpeaking
                 && !appModel.isSending
                 && !(meetingCapture?.isActive ?? false)
+            let idleTapAllowed = ambientOpportunityAllowed
+                && !appModel.speechRecognizer.isActive
             await AmbientSoundCapture.shared.refresh(
-                enabled: ambientAllowed,
+                enabled: idleTapAllowed,
                 audioRouteManager: appModel.audioRouteManager,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
-            if ambientAllowed {
+            // A hands-free wake session already classifies sound through the
+            // existing SpeechRecognizer tap; do not start a second microphone.
+            // A spoken command/follow-up is not ambient context.
+            let wakeOnly = appModel.handsFreeEnabled
+                && appModel.voiceStatus == "Listening for “Jarvis”…"
+            if ambientOpportunityAllowed
+                && (!appModel.speechRecognizer.isActive || wakeOnly) {
                 await persistentPresence?.observeAmbientSound()
             } else {
                 persistentPresence?.clearAmbientOpportunityEvidence()

@@ -10,6 +10,12 @@ class AmbientFrontendContractTests(unittest.TestCase):
     def test_opt_in_defaults_off_and_privacy_mode_revokes_consent(self) -> None:
         settings = (_ROOT / "ios/JarvisIOS/SettingsStore.swift").read_text()
         local = (_ROOT / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text()
+        settings_view = (_ROOT / "ios/JarvisIOS/SettingsView.swift").read_text()
+        self.assertIn('Section("Camera-free Ambient Presence")', settings_view)
+        self.assertLess(
+            settings_view.index('Section("Camera-free Ambient Presence")'),
+            settings_view.index('Section("Persistent Presence")')
+        )
         for setting in ("sensorOpportunitiesEnabled", "weatherContextEnabled"):
             self.assertIn(f'{setting} = defaults.object(forKey: "jarvis.{setting}") as? Bool ?? false', settings)
             self.assertIn(f"appModel.settings.{setting} = false", local)

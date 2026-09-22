@@ -43,7 +43,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         arrivalLightIDs = Set(ids.compactMap(UUID.init(uuidString:)))
         let doorbellIDs = UserDefaults.standard.stringArray(forKey: Self.doorbellKey) ?? []
         doorbellLightIDs = Set(doorbellIDs.compactMap(UUID.init(uuidString:)))
-        if let data = UserDefaults.standard.data(forKey: Self.receiptKey),
+        if let data = KeychainStore.readData(Self.receiptKey),
            let previous = try? JSONDecoder().decode([HomeInterventionReceipt].self, from: data) {
             interventionHistory = Array(previous.suffix(40))
         }
@@ -148,7 +148,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
             interventionHistory.removeFirst(interventionHistory.count - 40)
         }
         if let data = try? JSONEncoder().encode(interventionHistory) {
-            UserDefaults.standard.set(data, forKey: Self.receiptKey)
+            KeychainStore.saveData(data, account: Self.receiptKey)
         }
     }
 
@@ -170,6 +170,11 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
             outcomes.append(result)
         }
         return outcomes
+    }
+
+    func clearInterventionHistory() {
+        interventionHistory.removeAll()
+        KeychainStore.delete(Self.receiptKey)
     }
 
     func runPreapprovedArrivalActions() async -> [String] {
@@ -340,8 +345,13 @@ struct AppleHomeControlView: View {
                 }
             }
             if !home.interventionHistory.isEmpty {
-                Text("Verified intervention history")
-                    .font(.headline)
+                HStack {
+                    Text("Physical intervention history")
+                        .font(.headline)
+                    Spacer()
+                    Button("Clear") { home.clearInterventionHistory() }
+                        .font(.caption)
+                }
                 ForEach(Array(home.interventionHistory.suffix(5).reversed())) { item in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.verified ? "Verified • \(item.lightName)" : "Unverified / blocked • \(item.lightName)")

@@ -48,6 +48,13 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
             interventionHistory = Array(previous.suffix(40))
         }
         super.init()
+        // The user previously enrolled exact lights. Reconnect HomeKit on
+        // relaunch so arrival/doorbell automations do not silently require
+        // rediscovery each session. Fresh installations still never request
+        // Home access at startup.
+        if !arrivalLightIDs.isEmpty || !doorbellLightIDs.isEmpty {
+            discover()
+        }
     }
 
     private var manager: HMHomeManager?
@@ -59,8 +66,8 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
             refresh(from: manager)
             return
         }
-        // Starting HMHomeManager may show iOS Home permission for this app;
-        // do not instantiate it at app launch without the user's request.
+        // HMHomeManager is instantiated only after explicit Discover or after
+        // the user has already enrolled one or more specific lights.
         let newManager = HMHomeManager()
         manager = newManager
         newManager.delegate = self

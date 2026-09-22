@@ -88,6 +88,19 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Camera-free Ambient Presence") {
+                    Toggle("Proactive microphone + sensor opportunities", isOn: $settings.sensorOpportunitiesEnabled)
+                    Toggle("Motion / travel context and GPS", isOn: $settings.localSensorContextEnabled)
+                    Toggle("Classify environmental sounds locally", isOn: $settings.soundRecognitionEnabled)
+                    Toggle("Geofenced system profiles", isOn: $settings.geofencedProfilesEnabled)
+                    Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
+                    Toggle("Use modelled outdoor temperature (Open-Meteo)", isOn: $settings.weatherContextEnabled)
+                        .disabled(!settings.sensorOpportunitiesEnabled || !settings.localSensorContextEnabled)
+                    Text("The iPhone can combine separately opted-in GPS/motion, geofence events and on-device sound labels from the normal voice microphone or a foreground-only idle classifier. Only explicit standing reminders or individually preauthorized HomeKit lights may be affected. Raw audio and transcripts are not transmitted by this sensor engine. Coordinates are rounded and transient; Apple Health is read-only; outdoor temperature is a source-labelled weather model, not a thermometer in the phone or glasses.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Persistent Presence") {
                     Toggle("Passive vision", isOn: $settings.passiveVisionEnabled)
                     Toggle("Adaptive remote vision bandwidth", isOn: $settings.adaptiveBandwidthEnabled)
@@ -102,14 +115,6 @@ struct SettingsView: View {
                         Text("Urgent only").tag("urgent")
                     }
 
-                    Toggle("Geofenced system profiles", isOn: $settings.geofencedProfilesEnabled)
-                    Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
-                    Toggle("Proactive microphone + sensor opportunities", isOn: $settings.sensorOpportunitiesEnabled)
-                    Toggle("Use modelled outdoor temperature (Open-Meteo)", isOn: $settings.weatherContextEnabled)
-                        .disabled(!settings.sensorOpportunitiesEnabled || !settings.localSensorContextEnabled)
-                    Text("Camera-free opportunity detection uses opt-in iPhone motion/GPS, geofence transitions and on-device sound labels from the existing voice mic or a separate foreground-only classifier while idle, when Sound Recognition is enabled. It matches explicit standing reminder goals, never authorizes physical actions, and does not upload raw audio or transcripts. GPS coordinates are rounded and transient. Apple Health remains separately opt-in. Outdoor temperature is a source-labelled weather-model estimate, not a thermometer in the phone or glasses.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     TextField("Current project focus", text: $settings.projectFocus)
 
                     Text("Passive vision sends sampled glasses frames to the existing PC backend. The separate iPhone visual cache below does not depend on the backend and is intentionally not presented as general scene understanding.")
@@ -141,7 +146,6 @@ struct SettingsView: View {
                     Toggle("Continuous on-device fast perception", isOn: $settings.localFastPerceptionEnabled)
                     Toggle("Offline command staging", isOn: $settings.offlineQueueEnabled)
                     Toggle("Local voice command aliases", isOn: $settings.localCommandAliasesEnabled)
-                    Toggle("Motion / travel context", isOn: $settings.localSensorContextEnabled)
                     Toggle("Frontend diagnostics", isOn: $settings.frontendDiagnosticsEnabled)
                     Toggle("Allow offline meeting capture", isOn: $settings.offlineMeetingCaptureEnabled)
 
@@ -170,7 +174,6 @@ struct SettingsView: View {
                     Divider()
 
                     Toggle("30-second RAM-only rolling audio memory", isOn: $settings.rollingAudioMemoryEnabled)
-                    Toggle("Classify environmental sounds locally", isOn: $settings.soundRecognitionEnabled)
                     Toggle("Detect major visual scene changes", isOn: $settings.visualChangeDetectionEnabled)
                     if settings.visualChangeDetectionEnabled {
                         VStack(alignment: .leading, spacing: 4) {

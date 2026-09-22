@@ -138,7 +138,7 @@ def ingest(snapshot: dict[str, Any], *, now: datetime | None = None) -> list[dic
     motion = snapshot.get("motion") if isinstance(snapshot.get("motion"), dict) else {}
     activity = str(motion.get("activity") or "").lower()
     audio = snapshot.get("audio") if isinstance(snapshot.get("audio"), dict) else {}
-    if activity == "driving" or audio.get("conversation_active") is True:
+    if (activity == "driving" and _fresh(motion.get("observed_at"), instant, 90)) or audio.get("conversation_active") is True:
         # Still update the baseline, but do not speak over the user/driving.
         quiet = True
     else:
@@ -162,8 +162,17 @@ def ingest(snapshot: dict[str, Any], *, now: datetime | None = None) -> list[dic
 
     with _LOCK:
         previous = _LIVE.get(source, {})
+        # A delayed packet must never rewind the event baseline or fabricate a
+        # second arrival, even while still inside the freshness window.
+        prior_at = previous.get("updated_at")
+        if isinstance(prior_at, datetime) and instant < prior_at:
+            return []
         previous_home = previous.get("home_state")
         previous_sound = previous.get("last_sound")
+        previously_pending = [
+            item for item in previous.get("pending", [])
+            if (instant - item["at"]).total_seconds() <= 180
+        ]
         if not home:
             # Never infer an arrival/departure from missing or stale GPS.
             previous_home = None
@@ -174,6 +183,7 @@ def ingest(snapshot: dict[str, Any], *, now: datetime | None = None) -> list[dic
             "coordinates": coordinates,
             "weather_opt_in": snapshot.get("weather_opt_in") is True,
             "quiet": quiet,
+            "pending": previously_pending,
         }
         # Inactive/disconnected phones must not retain GPS in RAM indefinitely.
         for key, value in list(_LIVE.items()):
@@ -181,20 +191,55 @@ def ingest(snapshot: dict[str, Any], *, now: datetime | None = None) -> list[dic
                 _LIVE.pop(key, None)
                 _NEXT_WEATHER.pop(key, None)
 
+    # Discovery is distinct from interruption. Preserve a *bounded, ephemeral*
+    # event when the user is speaking or driving, and reconsider it only when
+    # the phone reports a quiet context. Never replay disabled or retired goals.
+    signals: list[dict[str, Any]] = []
+    if previous_home and home and previous_home != home:
+        signals.append({"kind": "home", "condition": home,
+                        "at": instant, "confidence": 0.95})
+    if sound_timestamp and sound_timestamp != previous_sound:
+        signals.append({"kind": "doorbell", "condition": "rings",
+                        "at": instant, "confidence": sound_confidence})
+    with _LOCK:
+        state = _LIVE.get(source)
+        if state is None:
+            return []
+        state["pending"] = (previously_pending + signals)[-4:] if quiet else []
+
     if quiet:
         return []
+    from jarvis_mrb.environment_state import get_state
+    preferences = get_state().get("preferences")
+    if isinstance(preferences, dict) and preferences.get("proactive_monitoring") is False:
+        return []
 
+    candidates = (previously_pending + signals)[-4:]
+    goals = _reminders()
     results: list[dict[str, Any]] = []
-    for goal in _reminders():
-        if goal["kind"] == "home" and previous_home and home and previous_home != home:
-            condition = goal["condition"]
-            arriving = condition in {"get home", "come home", "arrive home"}
-            if (home == "home") == arriving:
-                message = f"You asked me to remind you to {goal['task']} when you {'get' if arriving else 'leave'} home. The phone's geofence has just changed."
-                results.append(_emit(goal, f"home:{home}", message, confidence=0.95))
-        elif goal["kind"] == "doorbell" and sound_timestamp and sound_timestamp != previous_sound:
-            message = f"The iPhone sound classifier may have heard a doorbell. You asked me to remind you to {goal['task']} when it rings."
-            results.append(_emit(goal, f"doorbell:{goal['task']}", message, confidence=sound_confidence))
+    for signal in candidates:
+        for goal in goals:
+            if goal["kind"] == "home" and signal["kind"] == "home":
+                condition = goal["condition"]
+                arriving = condition in {"get home", "come home", "arrive home"}
+                matched = (signal["condition"] == "home") == arriving
+                if matched:
+                    message = (
+                        f"You asked me to remind you to {goal['task']} when you "
+                        f"{'get' if arriving else 'leave'} home. The phone's geofence changed "
+                        f"{'just now' if signal['at'] == instant else 'while you were occupied'}."
+                    )
+                    results.append(_emit(goal, f"home:{signal['condition']}",
+                                         message, confidence=signal["confidence"]))
+            elif goal["kind"] == "doorbell" and signal["kind"] == "doorbell":
+                message = (
+                    f"The iPhone sound classifier may have heard a doorbell. "
+                    f"You asked me to remind you to {goal['task']} when it rings."
+                )
+                results.append(_emit(goal, f"doorbell:{goal['task']}",
+                                     message, confidence=signal["confidence"]))
+            if len(results) >= 3:
+                return results
     return results
 
 
@@ -206,6 +251,10 @@ def check_weather(*, now: datetime | None = None, client: Any = None) -> list[di
     or silently treat a provider outage as benign.
     """
     instant = now or datetime.now(timezone.utc)
+    from jarvis_mrb.environment_state import get_state
+    prefs = get_state().get("preferences")
+    if isinstance(prefs, dict) and prefs.get("proactive_monitoring") is False:
+        return []
     with _LOCK:
         sources = [
             (key, value["coordinates"]) for key, value in _LIVE.items()
@@ -266,8 +315,8 @@ def status() -> dict[str, Any]:
     with _LOCK:
         return {
             "camera_required": False,
-            "signal_sources": ["iPhone microphone sound classification (only while capture is active)",
-                               "iPhone motion and GPS/geofence", "opt-in Open-Meteo modelled outdoor temperature"],
+            "signal_sources": ["Opt-in foreground iPhone microphone sound classes",
+                               "iPhone motion and fresh GPS/geofence", "opt-in Open-Meteo modelled outdoor temperature"],
             "active_opt_in_sources": len(_LIVE),
             "can_actuate": False,
             "transcripts_or_raw_audio_persisted": False,

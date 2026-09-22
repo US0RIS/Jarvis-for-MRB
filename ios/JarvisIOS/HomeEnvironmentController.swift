@@ -195,7 +195,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         // fresh readback for each action. No new Home permission prompt here.
         for light in lights.filter({ arrivalLightIDs.contains($0.id) }).prefix(5) {
             let result = await setLight(light.id, on: true)
-            saveReceipt(lightName: light.name, trigger: "verified home-arrival geofence", result: result)
+            saveReceipt(lightName: light.name, trigger: "GPS-cross-checked home-arrival geofence", result: result)
             outcomes.append(result)
         }
         return outcomes

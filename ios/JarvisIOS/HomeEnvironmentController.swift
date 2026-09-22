@@ -133,8 +133,8 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
             forKey: Self.doorbellKey
         )
         lastResult = enabled
-            ? "Preauthorized evening doorbell action for this light. Requires two high-confidence sound detections while you are home and Jarvis is foregrounded."
-            : "Automatic evening doorbell action revoked."
+            ? "Preauthorized 18:00–07:00 doorbell action for this light. Requires two high-confidence sound detections while you are home and Jarvis is foregrounded."
+            : "Automatic 18:00–07:00 doorbell action revoked."
     }
 
     private func saveReceipt(lightName: String, trigger: String, result: String) {
@@ -166,7 +166,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         var outcomes: [String] = []
         for light in lights.filter({ doorbellLightIDs.contains($0.id) }).prefix(5) {
             let result = await setLight(light.id, on: true)
-            saveReceipt(lightName: light.name, trigger: "two classified doorbell sounds at home after dark", result: result)
+            saveReceipt(lightName: light.name, trigger: "two classified doorbell sounds at home during 18:00–07:00 local time", result: result)
             outcomes.append(result)
         }
         return outcomes
@@ -301,37 +301,42 @@ struct AppleHomeControlView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 ForEach(home.lights) { light in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(light.name)
-                            Text(light.room + (light.reachable ? "" : " • Unreachable"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(light.name)
+                                Text(light.room + (light.reachable ? "" : " • Unreachable"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("On") {
+                                Task { _ = await home.setLight(light.id, on: true) }
+                            }
+                            .disabled(home.busy || !light.reachable)
+                            Button("Off") {
+                                Task { _ = await home.setLight(light.id, on: false) }
+                            }
+                            .disabled(home.busy || !light.reachable)
                         }
-                        Spacer()
-                        Button("On") {
-                            Task { _ = await home.setLight(light.id, on: true) }
+                        HStack {
+                            Button(home.arrivalLightIDs.contains(light.id) ? "Auto on arrival ✓" : "Auto on arrival") {
+                                home.setArrivalControl(
+                                    light.id, enabled: !home.arrivalLightIDs.contains(light.id)
+                                )
+                            }
+                            .accessibilityIdentifier("home-auto-arrival-\(light.id.uuidString)")
+                            Button(home.doorbellLightIDs.contains(light.id) ? "Doorbell 18:00–07:00 ✓" : "Doorbell 18:00–07:00") {
+                                home.setDoorbellControl(
+                                    light.id, enabled: !home.doorbellLightIDs.contains(light.id)
+                                )
+                            }
+                            .accessibilityIdentifier("home-auto-doorbell-\(light.id.uuidString)")
                         }
-                        Button("Off") {
-                            Task { _ = await home.setLight(light.id, on: false) }
-                        }
-                        Button(home.arrivalLightIDs.contains(light.id) ? "Auto on arrival ✓" : "Auto on arrival") {
-                            home.setArrivalControl(
-                                light.id,
-                                enabled: !home.arrivalLightIDs.contains(light.id)
-                            )
-                        }
-                        .accessibilityIdentifier("home-auto-arrival-\(light.id.uuidString)")
-                        Button(home.doorbellLightIDs.contains(light.id) ? "Doorbell after dark ✓" : "Doorbell after dark") {
-                            home.setDoorbellControl(
-                                light.id,
-                                enabled: !home.doorbellLightIDs.contains(light.id)
-                            )
-                        }
-                        .accessibilityIdentifier("home-auto-doorbell-\(light.id.uuidString)")
+                        .disabled(home.busy)
+                        Divider()
                     }
                     .buttonStyle(.bordered)
-                    .disabled(home.busy)
                 }
             }
             if !home.interventionHistory.isEmpty {

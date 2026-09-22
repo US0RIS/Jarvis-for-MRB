@@ -94,6 +94,11 @@ class AmbientFrontendContractTests(unittest.TestCase):
         self.assertIn("persistentPresence?.clearAmbientOpportunityEvidence()", frontend)
         self.assertIn("UIApplication.willResignActiveNotification", audio)
         self.assertIn("captureGeneration += 1", audio)
+        self.assertIn("let idleTapAllowed = ambientOpportunityAllowed", frontend)
+        self.assertIn("&& !appModel.speechRecognizer.isActive", frontend)
+        self.assertIn("let wakeOnly = appModel.handsFreeEnabled", frontend)
+        self.assertIn('appModel.voiceStatus == "Listening for “Jarvis”…"', frontend)
+        self.assertIn('appModel.voiceStatus == "Listening for “Jarvis”…"', presence)
 
     def test_backend_transient_sensor_state_never_mirrors_raw_snapshot(self) -> None:
         environment = (_ROOT / "jarvis_mrb/environment_state.py").read_text()

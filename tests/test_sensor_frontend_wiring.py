@@ -60,6 +60,8 @@ class AmbientFrontendContractTests(unittest.TestCase):
         self.assertIn("await setLight(light.id, on: true)", home)
         self.assertIn("characteristic.readValue", home)
         self.assertIn("self.lastKnownHomeState == false && isHome", presence)
+        self.assertIn("self.hasFreshHomeFix()", presence)
+        self.assertIn("phone.distance(from: home)", presence)
         self.assertIn("settings.sensorOpportunitiesEnabled", presence)
         self.assertIn("settings.localSensorContextEnabled", presence)
         self.assertIn("settings.geofencedProfilesEnabled", presence)

@@ -334,6 +334,8 @@ final class FrontendIntelligenceController: ObservableObject {
             )
             if ambientAllowed {
                 await persistentPresence?.observeAmbientSound()
+            } else {
+                persistentPresence?.clearAmbientOpportunityEvidence()
             }
             await captureLatestFrameIfNeeded()
 

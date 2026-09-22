@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SoundAnalysis
+import UIKit
 
 struct LocalSpeechSnippet: Identifiable, Equatable {
     let id = UUID()
@@ -175,8 +176,16 @@ final class AmbientSoundCapture: ObservableObject {
     private var lastAttempt = Date.distantPast
     private var permissionGranted: Bool?
     private var captureGeneration = 0
+    private var isStarting = false
 
-    private init() {}
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.stop() }
+        }
+    }
 
     func refresh(enabled: Bool, audioRouteManager: AudioRouteManager, preferBluetooth: Bool) async {
         guard enabled else {
@@ -184,12 +193,14 @@ final class AmbientSoundCapture: ObservableObject {
             status = "Off"
             return
         }
-        if isCapturing { return }
+        if isCapturing || isStarting { return }
         // Avoid repeated permission prompts/session restarts on a denied or
         // temporarily unavailable microphone.
         let retryDelay = permissionGranted == true ? 2.0 : 20.0
         guard Date().timeIntervalSince(lastAttempt) >= retryDelay else { return }
         lastAttempt = Date()
+        isStarting = true
+        defer { isStarting = false }
         let generation = captureGeneration
         if permissionGranted == nil {
             permissionGranted = await AVAudioApplication.requestRecordPermission()

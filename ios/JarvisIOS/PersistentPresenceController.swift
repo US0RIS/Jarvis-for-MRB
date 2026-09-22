@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import HealthKit
 import UIKit
@@ -117,6 +118,9 @@ final class PersistentPresenceController: ObservableObject {
     private weak var frontend: FrontendIntelligenceController?
     private var lastHomeStateObservedAt = Date.distantPast
     private var lastKnownHomeState: Bool?
+    private var lastObservedAmbientSoundAt = Date.distantPast
+    private var pendingDoorbellAt: Date?
+    private var pendingDoorbellConfidence = 0.0
 
     private unowned let appModel: JarvisAppModel
     private let companion: CompanionConnection
@@ -163,6 +167,7 @@ final class PersistentPresenceController: ObservableObject {
                 }
                 await self.sendEnvironmentState()
                 if genuineArrival,
+                   UIApplication.shared.applicationState == .active,
                    self.appModel.settings.sensorOpportunitiesEnabled,
                    self.appModel.settings.localSensorContextEnabled,
                    self.appModel.settings.geofencedProfilesEnabled,
@@ -181,6 +186,67 @@ final class PersistentPresenceController: ObservableObject {
 
     func attach(frontend: FrontendIntelligenceController) {
         self.frontend = frontend
+    }
+
+    /// The acoustic intervention path is independent of the companion socket,
+    /// the camera, the LLM and the glasses HUD. Two distinct on-device
+    /// classifications, a current home-position fix, and a per-device grant
+    /// must all agree before the reversible light action is even attempted.
+    func observeAmbientSound() async {
+        guard appModel.settings.sensorOpportunitiesEnabled,
+              appModel.settings.soundRecognitionEnabled,
+              appModel.settings.localSensorContextEnabled,
+              appModel.settings.geofencedProfilesEnabled,
+              UIApplication.shared.applicationState == .active,
+              !conversationActive,
+              !appModel.speechRecognizer.isActive,
+              appModel.voiceStatus != "Speaking offline…",
+              let frontend,
+              let observed = frontend.sensors.lastLocationAt,
+              Date().timeIntervalSince(observed) <= 120,
+              lastKnownHomeState == true, locationLabel == "home",
+              appModel.settings.homeLatitude != 0 || appModel.settings.homeLongitude != 0,
+              let coordinate = frontend.sensors.coordinate else {
+            pendingDoorbellAt = nil
+            return
+        }
+        guard frontend.sensors.activity != "Driving" else {
+            pendingDoorbellAt = nil
+            return
+        }
+        let configured = CLLocation(latitude: appModel.settings.homeLatitude,
+                                    longitude: appModel.settings.homeLongitude)
+        let current = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        guard current.distance(from: configured) <= max(50, appModel.settings.homeRadius) else {
+            pendingDoorbellAt = nil
+            return
+        }
+        guard let sound = LocalSoundClassifier.shared.latestEvent(maxAge: 5),
+              sound.timestamp > lastObservedAmbientSoundAt else { return }
+        lastObservedAmbientSoundAt = sound.timestamp
+        let id = sound.identifier.lowercased().replacingOccurrences(of: "-", with: "_")
+        guard id == "doorbell" || id == "door_bell", sound.confidence >= 0.90 else {
+            if let previous = pendingDoorbellAt,
+               sound.timestamp.timeIntervalSince(previous) > 10 {
+                pendingDoorbellAt = nil
+            }
+            return
+        }
+        guard let previous = pendingDoorbellAt,
+              sound.timestamp.timeIntervalSince(previous) >= 0.5,
+              sound.timestamp.timeIntervalSince(previous) <= 10 else {
+            pendingDoorbellAt = sound.timestamp
+            pendingDoorbellConfidence = sound.confidence
+            return
+        }
+        let confidence = min(sound.confidence, pendingDoorbellConfidence)
+        pendingDoorbellAt = nil
+        let outcomes = await appModel.homeEnvironment.runPreapprovedDoorbellActions(
+            confidence: confidence
+        )
+        if !outcomes.isEmpty {
+            lastProactiveMessage = outcomes.joined(separator: " ")
+        }
     }
 
     private var client: JarvisAPIClient {

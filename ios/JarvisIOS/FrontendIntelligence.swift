@@ -270,6 +270,7 @@ final class FrontendIntelligenceController: ObservableObject {
     private unowned let appModel: JarvisAppModel
     private weak var persistentPresence: PersistentPresenceController?
     private weak var meetingCapture: MeetingCaptureController?
+    var isMeetingActive: Bool { meetingCapture?.isActive ?? false }
     private var loopTask: Task<Void, Never>?
     private var started = false
     private var lastSnapshotAt = Date.distantPast
@@ -331,6 +332,9 @@ final class FrontendIntelligenceController: ObservableObject {
                 audioRouteManager: appModel.audioRouteManager,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
+            if ambientAllowed {
+                await persistentPresence?.observeAmbientSound()
+            }
             await captureLatestFrameIfNeeded()
 
             if appModel.settings.localFastPerceptionEnabled,

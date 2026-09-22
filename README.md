@@ -1,10 +1,20 @@
 # Jarvis for MRB
 
-Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. It combines Ray-Ban Meta glasses, a native iPhone companion, a Windows reasoning/tool host, local language/vision/speech models, private Gmail/Calendar data, automation, audited web research, and explicit action verification into one coherent agent.
+Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. Its primary presence path is the iPhone/compatible Bluetooth microphone plus phone motion, opt-in GPS/geofences, separately opt-in Health data and public environmental sources. The optional camera-free MemoMind display is an I/O surface, not a sensor prerequisite. A Windows reasoning/tool host, local language/speech models, private Gmail/Calendar data, automation, audited web research and explicit action verification form the remaining system. Meta first-person vision and public-camera lookup remain optional capabilities.
 
 The project is not intended to be “a chatbot with lots of plugins.” The design goal is a single persistent system that can understand what the user is doing, remember durable facts and objectives, connect evidence across sources, decide what matters, act within explicit authority boundaries, and then independently verify whether consequential actions actually changed the outside world.
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
+
+## Camera-free ambient autonomy — active development branch
+
+The camera-centred opportunity matcher is retired. On `jarvis/memomind-prep`, opt-in iPhone acoustic sound classification (foreground or active voice capture), separately timestamped phone motion and location/geofence and modelled, source-labelled outdoor temperature can match *explicit existing standing reminders* through Agency Attention. The source metadata is transient and cannot authorize tools or physical actions. Health is separately opt-in read-only context, not a diagnosis or actuating signal.
+
+Actual reversible action path: after discovering Apple Home, the user may individually preauthorize an exact light for an observed arrival, or for **two high-confidence doorbell classifications while the phone confirms home during 18:00–07:00 local time**. The foreground iPhone initiates only those enrolled HomeKit writes, then reads back the characteristic. An encrypted, locally clearable receipt separates verified success from failed/unverified actions. This is not a general autonomous device controller and is not supported in iOS background without actual device acceptance.
+
+Configuration: Physical → Ambient presence → Settings. Independently enable Proactive microphone + sensor opportunities, Motion / travel context, Sound Recognition for acoustic triggers, and optional weather/Health sources. Discover Apple Home on the Physical tab; enroll each permitted light. Geofenced home coordinates/radius must be configured. Do not interpret a sound label as proof of a visitor. The ability to use a future MemoMind HUD/audio stream still requires the actual official SDK and physical hardware.
+
+The next milestone is **[Counterfactual Guardian](COUNTERFACTUAL_GUARDIAN.md)**: detect an impending missed objective from expected vs observed trajectories and choose a minimally intrusive, explicitly authorized intervention. This is a design, not a claim that Jarvis now predicts arbitrary future events.
 
 ---
 

@@ -154,6 +154,57 @@ class AmbientOpportunityTests(unittest.TestCase):
         ]):
             self.assertEqual(radar._reminders(), [])
 
+    @patch("jarvis_mrb.agency_attention.consider", return_value={"emitted": True})
+    @patch("jarvis_mrb.world_executive.active_intentions")
+    def test_interruptions_are_deferred_until_quiet_and_are_expiring(
+        self, goals, consider
+    ) -> None:
+        goals.return_value = self.goals
+        radar.ingest(self.snapshot(), now=self.now)
+        arrival_at = self.now + timedelta(seconds=4)
+        arrival = self.snapshot(state="home", moment=arrival_at)
+        arrival["audio"]["conversation_active"] = True
+        self.assertEqual(radar.ingest(arrival, now=arrival_at), [])
+        self.assertEqual(len(radar._LIVE["phone-01"]["pending"]), 1)
+        quiet_at = arrival_at + timedelta(seconds=8)
+        quiet = self.snapshot(state="home", moment=quiet_at)
+        self.assertEqual(len(radar.ingest(quiet, now=quiet_at)), 1)
+        self.assertIn("while you were occupied", consider.call_args.kwargs["message"])
+        self.assertEqual(radar.ingest(quiet, now=quiet_at), [])
+        self.assertEqual(radar._LIVE["phone-01"]["pending"], [])
+
+        # A new event withheld for more than three minutes is discarded.
+        leave_at = quiet_at + timedelta(seconds=5)
+        leaving = self.snapshot(state="away", moment=leave_at)
+        leaving["audio"]["conversation_active"] = True
+        radar.ingest(leaving, now=leave_at)
+        late_at = leave_at + timedelta(seconds=190)
+        late = self.snapshot(state="away", moment=late_at)
+        self.assertEqual(radar.ingest(late, now=late_at), [])
+        self.assertEqual(consider.call_count, 1)
+
+    @patch("jarvis_mrb.agency_attention.consider", return_value={"emitted": True})
+    @patch("jarvis_mrb.world_executive.active_intentions")
+    def test_monitoring_veto_and_late_packets_do_not_trigger_actions(
+        self, goals, consider
+    ) -> None:
+        goals.return_value = self.goals
+        radar.ingest(self.snapshot(), now=self.now)
+        later = self.now + timedelta(seconds=25)
+        next_sample = self.snapshot(state="home", moment=later)
+        with patch("jarvis_mrb.environment_state.get_state", return_value={
+            "preferences": {"proactive_monitoring": False}
+        }):
+            self.assertEqual(radar.ingest(next_sample, now=later), [])
+            self.assertEqual(radar.check_weather(now=later), [])
+        self.assertEqual(consider.call_count, 0)
+        # A late away packet should not roll back the home baseline.
+        previous = self.snapshot(state="away", moment=self.now + timedelta(seconds=5))
+        self.assertEqual(radar.ingest(previous, now=self.now + timedelta(seconds=5)), [])
+        later += timedelta(seconds=2)
+        self.assertEqual(radar.ingest(self.snapshot(state="home", moment=later), now=later), [])
+        self.assertEqual(consider.call_count, 0)
+
     def test_status_does_not_claim_camera_or_unrestricted_physical_control(self) -> None:
         info = radar.status()
         self.assertIs(info["camera_required"], False)

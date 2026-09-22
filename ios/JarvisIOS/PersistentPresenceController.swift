@@ -171,8 +171,7 @@ final class PersistentPresenceController: ObservableObject {
                    self.appModel.settings.sensorOpportunitiesEnabled,
                    self.appModel.settings.localSensorContextEnabled,
                    self.appModel.settings.geofencedProfilesEnabled,
-                   let gps = self.frontend?.sensors.lastLocationAt,
-                   Date().timeIntervalSince(gps) <= 120 {
+                   self.hasFreshHomeFix() {
                     // Strictly enrolled light IDs and HomeKit readback live in
                     // HomeEnvironmentController. The model cannot expand scope.
                     let outcomes = await self.appModel.homeEnvironment.runPreapprovedArrivalActions()
@@ -184,6 +183,21 @@ final class PersistentPresenceController: ObservableObject {
 
     func attach(frontend: FrontendIntelligenceController) {
         self.frontend = frontend
+    }
+
+    private func hasFreshHomeFix() -> Bool {
+        guard let sensors = frontend?.sensors,
+              let observed = sensors.lastLocationAt,
+              Date().timeIntervalSince(observed) <= 120,
+              let coordinate = sensors.coordinate,
+              appModel.settings.homeLatitude != 0 || appModel.settings.homeLongitude != 0 else {
+            return false
+        }
+        let home = CLLocation(latitude: appModel.settings.homeLatitude,
+                              longitude: appModel.settings.homeLongitude)
+        let phone = CLLocation(latitude: coordinate.latitude,
+                               longitude: coordinate.longitude)
+        return phone.distance(from: home) <= max(50, appModel.settings.homeRadius)
     }
 
     /// The acoustic intervention path is independent of the companion socket,

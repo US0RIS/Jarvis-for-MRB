@@ -257,6 +257,17 @@ final class CounterfactualGuardianController: ObservableObject {
         await refreshObjectiveWatches()
     }
 
+    func stageObjectiveFollowup(_ id: String) {
+        guard appModel.settings.guardianEnabled,
+              let check = objectiveEvaluations.first(where: { $0.id == id }),
+              let dependency = check.pendingDependencies?.first else { return }
+        let owner = dependency.owner.trimmingCharacters(in: .whitespacesAndNewlines)
+        let salutation = owner.isEmpty ? "Hi," : "Hi \(owner),"
+        stagedMessage = "\(salutation) Could you share an update on "
+            + dependency.action + "? Thank you."
+        objectiveStatus = "Local follow-up prepared for review only. No recipient selected and no message sent."
+    }
+
     private static func parseStart(_ raw: String) -> Date? {
         guard raw.contains("T") else { return nil }
         let formatter = ISO8601DateFormatter()
@@ -683,6 +694,84 @@ struct CounterfactualGuardianView: View {
                     .textSelection(.enabled)
                 Button("Copy draft — do not send") { guardian.copyDraft() }
                     .buttonStyle(.bordered)
+            }
+            Divider()
+            Text("Guard my explicit goal deadlines")
+                .font(.headline)
+            Text("Enroll each exact user-authored goal separately. Only precise timezone-aware goal deadlines qualify. While your phone is actively connected, Jarvis notices pending dependencies and unrecorded completion before the deadline. It never automatically messages anyone or grants Agency tool authority.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button(guardian.objectivesBusy ? "Checking objective evidence…" : "Load explicit goals and watches") {
+                Task { await guardian.refreshObjectiveWatches() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(guardian.objectivesBusy || !appModel.settings.guardianEnabled)
+            Text(guardian.objectiveStatus)
+                .font(.caption)
+                .accessibilityIdentifier("guardian-objective-evidence")
+            ForEach(Array(guardian.objectiveCandidates.filter { !$0.enrolled }.prefix(12))) { goal in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(goal.title)
+                        .font(.callout.weight(.medium))
+                    Text("User goal • exact deadline: " + goal.deadlineAt)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Guard this exact goal and deadline") {
+                        Task { await guardian.enrollObjective(goal.intentionID) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(guardian.objectivesBusy || !appModel.settings.guardianEnabled)
+                }
+                .padding(8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            }
+            ForEach(Array(guardian.objectiveWatches.filter { $0.status == "active" }.prefix(20))) { watch in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(watch.title)
+                        .font(.callout.weight(.medium))
+                    Text("Enrolled deadline: " + watch.deadlineAt)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let check = guardian.objectiveEvaluations.first(where: { $0.id == watch.id }) {
+                        Text(check.message)
+                            .font(.caption)
+                        Text(check.evidence)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let action = check.nextAction, !action.isEmpty {
+                            Text("Recorded next action: " + action)
+                                .font(.caption2)
+                        }
+                        ForEach(check.pendingDependencies ?? []) { dependency in
+                            Text("Waiting on " + dependency.owner + ": " + dependency.action)
+                                .font(.caption2)
+                        }
+                        if !(check.pendingDependencies ?? []).isEmpty {
+                            Button("Prepare unsent follow-up") {
+                                guardian.stageObjectiveFollowup(watch.id)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } else if watch.lastSignal == "deadline_changed" {
+                        Text("Deadline changed. Revoke and re-enroll to authorize the new exact date.")
+                            .font(.caption)
+                    } else {
+                        Text("No current goal-evidence evaluation; this is not proof of completion.")
+                            .font(.caption)
+                    }
+                    HStack {
+                        Button("Snooze 1 hour") {
+                            Task { await guardian.snoozeObjective(watch.id) }
+                        }
+                        Button("Stop watching") {
+                            Task { await guardian.revokeObjective(watch.id) }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(guardian.objectivesBusy || !appModel.settings.guardianEnabled)
+                }
+                .padding(8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
             }
             if !guardian.handoffHistory.isEmpty {
                 HStack {

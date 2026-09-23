@@ -107,6 +107,88 @@ class MacNodeProtocolTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 404)
 
 
+class WindowsScreenTests(unittest.TestCase):
+    def test_disabled_without_exact_host_opt_in(self):
+        from jarvis_mrb import mesh_windows_screen as win
+        win.stop()
+        with patch("platform.system", return_value="Linux"):
+            with patch.dict("os.environ", {"JARVIS_MESH_WINDOWS_SCREEN_ENABLED": "1"}):
+                self.assertFalse(win.enabled())
+                with self.assertRaises(win.WindowsScreenUnavailable):
+                    win.begin()
+        with patch("platform.system", return_value="Windows"):
+            with patch.dict("os.environ", {"JARVIS_MESH_WINDOWS_SCREEN_ENABLED": "0"}):
+                self.assertFalse(win.enabled())
+                with self.assertRaises(win.WindowsScreenUnavailable):
+                    win.frame()
+
+    def test_one_exact_session_binary_capture_and_revoke(self):
+        from jarvis_mrb import mesh_windows_screen as win
+        from types import ModuleType
+        from io import BytesIO
+        import sys
+
+        class FakeImage:
+            width = 1920
+            height = 1080
+            closed = False
+
+            def thumbnail(self, dimensions):
+                self.width, self.height = dimensions
+
+            def convert(self, mode):
+                assert mode == "RGB"
+                return self
+
+            def save(self, stream, *, format, quality, optimize):
+                assert format == "JPEG" and quality == 58
+                stream.write(bytes([0xFF, 0xD8, 0xFF]) + b"f" * 200)
+
+            def close(self):
+                self.closed = True
+
+        grabbed = FakeImage()
+        fake = ModuleType("PIL.ImageGrab")
+        fake.grab = lambda all_screens=False: grabbed
+        pil = ModuleType("PIL")
+        pil.ImageGrab = fake
+        with patch("platform.system", return_value="Windows"):
+            with patch.dict("os.environ", {"JARVIS_MESH_WINDOWS_SCREEN_ENABLED": "1"}):
+                with patch.dict(sys.modules, {"PIL": pil, "PIL.ImageGrab": fake}):
+                    self.assertEqual(mesh.begin_screen("windows")["status"], "active")
+                    self.assertTrue(win.active())
+                    frame, media = mesh.frame("windows")
+                    self.assertTrue(frame.startswith(bytes([0xFF, 0xD8, 0xFF])))
+                    self.assertEqual(media, "image/jpeg")
+                    self.assertTrue(grabbed.closed)
+                    self.assertEqual(mesh.finish_screen("windows")["status"], "closed")
+                    with self.assertRaises(mesh.NodeUnavailable):
+                        mesh.frame("windows")
+
+    def test_windows_expiry_never_grants_remote_keyboard_or_background_capture(self):
+        from jarvis_mrb import mesh_windows_screen as win
+        win.stop()
+        with patch("platform.system", return_value="Windows"):
+            with patch.dict("os.environ", {"JARVIS_MESH_WINDOWS_SCREEN_ENABLED": "1"}):
+                for invalid in [0, 301, True, "120"]:
+                    with self.subTest(duration=invalid):
+                        with self.assertRaises(ValueError):
+                            mesh.begin_screen("windows", seconds=invalid)
+                self.assertEqual(mesh.begin_screen("windows", seconds=15)["status"], "active")
+                with patch.object(win, "_now", return_value=datetime.now(timezone.utc) + timedelta(minutes=10)):
+                    self.assertFalse(win.active())
+                    with self.assertRaises(mesh.NodeUnavailable):
+                        mesh.frame("windows")
+                win.stop()
+        source = (ROOT / "jarvis_mrb/mesh_windows_screen.py").read_text()
+        self.assertNotIn("keyboard.", source)
+        self.assertNotIn("mouse.", source)
+        self.assertNotIn("subprocess.run", source)
+        self.assertNotIn("open(", source)
+        self.assertIn('JARVIS_MESH_WINDOWS_SCREEN_ENABLED', source)
+        self.assertIn('ImageGrab.grab(all_screens=False)', source)
+
+
 class MeshCoordinatorTests(unittest.TestCase):
     def test_no_ambient_network_discovery_and_no_open_internet_tokens(self):
         with patch.dict("os.environ", {}, clear=True):

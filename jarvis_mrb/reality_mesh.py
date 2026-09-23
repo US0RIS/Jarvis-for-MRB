@@ -160,7 +160,7 @@ def probe(node_id: str) -> dict[str, Any]:
 
 def nodes() -> dict[str, Any]:
     from jarvis_mrb.pc_context import snapshot
-    from jarvis_mrb import mesh_windows_screen
+    from jarvis_mrb import mesh_windows_screen, mesh_windows_apps
 
     checked = _now()
     windows = {
@@ -173,6 +173,7 @@ def nodes() -> dict[str, Any]:
             "context": "read_only",
             "screen": ("session_opt_in" if mesh_windows_screen.enabled() else "disabled"),
             "remote_input": "not_implemented",
+            "app_launch": ("exact_user_tap_only" if mesh_windows_apps.enabled() else "disabled"),
             "file_transfer": "not_implemented",
         },
         "screen_session_active": mesh_windows_screen.active(),
@@ -292,6 +293,14 @@ def launch_exact_mac_app(node_id: str, app_name: str) -> dict[str, Any]:
         "source": "macOS open -a + process check; focus/window not proven",
         "observed_at": _now(),
     }
+
+
+def launch_exact_windows_app(app_name: str) -> dict[str, Any]:
+    from jarvis_mrb.mesh_windows_apps import launch_exact, WindowsAppUnavailable
+    try:
+        return launch_exact(app_name)
+    except WindowsAppUnavailable as exc:
+        raise NodeUnavailable(str(exc)) from exc
 
 
 def public_sources() -> dict[str, Any]:

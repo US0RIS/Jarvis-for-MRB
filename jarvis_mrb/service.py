@@ -160,6 +160,15 @@ class NearbyPublicCameraRequest(BaseModel):
     limit: int = 8
 
 
+class GuardianObjectiveRequest(BaseModel):
+    id: str = ""
+
+
+class GuardianObjectiveSnoozeRequest(BaseModel):
+    id: str
+    hours: int = 1
+
+
 class CommandResponse(BaseModel):
     ok: bool
     message: str
@@ -574,6 +583,67 @@ def guardian_calendar_expectations(
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "events": events,
     }
+
+
+@app.get("/guardian/objectives")
+def guardian_objective_overview(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.guardian_objectives import overview
+    return overview()
+
+
+@app.get("/guardian/objectives/evaluate")
+def guardian_objective_evaluation(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.guardian_objectives import evaluate_once
+    return {"evaluations": evaluate_once(emit=False)}
+
+
+@app.post("/guardian/objectives/enroll")
+def guardian_objective_enroll(
+    request: GuardianObjectiveRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.guardian_objectives import enroll
+    try:
+        return enroll(request.id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:320]) from exc
+
+
+@app.post("/guardian/objectives/revoke")
+def guardian_objective_revoke(
+    request: GuardianObjectiveRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.guardian_objectives import revoke
+    try:
+        return revoke(request.id)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:320]) from exc
+
+
+@app.post("/guardian/objectives/snooze")
+def guardian_objective_snooze(
+    request: GuardianObjectiveSnoozeRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.guardian_objectives import snooze
+    try:
+        return snooze(request.id, hours=request.hours)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:320]) from exc
 
 
 @app.get("/ambient/status")

@@ -127,6 +127,43 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    private static func exactSpokenAppIntent(_ rawText: String) -> (node: String, app: String)? {
+        var phrase = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        phrase = phrase.replacingOccurrences(
+            of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+        )
+        guard phrase.hasPrefix("open ") else { return nil }
+        let endings: [(String, String)] = [
+            (" on my macbook air", "macbook"),
+            (" on macbook air", "macbook"),
+            (" on my mac mini", "macmini"),
+            (" on mac mini", "macmini"),
+            (" on my windows pc", "windows"),
+            (" on my pc", "windows"),
+            (" on the windows pc", "windows"),
+            (" on the pc", "windows"),
+        ]
+        guard let suffix = endings.first(where: { phrase.hasSuffix($0.0) }) else {
+            return nil
+        }
+        let app = String(phrase.dropFirst(5).dropLast(suffix.0.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let windows = [
+            "notepad": "Notepad", "calculator": "Calculator",
+            "file explorer": "File Explorer", "paint": "Paint",
+        ]
+        let mac = [
+            "safari": "Safari", "notes": "Notes", "calendar": "Calendar",
+            "preview": "Preview", "finder": "Finder",
+        ]
+        guard let exact = (suffix.1 == "windows" ? windows : mac)[app] else {
+            return nil
+        }
+        return (suffix.1, exact)
+    }
+
     private static func meshIntent(_ rawText: String) -> (kind: String, place: String)? {
         let cleaned = rawText.lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -635,6 +672,17 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone Personal Notecard"
+            )
+            return
+        }
+
+        if let exactAction = Self.exactSpokenAppIntent(text) {
+            let reply = await realityMesh.executeSpokenExactApp(
+                nodeID: exactAction.node, appName: exactAction.app
+            )
+            await finishLocalResponse(
+                reply, command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone exact spoken Conductor app / separately enrolled one-use action"
             )
             return
         }

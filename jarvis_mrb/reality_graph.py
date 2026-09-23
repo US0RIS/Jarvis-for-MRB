@@ -2,28 +2,44 @@ from __future__ import annotations
 
 """Deterministic Reality Graph.
 
-A small, inspectable world-state layer that turns provider observations into
-typed entities, relations, evidence and derived facts before an LLM sees them.
-It deliberately contains no model calls and grants no action authority.
+This module is intentionally boring: provider observations become typed facts,
+relations and mission state before any language model sees them.  It performs
+no model calls and has no action authority.
 """
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _age_seconds(stamp: str, *, now: datetime | None = None) -> float | None:
+def _parse_time(value: Any) -> datetime | None:
     try:
-        value = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
-        if value.tzinfo is None:
-            return None
-        return max(0.0, ((now or datetime.now(timezone.utc)) - value).total_seconds())
+        dt = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        return dt if dt.tzinfo is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _age_seconds(stamp: Any, *, now: datetime | None = None) -> float | None:
+    dt = _parse_time(stamp)
+    if dt is None:
+        return None
+    return max(0.0, ((now or datetime.now(timezone.utc)) - dt).total_seconds())
+
+
+def _freshness(age: float | None, ttl: float) -> str:
+    if age is None:
+        return "unknown"
+    return "fresh" if age <= ttl else "stale"
+
+
+def _safe_id(value: Any) -> str:
+    text = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(value or ""))
+    return "_".join(part for part in text.split("_") if part)[:80] or "unknown"
 
 
 @dataclass(frozen=True)
@@ -62,156 +78,223 @@ class DerivedFact:
     explanation: str
 
 
-def _freshness(age: float | None, ttl: float) -> str:
-    if age is None:
-        return "unknown"
-    return "fresh" if age <= ttl else "stale"
-
-
-def _safe_id(value: Any) -> str:
-    text = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(value or ""))
-    return "_".join(part for part in text.split("_") if part)[:80] or "unknown"
-
-
 def build_place_graph(latitude: float, longitude: float, observation: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Compile existing public/provider observations into a model-free graph.
-
-    This does not perform person identification, infer private activity, or turn
-    camera catalog membership into a live observation.
-    """
+    """Compile public/provider observations into a model-free graph."""
     if observation is None:
         from jarvis_mrb.physical_awareness import physical_awareness
         observation = physical_awareness(latitude, longitude)
 
     place_id = "place:query"
-    entities: list[Entity] = [
-        Entity(place_id, "place", "Observed place", {
-            "latitude": round(float(latitude), 6),
-            "longitude": round(float(longitude), 6),
-        })
-    ]
+    entities = [Entity(place_id, "place", "Observed place", {
+        "latitude": round(float(latitude), 6), "longitude": round(float(longitude), 6)
+    })]
     relations: list[Relation] = []
     evidence: list[Evidence] = []
     facts: list[DerivedFact] = []
-
     checked = str(observation.get("checked_at") or _now())
+
     cameras = observation.get("cameras") if isinstance(observation.get("cameras"), dict) else {}
-    camera_rows = cameras.get("cameras") if isinstance(cameras.get("cameras"), list) else []
-    camera_evidence: list[str] = []
-    for index, row in enumerate(camera_rows[:24]):
+    rows = cameras.get("cameras") if isinstance(cameras.get("cameras"), list) else []
+    for index, row in enumerate(rows[:24]):
         if not isinstance(row, dict):
             continue
         raw_id = row.get("id") or row.get("camera_id") or index
-        entity_id = "camera:" + _safe_id(raw_id)
-        label = str(row.get("name") or row.get("label") or "Official public camera")[:120]
-        entities.append(Entity(entity_id, "public_camera", label, {
+        eid = "camera:" + _safe_id(raw_id)
+        entities.append(Entity(eid, "public_camera", str(row.get("name") or row.get("label") or "Official public camera")[:120], {
             "provider": str(row.get("provider") or "official catalog")[:80],
             "live_image_verified": False,
         }))
-        ev_id = "ev:camera_catalog:" + _safe_id(raw_id)
-        age = _age_seconds(str(cameras.get("checked_at") or checked))
-        evidence.append(Evidence(
-            ev_id, "camera_catalog", str(cameras.get("checked_at") or checked),
-            age, _freshness(age, 900),
-            "Official provider catalog reports a camera viewpoint near this place; this is not proof of current imagery.",
-        ))
-        camera_evidence.append(ev_id)
-        relations.append(Relation(entity_id, "catalog_near", place_id, (ev_id,)))
+        evid = "ev:camera_catalog:" + _safe_id(raw_id)
+        stamp = str(cameras.get("checked_at") or checked)
+        age = _age_seconds(stamp)
+        evidence.append(Evidence(evid, "camera_catalog", stamp, age, _freshness(age, 900),
+            "Official provider catalog reports a camera viewpoint near this place; this is not proof of current imagery."))
+        relations.append(Relation(eid, "catalog_near", place_id, (evid,)))
 
     conditions = observation.get("conditions") if isinstance(observation.get("conditions"), dict) else {}
     air = conditions.get("air_quality") if isinstance(conditions.get("air_quality"), dict) else {}
     if air.get("status") == "ok" and air.get("us_aqi") is not None:
-        ev_id = "ev:air_quality"
-        stamp = str(conditions.get("checked_at") or checked)
-        age = _age_seconds(stamp)
-        value = round(float(air["us_aqi"]))
-        evidence.append(Evidence(ev_id, "openmeteo_air", stamp, age, _freshness(age, 1800), f"Modelled US AQI is {value}."))
-        facts.append(DerivedFact("fact:air_quality", "provider_value", value, "provider_reported", (ev_id,), "Direct modelled provider value; not a local sensor."))
+        evid, stamp = "ev:air_quality", str(conditions.get("checked_at") or checked)
+        age, value = _age_seconds(stamp), round(float(air["us_aqi"]))
+        evidence.append(Evidence(evid, "openmeteo_air", stamp, age, _freshness(age, 1800), f"Modelled US AQI is {value}."))
+        facts.append(DerivedFact("fact:air_quality", "provider_value", value, "provider_reported", (evid,), "Direct modelled provider value; not a local sensor."))
 
     alerts = conditions.get("weather_alerts") if isinstance(conditions.get("weather_alerts"), dict) else {}
     alert_rows = alerts.get("alerts") if isinstance(alerts.get("alerts"), list) else []
     if alerts.get("status") == "ok":
-        ev_id = "ev:weather_alerts"
-        stamp = str(conditions.get("checked_at") or checked)
+        evid, stamp = "ev:weather_alerts", str(conditions.get("checked_at") or checked)
         age = _age_seconds(stamp)
-        evidence.append(Evidence(ev_id, "nws", stamp, age, _freshness(age, 600), f"Provider returned {len(alert_rows)} active point alert(s)."))
-        facts.append(DerivedFact("fact:active_weather_alert_count", "count_provider_rows", len(alert_rows), "high", (ev_id,), "Counted returned active alert records; zero is not an all-hazards clearance."))
+        evidence.append(Evidence(evid, "nws", stamp, age, _freshness(age, 600), f"Provider returned {len(alert_rows)} active point alert(s)."))
+        facts.append(DerivedFact("fact:active_weather_alert_count", "count_provider_rows", len(alert_rows), "high", (evid,), "Counted returned active alert records; zero is not an all-hazards clearance."))
 
     incidents = observation.get("incidents") if isinstance(observation.get("incidents"), dict) else {}
     incident_rows = incidents.get("events") if isinstance(incidents.get("events"), list) else []
     if incidents.get("status") == "ok":
-        ev_id = "ev:earthquakes"
-        stamp = str(incidents.get("checked_at") or checked)
+        evid, stamp = "ev:earthquakes", str(incidents.get("checked_at") or checked)
         age = _age_seconds(stamp)
-        evidence.append(Evidence(ev_id, "usgs", stamp, age, _freshness(age, 900), f"USGS query returned {len(incident_rows)} qualifying regional event(s)."))
-        facts.append(DerivedFact("fact:regional_earthquake_count", "count_provider_rows", len(incident_rows), "high", (ev_id,), "Counted provider events under the existing query boundary."))
+        evidence.append(Evidence(evid, "usgs", stamp, age, _freshness(age, 900), f"USGS query returned {len(incident_rows)} qualifying regional event(s)."))
+        facts.append(DerivedFact("fact:regional_earthquake_count", "count_provider_rows", len(incident_rows), "high", (evid,), "Counted provider events under the existing query boundary."))
 
     facilities = observation.get("facilities") if isinstance(observation.get("facilities"), dict) else {}
     facility_rows = facilities.get("facilities") if isinstance(facilities.get("facilities"), list) else []
     if facilities.get("status") == "ok":
-        ev_id = "ev:facilities"
-        stamp = str(facilities.get("checked_at") or checked)
+        evid, stamp = "ev:facilities", str(facilities.get("checked_at") or checked)
         age = _age_seconds(stamp)
-        evidence.append(Evidence(ev_id, "openstreetmap", stamp, age, _freshness(age, 86400), f"Public mapping returned {len(facility_rows)} nearby facility record(s)."))
-        facts.append(DerivedFact("fact:nearby_facility_count", "count_provider_rows", len(facility_rows), "provider_reported", (ev_id,), "Counted community-mapped facility records."))
+        evidence.append(Evidence(evid, "openstreetmap", stamp, age, _freshness(age, 86400), f"Public mapping returned {len(facility_rows)} nearby facility record(s)."))
+        facts.append(DerivedFact("fact:nearby_facility_count", "count_provider_rows", len(facility_rows), "provider_reported", (evid,), "Counted community-mapped facility records."))
 
-    # Deterministic completeness/risk signal. Unknown provider state increases
-    # uncertainty; absence never becomes an all-clear.
-    provider_states = {
+    states = {
         "cameras": str(cameras.get("status") or "unknown"),
         "air_quality": str(air.get("status") or "unknown"),
         "weather_alerts": str(alerts.get("status") or "unknown"),
         "incidents": str(incidents.get("status") or "unknown"),
         "facilities": str(facilities.get("status") or "unknown"),
     }
-    unavailable = sorted(k for k, v in provider_states.items() if v != "ok")
-    facts.append(DerivedFact(
-        "fact:observation_completeness", "provider_status_matrix",
-        "complete_for_integrated_sources" if not unavailable else "partial",
-        "high", tuple(),
-        "Integrated provider gaps: " + (", ".join(unavailable) if unavailable else "none") + ".",
-    ))
+    unavailable = sorted(k for k, v in states.items() if v != "ok")
+    facts.append(DerivedFact("fact:observation_completeness", "provider_status_matrix",
+        "complete_for_integrated_sources" if not unavailable else "partial", "high", tuple(),
+        "Integrated provider gaps: " + (", ".join(unavailable) if unavailable else "none") + "."))
 
     return {
-        "schema": "jarvis.reality_graph.v1",
-        "generated_at": _now(),
-        "model_calls": 0,
+        "schema": "jarvis.reality_graph.v1", "generated_at": _now(), "model_calls": 0,
         "action_authority": "none",
         "scope": {"kind": "place_snapshot", "latitude": round(float(latitude), 6), "longitude": round(float(longitude), 6)},
-        "entities": [asdict(x) for x in entities],
-        "relations": [asdict(x) for x in relations],
-        "evidence": [asdict(x) for x in evidence],
-        "derived_facts": [asdict(x) for x in facts],
-        "provider_states": provider_states,
+        "entities": [asdict(x) for x in entities], "relations": [asdict(x) for x in relations],
+        "evidence": [asdict(x) for x in evidence], "derived_facts": [asdict(x) for x in facts],
+        "provider_states": states,
+    }
+
+
+def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, Any]], *, now: datetime | None = None) -> dict[str, Any]:
+    """Compile a cross-provider mission state without asking an LLM to reason.
+
+    Provider adapters should normalize observations to:
+      kind, source, observed_at and typed fields such as status, eta_at,
+      latitude/longitude, moving, delay_seconds, disruption, delivered.
+    Unknown/missing data remains unknown. No person identity is inferred.
+    """
+    now = now or datetime.now(timezone.utc)
+    mid = _safe_id(mission.get("id") or "mission")
+    goal = str(mission.get("goal") or "")[:240]
+    deadline = _parse_time(mission.get("deadline"))
+    entities = [Entity("mission:" + mid, "mission", goal or "Mission", {
+        "status": str(mission.get("status") or "active")[:40],
+        "deadline": deadline.isoformat() if deadline else None,
+    })]
+    evidence: list[Evidence] = []
+    relations: list[Relation] = []
+    facts: list[DerivedFact] = []
+    newest: dict[str, dict[str, Any]] = {}
+
+    ttl_by_kind = {"courier": 180.0, "traffic": 300.0, "camera": 180.0, "order": 300.0, "device": 60.0}
+    for idx, row in enumerate(observations[:100]):
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("kind") or "observation").lower()
+        source = str(row.get("source") or "unknown")[:80]
+        stamp = str(row.get("observed_at") or "")
+        age = _age_seconds(stamp, now=now)
+        fresh = _freshness(age, ttl_by_kind.get(kind, 300.0))
+        evid = f"ev:{_safe_id(kind)}:{idx}"
+        claim = str(row.get("claim") or f"{kind} observation from {source}")[:300]
+        evidence.append(Evidence(evid, source, stamp, age, fresh, claim))
+        if fresh == "fresh":
+            previous = newest.get(kind)
+            prev_time = _parse_time(previous.get("observed_at")) if previous else None
+            row_time = _parse_time(stamp)
+            if row_time and (prev_time is None or row_time > prev_time):
+                newest[kind] = {**row, "_evidence_id": evid}
+
+    order = newest.get("order")
+    courier = newest.get("courier")
+    traffic = newest.get("traffic")
+    camera = newest.get("camera")
+
+    if order:
+        status = str(order.get("status") or "unknown")[:60]
+        facts.append(DerivedFact("fact:order_status", "fresh_latest_order", status, "provider_reported",
+            (order["_evidence_id"],), "Latest fresh order-provider status."))
+        if order.get("delivered") is True:
+            facts.append(DerivedFact("fact:provider_reports_delivered", "provider_delivery_flag", True, "provider_reported",
+                (order["_evidence_id"],), "Provider reports delivered; this does not prove personal receipt."))
+
+    eta = _parse_time(courier.get("eta_at")) if courier else None
+    if eta:
+        seconds = int((eta - now).total_seconds())
+        facts.append(DerivedFact("fact:provider_eta_seconds", "fresh_eta_minus_now", seconds, "provider_reported",
+            (courier["_evidence_id"],), "Fresh provider ETA converted to seconds from graph evaluation time."))
+        if deadline:
+            margin = int((deadline - eta).total_seconds())
+            facts.append(DerivedFact("fact:deadline_margin_seconds", "deadline_minus_provider_eta", margin, "high",
+                (courier["_evidence_id"],), "Positive means provider ETA precedes the exact mission deadline."))
+
+    if courier and courier.get("moving") is False:
+        stopped = courier.get("stationary_seconds")
+        if isinstance(stopped, (int, float)) and stopped >= 180:
+            facts.append(DerivedFact("fact:courier_stationary", "fresh_motion_threshold", int(stopped), "high",
+                (courier["_evidence_id"],), "Courier telemetry reports no movement for at least three minutes."))
+
+    if traffic:
+        delay = traffic.get("delay_seconds")
+        disruption = str(traffic.get("disruption") or "").strip()
+        if isinstance(delay, (int, float)) and delay >= 300:
+            facts.append(DerivedFact("fact:route_delay_seconds", "fresh_route_delay_threshold", int(delay), "high",
+                (traffic["_evidence_id"],), "Fresh route data reports at least five minutes of excess travel time."))
+        if disruption:
+            facts.append(DerivedFact("fact:route_disruption", "fresh_provider_disruption", disruption[:160], "provider_reported",
+                (traffic["_evidence_id"],), "Fresh traffic provider reports a route disruption."))
+
+    # Camera evidence may corroborate public-area conditions, never identity.
+    if camera:
+        state = str(camera.get("traffic_state") or camera.get("state") or "").strip().lower()
+        if state in {"stopped", "heavy", "congested"}:
+            facts.append(DerivedFact("fact:camera_route_congestion", "fresh_public_camera_condition", state, "tentative",
+                (camera["_evidence_id"],), "Public camera observation is consistent with congestion; no person/vehicle identity is inferred."))
+
+    fact_map = {f.id: f for f in facts}
+    cause_evidence: list[str] = []
+    if "fact:courier_stationary" in fact_map and ("fact:route_delay_seconds" in fact_map or "fact:route_disruption" in fact_map):
+        cause_evidence.extend(fact_map["fact:courier_stationary"].evidence_ids)
+        for key in ("fact:route_delay_seconds", "fact:route_disruption", "fact:camera_route_congestion"):
+            if key in fact_map:
+                cause_evidence.extend(fact_map[key].evidence_ids)
+        facts.append(DerivedFact("fact:delay_correlation", "stationary_plus_route_disruption", "route_disruption_consistent_with_delay",
+            "corroborated", tuple(dict.fromkeys(cause_evidence)),
+            "Independent fresh courier and route evidence are consistent with a traffic-related delay; this is correlation, not proof of cause."))
+
+    if deadline and now >= deadline and not any(f.id == "fact:provider_reports_delivered" for f in facts):
+        facts.append(DerivedFact("fact:deadline_passed_without_delivery_confirmation", "deadline_state_machine", True, "high", tuple(),
+            "Mission deadline passed without a fresh provider-delivered flag. This is not proof the item was not received."))
+
+    return {
+        "schema": "jarvis.reality_graph.mission.v1", "generated_at": now.isoformat(), "model_calls": 0,
+        "action_authority": "none", "mission_id": str(mission.get("id") or ""),
+        "entities": [asdict(x) for x in entities], "relations": [asdict(x) for x in relations],
+        "evidence": [asdict(x) for x in evidence], "derived_facts": [asdict(x) for x in facts],
+        "fresh_observation_kinds": sorted(newest),
     }
 
 
 def model_context(graph: dict[str, Any], *, max_facts: int = 12, max_evidence: int = 12) -> dict[str, Any]:
-    """Return the small semantic packet an LLM may see only when language or
-    novel planning is actually required. Raw provider payloads stay outside.
-    """
+    """Small semantic packet for the exceptional cases that still need a model."""
     facts = list(graph.get("derived_facts") or [])[:max(0, min(max_facts, 30))]
     evidence = list(graph.get("evidence") or [])[:max(0, min(max_evidence, 30))]
     return {
-        "schema": graph.get("schema"),
-        "generated_at": graph.get("generated_at"),
-        "scope": graph.get("scope"),
-        "provider_states": graph.get("provider_states"),
-        "facts": facts,
-        "evidence": [{
-            "id": row.get("id"), "source": row.get("source"),
-            "freshness": row.get("freshness"), "claim": row.get("claim"),
-        } for row in evidence if isinstance(row, dict)],
+        "schema": graph.get("schema"), "generated_at": graph.get("generated_at"),
+        "scope": graph.get("scope"), "mission_id": graph.get("mission_id"),
+        "provider_states": graph.get("provider_states"), "facts": facts,
+        "evidence": [{"id": r.get("id"), "source": r.get("source"), "freshness": r.get("freshness"), "claim": r.get("claim")}
+                     for r in evidence if isinstance(r, dict)],
         "omitted_raw_provider_payloads": True,
     }
 
 
 def answer_place_question(graph: dict[str, Any], question: str) -> dict[str, Any] | None:
-    """Narrow deterministic Q&A. A miss explicitly escalates instead of guessing."""
+    """Narrow deterministic Q&A; misses explicitly escalate instead of guessing."""
     q = " ".join(str(question or "").lower().split()).strip(" ?.!")
-    facts = {str(row.get("id")): row for row in graph.get("derived_facts", []) if isinstance(row, dict)}
+    facts = {str(r.get("id")): r for r in graph.get("derived_facts", []) if isinstance(r, dict)}
     if q in {"how many nearby public cameras are there", "how many public cameras are nearby", "are there public cameras nearby"}:
-        count = sum(1 for row in graph.get("entities", []) if isinstance(row, dict) and row.get("kind") == "public_camera")
+        count = sum(1 for r in graph.get("entities", []) if isinstance(r, dict) and r.get("kind") == "public_camera")
         return {"answered_without_model": True, "answer": f"{count} official catalog camera viewpoint(s) are represented nearby. Catalog presence does not prove a current live image.", "evidence_kind": "catalog"}
     if q in {"what is the air quality", "what's the air quality", "air quality"} and "fact:air_quality" in facts:
         return {"answered_without_model": True, "answer": f"Modelled US AQI is {facts['fact:air_quality']['value']}.", "evidence_kind": "provider_value"}
@@ -219,6 +302,26 @@ def answer_place_question(graph: dict[str, Any], question: str) -> dict[str, Any
         n = int(facts["fact:active_weather_alert_count"]["value"])
         return {"answered_without_model": True, "answer": f"The integrated weather provider returned {n} active point alert(s). This is not an all-hazards clearance.", "evidence_kind": "provider_count"}
     if q in {"what do you know about this place", "summarize this place", "reality graph status"}:
-        parts = [str(row.get("explanation") or "") for row in graph.get("derived_facts", []) if isinstance(row, dict)]
+        parts = [str(r.get("explanation") or "") for r in graph.get("derived_facts", []) if isinstance(r, dict)]
         return {"answered_without_model": True, "answer": " ".join(p for p in parts if p)[:1200], "evidence_kind": "derived_facts"}
+    return None
+
+
+def answer_mission_question(graph: dict[str, Any], question: str) -> dict[str, Any] | None:
+    """Routine mission questions are answered from facts, not an LLM."""
+    q = " ".join(str(question or "").lower().split()).strip(" ?.!")
+    facts = {str(r.get("id")): r for r in graph.get("derived_facts", []) if isinstance(r, dict)}
+    if q in {"is it late", "will it be late", "will this be late"} and "fact:deadline_margin_seconds" in facts:
+        margin = int(facts["fact:deadline_margin_seconds"]["value"])
+        if margin >= 0:
+            answer = f"Current provider ETA is {margin // 60} minute(s) before the mission deadline."
+        else:
+            answer = f"Current provider ETA is {abs(margin) // 60} minute(s) after the mission deadline."
+        return {"answered_without_model": True, "answer": answer, "evidence_kind": "deadline_math"}
+    if q in {"why is it delayed", "why is the delivery delayed", "what is causing the delay"} and "fact:delay_correlation" in facts:
+        return {"answered_without_model": True, "answer": "Fresh courier and route evidence are consistent with a traffic-related delay. That is corroboration, not proof of cause.", "evidence_kind": "correlation"}
+    if q in {"has it arrived", "was it delivered", "is it delivered"}:
+        if "fact:provider_reports_delivered" in facts:
+            return {"answered_without_model": True, "answer": "The provider reports the delivery complete. Personal receipt has not been independently proven.", "evidence_kind": "provider_status"}
+        return {"answered_without_model": True, "answer": "There is no fresh provider-delivered confirmation in the graph.", "evidence_kind": "absence_of_confirmation"}
     return None

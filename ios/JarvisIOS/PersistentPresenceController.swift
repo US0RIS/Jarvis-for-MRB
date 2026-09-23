@@ -597,6 +597,8 @@ final class PersistentPresenceController: ObservableObject {
             "source_id": appModel.settings.conversationSessionID,
             "enabled": appModel.settings.guardianEnabled
                 && UIApplication.shared.applicationState == .active,
+            "busy": conversationActive || frontend?.isMeetingActive == true
+                || frontend?.sensors.activity == "Driving",
             "observed_at": ISO8601DateFormatter().string(from: Date())
         ]
 

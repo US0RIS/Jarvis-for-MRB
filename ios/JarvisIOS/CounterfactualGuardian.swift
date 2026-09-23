@@ -330,6 +330,15 @@ final class CounterfactualGuardianController: ObservableObject {
             }
         }
 
+        // A route/calendar request can outlive an iOS foreground session or
+        // explicit consent. Never fire an interruption from a stale session.
+        guard UIApplication.shared.applicationState == .active,
+              manual || appModel.settings.guardianEnabled else {
+            trajectories = []
+            destinationByRisk = [:]
+            status = "Guardian paused — app inactive or automatic monitoring disabled."
+            return
+        }
         trajectories = found
         destinationByRisk = resolved
         lastCheckedAt = Date()

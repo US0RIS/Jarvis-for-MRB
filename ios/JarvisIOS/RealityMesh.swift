@@ -279,7 +279,7 @@ final class RealityMeshController: ObservableObject {
                 : nodeID + " accepted launch of " + appName
                     + "; process not independently observed. Foreground focus/window unknown."
         } catch {
-            appActionStatus = "Cannot confirm Mac app launch; do not assume it failed or retry automatically."
+            appActionStatus = "Cannot confirm the exact host app launch; do not assume it failed or retry automatically."
         }
     }
 

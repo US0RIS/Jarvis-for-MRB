@@ -102,8 +102,8 @@ struct SettingsView: View {
                 }
 
                 Section("Counterfactual Guardian") {
-                    Toggle("Guard calendar departures proactively", isOn: $settings.guardianEnabled)
-                    Text("Off by default. While Jarvis is foregrounded, this checks your own primary Google Calendar and fresh opted-in iPhone GPS against Apple MapKit driving ETAs for the next timed destinations. Only observed at-risk trajectories are surfaced; an unavailable calendar, unresolvable destination or stale GPS is unknown, never 'all clear'. Apple MapKit receives the origin and destination for the driving ETA. Individually authorize a single event-specific Maps handoff in Physical. No messages are sent, and no location trail is stored in the Jarvis backend.")
+                    Toggle("Counterfactual Guardian: departures + enrolled goals", isOn: $settings.guardianEnabled)
+                    Text("Off by default. While Jarvis is foregrounded, Guardian checks your primary Google Calendar and fresh opted-in iPhone GPS against Apple MapKit driving ETAs. Unknown provider/location data is never an all-clear. Apple receives the route origin/destination; Jarvis's PC does not store a new GPS trail. A single exact event/time/location Maps launch requires separate authorization. You can also individually enroll explicit user-goal deadlines in Physical: the Windows monitor may interrupt only while fresh foreground-phone consent exists and you are not driving, in a meeting or speaking. No messages are sent or broad tool authority granted.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

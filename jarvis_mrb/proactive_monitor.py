@@ -368,12 +368,19 @@ def _check_sensor_weather() -> None:
     check_weather()
 
 
+def _check_guardian_objectives() -> None:
+    """Reconcile user-enrolled goal deadlines; phone consent gates alerts."""
+    from jarvis_mrb.guardian_objectives import evaluate_once
+    evaluate_once()
+
+
 def check_once() -> None:
     proactive = _proactive_enabled()
     if proactive:
         _run_isolated("proactive_calendar", _check_calendar)
         _run_isolated("proactive_urgent_mail", _check_urgent_mail)
         _run_isolated("sensor_weather", _check_sensor_weather)
+        _run_isolated("guardian_objectives", _check_guardian_objectives)
 
     # Verification and persistent desired-state control are correctness/safety
     # loops, not optional notification features. Disabling general proactive
@@ -393,6 +400,7 @@ def _loop() -> None:
             if cycle % 3 == 0:
                 _run_isolated("proactive_urgent_mail", _check_urgent_mail)
             _run_isolated("sensor_weather", _check_sensor_weather)
+        _run_isolated("guardian_objectives", _check_guardian_objectives)
 
         # Always keep outcome verification and the persistent Agency control loop
         # alive. Agency's own mode/permissions determine whether any action occurs.

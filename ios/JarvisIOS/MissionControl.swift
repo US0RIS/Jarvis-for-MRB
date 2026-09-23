@@ -94,6 +94,8 @@ final class JarvisMissionControl: ObservableObject {
     @Published private(set) var status = "Mission Control is off. Enable it, then select a timed calendar destination."
     @Published private(set) var isChecking = false
     @Published private(set) var stagedDraft = ""
+    @Published private(set) var pcAffordances: [MissionAffordanceCatalog.Capability] = []
+    @Published private(set) var pcAffordanceStatus = "Windows tools not checked. These are never implicit action grants."
 
     private static let storeKey = "jarvis.missions.appointments.v1"
     private unowned let appModel: JarvisAppModel
@@ -247,6 +249,24 @@ final class JarvisMissionControl: ObservableObject {
             id: UUID(), at: at, source: source, kind: kind,
             detail: String(detail.prefix(400)), verified: verified
         )
+    }
+
+    func refreshPCAffordances() async {
+        guard appModel.settings.missionControlEnabled else {
+            pcAffordanceStatus = "Mission Control off."
+            pcAffordances = []
+            return
+        }
+        do {
+            let catalog = try await client.missionAffordanceCatalog()
+            pcAffordances = catalog.capabilities
+            pcAffordanceStatus = "PC catalog checked: "
+                + catalog.checkedAt
+                + ". Tool contracts are NOT live device/connection checks or execution grants."
+        } catch {
+            pcAffordances = []
+            pcAffordanceStatus = "Windows catalog unavailable. No PC action capability assumed."
+        }
     }
 
     /// Read-only candidate retrieval; no mission is silently enrolled.
@@ -789,7 +809,37 @@ struct JarvisMissionBoard: View {
                 }
                 .buttonStyle(.bordered)
             }
-            DisclosureGroup("Actual capabilities and authority") {
+            Button("Check connected PC affordance catalog") {
+                Task { await missions.refreshPCAffordances() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!appModel.settings.missionControlEnabled)
+            Text(missions.pcAffordanceStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DisclosureGroup("Windows PC / browser / Google tool contracts") {
+                ForEach(missions.pcAffordances) { capability in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(capability.label)
+                            .font(.caption.weight(.medium))
+                        Text(capability.id + " • " + capability.effect)
+                            .font(.caption2)
+                        Text(capability.contractDefined && capability.permissionAllowed
+                             ? (capability.requiresConfirmation
+                                ? "Policy permits only with confirmation"
+                                : "Policy permits; no mission grant")
+                             : "Contract absent or policy denies")
+                            .font(.caption2)
+                        Text(capability.agencyScopeImplemented
+                             ? "Agency workflow schema exists; availability unverified"
+                             : "Not an Agency workflow affordance")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+            DisclosureGroup("Actual iPhone capabilities and authority") {
                 ForEach(MissionAffordances.appointment) { affordance in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(affordance.label)

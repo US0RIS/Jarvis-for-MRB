@@ -73,5 +73,41 @@ class RealityGraphTests(unittest.TestCase):
         self.assertIn('response.headers["Cache-Control"] = "private, no-store"', source)
 
 
+    def test_mission_graph_correlates_fresh_sources_without_model(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph(
+            {"id": "dinner-1", "goal": "Dinner delivered", "deadline": "2026-09-23T05:20:00+00:00"},
+            [
+                {"kind": "order", "source": "provider", "observed_at": "2026-09-23T04:59:30+00:00", "status": "picked_up"},
+                {"kind": "courier", "source": "provider", "observed_at": "2026-09-23T04:59:40+00:00", "eta_at": "2026-09-23T05:28:00+00:00", "moving": False, "stationary_seconds": 420},
+                {"kind": "traffic", "source": "route", "observed_at": "2026-09-23T04:59:45+00:00", "delay_seconds": 720, "disruption": "collision"},
+                {"kind": "camera", "source": "public-camera", "observed_at": "2026-09-23T04:59:50+00:00", "traffic_state": "stopped"},
+            ],
+            now=now,
+        )
+        facts = {x["id"]: x for x in graph["derived_facts"]}
+        self.assertEqual(graph["model_calls"], 0)
+        self.assertEqual(graph["action_authority"], "none")
+        self.assertEqual(facts["fact:deadline_margin_seconds"]["value"], -480)
+        self.assertIn("fact:delay_correlation", facts)
+        self.assertEqual(facts["fact:camera_route_congestion"]["confidence"], "tentative")
+        direct = reality_graph.answer_mission_question(graph, "why is it delayed?")
+        self.assertTrue(direct["answered_without_model"])
+
+    def test_stale_mission_observation_cannot_drive_fact(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph(
+            {"id": "x", "deadline": "2026-09-23T05:30:00+00:00"},
+            [{"kind": "courier", "source": "provider", "observed_at": "2026-09-23T04:40:00+00:00",
+              "eta_at": "2026-09-23T05:40:00+00:00", "moving": False, "stationary_seconds": 1200}],
+            now=now,
+        )
+        ids = {x["id"] for x in graph["derived_facts"]}
+        self.assertNotIn("fact:provider_eta_seconds", ids)
+        self.assertNotIn("fact:courier_stationary", ids)
+
+
 if __name__ == "__main__":
     unittest.main()

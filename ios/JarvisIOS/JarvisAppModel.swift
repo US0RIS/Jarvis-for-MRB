@@ -125,6 +125,22 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    private static func isGuardianIntent(_ rawText: String) -> Bool {
+        let phrase = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+            .replacingOccurrences(
+                of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+            )
+        return [
+            "check next departures", "check my next departures",
+            "will i make my next meeting", "am i going to be late",
+            "am i going to be late for my next meeting",
+            "will i make my next appointment",
+            "check my departure risk", "check counterfactual guardian",
+        ].contains(phrase)
+    }
+
     private static func isPhysicalAwarenessIntent(_ rawText: String) -> Bool {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
@@ -579,6 +595,20 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone MapKit turn-by-turn navigation"
+            )
+            return
+        }
+
+        if Self.isGuardianIntent(text) {
+            await guardian.checkNow(manual: true)
+            let message = guardian.trajectories.first.map {
+                $0.brief + " The evidence and options are in Physical → Counterfactual Guardian."
+            } ?? guardian.status
+            await finishLocalResponse(
+                message,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone calendar + fresh GPS + actual MapKit driving ETA"
             )
             return
         }

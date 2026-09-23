@@ -117,6 +117,37 @@ def _launch_exact_app(name: str) -> dict[str, Any]:
         raise RuntimeError("Exact app launch or process check unavailable.") from exc
 
 
+def _observe_exact_apps() -> dict[str, Any]:
+    """Fresh process evidence for an immutable, non-sensitive allowlist only."""
+    now = iso(utcnow())
+    if platform.system() != "Darwin":
+        return {
+            "status": "unavailable", "observed_at": now,
+            "apps": {}, "source": "non-macOS test host",
+        }
+    observations: dict[str, str] = {}
+    for name in _EXACT_APPS:
+        try:
+            result = subprocess.run(
+                ["/usr/bin/pgrep", "-x", name],
+                capture_output=True, timeout=2, check=False,
+            )
+            observations[name] = (
+                "running" if result.returncode == 0 else
+                "not_running" if result.returncode == 1 else "unknown"
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            observations[name] = "unknown"
+    return {
+        "status": "ok" if all(s != "unknown" for s in observations.values())
+                  else "partial",
+        "observed_at": now,
+        "apps": observations,
+        "source": "Mac /usr/bin/pgrep -x for five exact app names; "
+                  "running process is not focused window or document",
+    }
+
+
 def _capture_screen() -> tuple[str, bytes]:
     if platform.system() != "Darwin":
         raise RuntimeError("Screen capture only implemented on macOS.")
@@ -208,6 +239,10 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path in {"/v1/health", "/v1/context"}:
                 self._json(200, self._context())
+                return
+            if self.path == "/v1/apps":
+                self._json(200, {"device_id": state.device_id,
+                                 **_observe_exact_apps()})
                 return
             if self.path != "/v1/screen":
                 self._json(404, {"status": "not_found"})

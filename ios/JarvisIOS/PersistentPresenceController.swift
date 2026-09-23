@@ -593,6 +593,12 @@ final class PersistentPresenceController: ObservableObject {
             }
         }
         environment["sensor_snapshot"] = opportunity
+        environment["guardian_snapshot"] = [
+            "source_id": appModel.settings.conversationSessionID,
+            "enabled": appModel.settings.guardianEnabled
+                && UIApplication.shared.applicationState == .active,
+            "observed_at": ISO8601DateFormatter().string(from: Date())
+        ]
 
         do {
             try await companion.sendEnvironment(environment)

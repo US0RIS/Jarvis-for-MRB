@@ -81,6 +81,17 @@ struct JarvisIOSApp: App {
                     Label("Physical", systemImage: "location.north.line")
                 }
 
+                NavigationStack {
+                    ScrollView {
+                        JarvisMissionBoard()
+                            .padding()
+                    }
+                    .navigationTitle("Missions")
+                }
+                .tabItem {
+                    Label("Missions", systemImage: "target")
+                }
+
                 LocalIntelligenceMilestoneView()
                     .tabItem {
                         Label("Local", systemImage: "brain.head.profile")

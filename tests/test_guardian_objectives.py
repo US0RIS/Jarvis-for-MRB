@@ -177,6 +177,32 @@ class GuardianObjectiveTests(TestCase):
         with self.assertRaisesRegex(ValueError, "between 1 and 24"):
             guardian.snooze("missing", hours=48, now=NOW)
 
+    def test_http_boundary_and_phone_privacy_wiring(self):
+        root = Path(__file__).resolve().parents[1]
+        service = (root / "jarvis_mrb/service.py").read_text()
+        environment = (root / "jarvis_mrb/environment_state.py").read_text()
+        presence = (root / "ios/JarvisIOS/PersistentPresenceController.swift").read_text()
+        client = (root / "ios/JarvisIOS/JarvisAPIClient.swift").read_text()
+        view = (root / "ios/JarvisIOS/CounterfactualGuardian.swift").read_text()
+        monitor = (root / "jarvis_mrb/proactive_monitor.py").read_text()
+        self.assertIn('guardian_snapshot = working_patch.pop("guardian_snapshot", None)', environment)
+        self.assertIn('environment["guardian_snapshot"]', presence)
+        self.assertIn('"busy": conversationActive', presence)
+        self.assertIn('from jarvis_mrb.guardian_objectives import ingest_presence', environment)
+        self.assertIn('guard appModel.settings.guardianEnabled, !objectivesBusy', view)
+        for path in (
+            "/guardian/objectives", "/guardian/objectives/evaluate",
+            "/guardian/objectives/enroll", "/guardian/objectives/revoke",
+            "/guardian/objectives/snooze",
+        ):
+            self.assertIn(f'("{path}")', service)
+            self.assertIn(path, client)
+        self.assertIn("def guardian_objective_enroll(", service)
+        self.assertIn("_check_auth(authorization)", service)
+        self.assertIn('guardian_objectives", _check_guardian_objectives', monitor)
+        self.assertIn("func stageObjectiveFollowup(_ id: String)", view)
+        self.assertIn("No recipient selected and no message sent.", view)
+
     def test_only_verified_date_and_explicit_goal_no_unsafe_fallback(self):
         self.goal["due_at"] = (NOW + timedelta(days=400)).isoformat()
         self.assertEqual(guardian.eligible(now=NOW), [])

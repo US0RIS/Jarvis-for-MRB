@@ -324,6 +324,73 @@ final class RealityMeshController: ObservableObject {
             + "I have not launched any applications or opened a private screen."
     }
 
+    func executeSpokenExactApp(nodeID: String, appName: String) async -> String {
+        // Different consent from tap-to-approve multi-app mission.
+        // This command may only open ONE of ten literal benign apps on one
+        // already configured host. Bystander voice is not authenticated.
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+              appModel.settings.exactVoiceAppActionsEnabled,
+              UIApplication.shared.applicationState == .active else {
+            return "Exact spoken app actions are off. Opt in separately in Settings. "
+                + "No application was launched."
+        }
+        guard ["windows", "macbook", "macmini"].contains(nodeID),
+              Self.conductorApps(for: nodeID).contains(appName) else {
+            return "That exact device/application is not in my safe voice registry."
+        }
+        guard !conductorBusy else {
+            return "A workstation mission is already running; no overlapping voice action."
+        }
+        conductorBusy = true
+        defer { conductorBusy = false }
+        await refreshFabric()
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+              appModel.settings.exactVoiceAppActionsEnabled,
+              UIApplication.shared.applicationState == .active,
+              nodes.contains(where: {
+                  $0.id == nodeID && $0.status == "online"
+                      && $0.capabilities["app_launch"] == "exact_user_tap_only"
+              }) else {
+            return "Exact device is unavailable or voice action permission was revoked. "
+                + "No launch attempted."
+        }
+        do {
+            let draft = try await client.conductorPlanWorkstation(
+                nodeID: nodeID, apps: [appName], screen: false
+            )
+            guard let grant = draft.oneUseGrant,
+                  appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+                  appModel.settings.exactVoiceAppActionsEnabled,
+                  UIApplication.shared.applicationState == .active else {
+                _ = try? await client.conductorRevoke(id: draft.id)
+                return "Voice permission changed. Workstation draft revoked."
+            }
+            // The opt-in is standing, but each exact recognized utterance
+            // still mints and spends a separate server one-use grant.
+            let result = try await client.conductorExecuteWorkstation(
+                id: draft.id, grant: grant,
+                nodeID: nodeID, apps: [appName]
+            )
+            guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+                  appModel.settings.exactVoiceAppActionsEnabled,
+                  UIApplication.shared.applicationState == .active else {
+                _ = try? await client.conductorRevoke(id: draft.id)
+                return "The voice action's server result is not current after privacy changed."
+            }
+            let verified = result.steps.first?.result ?? "unverified"
+            conductorStatus = "Spoken exact action on " + nodeID + ": " + verified
+                + " for " + appName + ". " + (result.steps.first?.receipt ?? "")
+            return verified == "verified_running" || verified == "already_running"
+                ? appName + " is observed running on " + nodeID
+                    + ". I cannot claim it has focus or a new window."
+                : "I attempted the exact app request, but its outcome is "
+                    + verified + ". I won't retry automatically."
+        } catch {
+            return "I couldn't confirm that exact remote app action. "
+                + "Do not assume the app did not open or issue an automatic retry."
+        }
+    }
+
     func stageConductor() async {
         guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
               UIApplication.shared.applicationState == .active, !conductorBusy,

@@ -139,6 +139,11 @@ final class JarvisAppModel: ObservableObject {
             "what devices are online", "show my connected devices",
             "what computers can you see", "check my mac nodes",
         ].contains(cleaned) { return ("nodes", "") }
+        if [
+            "prepare my workstation", "get my workstation ready",
+            "prepare the workstation", "start a workstation mission",
+            "ready my computer", "get my computer ready",
+        ].contains(cleaned) { return ("workstation", "") }
         for prefix in [
             "establish remote presence at ", "establish presence at ",
             "check public sources at ", "show me the world around ",
@@ -641,6 +646,8 @@ final class JarvisAppModel: ObservableObject {
                 reply = realityMesh.nodeStatus + " "
                     + realityMesh.nodes.map { $0.label + ": " + $0.status }
                         .joined(separator: "; ")
+            } else if meshAction.kind == "workstation" {
+                reply = realityMesh.requestWorkstationPreparation()
             } else {
                 realityMesh.placeName = meshAction.place
                 await realityMesh.establishWorldPresence()
@@ -649,7 +656,7 @@ final class JarvisAppModel: ObservableObject {
             }
             await finishLocalResponse(
                 reply, command: text, fromHandsFree: fromHandsFree,
-                routeReason: "iPhone Reality Mesh / live paired nodes and exact public place"
+                routeReason: "iPhone Reality Mesh / precise read-only request or Conductor staging"
             )
             return
         }

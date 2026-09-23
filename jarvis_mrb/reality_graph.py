@@ -9,7 +9,6 @@ It deliberately contains no model calls and grants no action authority.
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import math
 from typing import Any, Iterable
 
 

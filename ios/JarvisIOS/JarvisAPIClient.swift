@@ -1,5 +1,37 @@
 import Foundation
 
+struct MissionAffordanceCatalog: Decodable {
+    struct Capability: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let effect: String
+        let contractDefined: Bool
+        let permissionAllowed: Bool
+        let requiresConfirmation: Bool
+        let agencyScopeImplemented: Bool
+        let liveConnectionVerified: Bool
+        let executionAuthorizedByCatalog: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case id, label, effect
+            case contractDefined = "contract_defined"
+            case permissionAllowed = "permission_allowed"
+            case requiresConfirmation = "requires_confirmation"
+            case agencyScopeImplemented = "agency_scope_implemented"
+            case liveConnectionVerified = "live_connection_verified"
+            case executionAuthorizedByCatalog = "execution_authorized_by_catalog"
+        }
+    }
+
+    let checkedAt: String
+    let capabilities: [Capability]
+
+    enum CodingKeys: String, CodingKey {
+        case capabilities
+        case checkedAt = "checked_at"
+    }
+}
+
 struct GuardianObjectiveOverview: Decodable {
     struct Candidate: Decodable, Identifiable {
         let intentionID: String
@@ -424,6 +456,12 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
+    }
+
+    func missionAffordanceCatalog() async throws -> MissionAffordanceCatalog {
+        let (data, response) = try await get(path: "missions/affordances", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(MissionAffordanceCatalog.self, from: data)
     }
 
     func guardianObjectiveOverview() async throws -> GuardianObjectiveOverview {

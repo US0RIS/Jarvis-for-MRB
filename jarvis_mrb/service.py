@@ -237,6 +237,16 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid Jarvis API token")
 
 
+def _check_mesh_auth(authorization: str | None) -> None:
+    """Private device/desktop presence must never run on tokenless Jarvis."""
+    if not API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="Configure a private Jarvis API bearer token before enabling Reality Mesh.",
+        )
+    _check_auth(authorization)
+
+
 def _websocket_authorized(websocket: WebSocket) -> bool:
     if not API_TOKEN:
         return True
@@ -557,7 +567,7 @@ def reality_mesh_nodes(
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    _check_auth(authorization)
+    _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.reality_mesh import nodes
     return nodes()
@@ -568,7 +578,7 @@ def reality_mesh_public_sources(
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    _check_auth(authorization)
+    _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.reality_mesh import public_sources
     return public_sources()
@@ -580,7 +590,7 @@ def reality_mesh_place(
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    _check_auth(authorization)
+    _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.reality_mesh import observe_place
     try:
@@ -595,7 +605,7 @@ def reality_mesh_screen_begin(
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    _check_auth(authorization)
+    _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.reality_mesh import begin_screen, NodeUnavailable
     try:
@@ -611,7 +621,7 @@ def reality_mesh_screen_stop(
     request: MeshNodeRequest,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    _check_auth(authorization)
+    _check_mesh_auth(authorization)
     from jarvis_mrb.reality_mesh import finish_screen, NodeUnavailable
     try:
         return finish_screen(request.node_id)
@@ -626,7 +636,7 @@ def reality_mesh_screen_frame(
     node_id: str,
     authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
-    _check_auth(authorization)
+    _check_mesh_auth(authorization)
     from jarvis_mrb.reality_mesh import frame, NodeUnavailable
     try:
         data, media_type = frame(node_id)

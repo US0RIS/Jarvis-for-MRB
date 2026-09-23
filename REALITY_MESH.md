@@ -32,12 +32,21 @@ iPhone / iPad Mesh tab (explicit opt-in)
    python3 scripts/jarvis-mac-node.py \
      --device-id macbook --label "MacBook Air" \
      --bind "$(tailscale ip -4)" --port 8766 --allow-screen
+   # Optionally add --allow-app-launch to allow exact app buttons as well.
    ```
    Without `--allow-screen`, the device reports status but **cannot** start a screen session. macOS System Settings → Privacy & Security → Screen & System Audio Recording must independently permit the Terminal/Python running the agent. The agent intentionally runs only while this process is running.
 4. In the **Windows Jarvis service process environment**, set `JARVIS_MESH_MACBOOK_URL=http://<the Mac's Tailscale IP>:8766` and `JARVIS_MESH_MACBOOK_TOKEN=<that Mac's exact random token>`. Do not put the token into the iPhone app: the existing Jarvis API bearer token is used from iPhone to Windows. Restart the Windows Jarvis backend to read the new environment values. For a Mac mini use `--device-id macmini`, its own random secret and independent Windows `JARVIS_MESH_MACMINI_URL` / `JARVIS_MESH_MACMINI_TOKEN` variables.
 5. In the iPhone/iPad app open **Mesh**, enable its separate switch, tap **Check connected nodes**, then **View Mac screen for 2 minutes**. The Mac must answer with an exact device ID, supported protocol version, fresh timestamp and a real screen-session capability. Neither the phone nor the PC asserts a Mac is online just because it was configured. For a manually operated privacy shutdown, tap **Stop Mac screen** and quit the agent on the Mac.
 
 Node URLs are read only from the Windows process environment, **not supplied by phone/API request input**, and are restricted to loopback, Tailscale IPv4 `100.64.0.0/10` over HTTP, or `*.ts.net` via HTTPS. Redirects, oversized responses, unexpected image types and wrong node IDs fail closed. A missing/unavailable node is displayed as such. You do not need jailbreak, macOS private APIs or proprietary hardware protocols.
+
+## Narrowly authorized Mac actions: exact named app launch
+
+Reality Mesh also implements a **separate, disabled-by-default Mac app-launch capability**. Start the standalone Mac node with `--allow-app-launch` as well as, or independently of, `--allow-screen`. The two flags are separate. Without this startup flag, no request from Jarvis can launch a Mac application.
+
+After the Mac responds online and advertises `app_launch = exact_user_tap_only`, the iPhone/iPad Mesh device card exposes **Open an exact app on this Mac**. Each named menu button is itself the authorization for **one** call: Safari, Notes, Calendar, Preview or Finder, on the exact selected Mac. These five names are hard-coded on the phone, Windows broker and Mac node. Terminal, arbitrary command/path/URL and app arguments are **not** accepted, and neither a spoken request nor a background Mission can infer a new Mac app-launch permission.
+
+The Mac invokes only macOS `/usr/bin/open -a <allowlisted exact application>` without shell interpolation, then checks `/usr/bin/pgrep -x` as an independent *running-process observation*. A successful `open` command is not proof of focus or a new window; if the process cannot be observed, the receipt explicitly says unverified rather than reporting the app as running. Requests are spaced by a Mac-enforced three-second limit and never automatically retried. Both the Windows backend and Mac require their own bearer credentials; every action is an exact user tap, not an ambient camera/voice authorization. Actual application availability and visible user-session behavior require hardware checks.
 
 ## Optional view-only Windows screen
 

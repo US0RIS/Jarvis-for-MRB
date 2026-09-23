@@ -61,6 +61,23 @@ struct RealityMeshPlaceResponse: Decodable {
     }
 }
 
+struct RealityMeshAppLaunchReceipt: Decodable {
+    let nodeID: String
+    let appName: String
+    let status: String
+    let processObserved: Bool
+    let source: String
+    let observedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, source
+        case nodeID = "node_id"
+        case appName = "app_name"
+        case processObserved = "process_observed"
+        case observedAt = "observed_at"
+    }
+}
+
 struct RealityMeshScreenSession: Decodable {
     let nodeID: String
     let status: String
@@ -550,6 +567,17 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(RealityMeshPlaceResponse.self, from: data)
+    }
+
+    func realityMeshOpenMacApp(nodeID: String, appName: String) async throws -> RealityMeshAppLaunchReceipt {
+        guard ["macbook", "macmini"].contains(nodeID),
+              ["Safari", "Notes", "Calendar", "Preview", "Finder"].contains(appName)
+        else { throw JarvisAPIError.badResponse }
+        let (data, response) = try await postData(
+            path: "mesh/app/open", body: ["node_id": nodeID, "app_name": appName]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityMeshAppLaunchReceipt.self, from: data)
     }
 
     func realityMeshStartScreen(nodeID: String) async throws -> RealityMeshScreenSession {

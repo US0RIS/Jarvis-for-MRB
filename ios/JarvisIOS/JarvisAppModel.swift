@@ -126,6 +126,28 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    private static func missionIntent(_ rawText: String) -> String? {
+        let phrase = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+            .replacingOccurrences(
+                of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+            )
+        if [
+            "mission status", "check mission status", "check my missions",
+            "what are my missions", "what's my next mission",
+            "check my mission", "mission control status",
+        ].contains(phrase) { return "status" }
+        if [
+            "make sure i get to my next meeting on time",
+            "start a mission for my next appointment",
+            "start my next meeting mission",
+            "guard my next appointment",
+            "start mission for my next meeting",
+        ].contains(phrase) { return "enroll_next" }
+        return nil
+    }
+
     private static func isGuardianIntent(_ rawText: String) -> Bool {
         let phrase = rawText.lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -582,6 +604,21 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone Personal Notecard"
+            )
+            return
+        }
+
+        if let missionAction = Self.missionIntent(text) {
+            let reply: String
+            if missionAction == "enroll_next" {
+                reply = await missionControl.enrollNextAppointment()
+            } else {
+                await missionControl.checkNow()
+                reply = missionControl.spokenStatus
+            }
+            await finishLocalResponse(
+                reply, command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone Mission Control / explicit event / MapKit verified observations"
             )
             return
         }

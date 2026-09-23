@@ -75,7 +75,8 @@ def _request(node_id: str, method: str, path: str, *,
         raise NodeUnavailable("not configured or private transport/token invalid")
     base, token = config
     if method not in {"GET", "POST", "DELETE"} or path not in {
-        "/v1/health", "/v1/context", "/v1/session", "/v1/screen"
+        "/v1/health", "/v1/context", "/v1/session", "/v1/screen",
+        "/v1/app/open"
     }:
         raise ValueError("Unregistered mesh method/path.")
     try:
@@ -254,6 +255,43 @@ def frame(node_id: str) -> tuple[bytes, str]:
     if data is None:
         raise NodeUnavailable("No screen returned")
     return data, media
+
+
+def launch_exact_mac_app(node_id: str, app_name: str) -> dict[str, Any]:
+    """Explicit user-button app launch on one live, separately opted-in Mac.
+
+    Not callable through autonomous missions, Qwen, watch callbacks, or an
+    unbounded desktop tool. No custom arguments, URLs, paths or shell strings.
+    """
+    allowed = {"Safari", "Notes", "Calendar", "Preview", "Finder"}
+    if node_id not in _IDS or app_name not in allowed:
+        raise ValueError("Only exact paired Mac and five approved app names are supported.")
+    state = probe(node_id)
+    if state["status"] != "online":
+        raise NodeUnavailable("Mac node not live, authenticated and identity-verified.")
+    if state["capabilities"].get("app_launch") != "exact_user_tap_only":
+        raise NodeUnavailable("Mac was not started with separate app-launch permission.")
+    answer, _, _ = _request(
+        node_id, "POST", "/v1/app/open", payload={"app_name": app_name}
+    )
+    if not answer or answer.get("device_id") != node_id or answer.get("app_name") != app_name:
+        raise NodeUnavailable("Mac did not confirm the exact app launch request.")
+    status = answer.get("status")
+    if status not in {
+        "launch_accepted_process_observed", "launch_accepted_process_unverified"
+    }:
+        raise NodeUnavailable("Mac returned an unsupported app action receipt.")
+    return {
+        "node_id": node_id,
+        "app_name": app_name,
+        "status": status,
+        "process_observed": bool(
+            answer.get("process_observed") is True
+            and status == "launch_accepted_process_observed"
+        ),
+        "source": "macOS open -a + process check; focus/window not proven",
+        "observed_at": _now(),
+    }
 
 
 def public_sources() -> dict[str, Any]:

@@ -543,6 +543,18 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/missions/affordances")
+def mission_affordance_catalog(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """No execution: named real tool contracts and permission boundaries."""
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.mission_affordances import catalog
+    return catalog()
+
+
 @app.get("/guardian/calendar")
 def guardian_calendar_expectations(
     response: Response,

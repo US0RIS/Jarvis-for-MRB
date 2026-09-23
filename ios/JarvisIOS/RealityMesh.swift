@@ -686,7 +686,6 @@ struct RealityMeshView: View {
     @EnvironmentObject var appModel: JarvisAppModel
     @EnvironmentObject var mesh: RealityMeshController
     @Environment(\.scenePhase) private var scenePhase
-    @State private var confirmConductorExecution = false
 
     var body: some View {
         ScrollView {
@@ -798,6 +797,179 @@ struct RealityMeshView: View {
                         .font(.caption)
                 }
                 Divider()
+                ConductorPanelView()
+                Divider()
+                Text("Presence anywhere")
+                    .font(.headline)
+                Text("Resolve an exact named place on the phone; then ask Jarvis to check public sources already integrated for that coordinate. No location is automatically monitored or added to an ongoing mission.")
+                    .font(.caption)
+                TextField("e.g. Melbourne Airport, Victoria", text: $mesh.placeName)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                Button(mesh.isCheckingWorld ? "Checking world sources…" : "Establish remote presence") {
+                    Task { await mesh.establishWorldPresence() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(mesh.isCheckingWorld || !appModel.settings.meshEnabled)
+                Text(mesh.worldStatus)
+                    .font(.caption)
+                    .accessibilityIdentifier("mesh-world-status")
+                ForEach(mesh.placeCandidates) { choice in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(choice.name)
+                            .font(.subheadline.weight(.medium))
+                        Text(choice.address)
+                            .font(.caption)
+                        Button("Select this exact place") {
+                            Task { await mesh.selectPlace(choice.id) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(mesh.isCheckingWorld)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
+                if let place = mesh.place {
+                    Text(place.summary)
+                        .font(.callout)
+                    Text("Camera coverage: " + place.cameras.coverage)
+                        .font(.caption)
+                    Text(place.cameras.sourceNote)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(place.conditions.airQuality.sourceNote)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(place.conditions.weatherAlerts.sourceNote)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    ForEach(place.cameras.cameras.prefix(6)) { camera in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(camera.title + " • " + camera.provider)
+                                .font(.subheadline.weight(.medium))
+                            if let imageURL = URL(string: camera.imageURL),
+                               imageURL.scheme == "https" {
+                                AsyncImage(url: imageURL) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().scaledToFit()
+                                    } else {
+                                        Text("Published still unavailable; this is not live video.")
+                                            .font(.caption)
+                                    }
+                                }
+                            }
+                            if let stream = URL(string: camera.streamURL),
+                               stream.scheme == "https" {
+                                Link("Open provider-published stream", destination: stream)
+                                    .font(.caption)
+                            }
+                        }
+                        .padding(8)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                    }
+                }
+                Divider()
+                Text("Time-bounded watch at my selected place")
+                    .font(.headline)
+                Text("An exact three-hour public-source watch runs on the Jarvis PC even when the iPhone app suspends. Explicitly enrolling one stores the chosen coordinate in Jarvis's separate external-watch ledger. These are ADS-B aircraft reports and USGS earthquake reports, not live worldwide CCTV.")
+                    .font(.caption)
+                HStack {
+                    Button("Watch aircraft • 3h") {
+                        Task { await mesh.watchSelectedPlace(kind: "airspace_region") }
+                    }
+                    Button("Watch USGS events • 3h") {
+                        Task { await mesh.watchSelectedPlace(kind: "usgs_earthquakes") }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appModel.settings.meshEnabled || mesh.place == nil)
+                Button("Refresh my mesh watches") {
+                    Task { await mesh.refreshPublicWatches() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appModel.settings.meshEnabled)
+                Text(mesh.watchStatus)
+                    .font(.caption)
+                ForEach(mesh.publicWatches) { watch in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(watch.label)
+                            .font(.subheadline.weight(.medium))
+                        Text("Expires: " + watch.expiresAt + " • " + watch.lastStatus)
+                            .font(.caption2)
+                        Text(watch.lastSummary)
+                            .font(.caption2)
+                        Button("Stop exact watch", role: .destructive) {
+                            Task { await mesh.stopPublicWatch(watch.id) }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
+                Divider()
+                DisclosureGroup("Registered public sensors and actual coverage") {
+                    ForEach(mesh.sources) { source in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(source.label)
+                                .font(.subheadline.weight(.medium))
+                            Text(source.coverage + " • " + source.kind)
+                                .font(.caption)
+                            Text(source.status + " — not a live measurement")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                Text("A registered feed is not proof of a working stream. Reality Mesh supplies evidence; Mission Control still requires an explicitly enrolled goal and separate action authorization.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                Task {
+                    await mesh.stopScreen()
+                    if ["planned", "running"].contains(mesh.conductorMission?.status ?? "") {
+                        await mesh.revokeConductor()
+                    }
+                }
+            }
+        }
+        .onChange(of: appModel.settings.meshEnabled) { _, enabled in
+            if !enabled {
+                Task {
+                    await mesh.stopScreen()
+                    await mesh.revokeConductor()
+                    mesh.clearSensitiveViews()
+                }
+            }
+        }
+        .onChange(of: appModel.settings.conductorEnabled) { _, enabled in
+            if !enabled {
+                Task { await mesh.revokeConductor() }
+            }
+        }
+        .onDisappear {
+            Task {
+                await mesh.stopScreen()
+                if ["planned", "running"].contains(mesh.conductorMission?.status ?? "") {
+                    await mesh.revokeConductor()
+                }
+            }
+        }
+    }
+}
+
+
+private struct ConductorPanelView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+    @EnvironmentObject var mesh: RealityMeshController
+    @State private var confirmConductorExecution = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
                 Text("Conductor • Prepare my workstation")
                     .font(.headline)
                 Toggle(
@@ -928,134 +1100,6 @@ struct RealityMeshView: View {
                     }
                     .buttonStyle(.bordered)
                 }
-                Divider()
-                Text("Presence anywhere")
-                    .font(.headline)
-                Text("Resolve an exact named place on the phone; then ask Jarvis to check public sources already integrated for that coordinate. No location is automatically monitored or added to an ongoing mission.")
-                    .font(.caption)
-                TextField("e.g. Melbourne Airport, Victoria", text: $mesh.placeName)
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                Button(mesh.isCheckingWorld ? "Checking world sources…" : "Establish remote presence") {
-                    Task { await mesh.establishWorldPresence() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(mesh.isCheckingWorld || !appModel.settings.meshEnabled)
-                Text(mesh.worldStatus)
-                    .font(.caption)
-                    .accessibilityIdentifier("mesh-world-status")
-                ForEach(mesh.placeCandidates) { choice in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(choice.name)
-                            .font(.subheadline.weight(.medium))
-                        Text(choice.address)
-                            .font(.caption)
-                        Button("Select this exact place") {
-                            Task { await mesh.selectPlace(choice.id) }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(mesh.isCheckingWorld)
-                    }
-                    .padding(8)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
-                }
-                if let place = mesh.place {
-                    Text(place.summary)
-                        .font(.callout)
-                    Text("Camera coverage: " + place.cameras.coverage)
-                        .font(.caption)
-                    Text(place.cameras.sourceNote)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(place.conditions.airQuality.sourceNote)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(place.conditions.weatherAlerts.sourceNote)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    ForEach(place.cameras.cameras.prefix(6)) { camera in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(camera.title + " • " + camera.provider)
-                                .font(.subheadline.weight(.medium))
-                            if let imageURL = URL(string: camera.imageURL),
-                               imageURL.scheme == "https" {
-                                AsyncImage(url: imageURL) { phase in
-                                    if let image = phase.image {
-                                        image.resizable().scaledToFit()
-                                    } else {
-                                        Text("Published still unavailable; this is not live video.")
-                                            .font(.caption)
-                                    }
-                                }
-                            }
-                            if let stream = URL(string: camera.streamURL),
-                               stream.scheme == "https" {
-                                Link("Open provider-published stream", destination: stream)
-                                    .font(.caption)
-                            }
-                        }
-                        .padding(8)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
-                    }
-                }
-                Divider()
-                Text("Time-bounded watch at my selected place")
-                    .font(.headline)
-                Text("An exact three-hour public-source watch runs on the Jarvis PC even when the iPhone app suspends. Explicitly enrolling one stores the chosen coordinate in Jarvis's separate external-watch ledger. These are ADS-B aircraft reports and USGS earthquake reports, not live worldwide CCTV.")
-                    .font(.caption)
-                HStack {
-                    Button("Watch aircraft • 3h") {
-                        Task { await mesh.watchSelectedPlace(kind: "airspace_region") }
-                    }
-                    Button("Watch USGS events • 3h") {
-                        Task { await mesh.watchSelectedPlace(kind: "usgs_earthquakes") }
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!appModel.settings.meshEnabled || mesh.place == nil)
-                Button("Refresh my mesh watches") {
-                    Task { await mesh.refreshPublicWatches() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!appModel.settings.meshEnabled)
-                Text(mesh.watchStatus)
-                    .font(.caption)
-                ForEach(mesh.publicWatches) { watch in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(watch.label)
-                            .font(.subheadline.weight(.medium))
-                        Text("Expires: " + watch.expiresAt + " • " + watch.lastStatus)
-                            .font(.caption2)
-                        Text(watch.lastSummary)
-                            .font(.caption2)
-                        Button("Stop exact watch", role: .destructive) {
-                            Task { await mesh.stopPublicWatch(watch.id) }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding(8)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
-                }
-                Divider()
-                DisclosureGroup("Registered public sensors and actual coverage") {
-                    ForEach(mesh.sources) { source in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(source.label)
-                                .font(.subheadline.weight(.medium))
-                            Text(source.coverage + " • " + source.kind)
-                                .font(.caption)
-                            Text(source.status + " — not a live measurement")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                Text("A registered feed is not proof of a working stream. Reality Mesh supplies evidence; Mission Control still requires an explicitly enrolled goal and separate action authorization.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding()
         }
         .confirmationDialog(
             "Approve exact workstation actions?",
@@ -1072,38 +1116,6 @@ struct RealityMeshView: View {
                  + (mesh.conductorShowScreen
                     ? ". Includes temporary private screen viewing." : ". No screen viewing.")
                  + " No terminal, email, file transfer, weapon or general OS input.")
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase != .active {
-                Task {
-                    await mesh.stopScreen()
-                    if ["planned", "running"].contains(mesh.conductorMission?.status ?? "") {
-                        await mesh.revokeConductor()
-                    }
-                }
-            }
-        }
-        .onChange(of: appModel.settings.meshEnabled) { _, enabled in
-            if !enabled {
-                Task {
-                    await mesh.stopScreen()
-                    await mesh.revokeConductor()
-                    mesh.clearSensitiveViews()
-                }
-            }
-        }
-        .onChange(of: appModel.settings.conductorEnabled) { _, enabled in
-            if !enabled {
-                Task { await mesh.revokeConductor() }
-            }
-        }
-        .onDisappear {
-            Task {
-                await mesh.stopScreen()
-                if ["planned", "running"].contains(mesh.conductorMission?.status ?? "") {
-                    await mesh.revokeConductor()
-                }
-            }
         }
     }
 }

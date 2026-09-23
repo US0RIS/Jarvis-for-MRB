@@ -23,6 +23,8 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var isCheckingNodes = false
     @Published private(set) var activeNodeID: String?
     @Published private(set) var screenStatus = "No desktop viewing session."
+    @Published private(set) var appActionStatus = "No remote app action requested."
+    @Published private(set) var appActionBusy = false
     @Published private(set) var screenData: Data?
     @Published private(set) var screenExpiresAt: Date?
     @Published private(set) var publicWatches: [ExternalWatchSummary] = []
@@ -246,6 +248,39 @@ final class RealityMeshController: ObservableObject {
         }
     }
 
+    func openExactMacApp(nodeID: String, appName: String) async {
+        // Only an explicit named-button action; no Qwen, goal, watch or
+        // voice path delegates automatically to a remote Mac app.
+        guard !appActionBusy, appModel.settings.meshEnabled,
+              UIApplication.shared.applicationState == .active,
+              ["macbook", "macmini"].contains(nodeID),
+              ["Safari", "Notes", "Calendar", "Preview", "Finder"].contains(appName),
+              nodes.contains(where: {
+                  $0.id == nodeID && $0.status == "online"
+                      && $0.capabilities["app_launch"] == "exact_user_tap_only"
+              }) else {
+            appActionStatus = "Mac not online or separately authorized for exact app launch."
+            return
+        }
+        appActionBusy = true
+        defer { appActionBusy = false }
+        appActionStatus = "Requesting one exact " + appName + " launch on " + nodeID + "…"
+        do {
+            let result = try await client.realityMeshOpenMacApp(
+                nodeID: nodeID, appName: appName
+            )
+            guard appModel.settings.meshEnabled,
+                  UIApplication.shared.applicationState == .active else { return }
+            appActionStatus = result.processObserved
+                ? "Mac accepted launch of " + appName
+                    + "; process is observed running. Foreground focus/window not verified."
+                : "Mac accepted launch of " + appName
+                    + "; process not independently observed. Foreground focus/window unknown."
+        } catch {
+            appActionStatus = "Cannot confirm Mac app launch; do not assume it failed or retry automatically."
+        }
+    }
+
     func startScreen(nodeID: String) async {
         guard appModel.settings.meshEnabled, activeNodeID == nil,
               UIApplication.shared.applicationState == .active,
@@ -354,6 +389,7 @@ final class RealityMeshController: ObservableObject {
         candidateItems = [:]
         publicWatches = []
         screenData = nil
+        appActionStatus = "No remote app action requested."
         placeName = ""
         screenLoop?.cancel()
         screenLoop = nil
@@ -417,6 +453,25 @@ struct RealityMeshView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         if node.status == "online",
+                           node.capabilities["app_launch"] == "exact_user_tap_only",
+                           ["macbook", "macmini"].contains(node.id) {
+                            Menu("Open an exact app on this Mac") {
+                                ForEach(
+                                    ["Safari", "Notes", "Calendar", "Preview", "Finder"],
+                                    id: \\.self
+                                ) { appName in
+                                    Button("Open " + appName + " on " + node.label) {
+                                        Task {
+                                            await mesh.openExactMacApp(
+                                                nodeID: node.id, appName: appName
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            .disabled(mesh.appActionBusy)
+                        }
+                        if node.status == "online",
                            node.capabilities["screen"] == "session_opt_in",
                            ["windows", "macbook", "macmini"].contains(node.id) {
                             Button("View host screen for 2 minutes") {
@@ -429,6 +484,8 @@ struct RealityMeshView: View {
                     .padding(10)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 }
+                Text(mesh.appActionStatus)
+                    .font(.caption)
                 if let id = mesh.activeNodeID {
                     Divider()
                     Text("Private view-only desktop • " + id)

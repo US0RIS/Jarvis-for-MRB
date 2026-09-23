@@ -96,7 +96,7 @@ def frame() -> tuple[bytes, str]:
             raise WindowsScreenUnavailable(
                 "Windows desktop capture unavailable; check interactive session."
             ) from exc
-        if not 80 <= len(encoded) <= _MAX_BYTES or not encoded.startswith(b"\\xff\\xd8\\xff"):
+        if not 80 <= len(encoded) <= _MAX_BYTES or not encoded.startswith(b"\xff\xd8\xff"):
             raise WindowsScreenUnavailable(
                 "Captured desktop image invalid or exceeded private 4 MB limit."
             )

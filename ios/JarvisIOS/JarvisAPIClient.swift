@@ -1,5 +1,78 @@
 import Foundation
 
+struct RealityMeshNodesResponse: Decodable {
+    struct Node: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let status: String
+        let platform: String
+        let evidence: String
+        let capabilities: [String: String]
+        let screenSessionActive: Bool
+        let foregroundApp: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, label, status, platform, evidence, capabilities
+            case screenSessionActive = "screen_session_active"
+            case foregroundApp = "foreground_app"
+        }
+    }
+
+    let checkedAt: String
+    let nodes: [Node]
+
+    enum CodingKeys: String, CodingKey {
+        case nodes
+        case checkedAt = "checked_at"
+    }
+}
+
+struct RealityMeshSourceRegistry: Decodable {
+    struct Source: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let coverage: String
+        let kind: String
+        let status: String
+        let sourceURL: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, label, coverage, kind, status
+            case sourceURL = "source_url"
+        }
+    }
+
+    let checkedAt: String
+    let sources: [Source]
+
+    enum CodingKeys: String, CodingKey {
+        case sources
+        case checkedAt = "checked_at"
+    }
+}
+
+struct RealityMeshPlaceResponse: Decodable {
+    let checkedAt: String
+    let data: PhysicalAwarenessResponse
+
+    enum CodingKeys: String, CodingKey {
+        case data
+        case checkedAt = "checked_at"
+    }
+}
+
+struct RealityMeshScreenSession: Decodable {
+    let nodeID: String
+    let status: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case nodeID = "node_id"
+        case expiresAt = "expires_at"
+    }
+}
+
 struct MissionAffordanceCatalog: Decodable {
     struct Capability: Decodable, Identifiable {
         let id: String
@@ -456,6 +529,59 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
+    }
+
+    func realityMeshNodes() async throws -> RealityMeshNodesResponse {
+        let (data, response) = try await get(path: "mesh/nodes", timeout: 12)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityMeshNodesResponse.self, from: data)
+    }
+
+    func realityMeshSources() async throws -> RealityMeshSourceRegistry {
+        let (data, response) = try await get(path: "mesh/public-sources", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityMeshSourceRegistry.self, from: data)
+    }
+
+    func realityMeshPlace(latitude: Double, longitude: Double) async throws -> RealityMeshPlaceResponse {
+        let (data, response) = try await postData(
+            path: "mesh/place",
+            body: ["latitude": latitude, "longitude": longitude]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityMeshPlaceResponse.self, from: data)
+    }
+
+    func realityMeshStartScreen(nodeID: String) async throws -> RealityMeshScreenSession {
+        let (data, response) = try await postData(
+            path: "mesh/screen/begin",
+            body: ["node_id": nodeID, "duration_seconds": 120]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityMeshScreenSession.self, from: data)
+    }
+
+    func realityMeshStopScreen(nodeID: String) async throws {
+        let (data, response) = try await postData(
+            path: "mesh/screen/stop", body: ["node_id": nodeID]
+        )
+        try validate(response: response, data: data)
+    }
+
+    func realityMeshScreenFrame(nodeID: String) async throws -> Data {
+        guard ["macbook", "macmini"].contains(nodeID) else { throw JarvisAPIError.badResponse }
+        let (data, response) = try await get(
+            path: "mesh/screen/" + nodeID, timeout: 10
+        )
+        try validate(response: response, data: data)
+        guard data.count >= 80, data.count <= 4_000_000,
+              let http = response as? HTTPURLResponse,
+              ["image/jpeg", "image/png"].contains(
+                  http.value(forHTTPHeaderField: "Content-Type")?.split(separator: ";").first.map(String.init)
+              ) else {
+            throw JarvisAPIError.badResponse
+        }
+        return data
     }
 
     func missionAffordanceCatalog() async throws -> MissionAffordanceCatalog {

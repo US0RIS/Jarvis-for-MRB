@@ -49,6 +49,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_mesh_windows_apps.py" -v
       - name: Verify private hardware acceptance CLI and no-output screen bytes
         run: python -m unittest discover -s tests -p "test_mesh_acceptance_check.py" -v
+      - name: Verify Conductor one-use workstation mission execution and independent post-action evidence
+        run: python -m unittest discover -s tests -p "test_conductor.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback
         run: python -m unittest discover -s tests -p "test_explicit_meeting_actions.py" -v
       - name: Verify model-free research, briefs and safe read-only workflows

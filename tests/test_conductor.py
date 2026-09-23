@@ -131,6 +131,15 @@ class ConductorMissionTests(unittest.TestCase):
         self.assertEqual(outcome["steps"][0]["result"], "unverified")
         self.assertEqual(outcome["steps"][0]["after_state"], "unknown")
 
+    def test_recent_persisted_receipts_cannot_recover_raw_grants(self):
+        draft = conductor.plan("macbook", ["Safari"])
+        older = conductor.recent()
+        self.assertEqual(older["missions"][0]["id"], draft["id"])
+        self.assertFalse(older["one_use_grants_returned"])
+        self.assertNotIn("one_use_grant", older["missions"][0])
+        conductor.revoke(draft["id"])
+        self.assertEqual(conductor.recent()["missions"][0]["status"], "revoked")
+
     def test_revoked_or_expired_grant_never_executes(self):
         draft = conductor.plan("macbook", ["Safari"])
         self.assertEqual(conductor.revoke(draft["id"])["status"], "revoked")
@@ -189,12 +198,15 @@ class ConductorMissionTests(unittest.TestCase):
             self.assertIn('"/conductor/workstation/' + name + '"', service)
         self.assertIn("_check_mesh_auth(authorization)", service)
         self.assertIn("conductor.execute(", service)
+        self.assertIn('@app.get("/conductor/workstation/recent")', service)
         node = (Path(__file__).parents[1] / "scripts/jarvis-mac-node.py").read_text()
         self.assertIn('self.path == "/v1/apps"', node)
         self.assertIn('"/usr/bin/pgrep", "-x", name', node)
         swift = (Path(__file__).parents[1] / "ios/JarvisIOS/RealityMesh.swift").read_text()
         self.assertIn("func executeConductor() async", swift)
         self.assertIn("func revokeConductor() async", swift)
+        self.assertIn("func inspectConductorReceipt(_ id: String) async", swift)
+        self.assertIn("conductorHasOneUseGrant", swift)
         self.assertIn("conductorOneUseGrant = nil", swift)
         self.assertIn("Approve these exact actions once", swift)
         self.assertIn("func executeSpokenExactApp(nodeID: String, appName: String)", swift)

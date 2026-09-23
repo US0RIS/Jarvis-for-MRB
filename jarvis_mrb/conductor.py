@@ -11,6 +11,7 @@ email, microphone, smart-lock, purchases, or irreversible physical actions.
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -47,7 +48,8 @@ def enabled() -> bool:
     return os.getenv("JARVIS_CONDUCTOR_ENABLED") == "1"
 
 
-def _database() -> sqlite3.Connection:
+@contextmanager
+def _database():
     APP_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(APP_DIR / "conductor.sqlite3", timeout=15)
     connection.row_factory = sqlite3.Row
@@ -67,7 +69,10 @@ def _database() -> sqlite3.Connection:
         error TEXT NOT NULL DEFAULT ''
     )""")
     connection.commit()
-    return connection
+    try:
+        yield connection
+    finally:
+        connection.close()
 
 
 def _validate_target(node_id: str, apps: list[str], screen: bool) -> None:
@@ -216,6 +221,20 @@ def _save(mission_id: str, status: str, steps: list[dict[str, Any]],
     return get(mission_id)
 
 
+def _require_fresh_evidence(snapshot: dict[str, Any], node_id: str) -> datetime:
+    if snapshot.get("node_id") != node_id or not isinstance(snapshot.get("apps"), dict):
+        raise reality_mesh.NodeUnavailable("Independent process observation target mismatched.")
+    try:
+        stamp = datetime.fromisoformat(str(snapshot["observed_at"]).replace("Z", "+00:00"))
+        if stamp.tzinfo is None or abs((_now() - stamp).total_seconds()) > 30:
+            raise ValueError("stale source timestamp")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise reality_mesh.NodeUnavailable("Independent process timestamp missing/stale.") from exc
+    if not str(snapshot.get("source") or ""):
+        raise reality_mesh.NodeUnavailable("Independent process source attribution absent.")
+    return stamp
+
+
 def execute(mission_id: str, grant: str, node_id: str,
             apps: list[str]) -> dict[str, Any]:
     if not enabled():
@@ -256,6 +275,7 @@ def execute(mission_id: str, grant: str, node_id: str,
     try:
         _validate_target(node_id, apps, bool(row["screen_requested"]))
         pre = reality_mesh.exact_app_observations(node_id)
+        pre_time = _require_fresh_evidence(pre, node_id)
         last_action_at = 0.0
         for app in apps:
             if get(mission_id)["status"] != "running":
@@ -288,7 +308,9 @@ def execute(mission_id: str, grant: str, node_id: str,
                 # Reserve this exact step in durable ledger *before* OS/HTTP IO.
                 step["result"] = "attempt_reserved"
                 steps.append(step)
-                _save(mission_id, "running", steps)
+                reservation = _save(mission_id, "running", steps)
+                if reservation["status"] != "running":
+                    return reservation
                 last_action_at = time.monotonic()
                 try:
                     receipt = (
@@ -312,11 +334,8 @@ def execute(mission_id: str, grant: str, node_id: str,
                 return get(mission_id)
             try:
                 after = reality_mesh.exact_app_observations(node_id)
-                if after["node_id"] != node_id:
-                    raise reality_mesh.NodeUnavailable("Verifier identity changed.")
                 # Require an independently observed, newer source timestamp.
-                pre_time = datetime.fromisoformat(pre["observed_at"])
-                post_time = datetime.fromisoformat(after["observed_at"])
+                post_time = _require_fresh_evidence(after, node_id)
                 if post_time <= pre_time:
                     raise reality_mesh.NodeUnavailable("Verifier timestamp not newer.")
                 step["after_state"] = after["apps"].get(app, "unknown")

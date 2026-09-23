@@ -363,6 +363,7 @@ final class JarvisMissionControl: ObservableObject {
         var updated = missions
         var destinationUpdates: [UUID: MKMapItem] = [:]
         var newAlert: String?
+        var riskForAuto: [UUID] = []
         var activeCount = 0
         for index in updated.indices {
             if Task.isCancelled { return }
@@ -395,12 +396,20 @@ final class JarvisMissionControl: ObservableObject {
                     continue
                 }
             }
-            guard exact != nil else {
+            // The future-only Google Calendar window stops returning an event
+            // once its start passes. A recently revalidated exact event may
+            // still be observed for its 30-minute post-start arrival window,
+            // but never creates new preapproved navigation authority.
+            let postStartArrivalOnly = Date() >= mission.startsAt
+                && mission.calendarCheckedAt.map {
+                    $0 >= mission.startsAt.addingTimeInterval(-600)
+                } == true
+            guard exact != nil || postStartArrivalOnly else {
                 mission.status = "Unknown: this event is missing from the bounded Calendar response, not proof it was cancelled."
                 updated[index] = mission
                 continue
             }
-            mission.calendarCheckedAt = calendarTime
+            if exact != nil { mission.calendarCheckedAt = calendarTime }
             guard mission.phase == .active else {
                 updated[index] = mission
                 continue
@@ -482,7 +491,15 @@ final class JarvisMissionControl: ObservableObject {
                 append(evidence("Apple MapKit + iPhone GPS + primary Google Calendar",
                                 risk ? "trajectory_at_risk" : "trajectory_feasible",
                                 mission.status, verified: false), to: &mission)
-                if risk, mission.lastAlertAt.map({
+                if risk {
+                    riskForAuto.append(mission.id)
+                }
+                let canAlert = appModel.settings.proactiveAnnouncements
+                    && !appModel.isSending && !appModel.isListening
+                    && !appModel.speechSynthesizer.isSpeaking
+                    && frontend?.isMeetingActive != true
+                    && frontend?.sensors.activity != "Driving"
+                if risk, canAlert, mission.lastAlertAt.map({
                     now.timeIntervalSince($0) > 1800
                 }) ?? true {
                     mission.lastAlertAt = now
@@ -500,6 +517,21 @@ final class JarvisMissionControl: ObservableObject {
         destinations.merge(destinationUpdates) { _, recent in recent }
         save()
         status = "Checked \(activeCount) enrolled mission(s) against real Calendar and phone observations. Evidence is shown per mission."
+
+        // Affordance broker: ONE already-granted, exact-target Maps handoff.
+        // The grant is consumed inside openDirections before Apple's API call.
+        if !appModel.isCurrentlyNavigating,
+           !appModel.isSending, !appModel.isListening,
+           !appModel.speechSynthesizer.isSpeaking,
+           frontend?.isMeetingActive != true,
+           frontend?.sensors.activity != "Driving" {
+            for id in riskForAuto where canAutoNavigate(id) {
+                if openDirections(id, automatically: true) { return }
+                // Failed handoff has also consumed that grant; do not attempt
+                // another launch in the same cycle.
+                return
+            }
+        }
         if let newAlert {
             appModel.memoMind.presentProactiveAlert(newAlert, severity: "warning")
             if appModel.settings.proactiveAnnouncements,

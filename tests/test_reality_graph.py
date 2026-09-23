@@ -115,6 +115,42 @@ class RealityGraphTests(unittest.TestCase):
         self.assertIsNone(reality_graph.answer_place_question(graph, "what is the air quality"))
         self.assertIsNone(reality_graph.answer_place_question(graph, "weather alerts"))
 
+    def test_other_mission_delivery_cannot_confirm_this_mission(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph(
+            {"id": "order-A"},
+            [{"kind": "order", "source": "delivery-app", "mission_id": "order-B",
+              "observed_at": "2026-09-23T04:59:00+00:00", "delivered": True}],
+            now=now,
+        )
+        self.assertNotIn("fact:provider_reports_delivered",
+                         {fact["id"] for fact in graph["derived_facts"]})
+
+    def test_different_routes_cannot_correlate_courier_delay(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        rows = [
+            {"kind": "courier", "source": "delivery-app", "mission_id": "a",
+             "route_id": "courier-route", "observed_at": "2026-09-23T04:59:00+00:00",
+             "moving": False, "stationary_seconds": 400},
+            {"kind": "traffic", "source": "route-provider", "mission_id": "a",
+             "route_id": "different-route", "observed_at": "2026-09-23T04:59:00+00:00",
+             "delay_seconds": 600},
+        ]
+        graph = reality_graph.build_mission_graph({"id": "a"}, rows, now=now)
+        self.assertNotIn("fact:delay_correlation",
+                         {fact["id"] for fact in graph["derived_facts"]})
+        rows[1]["route_id"] = "courier-route"
+        matched = reality_graph.build_mission_graph({"id": "a"}, rows, now=now)
+        self.assertIn("fact:delay_correlation",
+                      {fact["id"] for fact in matched["derived_facts"]})
+
+    def test_stale_place_summary_is_explicitly_historical(self):
+        obs = {**OBS, "conditions": {**OBS["conditions"],
+               "checked_at": "2020-01-01T00:00:00+00:00"}}
+        graph = reality_graph.build_place_graph(34.1, -118.2, obs)
+        answer = reality_graph.answer_place_question(graph, "summarize this place")
+        self.assertIn("Historical/stale source (not current)", answer["answer"])
+
     def test_stale_mission_observation_cannot_drive_fact(self):
         from datetime import datetime, timezone
         now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)

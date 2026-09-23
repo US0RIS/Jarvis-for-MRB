@@ -280,13 +280,13 @@ final class CounterfactualGuardianController: ObservableObject {
             destinationByRisk = [:]
             return
         }
-        guard let currentPosition = freshLocation() else {
+        guard freshLocation() != nil else {
             status = "Unknown — location expired during the calendar lookup."
             trajectories = []
             destinationByRisk = [:]
             return
         }
-        _ = origin // position has been rechecked after remote calendar access.
+        _ = origin // the fix was independently rechecked after remote Calendar access.
 
         let now = Date()
         let upcoming = calendar.events.compactMap { event -> (GuardianCalendarResponse.Event, Date)? in
@@ -535,7 +535,13 @@ struct CounterfactualGuardianView: View {
                 value: appModel.settings.guardianEnabled ? "Opted in • foreground only" : "Off"
             )
             .font(.caption)
-            Toggle("Guard upcoming calendar departures", isOn: $appModel.settings.guardianEnabled)
+            Toggle(
+                "Guard upcoming calendar departures",
+                isOn: Binding(
+                    get: { appModel.settings.guardianEnabled },
+                    set: { appModel.settings.guardianEnabled = $0 }
+                )
+            )
             Text("Also enable Motion / travel context and GPS under Settings. This does not monitor other people's calendars or infer a meeting place from its title.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

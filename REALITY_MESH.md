@@ -83,6 +83,26 @@ On **Mesh → Presence anywhere**, enter a specific place such as **Melbourne Ai
 
 The interface shows individual source coverage/status, source notes and provider-published camera stills/streams only when supplied by the allowlisted camera catalog. These public camera stills are fetched for the iOS preview by the phone directly from the allowlisted HTTPS government media URL; they are not private Mac screen captures. Unsupported, stale, offline, rate-limited or empty results are **never** converted into "everything is safe". The source manifest `GET /mesh/public-sources` describes integrations, **not** live measurements. The phone's named place is resolved by Apple and the coordinate is shared only after the button tap with the configured Windows service and corresponding external providers; Reality Mesh itself does not store a new location history. The Mesh screen additionally exposes explicit **Watch aircraft • 3h** and **Watch USGS events • 3h** buttons *after* the named place has been resolved and observed. These reuse the existing authenticated, time-bounded `external_watches` scheduler, at 30-minute/15-minute intervals respectively, with visible per-watch stop controls. Enrolling a watch stores the **selected coordinate** in Jarvis's separate local external-watch ledger for three hours; this is a distinct, user-triggered step, not storage from the one-shot place query. Aircraft feeds may be incomplete; a changing aircraft count does not imply a specific flight change, and seismic event reporting is neither instant nor comprehensive. Other watch types (e.g. private CCTV, non-integrated Melbourne feeds) are not silently accepted. This view does not take control of an existing Mission merely from a place query.
 
+## Operator readiness and hardware acceptance
+
+Run this on the Windows Jarvis backend host, with the *same environment and user account* that normally start Jarvis:
+
+```powershell
+python -m jarvis_mrb.mesh_acceptance_check
+python -m jarvis_mrb.mesh_acceptance_check --probe --strict
+```
+
+The default check does **no remote network requests and no screen capture**. It reports whether the existing Jarvis API bearer is configured, each exact Mac node has private URL and token configuration, the two independent Windows opt-ins, and the registry's actual source-coverage boundaries. `--probe` performs live, authenticated, identity-checked health probes to **only the Macs you explicitly configured**, without dumping secrets/IPs or touching their screens; with `--strict`, a missing API bearer or configured Mac that fails its live check exits nonzero. Unconfigured Macs remain unconfigured, never fabricated.
+
+For an explicitly authorized 15-second hardware screen check, *only while you are in front of the corresponding host*:
+
+```powershell
+python -m jarvis_mrb.mesh_acceptance_check --exercise-screen windows --strict
+python -m jarvis_mrb.mesh_acceptance_check --exercise-screen macbook --strict
+```
+
+This creates a fresh, minimal consent session on **one** already opted-in host, obtains **one** screenshot in RAM, reports only byte count/media type, then attempts immediate remote revocation in `finally`. No image file or private pixel content is printed. A Mac/Windows process with missing screen opt-in, macOS Screen Recording permission, interactive desktop, auth or Tailscale connectivity will fail rather than produce a synthetic success. A network failure during revoke is explicitly reported; the short remote consent still expires after 15 seconds. Do not use the screen check in unattended automation or where confidential desktop material must not be transmitted even briefly.
+
 ## Safety / privacy acceptance
 
 A completed source and CI build is distinct from deployed runtime acceptance. On your actual Macs and iPad, check separate Mac and iOS opt-ins, firewall/Tailscale reachability, macOS Screen Recording permission, private two-minute screenshot expiration, hidden content in screenshots, back-to-back session revocation, app background, network loss while stopping, independent node secrets, wrong ID/token, and offline/stale provider behavior. Windows/Tailscale bearer settings and actual remote display streaming need device tests. No MemoMind official SDK/protocol is fabricated.

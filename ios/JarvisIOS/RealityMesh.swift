@@ -186,15 +186,15 @@ final class RealityMeshController: ObservableObject {
     func startScreen(nodeID: String) async {
         guard appModel.settings.meshEnabled, activeNodeID == nil,
               UIApplication.shared.applicationState == .active,
-              ["macbook", "macmini"].contains(nodeID),
+              ["windows", "macbook", "macmini"].contains(nodeID),
               nodes.contains(where: {
                   $0.id == nodeID && $0.status == "online"
                       && $0.capabilities["screen"] == "session_opt_in"
               }) else {
-            screenStatus = "Mac is offline, not explicitly enrolled, or cannot share its screen."
+            screenStatus = "Host is offline, not explicitly opted in, or cannot share its interactive screen."
             return
         }
-        screenStatus = "Requesting a bounded, user-initiated Mac screen session…"
+        screenStatus = "Requesting a bounded, user-initiated private host screen session…"
         do {
             let response = try await client.realityMeshStartScreen(nodeID: nodeID)
             guard appModel.settings.meshEnabled,
@@ -212,7 +212,7 @@ final class RealityMeshController: ObservableObject {
             guard let expiry = expires, expiry > Date(), expiry <= Date().addingTimeInterval(310)
             else {
                 try? await client.realityMeshStopScreen(nodeID: nodeID)
-                screenStatus = "Mac did not return a valid short-lived consent deadline."
+                screenStatus = "Host did not return a valid short-lived consent deadline."
                 return
             }
             activeNodeID = nodeID
@@ -233,7 +233,7 @@ final class RealityMeshController: ObservableObject {
             }
         } catch {
             screenData = nil
-            screenStatus = "Could not open a Mac screen session. Check explicit Mac opt-in, node pairing and macOS permissions."
+            screenStatus = "Could not open a host screen session. Check exact opt-in, pairing, macOS Screen Recording or interactive Windows desktop."
         }
     }
 
@@ -258,7 +258,7 @@ final class RealityMeshController: ObservableObject {
                 + ". No remote keyboard/mouse control exists yet."
         } catch {
             screenData = nil
-            screenStatus = "Mac screenshot unavailable or session expired. Check Screen Recording permission; no image inferred."
+            screenStatus = "Host screenshot unavailable or session expired. Check screen consent and interactive desktop; no image inferred."
         }
     }
 
@@ -273,9 +273,9 @@ final class RealityMeshController: ObservableObject {
         if let id = prior {
             do {
                 try await client.realityMeshStopScreen(nodeID: id)
-                screenStatus = "Private Mac screen session revoked on the Mac."
+                screenStatus = "Private screen session revoked on the host."
             } catch {
-                screenStatus = "Local view cleared; Mac stop was not confirmed. Its consent expires automatically within 120 seconds."
+                screenStatus = "Local view cleared; remote stop was not confirmed. Its consent expires automatically within 120 seconds."
             }
         }
     }
@@ -352,8 +352,8 @@ struct RealityMeshView: View {
                             .foregroundStyle(.secondary)
                         if node.status == "online",
                            node.capabilities["screen"] == "session_opt_in",
-                           ["macbook", "macmini"].contains(node.id) {
-                            Button("View Mac screen for 2 minutes") {
+                           ["windows", "macbook", "macmini"].contains(node.id) {
+                            Button("View host screen for 2 minutes") {
                                 Task { await mesh.startScreen(nodeID: node.id) }
                             }
                             .buttonStyle(.bordered)
@@ -377,7 +377,7 @@ struct RealityMeshView: View {
                     }
                     HStack {
                         Button("Refresh image") { Task { await mesh.refreshScreen() } }
-                        Button("Stop Mac screen", role: .destructive) {
+                        Button("Stop host screen", role: .destructive) {
                             Task { await mesh.stopScreen() }
                         }
                     }

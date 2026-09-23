@@ -935,11 +935,12 @@ final class LocalPowerFeaturesController: ObservableObject {
             appModel.missionControl.clearNavigationGrants()
             // Privacy mode can be selected outside Mesh. Revoke any live
             // Conductor grant and view even when the Mesh tab is not mounted.
-            Task { @MainActor [weak appModel] in
-                guard let appModel else { return }
-                await appModel.realityMesh.stopScreen()
-                await appModel.realityMesh.revokeConductor()
-                appModel.realityMesh.clearSensitiveViews()
+            let meshModel = appModel
+            Task { @MainActor [weak meshModel] in
+                guard let meshModel else { return }
+                await meshModel.realityMesh.stopScreen()
+                await meshModel.realityMesh.revokeConductor()
+                meshModel.realityMesh.clearSensitiveViews()
             }
         }
     }

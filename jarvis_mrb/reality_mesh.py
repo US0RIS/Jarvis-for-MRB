@@ -78,7 +78,7 @@ def _request(node_id: str, method: str, path: str, *,
     base, token = config
     if method not in {"GET", "POST", "DELETE"} or path not in {
         "/v1/health", "/v1/context", "/v1/session", "/v1/screen",
-        "/v1/app/open"
+        "/v1/app/open", "/v1/apps"
     }:
         raise ValueError("Unregistered mesh method/path.")
     try:
@@ -303,6 +303,75 @@ def launch_exact_windows_app(app_name: str) -> dict[str, Any]:
         return launch_exact(app_name)
     except WindowsAppUnavailable as exc:
         raise NodeUnavailable(str(exc)) from exc
+
+
+def exact_app_observations(node_id: str) -> dict[str, Any]:
+    """Fresh independent observation after a step; never treat the launch
+    acknowledgment itself as proof of the workstation's desired state.
+    """
+    from datetime import datetime, timezone
+    mac_apps = ("Safari", "Notes", "Calendar", "Preview", "Finder")
+    win_apps = {
+        "Notepad": "notepad.exe", "Calculator": "calculatorapp.exe",
+        "File Explorer": "explorer.exe", "Paint": "mspaint.exe",
+    }
+    if node_id == "windows":
+        from jarvis_mrb import mesh_windows_apps
+        if not mesh_windows_apps.enabled():
+            raise NodeUnavailable("Windows exact-action startup opt-in is disabled.")
+        try:
+            import psutil
+            names: set[str] = set()
+            for proc in psutil.process_iter(["name"]):
+                try:
+                    name = str(proc.info.get("name") or "").casefold()
+                    if name:
+                        names.add(name)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except (ImportError, OSError, psutil.Error) as exc:
+            raise NodeUnavailable("Windows process observation unavailable.") from exc
+        return {
+            "node_id": node_id, "status": "ok",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "apps": {
+                app: ("running" if process in names else "not_running")
+                for app, process in win_apps.items()
+            },
+            "source": "Fresh Windows psutil process enumeration; not foreground focus",
+        }
+    if node_id not in _IDS:
+        raise ValueError("Unknown exact workstation node.")
+    state = probe(node_id)
+    if state["status"] != "online":
+        raise NodeUnavailable("Configured Mac node is offline or identity unverified.")
+    if state["capabilities"].get("app_launch") != "exact_user_tap_only":
+        raise NodeUnavailable("Mac is not opted into exact app actions.")
+    data, _, _ = _request(node_id, "GET", "/v1/apps")
+    if not data or data.get("device_id") != node_id:
+        raise NodeUnavailable("Mac process evidence device ID mismatched.")
+    if data.get("status") not in {"ok", "partial"}:
+        raise NodeUnavailable("Mac process observation unavailable.")
+    raw = data.get("apps")
+    if not isinstance(raw, dict):
+        raise NodeUnavailable("Mac process observation schema unknown.")
+    stamp = str(data.get("observed_at") or "")
+    try:
+        seen = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if seen.tzinfo is None or abs((datetime.now(timezone.utc) - seen).total_seconds()) > 30:
+            raise ValueError("Stale observation")
+    except ValueError as exc:
+        raise NodeUnavailable("Mac process evidence timestamp stale or missing.") from exc
+    return {
+        "node_id": node_id, "status": data["status"],
+        "observed_at": stamp,
+        "apps": {
+            name: raw.get(name) if raw.get(name) in {"running", "not_running"}
+                  else "unknown"
+            for name in mac_apps
+        },
+        "source": "Independent fresh macOS pgrep observation; no focus claim",
+    }
 
 
 def public_sources() -> dict[str, Any]:

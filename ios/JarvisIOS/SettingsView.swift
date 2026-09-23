@@ -101,6 +101,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Counterfactual Guardian") {
+                    Toggle("Guard calendar departures proactively", isOn: $settings.guardianEnabled)
+                    Text("Off by default. While Jarvis is foregrounded, this checks your own primary Google Calendar and fresh opted-in iPhone GPS against Apple MapKit driving ETAs for the next timed destinations. Only observed at-risk trajectories are surfaced; an unavailable calendar, unresolvable destination or stale GPS is unknown, never 'all clear'. Individually authorize a single event-specific Maps handoff in Physical. No messages are sent, and no location trail is stored in the backend.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Persistent Presence") {
                     Toggle("Passive vision", isOn: $settings.passiveVisionEnabled)
                     Toggle("Adaptive remote vision bandwidth", isOn: $settings.adaptiveBandwidthEnabled)

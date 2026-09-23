@@ -117,8 +117,10 @@ def eligible(*, now: datetime | None = None) -> list[dict[str, Any]]:
     instant = now or _now()
     with _connect() as conn:
         enrolled = {
-            str(row["intention_id"]): str(row["status"])
-            for row in conn.execute("SELECT intention_id,status FROM guardian_objective_watches")
+            str(row["intention_id"]): (str(row["status"]), str(row["deadline_at"]))
+            for row in conn.execute(
+                "SELECT intention_id,status,deadline_at FROM guardian_objective_watches"
+            )
         }
     result = []
     for item in _active_goals():
@@ -129,7 +131,7 @@ def eligible(*, now: datetime | None = None) -> list[dict[str, Any]]:
             "intention_id": str(item["id"]),
             "title": str(item["title"])[:180],
             "deadline_at": _iso(due),
-            "enrolled": enrolled.get(str(item["id"])) == "active",
+            "enrolled": enrolled.get(str(item["id"])) == ("active", _iso(due)),
             "source": "user-authored goal / structured world intention",
         })
     return result
@@ -299,11 +301,28 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
     reports = []
     for row in rows:
         watch_id = row["id"]
+        enrolled_deadline = _stamp(row["deadline_at"])
+        if enrolled_deadline is not None and instant > enrolled_deadline + timedelta(hours=24):
+            with _connect() as conn:
+                conn.execute(
+                    "UPDATE guardian_objective_watches SET status='expired' "
+                    "WHERE id=? AND status='active'",
+                    (watch_id,)
+                )
+                conn.commit()
+            continue
         goal = all_goals.get(str(row["intention_id"]))
         deadline = _stamp(row["deadline_at"])
         current_deadline = _deadline(goal, instant) if goal else None
         if goal is None or deadline is None:
-            _record(watch_id, instant, "goal_no_longer_active", alerted=False)
+            with _connect() as conn:
+                conn.execute(
+                    "UPDATE guardian_objective_watches SET status='inactive',"
+                    "last_checked_at=?,last_signal='goal_no_longer_active' "
+                    "WHERE id=? AND status='active'",
+                    (_iso(instant), watch_id)
+                )
+                conn.commit()
             reports.append({
                 "id": watch_id, "status": "no_longer_active",
                 "title": row["goal_title"], "message": "Goal no longer active; no intervention.",

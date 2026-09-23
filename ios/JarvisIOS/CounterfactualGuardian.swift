@@ -201,9 +201,11 @@ final class CounterfactualGuardianController: ObservableObject {
             objectiveEvaluations = evaluations
             let active = overview.watches.filter { $0.status == "active" }.count
             objectiveStatus = "\(active) individually enrolled goal deadline(s). "
-                + (overview.phoneConsentLive
-                    ? "Live phone consent received by the PC."
-                    : "PC heartbeat is absent; no automatic deadline alerts.")
+                + (!overview.phoneConsentLive
+                    ? "Phone consent is absent; no automatic deadline alerts."
+                    : overview.phoneAvailableForInterruption
+                        ? "Fresh phone context permits a bounded warning."
+                        : "Phone consent is live, but conversation, travel or unknown motion currently defers alerts.")
         } catch {
             objectiveStatus = "Could not verify goal deadlines from Jarvis: "
                 + error.localizedDescription

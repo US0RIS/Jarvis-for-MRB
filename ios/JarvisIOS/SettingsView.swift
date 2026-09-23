@@ -108,6 +108,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Conductor / EDITH-style workstation actions") {
+                    Toggle("Allow exact one-use workstation missions", isOn: $settings.conductorEnabled)
+                    Text("Off by default, independent of Reality Mesh. Also set JARVIS_CONDUCTOR_ENABLED=1 on the authenticated Windows backend and separately opt in to exact app actions on each target host. Saying 'prepare my workstation' only presents the workflow: on the Mesh tab inspect one named device and up to three exact app names, confirm one two-minute server grant, and inspect independently timestamped process observations. An opted-in private screen is requested only when specifically selected. Privacy mode and leaving the Mesh tab revoke outstanding mission authority; in-flight OS actions cannot be undone. This does not grant remote keyboard/mouse, unrestricted commands, purchases, messages, tracking people, or physical-force actions. A phone UI confirmation is not cryptographic device attestation; protect the Jarvis API bearer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Mission Control") {
                     Toggle("Enable foreground Mission Control", isOn: $settings.missionControlEnabled)
                     Text("Off by default. Mission Control independently requires enabled Guardian and high-accuracy opted-in phone GPS. In Physical, enroll one exact primary Calendar appointment, see source-linked trajectory evidence and authorize one exact Maps launch. Two separate accurate GPS fixes can record proximity-based arrival; this is not proof of attending the meeting. The phone stores bounded mission receipts in device-only Keychain; only Apple MapKit receives the route origin/destination. No email or other third-party actions are authorized by this switch.")

@@ -67,7 +67,7 @@ class RealityGraphTests(unittest.TestCase):
     def test_service_has_private_no_store_graph_routes(self):
         from pathlib import Path
         source = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text()
-        for route in ("/mesh/graph", "/mesh/graph/context", "/mesh/graph/answer"):
+        for route in ("/mesh/graph", "/mesh/graph/context", "/mesh/graph/answer", "/mesh/graph/mission"):
             self.assertIn(route, source)
         self.assertIn("_check_mesh_auth(authorization)", source)
         self.assertIn('response.headers["Cache-Control"] = "private, no-store"', source)

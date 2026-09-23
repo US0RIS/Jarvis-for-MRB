@@ -73,6 +73,8 @@ class MissionControlContractTests(unittest.TestCase):
         ):
             self.assertIn(value, self.mission)
         self.assertIn('return matches.count == 1 ? matches.first : nil', self.mission)
+        self.assertIn('private static func ambiguousAlias(_ raw: String)', self.mission)
+        self.assertIn('!Self.ambiguousAlias(event.location)', self.mission)
         self.assertIn('mission.status = "Unknown: no fresh high-accuracy phone fix;', self.mission)
         self.assertIn('route estimates', (ROOT / "MISSION_CONTROL.md").read_text())
 

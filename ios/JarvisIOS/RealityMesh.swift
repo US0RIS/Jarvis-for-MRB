@@ -458,7 +458,7 @@ struct RealityMeshView: View {
                             Menu("Open an exact app on this Mac") {
                                 ForEach(
                                     ["Safari", "Notes", "Calendar", "Preview", "Finder"],
-                                    id: \\.self
+                                    id: \.self
                                 ) { appName in
                                     Button("Open " + appName + " on " + node.label) {
                                         Task {

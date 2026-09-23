@@ -569,7 +569,7 @@ struct JarvisAPIClient {
     }
 
     func realityMeshScreenFrame(nodeID: String) async throws -> Data {
-        guard ["macbook", "macmini"].contains(nodeID) else { throw JarvisAPIError.badResponse }
+        guard ["windows", "macbook", "macmini"].contains(nodeID) else { throw JarvisAPIError.badResponse }
         let (data, response) = try await get(
             path: "mesh/screen/" + nodeID, timeout: 10
         )

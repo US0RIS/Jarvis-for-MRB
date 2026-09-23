@@ -324,6 +324,7 @@ final class LocalPowerFeaturesController: ObservableObject {
         let missionControlEnabled: Bool
         let meshEnabled: Bool
         let conductorEnabled: Bool
+        let exactVoiceAppActionsEnabled: Bool
     }
 
     init(
@@ -907,7 +908,8 @@ final class LocalPowerFeaturesController: ObservableObject {
                 guardianEnabled: appModel.settings.guardianEnabled,
                 missionControlEnabled: appModel.settings.missionControlEnabled,
                 meshEnabled: appModel.settings.meshEnabled,
-                conductorEnabled: appModel.settings.conductorEnabled
+                conductorEnabled: appModel.settings.conductorEnabled,
+                exactVoiceAppActionsEnabled: appModel.settings.exactVoiceAppActionsEnabled
             )
         }
 
@@ -932,6 +934,7 @@ final class LocalPowerFeaturesController: ObservableObject {
             appModel.settings.missionControlEnabled = false
             appModel.settings.meshEnabled = false
             appModel.settings.conductorEnabled = false
+            appModel.settings.exactVoiceAppActionsEnabled = false
             appModel.missionControl.clearNavigationGrants()
             // Privacy mode can be selected outside Mesh. Revoke any live
             // Conductor grant and view even when the Mesh tab is not mounted.
@@ -961,6 +964,7 @@ final class LocalPowerFeaturesController: ObservableObject {
         appModel.settings.missionControlEnabled = snapshot.missionControlEnabled
         appModel.settings.meshEnabled = snapshot.meshEnabled
         appModel.settings.conductorEnabled = snapshot.conductorEnabled
+        appModel.settings.exactVoiceAppActionsEnabled = snapshot.exactVoiceAppActionsEnabled
         savedModeState = nil
     }
 

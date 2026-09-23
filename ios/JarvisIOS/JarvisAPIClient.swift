@@ -1,5 +1,77 @@
 import Foundation
 
+struct GuardianObjectiveOverview: Decodable {
+    struct Candidate: Decodable, Identifiable {
+        let intentionID: String
+        let title: String
+        let deadlineAt: String
+        let enrolled: Bool
+
+        var id: String { intentionID }
+
+        enum CodingKeys: String, CodingKey {
+            case title, enrolled
+            case intentionID = "intention_id"
+            case deadlineAt = "deadline_at"
+        }
+    }
+
+    struct Watch: Decodable, Identifiable {
+        let id: String
+        let intentionID: String
+        let title: String
+        let deadlineAt: String
+        let status: String
+        let lastSignal: String
+        let snoozedUntil: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, status
+            case intentionID = "intention_id"
+            case deadlineAt = "deadline_at"
+            case lastSignal = "last_signal"
+            case snoozedUntil = "snoozed_until"
+        }
+    }
+
+    let phoneConsentLive: Bool
+    let enrollable: [Candidate]
+    let watches: [Watch]
+
+    enum CodingKeys: String, CodingKey {
+        case enrollable, watches
+        case phoneConsentLive = "phone_consent_live"
+    }
+}
+
+struct GuardianObjectiveEvaluation: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let status: String
+    let message: String
+    let evidence: String
+    let nextAction: String?
+    let pendingDependencies: [Dependency]?
+    let phoneConsentLive: Bool?
+
+    struct Dependency: Decodable, Identifiable {
+        let id: String
+        let owner: String
+        let action: String
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, status, message, evidence
+        case nextAction = "next_action"
+        case pendingDependencies = "pending_dependencies"
+        case phoneConsentLive = "phone_consent_live"
+    }
+}
+
+private struct GuardianObjectiveEvaluationEnvelope: Decodable {
+    let evaluations: [GuardianObjectiveEvaluation]
+}
+
 struct GuardianCalendarResponse: Decodable {
     struct Event: Decodable, Identifiable {
         let id: String
@@ -350,6 +422,42 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
+    }
+
+    func guardianObjectiveOverview() async throws -> GuardianObjectiveOverview {
+        let (data, response) = try await get(path: "guardian/objectives", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(GuardianObjectiveOverview.self, from: data)
+    }
+
+    func guardianObjectiveEvaluations() async throws -> [GuardianObjectiveEvaluation] {
+        let (data, response) = try await get(path: "guardian/objectives/evaluate", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(
+            GuardianObjectiveEvaluationEnvelope.self, from: data
+        ).evaluations
+    }
+
+    func guardianObjectiveEnroll(_ intentionID: String) async throws {
+        let (data, response) = try await postData(
+            path: "guardian/objectives/enroll", body: ["id": intentionID]
+        )
+        try validate(response: response, data: data)
+    }
+
+    func guardianObjectiveRevoke(_ watchID: String) async throws {
+        let (data, response) = try await postData(
+            path: "guardian/objectives/revoke", body: ["id": watchID]
+        )
+        try validate(response: response, data: data)
+    }
+
+    func guardianObjectiveSnooze(_ watchID: String, hours: Int = 1) async throws {
+        let (data, response) = try await postData(
+            path: "guardian/objectives/snooze",
+            body: ["id": watchID, "hours": hours]
+        )
+        try validate(response: response, data: data)
     }
 
     func guardianCalendarExpectations() async throws -> GuardianCalendarResponse {

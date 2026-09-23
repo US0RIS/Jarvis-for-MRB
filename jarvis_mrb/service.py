@@ -575,8 +575,12 @@ def reality_mesh_open_exact_mac_app(
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
-    from jarvis_mrb.reality_mesh import launch_exact_mac_app, NodeUnavailable
+    from jarvis_mrb.reality_mesh import (
+        launch_exact_mac_app, launch_exact_windows_app, NodeUnavailable
+    )
     try:
+        if request.node_id == "windows":
+            return launch_exact_windows_app(request.app_name)
         return launch_exact_mac_app(request.node_id, request.app_name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc

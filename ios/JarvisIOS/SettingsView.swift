@@ -101,6 +101,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Reality Mesh") {
+                    Toggle("Allow explicit device and public-world lookups", isOn: $settings.meshEnabled)
+                    Text("Off by default. The Mesh tab checks the real Windows host and only Macs paired through the Windows service's private Tailscale configuration. Remote Mac screen viewing requires a separate Mac startup opt-in, macOS Screen Recording permission and an explicit short session from the phone. Private screenshots travel through Jarvis's authenticated Windows backend and remain in iPhone RAM; a stop or background transition clears them. Named place queries send a MapKit-resolved coordinate to the backend and its supported public providers only on your tap. This is view-only, not remote keyboard/mouse access or global camera coverage.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Mission Control") {
                     Toggle("Enable foreground Mission Control", isOn: $settings.missionControlEnabled)
                     Text("Off by default. Mission Control independently requires enabled Guardian and high-accuracy opted-in phone GPS. In Physical, enroll one exact primary Calendar appointment, see source-linked trajectory evidence and authorize one exact Maps launch. Two separate accurate GPS fixes can record proximity-based arrival; this is not proof of attending the meeting. The phone stores bounded mission receipts in device-only Keychain; only Apple MapKit receives the route origin/destination. No email or other third-party actions are authorized by this switch.")

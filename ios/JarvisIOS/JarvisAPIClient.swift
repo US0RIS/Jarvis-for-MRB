@@ -440,14 +440,14 @@ struct JarvisAPIClient {
 
     func createExternalWatch(
         kind: String, label: String, config: [String: Any],
-        seconds: Int, scope: String = "personal"
+        seconds: Int, scope: String = "personal", expiresHours: Int = 24
     ) async throws -> ExternalWatchSummary {
         let (data, response) = try await postData(
             path: "external/watch/create",
             body: [
                 "scope": scope, "kind": kind, "label": label,
                 "config": config, "interval_seconds": seconds,
-                "expires_hours": 24,
+                "expires_hours": expiresHours,
             ]
         )
         try validate(response: response, data: data)

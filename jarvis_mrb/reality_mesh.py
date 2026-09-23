@@ -329,7 +329,9 @@ def exact_app_observations(node_id: str) -> dict[str, Any]:
                         names.add(name)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-        except (ImportError, OSError, psutil.Error) as exc:
+        except Exception as exc:
+            # Process enumeration is a read-only diagnostic. An unavailable
+            # provider is unknown, not proof the app is absent.
             raise NodeUnavailable("Windows process observation unavailable.") from exc
         return {
             "node_id": node_id, "status": "ok",

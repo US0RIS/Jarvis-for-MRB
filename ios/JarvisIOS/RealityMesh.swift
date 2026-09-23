@@ -35,6 +35,8 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var conductorMission: ConductorWorkstationMission?
     @Published private(set) var conductorStatus = "Select one device and up to three exact apps. Speech only requests preparation, not authority."
     @Published private(set) var conductorBusy = false
+    @Published private(set) var conductorRecent: [ConductorWorkstationMission] = []
+    var conductorHasOneUseGrant: Bool { conductorOneUseGrant != nil }
     private var conductorOneUseGrant: String?
     private var conductorLastPreparedID: String?
 
@@ -497,6 +499,40 @@ final class RealityMeshController: ObservableObject {
         }
     }
 
+    func refreshConductorHistory() async {
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled else {
+            return
+        }
+        do {
+            let records = try await client.conductorRecent()
+            guard appModel.settings.meshEnabled,
+                  appModel.settings.conductorEnabled else { return }
+            conductorRecent = Array(records.prefix(15))
+        } catch {
+            conductorStatus = "Recent workstation evidence cannot be loaded."
+        }
+    }
+
+    func inspectConductorReceipt(_ id: String) async {
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+              !conductorBusy,
+              conductorRecent.contains(where: { $0.id == id }) else { return }
+        do {
+            let receipt = try await client.conductorStatus(id: id)
+            // A persisted draft from a prior app session cannot be redeemed
+            // without its original RAM-only grant.
+            conductorOneUseGrant = nil
+            conductorMission = receipt
+            conductorLastPreparedID = receipt.id
+            conductorNodeID = receipt.nodeID
+            conductorSelectedApps = receipt.apps
+            conductorShowScreen = receipt.screenRequested
+            conductorStatus = "Showing persisted source receipts; historical approval tokens are not recovered."
+        } catch {
+            conductorStatus = "That exact historical Conductor receipt is unavailable."
+        }
+    }
+
     func revokeConductor() async {
         conductorOneUseGrant = nil
         guard let id = conductorLastPreparedID else {
@@ -631,6 +667,7 @@ final class RealityMeshController: ObservableObject {
         placeCandidates = []
         candidateItems = [:]
         publicWatches = []
+        conductorRecent = []
         conductorOneUseGrant = nil
         conductorSelectedApps = []
         conductorMission = nil
@@ -832,7 +869,8 @@ struct RealityMeshView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(mesh.conductorBusy
-                                || !appModel.settings.conductorEnabled)
+                                || !appModel.settings.conductorEnabled
+                                || !mesh.conductorHasOneUseGrant)
                         }
                         if ["planned", "running"].contains(mission.status) {
                             Button("Revoke remaining Conductor actions",
@@ -870,6 +908,25 @@ struct RealityMeshView: View {
                     }
                     .padding(9)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+                Button("View recent Conductor receipts after restart") {
+                    Task { await mesh.refreshConductorHistory() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appModel.settings.meshEnabled
+                    || !appModel.settings.conductorEnabled)
+                ForEach(mesh.conductorRecent) { receipt in
+                    Button {
+                        Task { await mesh.inspectConductorReceipt(receipt.id) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(receipt.nodeID + " • " + receipt.status)
+                            Text(receipt.apps.joined(separator: ", ")
+                                + " • " + receipt.updatedAt)
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
                 Divider()
                 Text("Presence anywhere")

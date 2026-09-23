@@ -160,6 +160,15 @@ class NearbyPublicCameraRequest(BaseModel):
     limit: int = 8
 
 
+class MeshNodeSessionRequest(BaseModel):
+    node_id: str
+    duration_seconds: int = 120
+
+
+class MeshNodeRequest(BaseModel):
+    node_id: str
+
+
 class GuardianObjectiveRequest(BaseModel):
     id: str = ""
 
@@ -541,6 +550,94 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.get("/mesh/nodes")
+def reality_mesh_nodes(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_mesh import nodes
+    return nodes()
+
+
+@app.get("/mesh/public-sources")
+def reality_mesh_public_sources(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_mesh import public_sources
+    return public_sources()
+
+
+@app.post("/mesh/place")
+def reality_mesh_place(
+    request: PhysicalConditionsRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_mesh import observe_place
+    try:
+        return observe_place(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+@app.post("/mesh/screen/begin")
+def reality_mesh_screen_begin(
+    request: MeshNodeSessionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_mesh import begin_screen, NodeUnavailable
+    try:
+        return begin_screen(request.node_id, seconds=request.duration_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except NodeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/mesh/screen/stop")
+def reality_mesh_screen_stop(
+    request: MeshNodeRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, str]:
+    _check_auth(authorization)
+    from jarvis_mrb.reality_mesh import finish_screen, NodeUnavailable
+    try:
+        return finish_screen(request.node_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except NodeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.get("/mesh/screen/{node_id}")
+def reality_mesh_screen_frame(
+    node_id: str,
+    authorization: Annotated[str | None, Header()] = None,
+) -> Response:
+    _check_auth(authorization)
+    from jarvis_mrb.reality_mesh import frame, NodeUnavailable
+    try:
+        data, media_type = frame(node_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except NodeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+    return Response(
+        content=data, media_type=media_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @app.get("/missions/affordances")

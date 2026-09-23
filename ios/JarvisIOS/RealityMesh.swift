@@ -3,6 +3,12 @@ import MapKit
 import SwiftUI
 import UIKit
 
+struct MeshPlaceChoice: Identifiable {
+    let id: UUID
+    let name: String
+    let address: String
+}
+
 /// User's iPad/iPhone becomes a view into explicit, connected Jarvis nodes.
 @MainActor
 final class RealityMeshController: ObservableObject {
@@ -11,6 +17,7 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var sources: [RealityMeshSourceRegistry.Source] = []
     @Published private(set) var place: PhysicalAwarenessResponse?
     @Published private(set) var worldStatus = "Name an exact place, then make a one-time public-world observation."
+    @Published private(set) var placeCandidates: [MeshPlaceChoice] = []
     @Published private(set) var nodeStatus = "Check explicit devices; Jarvis never scans a network."
     @Published private(set) var isCheckingWorld = false
     @Published private(set) var isCheckingNodes = false
@@ -24,6 +31,8 @@ final class RealityMeshController: ObservableObject {
     // RAM-only until the user explicitly enrolls a three-hour external watch.
     private var placeCoordinate: CLLocationCoordinate2D?
     private var resolvedPlaceName = ""
+    private var candidateItems: [UUID: MKMapItem] = [:]
+    private var pendingQuery = ""
     private var isWatching = false
 
     private unowned let appModel: JarvisAppModel
@@ -83,6 +92,9 @@ final class RealityMeshController: ObservableObject {
         place = nil
         placeCoordinate = nil
         resolvedPlaceName = ""
+        placeCandidates = []
+        candidateItems = [:]
+        pendingQuery = query
         worldStatus = "Resolving the named place with Apple MapKit…"
         do {
             let request = MKLocalSearch.Request()
@@ -100,17 +112,68 @@ final class RealityMeshController: ObservableObject {
             } else {
                 chosen = nil
             }
+            guard appModel.settings.meshEnabled,
+                  UIApplication.shared.applicationState == .active,
+                  pendingQuery == query,
+                  placeName.trimmingCharacters(in: .whitespacesAndNewlines) == query
+            else { return }
             guard let item = chosen else {
-                worldStatus = "Place resolution ambiguous or unavailable. Be more specific; Jarvis will not guess a location."
+                var locations = Set<String>()
+                for result in matches.prefix(12) {
+                    let coordinate = result.placemark.coordinate
+                    let key = String(format: "%.4f,%.4f",
+                                     coordinate.latitude, coordinate.longitude)
+                    if locations.insert(key).inserted {
+                        let id = UUID()
+                        let choice = MeshPlaceChoice(
+                            id: id,
+                            name: result.name ?? "Unnamed public map result",
+                            address: result.placemark.title ?? "No address provided"
+                        )
+                        placeCandidates.append(choice)
+                        candidateItems[id] = result
+                    }
+                    if placeCandidates.count >= 6 { break }
+                }
+                worldStatus = placeCandidates.isEmpty
+                    ? "No location resolved; no public source lookup performed."
+                    : "Multiple map results. Choose the exact place below before sharing a coordinate with Jarvis."
                 return
             }
-            let coordinate = item.placemark.coordinate
-            worldStatus = "Checking the sources actually integrated for \(item.name ?? query)…"
+            await observeResolvedPlace(item, query: query)
+        } catch {
+            worldStatus = "Place lookup/provider unavailable. No observations asserted."
+        }
+    }
+
+    func selectPlace(_ id: UUID) async {
+        guard appModel.settings.meshEnabled, !isCheckingWorld,
+              UIApplication.shared.applicationState == .active,
+              let item = candidateItems[id],
+              !pendingQuery.isEmpty,
+              placeName.trimmingCharacters(in: .whitespacesAndNewlines) == pendingQuery else {
+            worldStatus = "Place selection expired or query changed. Search again."
+            return
+        }
+        isCheckingWorld = true
+        defer { isCheckingWorld = false }
+        let query = pendingQuery
+        placeCandidates = []
+        candidateItems = [:]
+        await observeResolvedPlace(item, query: query)
+    }
+
+    private func observeResolvedPlace(_ item: MKMapItem, query: String) async {
+        let coordinate = item.placemark.coordinate
+        worldStatus = "Checking the sources actually integrated for \(item.name ?? query)…"
+        do {
             let report = try await client.realityMeshPlace(
                 latitude: coordinate.latitude, longitude: coordinate.longitude
             )
             guard appModel.settings.meshEnabled,
-                  UIApplication.shared.applicationState == .active else { return }
+                  UIApplication.shared.applicationState == .active,
+                  placeName.trimmingCharacters(in: .whitespacesAndNewlines) == query
+            else { return }
             place = report.data
             placeCoordinate = coordinate
             resolvedPlaceName = String((item.name ?? query).prefix(100))
@@ -118,7 +181,7 @@ final class RealityMeshController: ObservableObject {
                 + " • " + report.checkedAt
                 + ". Unsupported or stale sources remain unknown, not a safety clearance."
         } catch {
-            worldStatus = "Place lookup/provider unavailable. No observations asserted."
+            worldStatus = "Public provider lookup unavailable. No observations asserted."
         }
     }
 
@@ -286,6 +349,9 @@ final class RealityMeshController: ObservableObject {
         place = nil
         placeCoordinate = nil
         resolvedPlaceName = ""
+        pendingQuery = ""
+        placeCandidates = []
+        candidateItems = [:]
         publicWatches = []
         screenData = nil
         placeName = ""
@@ -402,6 +468,21 @@ struct RealityMeshView: View {
                 Text(mesh.worldStatus)
                     .font(.caption)
                     .accessibilityIdentifier("mesh-world-status")
+                ForEach(mesh.placeCandidates) { choice in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(choice.name)
+                            .font(.subheadline.weight(.medium))
+                        Text(choice.address)
+                            .font(.caption)
+                        Button("Select this exact place") {
+                            Task { await mesh.selectPlace(choice.id) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(mesh.isCheckingWorld)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
                 if let place = mesh.place {
                     Text(place.summary)
                         .font(.callout)

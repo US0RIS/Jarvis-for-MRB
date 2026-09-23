@@ -26,6 +26,7 @@ final class JarvisAppModel: ObservableObject {
     let homeEnvironment: HomeEnvironmentController
     lazy var guardian = CounterfactualGuardianController(appModel: self)
     lazy var missionControl = JarvisMissionControl(appModel: self)
+    lazy var realityMesh = RealityMeshController(appModel: self)
 
     // Physical-world observations belong to the iPhone session, not a HUD
     // accessory. The same state is used by buttons and Gen 1 Meta voice input.

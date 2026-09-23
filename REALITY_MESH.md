@@ -17,7 +17,7 @@ iPhone / iPad Mesh tab (explicit opt-in)
 
 **What is actually real:** `scripts/jarvis-mac-node.py` is a standalone Python 3 macOS HTTP agent with a bearer-token gate. It publishes a bounded, live system/capability observation on GET `/v1/health`; a Mac started with `--allow-screen` can accept a separate, explicitly tapped **120-second screen session**. The phone requests `POST /mesh/screen/begin` via the existing authenticated Windows backend. The backend forwards to one **configured**, matching Mac only; the Mac itself expires consent after at most five minutes. GET `/mesh/screen/{node_id}` provides screenshot *snapshots*, no more than 4 MB, every approximately 5 seconds while foregrounded. A Stop tap, leaving the screen, disabling Mesh or putting the app in background stops local viewing and requests remote revocation. If that final network call fails, the Mac still expires the consent. The Mac creates a temporary capture file only for the duration of the screenshot and removes it immediately. The iPhone image is RAM-only, not saved to Photos or Jarvis world history. Actual Mac Screen Recording permission must be granted to the process executing `screencapture`.
 
-**What is not implemented:** full low-latency remote desktop protocol, remote keyboard/mouse, OS window transfer/drag-and-drop, clipboard/file transfer, Wake-on-LAN, auto-discovery of Mac devices, silent background iOS capture, Mac/PC arbitrary command execution, direct physical MemoMind hardware. The Windows host status response is real backend status and a foreground-process observation, not a Windows video stream. This first slice makes remote Mac screens *viewable on iPad* under explicit permission, not controllable there. It is not a general-purpose VNC/Screen Sharing replacement.
+**What is not implemented:** full low-latency remote desktop protocol, remote keyboard/mouse, OS window transfer/drag-and-drop, clipboard/file transfer, Wake-on-LAN, auto-discovery of Mac devices, silent background iOS capture, Mac/PC arbitrary command execution, direct physical MemoMind hardware. The Windows host status response is real backend status and a foreground-process observation; with separate Windows opt-in, there are also real view-only Windows screenshot snapshots, not a video stream. This first slice makes remote Mac and optionally Windows screen snapshots *viewable on iPad* under explicit permission, not controllable there. It is not a general-purpose VNC/Screen Sharing replacement.
 
 ## Setup: an explicitly paired MacBook Air
 
@@ -38,6 +38,21 @@ iPhone / iPad Mesh tab (explicit opt-in)
 5. In the iPhone/iPad app open **Mesh**, enable its separate switch, tap **Check connected nodes**, then **View Mac screen for 2 minutes**. The Mac must answer with an exact device ID, supported protocol version, fresh timestamp and a real screen-session capability. Neither the phone nor the PC asserts a Mac is online just because it was configured. For a manually operated privacy shutdown, tap **Stop Mac screen** and quit the agent on the Mac.
 
 Node URLs are read only from the Windows process environment, **not supplied by phone/API request input**, and are restricted to loopback, Tailscale IPv4 `100.64.0.0/10` over HTTP, or `*.ts.net` via HTTPS. Redirects, oversized responses, unexpected image types and wrong node IDs fail closed. A missing/unavailable node is displayed as such. You do not need jailbreak, macOS private APIs or proprietary hardware protocols.
+
+## Optional view-only Windows screen
+
+The Windows PC was initially exposed as a status/foreground-process node. The source now implements a **separately enabled, view-only primary Windows desktop screenshot** through the same authenticated Mesh broker, with no remote shell, keystrokes, mouse, clipboard or file transfer. It is off by default even if Mesh is enabled on your phone.
+
+Enable only if Jarvis runs in your **interactive logged-in Windows user session**, rather than as a headless Windows service running in Session 0:
+
+```powershell
+$env:JARVIS_MESH_WINDOWS_SCREEN_ENABLED = '1'
+# Start the normal authenticated Jarvis backend from this same user session.
+```
+
+The setting must be present in the Jarvis **backend process environment**, not just a different terminal. The Python backend dependency now includes Pillow's `ImageGrab`. On your iPhone/iPad, Mesh → Check connected nodes → **View host screen for 2 minutes** on **Jarvis Windows host**. The user tap creates a distinct 120-second session; a fixed-size JPEG image is captured in RAM at a capped resolution, no more than 4 MB per image and about one image every five seconds while foregrounded. Stop/leave Mesh or app background revokes the session, and the server expires it even if the phone disconnects.
+
+If Windows desktop capture cannot access a real interactive screen, Jarvis reports **unavailable**, rather than showing a fabricated or stale image. The backend auth token must be configured; tokenless localhost and public forwarding do not authorize Mesh. Disable the environment setting and restart Jarvis to remove even the ability to enroll a screen session. No webcam or microphone activation is involved.
 
 ## Presence at any named place
 

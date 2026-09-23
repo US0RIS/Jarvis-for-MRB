@@ -52,6 +52,7 @@ struct JarvisIOSApp: App {
         )
         frontend.attach(persistentPresence: presence, meetingCapture: meeting)
         presence.attach(frontend: frontend)
+        model.guardian.attach(frontend: frontend)
 
         _appModel = StateObject(wrappedValue: model)
         _persistentPresence = StateObject(wrappedValue: presence)
@@ -100,6 +101,7 @@ struct JarvisIOSApp: App {
             .environmentObject(persistentPresence)
             .environmentObject(meetingCapture)
             .environmentObject(frontendIntelligence)
+            .environmentObject(appModel.guardian)
             .environmentObject(knownPeople)
             .environmentObject(localPower)
             .environmentObject(localProductivity)
@@ -108,6 +110,7 @@ struct JarvisIOSApp: App {
             .task {
                 await persistentPresence.start()
                 await frontendIntelligence.start()
+                appModel.guardian.start()
                 await knownPeople.start(appModel: appModel)
                 await localPower.start()
                 localProductivity.start()

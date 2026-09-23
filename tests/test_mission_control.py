@@ -59,7 +59,7 @@ class MissionControlContractTests(unittest.TestCase):
             'exact.location != mission.literalDestination',
             'mission.phase = .reviewRequired',
             'grants.removeValue(forKey: mission.id)',
-            'MissionPhase', 'missedUnverified', 'missed/unverified',
+            'MissionPhase', 'missedUnverified', 'Observation window expired without verified arrival;',
             'MKLocalSearch(request: request).start()', 'MKDirections(request: request).calculate()',
             'route.expectedTravelTime', 'remaining - route.expectedTravelTime - 300',
             'phone.timestamp.timeIntervalSince(first.firstObservedAt) >= 8',

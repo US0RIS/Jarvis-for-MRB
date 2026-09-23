@@ -320,6 +320,10 @@ struct JarvisPhysicalHubView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                GroupBox("JARVIS • Counterfactual Guardian") {
+                    CounterfactualGuardianView()
+                }
+
                 GroupBox("JARVIS • Situational briefing") {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("A single deliberate lookup across available public cameras, modelled air quality, official point alerts, and mapped facilities.")

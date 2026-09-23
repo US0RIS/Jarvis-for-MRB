@@ -48,6 +48,14 @@ After the Mac responds online and advertises `app_launch = exact_user_tap_only`,
 
 The Mac invokes only macOS `/usr/bin/open -a <allowlisted exact application>` without shell interpolation, then checks `/usr/bin/pgrep -x` as an independent *running-process observation*. A successful `open` command is not proof of focus or a new window; if the process cannot be observed, the receipt explicitly says unverified rather than reporting the app as running. Requests are spaced by a Mac-enforced three-second limit and never automatically retried. Both the Windows backend and Mac require their own bearer credentials; every action is an exact user tap, not an ambient camera/voice authorization. Actual application availability and visible user-session behavior require hardware checks.
 
+## Narrowly authorized Windows actions
+
+The Mesh tab now exposes **four exact Windows app launch buttons** when the Windows service operator has independently set `JARVIS_MESH_WINDOWS_APP_ENABLED=1` **in the interactive Windows Jarvis backend process environment** and its existing `pc.launch_app` permission is not denied. This setting is separate from `JARVIS_MESH_WINDOWS_SCREEN_ENABLED`: enabling one does not enable the other.
+
+The actual fixed command choices are Notepad (`notepad.exe`), Calculator (`calc.exe`), File Explorer (`explorer.exe`) and Paint (`mspaint.exe`). A tap runs only that literal program argv, with `shell=False` and no dynamic user-supplied parameters, script strings, PowerShell, terminal, arbitrary URLs or file paths. Jarvis checks the expected running process and distinguishes **launch accepted, process observed** from **launch accepted, process unverified**. It does not claim window focus, that an already-running Explorer instance was newly launched, or that calculator's modern packaged process is always visible under its historic executable name.
+
+A separate Windows-side three-second operation rate limit is reserved before execution. No ambiguous outcomes are automatically retried. Disabling the flag and restarting the Jarvis service removes the capability. All authenticated Windows backend clients share the same API bearer and thus must be treated as possessing permission to call these fixed routes; the iPhone menu is a user-facing intent boundary, not cryptographic proof of a tap. Do not hand out the Jarvis API token to untrusted apps, agents or devices.
+
 ## Optional view-only Windows screen
 
 The Windows PC was initially exposed as a status/foreground-process node. The source now implements a **separately enabled, view-only primary Windows desktop screenshot** through the same authenticated Mesh broker, with no remote shell, keystrokes, mouse, clipboard or file transfer. It is off by default even if Mesh is enabled on your phone.

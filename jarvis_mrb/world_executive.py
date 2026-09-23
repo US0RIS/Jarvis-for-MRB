@@ -378,6 +378,7 @@ def active_intentions(limit: int = 8) -> list[dict[str, Any]]:
             result.append(
                 {
                     "id": iid,
+                    "source_kind": str(row["source_kind"]),
                     "title": str(row["title"]),
                     "next_action": str(row["next_action"]),
                     "due_at": str(row["due_at"] or ""),

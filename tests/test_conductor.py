@@ -197,6 +197,17 @@ class ConductorMissionTests(unittest.TestCase):
         self.assertIn("func revokeConductor() async", swift)
         self.assertIn("conductorOneUseGrant = nil", swift)
         self.assertIn("Approve these exact actions once", swift)
+        self.assertIn("func executeSpokenExactApp(nodeID: String, appName: String)", swift)
+        self.assertIn("conductorPlanWorkstation(", swift)
+        self.assertIn("conductorExecuteWorkstation(", swift)
+        voice = (Path(__file__).parents[1] / "ios/JarvisIOS/JarvisAppModel.swift").read_text()
+        self.assertIn("private static func exactSpokenAppIntent", voice)
+        self.assertIn("executeSpokenExactApp(", voice)
+        self.assertIn('routeReason: "iPhone exact spoken Conductor app / separately enrolled one-use action"', voice)
+        settings = (Path(__file__).parents[1] / "ios/JarvisIOS/SettingsStore.swift").read_text()
+        self.assertIn('exactVoiceAppActionsEnabled = defaults.object(forKey: "jarvis.exactVoiceAppActionsEnabled") as? Bool ?? false', settings)
+        privacy = (Path(__file__).parents[1] / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text()
+        self.assertIn("appModel.settings.exactVoiceAppActionsEnabled = false", privacy)
 
 
 if __name__ == "__main__":

@@ -622,6 +622,17 @@ def conductor_workstation_execute(
         raise HTTPException(status_code=409, detail=str(exc)[:200]) from exc
 
 
+@app.get("/conductor/workstation/recent")
+def conductor_workstation_recent(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import conductor
+    return conductor.recent()
+
+
 @app.post("/conductor/workstation/status")
 def conductor_workstation_status(
     request: ConductorMissionRequest,

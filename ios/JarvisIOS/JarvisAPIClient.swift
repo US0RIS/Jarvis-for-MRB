@@ -35,12 +35,14 @@ struct GuardianObjectiveOverview: Decodable {
     }
 
     let phoneConsentLive: Bool
+    let phoneAvailableForInterruption: Bool
     let enrollable: [Candidate]
     let watches: [Watch]
 
     enum CodingKeys: String, CodingKey {
         case enrollable, watches
         case phoneConsentLive = "phone_consent_live"
+        case phoneAvailableForInterruption = "phone_available_for_interruption"
     }
 }
 

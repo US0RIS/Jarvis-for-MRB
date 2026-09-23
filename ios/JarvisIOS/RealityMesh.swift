@@ -18,6 +18,13 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var screenStatus = "No desktop viewing session."
     @Published private(set) var screenData: Data?
     @Published private(set) var screenExpiresAt: Date?
+    @Published private(set) var publicWatches: [ExternalWatchSummary] = []
+    @Published private(set) var watchStatus = "No place watch enrolled from this screen."
+
+    // RAM-only until the user explicitly enrolls a three-hour external watch.
+    private var placeCoordinate: CLLocationCoordinate2D?
+    private var resolvedPlaceName = ""
+    private var isWatching = false
 
     private unowned let appModel: JarvisAppModel
     private var screenLoop: Task<Void, Never>?
@@ -74,6 +81,8 @@ final class RealityMeshController: ObservableObject {
         isCheckingWorld = true
         defer { isCheckingWorld = false }
         place = nil
+        placeCoordinate = nil
+        resolvedPlaceName = ""
         worldStatus = "Resolving the named place with Apple MapKit…"
         do {
             let request = MKLocalSearch.Request()
@@ -103,11 +112,74 @@ final class RealityMeshController: ObservableObject {
             guard appModel.settings.meshEnabled,
                   UIApplication.shared.applicationState == .active else { return }
             place = report.data
+            placeCoordinate = coordinate
+            resolvedPlaceName = String((item.name ?? query).prefix(100))
             worldStatus = (item.name ?? query)
                 + " • " + report.checkedAt
                 + ". Unsupported or stale sources remain unknown, not a safety clearance."
         } catch {
             worldStatus = "Place lookup/provider unavailable. No observations asserted."
+        }
+    }
+
+    func refreshPublicWatches() async {
+        guard appModel.settings.meshEnabled else { return }
+        do {
+            let fetched = try await client.getExternalWatches()
+            guard appModel.settings.meshEnabled else { return }
+            publicWatches = fetched.filter {
+                ["airspace_region", "usgs_earthquakes"].contains($0.kind)
+                    && $0.label.hasPrefix("Mesh: ")
+                    && $0.enabled
+            }
+            watchStatus = "\(publicWatches.count) time-bounded user-enrolled public watches. They are not live proof of events."
+        } catch {
+            watchStatus = "Could not verify existing public watches. Unknown, not empty."
+        }
+    }
+
+    func watchSelectedPlace(kind: String) async {
+        guard !isWatching, appModel.settings.meshEnabled,
+              UIApplication.shared.applicationState == .active,
+              let coordinate = placeCoordinate,
+              ["airspace_region", "usgs_earthquakes"].contains(kind) else {
+            watchStatus = "Resolve one unambiguous place and explicitly choose a supported watch."
+            return
+        }
+        isWatching = true
+        defer { isWatching = false }
+        let flight = kind == "airspace_region"
+        let label = "Mesh: " + resolvedPlaceName
+            + (flight ? " aircraft" : " reported earthquakes")
+        let configuration: [String: Any] = [
+            "latitude": coordinate.latitude,
+            "longitude": coordinate.longitude,
+            "radius_km": flight ? 20.0 : 100.0,
+        ]
+        do {
+            let result = try await client.createExternalWatch(
+                kind: kind, label: label,
+                config: configuration, seconds: flight ? 1800 : 900,
+                expiresHours: 3
+            )
+            watchStatus = "Created three-hour " + kind
+                + " watch: " + result.id
+                + ". This stores the selected location in Jarvis's bounded external-watch ledger."
+            await refreshPublicWatches()
+        } catch {
+            watchStatus = "Watch creation failed. No recurring watch assumed."
+        }
+    }
+
+    func stopPublicWatch(_ id: String) async {
+        guard appModel.settings.meshEnabled,
+              publicWatches.contains(where: { $0.id == id }) else { return }
+        do {
+            _ = try await client.stopExternalWatch(id)
+            watchStatus = "Public watch stopped and confirmed by Jarvis."
+            await refreshPublicWatches()
+        } catch {
+            watchStatus = "Could not confirm watch revocation; check the watch list before relying on it."
         }
     }
 
@@ -212,6 +284,9 @@ final class RealityMeshController: ObservableObject {
         nodes = []
         sources = []
         place = nil
+        placeCoordinate = nil
+        resolvedPlaceName = ""
+        publicWatches = []
         screenData = nil
         placeName = ""
         screenLoop?.cancel()
@@ -365,6 +440,44 @@ struct RealityMeshView: View {
                         .padding(8)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
                     }
+                }
+                Divider()
+                Text("Time-bounded watch at my selected place")
+                    .font(.headline)
+                Text("An exact three-hour public-source watch runs on the Jarvis PC even when the iPhone app suspends. Explicitly enrolling one stores the chosen coordinate in Jarvis's separate external-watch ledger. These are ADS-B aircraft reports and USGS earthquake reports, not live worldwide CCTV.")
+                    .font(.caption)
+                HStack {
+                    Button("Watch aircraft • 3h") {
+                        Task { await mesh.watchSelectedPlace(kind: "airspace_region") }
+                    }
+                    Button("Watch USGS events • 3h") {
+                        Task { await mesh.watchSelectedPlace(kind: "usgs_earthquakes") }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appModel.settings.meshEnabled || mesh.place == nil)
+                Button("Refresh my mesh watches") {
+                    Task { await mesh.refreshPublicWatches() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appModel.settings.meshEnabled)
+                Text(mesh.watchStatus)
+                    .font(.caption)
+                ForEach(mesh.publicWatches) { watch in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(watch.label)
+                            .font(.subheadline.weight(.medium))
+                        Text("Expires: " + watch.expiresAt + " • " + watch.lastStatus)
+                            .font(.caption2)
+                        Text(watch.lastSummary)
+                            .font(.caption2)
+                        Button("Stop exact watch", role: .destructive) {
+                            Task { await mesh.stopPublicWatch(watch.id) }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
                 }
                 Divider()
                 DisclosureGroup("Registered public sensors and actual coverage") {

@@ -84,6 +84,11 @@ final class CounterfactualGuardianController: ObservableObject {
     @Published private(set) var stagedMessage = ""
     @Published private(set) var lastAlert = ""
     @Published private(set) var lastCheckedAt: Date?
+    @Published private(set) var objectiveCandidates: [GuardianObjectiveOverview.Candidate] = []
+    @Published private(set) var objectiveWatches: [GuardianObjectiveOverview.Watch] = []
+    @Published private(set) var objectiveEvaluations: [GuardianObjectiveEvaluation] = []
+    @Published private(set) var objectiveStatus = "Load your explicit, precisely dated goals to enroll deadline protection."
+    @Published private(set) var objectivesBusy = false
 
     private static let grantsKey = "jarvis.guardian.navigationGrants.v1"
     private static let dismissedKey = "jarvis.guardian.dismissals.v1"
@@ -164,6 +169,92 @@ final class CounterfactualGuardianController: ObservableObject {
             apiToken: appModel.settings.apiToken,
             sessionID: appModel.settings.conversationSessionID
         )
+    }
+
+    /// No LLM-generated objective may enroll itself. Each exact explicit goal
+    /// is separately authorized on the authenticated iPhone UI.
+    func refreshObjectiveWatches() async {
+        guard appModel.settings.guardianEnabled, !objectivesBusy else {
+            if !appModel.settings.guardianEnabled {
+                objectiveStatus = "Enable Counterfactual Guardian before reading private goals."
+            }
+            return
+        }
+        objectivesBusy = true
+        defer { objectivesBusy = false }
+        do {
+            let overview = try await client.guardianObjectiveOverview()
+            let evaluations = try await client.guardianObjectiveEvaluations()
+            guard appModel.settings.guardianEnabled else {
+                objectiveCandidates = []
+                objectiveWatches = []
+                objectiveEvaluations = []
+                objectiveStatus = "Guardian disabled during refresh."
+                return
+            }
+            objectiveCandidates = overview.enrollable
+            objectiveWatches = overview.watches
+            objectiveEvaluations = evaluations
+            let active = overview.watches.filter { $0.status == "active" }.count
+            objectiveStatus = "\(active) individually enrolled goal deadline(s). "
+                + (overview.phoneConsentLive
+                    ? "Live phone consent received by the PC."
+                    : "PC heartbeat is absent; no automatic deadline alerts.")
+        } catch {
+            objectiveStatus = "Could not verify goal deadlines from Jarvis: "
+                + error.localizedDescription
+            objectiveCandidates = []
+            objectiveWatches = []
+            objectiveEvaluations = []
+        }
+    }
+
+    func enrollObjective(_ id: String) async {
+        guard appModel.settings.guardianEnabled, !objectivesBusy,
+              objectiveCandidates.contains(where: { $0.intentionID == id && !$0.enrolled })
+        else { return }
+        objectivesBusy = true
+        defer { objectivesBusy = false }
+        do {
+            try await client.guardianObjectiveEnroll(id)
+            objectiveStatus = "Exact deadline enrolled. Refresh to see status."
+        } catch {
+            objectiveStatus = "Enrollment not confirmed: " + error.localizedDescription
+        }
+        objectivesBusy = false
+        await refreshObjectiveWatches()
+    }
+
+    func revokeObjective(_ id: String) async {
+        guard appModel.settings.guardianEnabled, !objectivesBusy,
+              objectiveWatches.contains(where: { $0.id == id && $0.status == "active" })
+        else { return }
+        objectivesBusy = true
+        defer { objectivesBusy = false }
+        do {
+            try await client.guardianObjectiveRevoke(id)
+            objectiveStatus = "This goal's deadline guard was revoked."
+        } catch {
+            objectiveStatus = "Revocation not confirmed: " + error.localizedDescription
+        }
+        objectivesBusy = false
+        await refreshObjectiveWatches()
+    }
+
+    func snoozeObjective(_ id: String) async {
+        guard appModel.settings.guardianEnabled, !objectivesBusy,
+              objectiveWatches.contains(where: { $0.id == id && $0.status == "active" })
+        else { return }
+        objectivesBusy = true
+        defer { objectivesBusy = false }
+        do {
+            try await client.guardianObjectiveSnooze(id, hours: 1)
+            objectiveStatus = "Snoozed for one hour; nothing sent or changed in your goal."
+        } catch {
+            objectiveStatus = "Snooze not confirmed: " + error.localizedDescription
+        }
+        objectivesBusy = false
+        await refreshObjectiveWatches()
     }
 
     private static func parseStart(_ raw: String) -> Date? {

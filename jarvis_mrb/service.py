@@ -160,6 +160,11 @@ class NearbyPublicCameraRequest(BaseModel):
     limit: int = 8
 
 
+class MeshAppLaunchRequest(BaseModel):
+    node_id: str
+    app_name: str
+
+
 class MeshNodeSessionRequest(BaseModel):
     node_id: str
     duration_seconds: int = 120
@@ -560,6 +565,23 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.post("/mesh/app/open")
+def reality_mesh_open_exact_mac_app(
+    request: MeshAppLaunchRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_mesh import launch_exact_mac_app, NodeUnavailable
+    try:
+        return launch_exact_mac_app(request.node_id, request.app_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except NodeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
 
 
 @app.get("/mesh/nodes")

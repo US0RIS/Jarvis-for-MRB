@@ -42,8 +42,13 @@ def _config(node_id: str) -> tuple[str, str] | None:
     if len(token) < 32:
         return None
     parsed = urlsplit(base)
-    if (parsed.username or parsed.password or parsed.query or parsed.fragment
-            or parsed.path not in {"", "/"} or parsed.port not in range(1, 65536)):
+    try:
+        invalid = (parsed.username or parsed.password or parsed.query or parsed.fragment
+                   or parsed.path not in {"", "/"}
+                   or parsed.port not in range(1, 65536))
+    except ValueError:
+        return None
+    if invalid:
         return None
     host = parsed.hostname or ""
     # Never let these credentials traverse the open Internet or a hostname

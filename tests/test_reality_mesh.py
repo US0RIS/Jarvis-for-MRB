@@ -96,6 +96,65 @@ class MacNodeProtocolTests(unittest.TestCase):
                          payload={"duration_seconds": 30})
         self.assertEqual(raised.exception.code, 403)
 
+    def test_mac_exact_app_launch_has_independent_startup_opt_in_allowlist_and_receipt(self):
+        # No Mac app is opened by the test: exercise the real authenticated
+        # HTTP routing and hard-coded authority first, then a mocked OS result.
+        request = {"app_name": "Safari"}
+        with self.assertRaises(HTTPError) as denied:
+            self.request("/v1/app/open", method="POST", payload=request)
+        self.assertEqual(denied.exception.code, 403)
+
+        self.state.allow_app_launch = True
+        module = self.http.RequestHandlerClass.do_POST.__globals__
+        module["_launch_exact_app"] = lambda app: {
+            "status": "launch_accepted_process_observed",
+            "app_name": app,
+            "process_observed": True,
+            "source": "macOS open and pgrep; no focus claim",
+        }
+        with patch("platform.system", return_value="Darwin"):
+            with self.assertRaises(HTTPError) as invalid:
+                self.request(
+                    "/v1/app/open", method="POST",
+                    payload={"app_name": "Terminal"}
+                )
+            self.assertEqual(invalid.exception.code, 422)
+            status, _, raw = self.request(
+                "/v1/app/open", method="POST", payload=request
+            )
+            self.assertEqual(status, 200)
+            receipt = json.loads(raw)
+            self.assertEqual(receipt["device_id"], "macbook")
+            self.assertEqual(receipt["app_name"], "Safari")
+            self.assertTrue(receipt["process_observed"])
+            with self.assertRaises(HTTPError) as repeat:
+                self.request("/v1/app/open", method="POST", payload=request)
+            self.assertEqual(repeat.exception.code, 503)
+
+    def test_fixed_app_launcher_never_interpolates_shell_or_claims_window_focus(self):
+        module = runpy.run_path(str(MAC), run_name="mesh_test")
+        launch = module["_launch_exact_app"]
+        import subprocess
+
+        with patch("platform.system", return_value="Darwin"):
+            with patch("subprocess.run", side_effect=[
+                subprocess.CompletedProcess(args=[], returncode=0),
+                subprocess.CompletedProcess(args=[], returncode=0),
+            ]) as runner:
+                result = launch("Safari")
+            self.assertEqual(result["status"], "launch_accepted_process_observed")
+            self.assertIn("no foreground-focus claim", result["source"])
+            self.assertEqual(
+                runner.call_args_list[0].args[0],
+                ["/usr/bin/open", "-a", "Safari"]
+            )
+            self.assertEqual(
+                runner.call_args_list[1].args[0],
+                ["/usr/bin/pgrep", "-x", "Safari"]
+            )
+            with self.assertRaises(ValueError):
+                launch("Terminal")
+
     def test_duration_and_unknown_endpoints_fail_closed(self):
         for duration in (-1, 0, True, 301, "120"):
             with self.assertRaises(HTTPError) as raised:
@@ -302,6 +361,12 @@ class MeshCoordinatorTests(unittest.TestCase):
         self.assertIn('expiresHours: Int = 24', api)
         self.assertIn('"_check_mesh_auth(authorization)"'.strip('"'), (ROOT / "jarvis_mrb/service.py").read_text())
         self.assertIn('path: "mesh/screen/" + nodeID', api)
+        self.assertIn('path: "mesh/app/open"', api)
+        self.assertIn('Menu("Open an exact app on this Mac")', ui)
+        self.assertIn('func openExactMacApp(nodeID: String, appName: String)', ui)
+        self.assertIn('node.capabilities["app_launch"] == "exact_user_tap_only"', ui)
+        self.assertIn('@app.post("/mesh/app/open")', (ROOT / "jarvis_mrb/service.py").read_text())
+        self.assertIn('app_name not in allowed', (ROOT / "jarvis_mrb/reality_mesh.py").read_text())
         self.assertIn('path: "mesh/place"', api)
         self.assertIn('No network scans', ui)
         self.assertNotIn("remoteKeyboard(", ui)

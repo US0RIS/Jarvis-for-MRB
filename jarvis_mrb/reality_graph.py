@@ -192,6 +192,11 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
     for idx, row in enumerate(observations[:100]):
         if not isinstance(row, dict):
             continue
+        # A shared source bundle must not let observations explicitly tied to
+        # another mission establish this mission's delivery or route outcome.
+        linked_mission = row.get("mission_id")
+        if linked_mission is not None and str(linked_mission) != str(mission.get("id") or ""):
+            continue
         kind = str(row.get("kind") or "observation").lower()
         source = str(row.get("source") or "unknown")[:80]
         stamp = str(row.get("observed_at") or "")
@@ -255,7 +260,13 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
 
     fact_map = {f.id: f for f in facts}
     cause_evidence: list[str] = []
-    if "fact:courier_stationary" in fact_map and ("fact:route_delay_seconds" in fact_map or "fact:route_disruption" in fact_map):
+    courier_route = str(courier.get("route_id") or "") if courier else ""
+    traffic_route = str(traffic.get("route_id") or "") if traffic else ""
+    # An explicit route mismatch cannot corroborate this courier's delay.
+    same_route = not (courier_route or traffic_route) or (
+        bool(courier_route) and courier_route == traffic_route
+    )
+    if same_route and "fact:courier_stationary" in fact_map and ("fact:route_delay_seconds" in fact_map or "fact:route_disruption" in fact_map):
         cause_evidence.extend(fact_map["fact:courier_stationary"].evidence_ids)
         for key in ("fact:route_delay_seconds", "fact:route_disruption", "fact:camera_route_congestion"):
             if key in fact_map:
@@ -308,7 +319,13 @@ def answer_place_question(graph: dict[str, Any], question: str) -> dict[str, Any
         n = int(facts["fact:active_weather_alert_count"]["value"])
         return {"answered_without_model": True, "answer": f"The integrated weather provider returned {n} active point alert(s). This is not an all-hazards clearance.", "evidence_kind": "provider_count"}
     if q in {"what do you know about this place", "summarize this place", "reality graph status"}:
-        parts = [str(r.get("explanation") or "") for r in graph.get("derived_facts", []) if isinstance(r, dict)]
+        parts = []
+        for fact in graph.get("derived_facts", []):
+            if not isinstance(fact, dict):
+                continue
+            ids = fact.get("evidence_ids") or ()
+            label = "" if all(e in fresh_evidence for e in ids) else "Historical/stale source (not current): "
+            parts.append(label + str(fact.get("explanation") or ""))
         return {"answered_without_model": True, "answer": " ".join(p for p in parts if p)[:1200], "evidence_kind": "derived_facts"}
     return None
 

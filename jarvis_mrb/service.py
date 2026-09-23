@@ -159,6 +159,12 @@ class RealityGraphQuestionRequest(BaseModel):
     question: str = ""
 
 
+class RealityGraphMissionRequest(BaseModel):
+    mission: dict[str, Any]
+    observations: list[dict[str, Any]]
+    question: str = ""
+
+
 class NearbyPublicCameraRequest(BaseModel):
     latitude: float
     longitude: float
@@ -780,6 +786,29 @@ def reality_graph_answer(
         }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+@app.post("/mesh/graph/mission")
+def reality_graph_mission(
+    request: RealityGraphMissionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Normalize/correlate already-authorized provider observations; no actuation."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph import build_mission_graph, answer_mission_question, model_context
+    graph = build_mission_graph(request.mission, request.observations)
+    if request.question:
+        direct = answer_mission_question(graph, request.question)
+        if direct is not None:
+            return {"graph": graph, "answer": direct}
+    return {
+        "graph": graph,
+        "answer": None,
+        "model_context": model_context(graph),
+        "model_needed": bool(request.question),
+    }
 
 
 @app.post("/mesh/screen/begin")

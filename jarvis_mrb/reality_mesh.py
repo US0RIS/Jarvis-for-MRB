@@ -159,6 +159,7 @@ def probe(node_id: str) -> dict[str, Any]:
 
 def nodes() -> dict[str, Any]:
     from jarvis_mrb.pc_context import snapshot
+    from jarvis_mrb import mesh_windows_screen
 
     checked = _now()
     windows = {
@@ -169,12 +170,13 @@ def nodes() -> dict[str, Any]:
         "checked_at": checked,
         "capabilities": {
             "context": "read_only",
-            "screen": "not_implemented",
+            "screen": ("session_opt_in" if mesh_windows_screen.enabled() else "disabled"),
             "remote_input": "not_implemented",
             "file_transfer": "not_implemented",
         },
-        "screen_session_active": False,
-        "evidence": "Jarvis service is responding on this host; no desktop image asserted.",
+        "screen_session_active": mesh_windows_screen.active(),
+        "evidence": ("Jarvis service is responding on this host; screen capability is explicit opt-in. "
+                     "Actual desktop capture still requires an interactive Windows session."),
     }
     try:
         context = snapshot()
@@ -206,6 +208,12 @@ def _valid_node(node_id: str) -> None:
 def begin_screen(node_id: str, *, seconds: int = 120) -> dict[str, Any]:
     if type(seconds) is not int or not 15 <= seconds <= 300:
         raise ValueError("Screen consent must be 15–300 seconds.")
+    if node_id == "windows":
+        from jarvis_mrb.mesh_windows_screen import begin, WindowsScreenUnavailable
+        try:
+            return begin(seconds)
+        except WindowsScreenUnavailable as exc:
+            raise NodeUnavailable(str(exc)) from exc
     _valid_node(node_id)
     response, _, _ = _request(
         node_id, "POST", "/v1/session",
@@ -222,6 +230,9 @@ def begin_screen(node_id: str, *, seconds: int = 120) -> dict[str, Any]:
 
 
 def finish_screen(node_id: str) -> dict[str, str]:
+    if node_id == "windows":
+        from jarvis_mrb.mesh_windows_screen import stop
+        return stop()
     if node_id not in _IDS:
         raise ValueError("Not a screen-enabled mesh node.")
     _request(node_id, "DELETE", "/v1/session")
@@ -229,6 +240,12 @@ def finish_screen(node_id: str) -> dict[str, str]:
 
 
 def frame(node_id: str) -> tuple[bytes, str]:
+    if node_id == "windows":
+        from jarvis_mrb.mesh_windows_screen import frame as capture, WindowsScreenUnavailable
+        try:
+            return capture()
+        except WindowsScreenUnavailable as exc:
+            raise NodeUnavailable(str(exc)) from exc
     if node_id not in _IDS:
         raise ValueError("Not a screen-enabled mesh node.")
     if _config(node_id) is None:

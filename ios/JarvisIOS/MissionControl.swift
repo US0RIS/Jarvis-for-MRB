@@ -699,6 +699,7 @@ final class JarvisMissionControl: ObservableObject {
 struct JarvisMissionBoard: View {
     @EnvironmentObject var appModel: JarvisAppModel
     @EnvironmentObject var missions: JarvisMissionControl
+    @EnvironmentObject var guardian: CounterfactualGuardianController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -847,6 +848,72 @@ struct JarvisMissionBoard: View {
                     }
                     .padding(.vertical, 3)
                 }
+            }
+            Divider()
+            Text("Cross-system goal missions")
+                .font(.headline)
+            Text("Separately enrolled Guardian goal watches draw evidence from Jarvis's World Executive, exact user-goal deadline and pending commitments. Mission Control does not widen their authority. A goal's watch remains under the Guardian switch even if the appointment mission switch is off.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button(guardian.objectivesBusy ? "Loading goal evidence…" : "Load exact goal missions") {
+                Task { await guardian.refreshObjectiveWatches() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!appModel.settings.guardianEnabled || guardian.objectivesBusy)
+            Text(guardian.objectiveStatus)
+                .font(.caption)
+            ForEach(Array(guardian.objectiveWatches.filter {
+                $0.status == "active"
+            }.prefix(10))) { watch in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(watch.title)
+                        .font(.subheadline.weight(.medium))
+                    Text("Exact deadline: " + watch.deadlineAt)
+                        .font(.caption)
+                    if let check = guardian.objectiveEvaluations.first(where: {
+                        $0.id == watch.id
+                    }) {
+                        Text(check.message)
+                            .font(.caption)
+                        Text(check.evidence)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let next = check.nextAction, !next.isEmpty {
+                            Text("Recorded next action: " + next)
+                                .font(.caption2)
+                        }
+                        ForEach(check.pendingDependencies ?? []) { item in
+                            Text("Pending: " + item.owner + " — " + item.action)
+                                .font(.caption2)
+                        }
+                        if !(check.pendingDependencies ?? []).isEmpty {
+                            Button("Prepare unsent dependency follow-up") {
+                                guardian.stageObjectiveFollowup(watch.id)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    HStack {
+                        Button("Snooze 1 hour") {
+                            Task { await guardian.snoozeObjective(watch.id) }
+                        }
+                        Button("Stop watching", role: .destructive) {
+                            Task { await guardian.revokeObjective(watch.id) }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(9)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            }
+            if !guardian.stagedMessage.isEmpty {
+                Text(guardian.stagedMessage)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                Button("Copy unsent Guardian draft") {
+                    guardian.copyDraft()
+                }
+                .buttonStyle(.bordered)
             }
             DisclosureGroup("Actual iPhone capabilities and authority") {
                 ForEach(MissionAffordances.appointment) { affordance in

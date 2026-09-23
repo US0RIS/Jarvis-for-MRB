@@ -24,6 +24,7 @@ final class JarvisAppModel: ObservableObject {
     let metaGlasses: MetaGlassesManager
     let memoMind: MemoMindBridge
     let homeEnvironment: HomeEnvironmentController
+    lazy var guardian = CounterfactualGuardianController(appModel: self)
 
     // Physical-world observations belong to the iPhone session, not a HUD
     // accessory. The same state is used by buttons and Gen 1 Meta voice input.
@@ -50,6 +51,7 @@ final class JarvisAppModel: ObservableObject {
     var offlineResponseHandler: ((String) async -> String?)?
 
     private lazy var navigationController = JarvisNavigationController(appModel: self)
+    var isCurrentlyNavigating: Bool { navigationController.isNavigating }
     private var wakeWordTask: Task<Void, Never>?
     private var confirmationFollowUpDeadline: Date?
     private var conversationalFollowUpDeadline: Date?

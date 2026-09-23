@@ -66,7 +66,10 @@ status, step reservation, observed process state, timestamp, and brief
 source/error receipt are stored in `conductor.sqlite3` under the existing
 Jarvis private app directory. Screen pixels and raw API/Mac secrets are
 **never** stored there. `Inspect persisted mission state` fetches the
-specific last session ID. Revocation blocks future steps; a host action
+specific last session ID. The iPad button **View recent Conductor receipts after
+restart** retrieves up to 15 persisted source summaries **without** returning
+historical one-use grants; opening a past draft cannot execute it after the
+app's RAM-only approval is gone. Revocation blocks future steps; a host action
 already in flight cannot be rolled back. Server restart with a `running`
 record is an **unknown/inspect** situation, not authority to replay it.
 

@@ -582,6 +582,7 @@ struct RealityMeshView: View {
     @EnvironmentObject var appModel: JarvisAppModel
     @EnvironmentObject var mesh: RealityMeshController
     @Environment(\.scenePhase) private var scenePhase
+    @State private var confirmConductorExecution = false
 
     var body: some View {
         ScrollView {
@@ -691,6 +692,117 @@ struct RealityMeshView: View {
                 } else {
                     Text(mesh.screenStatus)
                         .font(.caption)
+                }
+                Divider()
+                Text("Conductor • Prepare my workstation")
+                    .font(.headline)
+                Toggle(
+                    "Enable exact workstation missions on this phone",
+                    isOn: Binding(
+                        get: { appModel.settings.conductorEnabled },
+                        set: { appModel.settings.conductorEnabled = $0 }
+                    )
+                )
+                Text("Say 'Jarvis, prepare my workstation' to open this workflow. "
+                     + "Choose one exact paired machine, 1–3 registered apps and optional "
+                     + "two-minute view. Speaking does not grant remote execution.")
+                    .font(.caption)
+                Picker("Workstation", selection: Binding(
+                    get: { mesh.conductorNodeID },
+                    set: { mesh.selectConductorNode($0) }
+                )) {
+                    Text("Windows PC").tag("windows")
+                    Text("MacBook Air").tag("macbook")
+                    Text("Mac mini").tag("macmini")
+                }
+                .pickerStyle(.segmented)
+                .disabled(mesh.conductorBusy || mesh.conductorMission != nil)
+                ForEach(
+                    RealityMeshController.conductorApps(for: mesh.conductorNodeID),
+                    id: \.self
+                ) { app in
+                    Button {
+                        mesh.toggleConductorApp(app)
+                    } label: {
+                        Label(
+                            app,
+                            systemImage: mesh.conductorSelectedApps.contains(app)
+                                ? "checkmark.square.fill" : "square"
+                        )
+                    }
+                    .disabled(
+                        mesh.conductorBusy || mesh.conductorMission != nil
+                        || (!mesh.conductorSelectedApps.contains(app)
+                            && mesh.conductorSelectedApps.count >= 3)
+                    )
+                }
+                Toggle("Also show this exact machine's private desktop for 2 minutes",
+                       isOn: $mesh.conductorShowScreen)
+                    .disabled(mesh.conductorBusy || mesh.conductorMission != nil)
+                if mesh.conductorMission == nil {
+                    Button("Review exact workstation mission") {
+                        Task { await mesh.stageConductor() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        !appModel.settings.meshEnabled
+                        || !appModel.settings.conductorEnabled
+                        || mesh.conductorBusy || mesh.conductorSelectedApps.isEmpty
+                    )
+                }
+                Text(mesh.conductorStatus)
+                    .font(.caption)
+                    .accessibilityIdentifier("conductor-status")
+                if let mission = mesh.conductorMission {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Exact node: " + mission.nodeID)
+                        Text("Exact apps: " + mission.apps.joined(separator: ", "))
+                        Text("Private screen: " + (mission.screenRequested ? "yes" : "no"))
+                        Text("State: " + mission.status + " • expiry " + mission.expiresAt)
+                        if mission.status == "planned" {
+                            Button("Approve these exact actions once") {
+                                confirmConductorExecution = true
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(mesh.conductorBusy
+                                || !appModel.settings.conductorEnabled)
+                        }
+                        if ["planned", "running"].contains(mission.status) {
+                            Button("Revoke remaining Conductor actions",
+                                   role: .destructive) {
+                                Task { await mesh.revokeConductor() }
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button("Start a new workstation mission") {
+                                mesh.resetConductorSelection()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        Button("Inspect persisted mission state") {
+                            Task { await mesh.refreshConductorStatus() }
+                        }
+                        .buttonStyle(.bordered)
+                        ForEach(mission.steps) { step in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(step.appName + " • " + step.result)
+                                    .font(.subheadline.weight(.medium))
+                                Text("Before: " + step.beforeState
+                                     + " (" + step.beforeObservedAt + ")")
+                                Text("After: " + step.afterState
+                                     + " (" + step.afterObservedAt + ")")
+                                Text(step.receipt)
+                                Text("Evidence: " + step.source)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.caption2)
+                            .padding(7)
+                            .background(.thinMaterial,
+                                        in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                    .padding(9)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 }
                 Divider()
                 Text("Presence anywhere")
@@ -821,21 +933,53 @@ struct RealityMeshView: View {
             }
             .padding()
         }
+        .confirmationDialog(
+            "Approve exact workstation actions?",
+            isPresented: $confirmConductorExecution,
+            titleVisibility: .visible
+        ) {
+            Button("Run exactly these device and app actions once") {
+                Task { await mesh.executeConductor() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("One exact device: " + mesh.conductorNodeID
+                 + ". Apps: " + mesh.conductorSelectedApps.joined(separator: ", ")
+                 + (mesh.conductorShowScreen
+                    ? ". Includes temporary private screen viewing." : ". No screen viewing.")
+                 + " No terminal, email, file transfer, weapon or general OS input.")
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
-                Task { await mesh.stopScreen() }
+                Task {
+                    await mesh.stopScreen()
+                    if ["planned", "running"].contains(mesh.conductorMission?.status ?? "") {
+                        await mesh.revokeConductor()
+                    }
+                }
             }
         }
         .onChange(of: appModel.settings.meshEnabled) { _, enabled in
             if !enabled {
                 Task {
                     await mesh.stopScreen()
+                    await mesh.revokeConductor()
                     mesh.clearSensitiveViews()
                 }
             }
         }
+        .onChange(of: appModel.settings.conductorEnabled) { _, enabled in
+            if !enabled {
+                Task { await mesh.revokeConductor() }
+            }
+        }
         .onDisappear {
-            Task { await mesh.stopScreen() }
+            Task {
+                await mesh.stopScreen()
+                if ["planned", "running"].contains(mesh.conductorMission?.status ?? "") {
+                    await mesh.revokeConductor()
+                }
+            }
         }
     }
 }

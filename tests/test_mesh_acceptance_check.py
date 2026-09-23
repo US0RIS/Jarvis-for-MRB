@@ -8,8 +8,8 @@ from jarvis_mrb import reality_mesh as mesh
 
 class MeshAcceptanceCheckTests(unittest.TestCase):
     def test_default_never_queries_node_or_captures_screen_and_reports_no_secrets(self):
-        with patch.object(mesh, "probe", side_effect=AssertionError("network probe")),
-             patch.object(mesh, "begin_screen", side_effect=AssertionError("screen capture")):
+        with (patch.object(mesh, "probe", side_effect=AssertionError("network probe")),
+              patch.object(mesh, "begin_screen", side_effect=AssertionError("screen capture"))):
             result = acceptance.report()
         self.assertFalse(result["probe_live_nodes_requested"])
         self.assertFalse(result["screen_captured"])
@@ -20,9 +20,9 @@ class MeshAcceptanceCheckTests(unittest.TestCase):
         self.assertNotIn("secret", str(result).lower())
 
     def test_explicit_one_shot_capture_revokes_and_returns_metadata_only(self):
-        with patch.object(mesh, "begin_screen", return_value={"status": "active"}) as begin,
-             patch.object(mesh, "frame", return_value=(b"image contents", "image/png")),
-             patch.object(mesh, "finish_screen", return_value={"status": "closed"}) as stop:
+        with (patch.object(mesh, "begin_screen", return_value={"status": "active"}) as begin,
+              patch.object(mesh, "frame", return_value=(b"image contents", "image/png")),
+              patch.object(mesh, "finish_screen", return_value={"status": "closed"}) as stop):
             result = acceptance.report(exercise_screen="macbook")
         begin.assert_called_once_with("macbook", seconds=15)
         stop.assert_called_once_with("macbook")
@@ -33,8 +33,8 @@ class MeshAcceptanceCheckTests(unittest.TestCase):
         self.assertNotIn("image contents", str(result))
 
     def test_fails_closed_on_capture_and_reports_unconfirmed_revoke(self):
-        with patch.object(mesh, "begin_screen", side_effect=mesh.NodeUnavailable("unavailable")),
-             patch.object(mesh, "finish_screen", side_effect=mesh.NodeUnavailable("offline")):
+        with (patch.object(mesh, "begin_screen", side_effect=mesh.NodeUnavailable("unavailable")),
+              patch.object(mesh, "finish_screen", side_effect=mesh.NodeUnavailable("offline"))):
             result = acceptance.report(exercise_screen="windows")
         self.assertFalse(result["screen_captured"])
         self.assertEqual(result["screen_exercise"]["status"], "unavailable")

@@ -598,6 +598,10 @@ final class PersistentPresenceController: ObservableObject {
             "enabled": appModel.settings.guardianEnabled
                 && UIApplication.shared.applicationState == .active,
             "busy": conversationActive || frontend?.isMeetingActive == true
+                || !appModel.settings.localSensorContextEnabled
+                || frontend?.sensors.lastMotionAt.map {
+                    Date().timeIntervalSince($0) > 90
+                } != false
                 || frontend?.sensors.activity == "Driving",
             "observed_at": ISO8601DateFormatter().string(from: Date())
         ]

@@ -20,6 +20,7 @@ from jarvis_mrb.world_model import DB_PATH
 
 _LOCK = threading.RLock()
 _PRESENCE: dict[str, datetime] = {}
+_BUSY: dict[str, bool] = {}
 _MAX_WATCHES = 30
 _MAX_ACTIVE_DAYS = 365
 
@@ -82,16 +83,28 @@ def ingest_presence(snapshot: dict[str, Any], *, now: datetime | None = None) ->
             previous = _PRESENCE.get(source)
             if previous is None or observed > previous:
                 _PRESENCE[source] = observed
+                _BUSY[source] = snapshot.get("busy") is True
         else:
             _PRESENCE.pop(source, None)
+            _BUSY.pop(source, None)
         for key, seen in list(_PRESENCE.items()):
             if (instant - seen).total_seconds() > 90:
                 _PRESENCE.pop(key, None)
+                _BUSY.pop(key, None)
 
 
 def _has_live_consent(now: datetime) -> bool:
     with _LOCK:
         return any(0 <= (now - seen).total_seconds() <= 90 for seen in _PRESENCE.values())
+
+
+def _can_interrupt(now: datetime) -> bool:
+    with _LOCK:
+        return any(
+            0 <= (now - seen).total_seconds() <= 90
+            and not _BUSY.get(source, False)
+            for source, seen in _PRESENCE.items()
+        )
 
 
 def _active_goals(limit: int = 30) -> list[dict[str, Any]]:
@@ -293,11 +306,14 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
         return []
     all_goals = {str(g["id"]): g for g in _active_goals()}
     live = _has_live_consent(instant)
+    can_interrupt = _can_interrupt(instant)
+    interruption_budget = 1
     if emit:
         from jarvis_mrb.environment_state import get_state
         preferences = get_state().get("preferences") or {}
         if isinstance(preferences, dict) and preferences.get("proactive_monitoring") is False:
             live = False
+            can_interrupt = False
     reports = []
     for row in rows:
         watch_id = row["id"]
@@ -370,11 +386,13 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
             "source": "explicit goal / current world intention",
             "can_actuate": False,
             "phone_consent_live": live,
+            "phone_available_for_interruption": can_interrupt,
             "snoozed_until": row["snoozed_until"],
         }
         reports.append(report)
         snoozed = _stamp(row["snoozed_until"])
-        has_alert = bool(emit and live and status in {"at_risk", "past_deadline_unverified"}
+        has_alert = bool(emit and live and can_interrupt
+                         and status in {"at_risk", "past_deadline_unverified"}
                          and (snoozed is None or instant >= snoozed))
         if has_alert:
             from jarvis_mrb.agency_attention import consider
@@ -387,8 +405,12 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
                 confidence=0.95, error_cost=8, attention_cost=15,
                 threshold=60, dedup_seconds=4 * 3600,
                 severity="warning",
+                allow_emit=interruption_budget > 0,
+                suppress_reason="one-Guardian-interruption-per-monitor-cycle",
             )
             has_alert = bool(result.get("emitted"))
+            if has_alert:
+                interruption_budget -= 1
         _record(watch_id, instant, status, alerted=has_alert)
     return reports
 
@@ -402,6 +424,7 @@ def overview(*, now: datetime | None = None) -> dict[str, Any]:
     return {
         "checked_at": _iso(instant),
         "phone_consent_live": _has_live_consent(instant),
+        "phone_available_for_interruption": _can_interrupt(instant),
         "camera_required": False,
         "can_actuate": False,
         "enrollable": eligible(now=instant),

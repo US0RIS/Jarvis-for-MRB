@@ -140,6 +140,10 @@ final class CounterfactualGuardianController: ObservableObject {
                     self.trajectories = []
                     self.destinationByRisk = [:]
                     self.stagedMessage = ""
+                    self.objectiveCandidates = []
+                    self.objectiveWatches = []
+                    self.objectiveEvaluations = []
+                    self.objectiveStatus = "Off — no private goal details are shown."
                     self.status = "Off — enable Counterfactual Guardian under Settings."
                 }
                 if self.appModel.settings.guardianEnabled,
@@ -638,13 +642,13 @@ struct CounterfactualGuardianView: View {
             )
             .font(.caption)
             Toggle(
-                "Guard upcoming calendar departures",
+                "Enable Counterfactual Guardian",
                 isOn: Binding(
                     get: { appModel.settings.guardianEnabled },
                     set: { appModel.settings.guardianEnabled = $0 }
                 )
             )
-            Text("Also enable Motion / travel context and GPS under Settings. This does not monitor other people's calendars or infer a meeting place from its title.")
+            Text("For travel protection, enable Motion / travel context and GPS under Settings. Goal deadline protection separately requires per-goal enrollment, and can pause alerts when phone context is unknown. Jarvis never guesses a meeting place from its title.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button(guardian.isChecking ? "Comparing routes…" : "Check next departures now") {

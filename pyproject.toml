@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "psutil>=6.0.0",
+  "Pillow>=11.0.0",  # optional interactive Windows screen capture; fails closed headless
   "fastapi>=0.116.0",
   "uvicorn>=0.35.0",
   "httpx>=0.28.0",

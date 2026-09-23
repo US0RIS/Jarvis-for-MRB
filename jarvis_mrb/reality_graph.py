@@ -28,13 +28,15 @@ def _age_seconds(stamp: Any, *, now: datetime | None = None) -> float | None:
     dt = _parse_time(stamp)
     if dt is None:
         return None
-    return max(0.0, ((now or datetime.now(timezone.utc)) - dt).total_seconds())
+    age = ((now or datetime.now(timezone.utc)) - dt).total_seconds()
+    # Future-dated provider observations are not current evidence. Allow small clock skew.
+    return age if age >= -30.0 else None
 
 
 def _freshness(age: float | None, ttl: float) -> str:
     if age is None:
         return "unknown"
-    return "fresh" if age <= ttl else "stale"
+    return "fresh" if -30.0 <= age <= ttl else "stale"
 
 
 def _safe_id(value: Any) -> str:
@@ -296,9 +298,13 @@ def answer_place_question(graph: dict[str, Any], question: str) -> dict[str, Any
     if q in {"how many nearby public cameras are there", "how many public cameras are nearby", "are there public cameras nearby"}:
         count = sum(1 for r in graph.get("entities", []) if isinstance(r, dict) and r.get("kind") == "public_camera")
         return {"answered_without_model": True, "answer": f"{count} official catalog camera viewpoint(s) are represented nearby. Catalog presence does not prove a current live image.", "evidence_kind": "catalog"}
-    if q in {"what is the air quality", "what's the air quality", "air quality"} and "fact:air_quality" in facts:
+    fresh_evidence = {str(e.get("id")) for e in graph.get("evidence", []) if isinstance(e, dict) and e.get("freshness") == "fresh"}
+    def supported(fact_id: str) -> bool:
+        fact = facts.get(fact_id)
+        return bool(fact and fact.get("evidence_ids") and all(e in fresh_evidence for e in fact["evidence_ids"]))
+    if q in {"what is the air quality", "what's the air quality", "air quality"} and supported("fact:air_quality"):
         return {"answered_without_model": True, "answer": f"Modelled US AQI is {facts['fact:air_quality']['value']}.", "evidence_kind": "provider_value"}
-    if q in {"are there weather alerts", "any weather alerts", "weather alerts"} and "fact:active_weather_alert_count" in facts:
+    if q in {"are there weather alerts", "any weather alerts", "weather alerts"} and supported("fact:active_weather_alert_count"):
         n = int(facts["fact:active_weather_alert_count"]["value"])
         return {"answered_without_model": True, "answer": f"The integrated weather provider returned {n} active point alert(s). This is not an all-hazards clearance.", "evidence_kind": "provider_count"}
     if q in {"what do you know about this place", "summarize this place", "reality graph status"}:

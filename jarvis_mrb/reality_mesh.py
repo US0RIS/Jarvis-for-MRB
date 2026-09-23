@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-"""Jarvis Reality Mesh, first *actual* cross-device read-only execution slice.
+"""Jarvis Reality Mesh: live cross-device observations and exact-action fabric.
 
-No network discovery, unapproved target URLs, arbitrary RPC, device control,
-screen recording without Mac and phone consent, or inferred provider coverage.
+No network discovery, unapproved target URLs, arbitrary RPC, general OS input,
+screen recording without each host's own opt-in and explicit phone consent,
+or inferred provider coverage. Only fixed, separately permitted app names can
+mutate a desktop, with evidence that distinguishes acceptance and observation.
 Configured Mac endpoints/tokens live ONLY in Windows process environment.
 """
 

@@ -132,7 +132,7 @@ final class JarvisAppModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
             .replacingOccurrences(
-                of: #"^jarvis[,:]?\\s+"#, with: "", options: .regularExpression
+                of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
             )
         if [
             "mesh status", "check the reality mesh",

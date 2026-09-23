@@ -1,5 +1,56 @@
 import Foundation
 
+struct ConductorWorkstationMission: Decodable, Identifiable {
+    struct Step: Decodable, Identifiable {
+        let nodeID: String
+        let appName: String
+        let beforeState: String
+        let beforeObservedAt: String
+        let afterState: String
+        let afterObservedAt: String
+        let attemptedAt: String
+        let receipt: String
+        let source: String
+        let result: String
+        var id: String { nodeID + ":" + appName }
+
+        enum CodingKeys: String, CodingKey {
+            case receipt, source, result
+            case nodeID = "node_id"
+            case appName = "app_name"
+            case beforeState = "before_state"
+            case beforeObservedAt = "before_observed_at"
+            case afterState = "after_state"
+            case afterObservedAt = "after_observed_at"
+            case attemptedAt = "attempted_at"
+        }
+    }
+
+    let id: String
+    let nodeID: String
+    let apps: [String]
+    let screenRequested: Bool
+    let status: String
+    let createdAt: String
+    let expiresAt: String
+    let updatedAt: String
+    let steps: [Step]
+    let error: String
+    let oneUseGrantRedeemable: Bool
+    let oneUseGrant: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, apps, status, steps, error
+        case nodeID = "node_id"
+        case screenRequested = "screen_requested"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case updatedAt = "updated_at"
+        case oneUseGrantRedeemable = "one_use_grant_redeemable"
+        case oneUseGrant = "one_use_grant"
+    }
+}
+
 struct RealityMeshNodesResponse: Decodable {
     struct Node: Decodable, Identifiable {
         let id: String
@@ -546,6 +597,47 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
+    }
+
+    func conductorPlanWorkstation(
+        nodeID: String, apps: [String], screen: Bool
+    ) async throws -> ConductorWorkstationMission {
+        let (data, response) = try await postData(
+            path: "conductor/workstation/plan",
+            body: ["node_id": nodeID, "apps": apps, "screen_requested": screen]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ConductorWorkstationMission.self, from: data)
+    }
+
+    func conductorExecuteWorkstation(
+        id: String, grant: String, nodeID: String, apps: [String]
+    ) async throws -> ConductorWorkstationMission {
+        let (data, response) = try await postData(
+            path: "conductor/workstation/execute",
+            body: [
+                "id": id, "one_use_grant": grant,
+                "node_id": nodeID, "apps": apps,
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ConductorWorkstationMission.self, from: data)
+    }
+
+    func conductorStatus(id: String) async throws -> ConductorWorkstationMission {
+        let (data, response) = try await postData(
+            path: "conductor/workstation/status", body: ["id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ConductorWorkstationMission.self, from: data)
+    }
+
+    func conductorRevoke(id: String) async throws -> ConductorWorkstationMission {
+        let (data, response) = try await postData(
+            path: "conductor/workstation/revoke", body: ["id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ConductorWorkstationMission.self, from: data)
     }
 
     func realityMeshNodes() async throws -> RealityMeshNodesResponse {

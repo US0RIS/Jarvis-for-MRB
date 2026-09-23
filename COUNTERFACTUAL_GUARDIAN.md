@@ -1,6 +1,6 @@
 # Next capability: Counterfactual Guardian — notice what has *not* happened yet
 
-**Status:** design for the next milestone, not a deployed prediction engine. The camera-free Ambient Opportunity Loop in this branch is the implementation substrate; the system described below is future scope.
+**Status:** first operational slice implemented in source on `jarvis/memomind-prep`: opt-in local iPhone calendar-route anticipation, genuine Apple MapKit route estimates, evidence cards, explicit event-scoped one-use Maps grants, local unsent ETA drafts, and Keychain-protected handoff receipts. This is not yet a general future-state prediction engine and has not been validated on a physical phone or vendor glasses.
 
 ## The conceptual leap
 
@@ -9,6 +9,18 @@ Today Jarvis responds to an event ("we got home", "the doorbell may have rung", 
 This is not surveillance omniscience. Without a fresh observation, Jarvis must distinguish "not observed" from "did not happen." Counterfactuals are grounded in time, GPS, calendar, motion, microphone sound labels, public providers, user declarations and verified device state. Camera input is optional and never required.
 
 The cinematic move is not "run a thousand automations". It is "preserve the user's goal using an unexpected but authorized affordance as circumstances change."
+
+## Implemented activation and evidence contract
+
+In the iPhone app open **Physical → JARVIS • Counterfactual Guardian**. Enable **Guard upcoming calendar departures** (off by default) and opt into **Motion / travel context and GPS**. The controller only runs while the app is foregrounded, polls at most once per two minutes, and allows a separate explicit **Check next departures now** button.
+
+The Windows backend serves `GET /guardian/calendar` through the existing bearer-token authorization and primary Google Calendar credentials. Its read-only response contains up to twelve upcoming timed calendar events with literal locations and a server timestamp; it rejects missing permissions/unavailable calendars instead of returning a fabricated empty agenda. The iPhone independently requires a fresh location fix, its reported horizontal accuracy, a timed event within the next two hours, a uniquely resolved MapKit destination, and a live route estimate. Up to the first three usable upcoming appointments are checked per pass. A five-minute departure buffer is explicit, not a claim about traffic-prediction accuracy. All-day and virtual events are excluded. Map ambiguity, stale GPS, missing backend access and route failures do not become confident predictions.
+
+The Guardian shows a source- and time-labelled warning for supported impending departure risks, deduplicates events within the current session, and avoids speaking when driving, in meetings, or in active conversations. A HUD card is redacted by default. The GPS fix, route destination and calendar content used for matching stay on the phone; the backend does not receive a new location history from Guardian.
+
+**Interventions:** a visible **Start directions** control opens Apple Maps only after the user taps it. The user may separately **Allow one automatic Maps launch**, bound to the calendar event ID, its exact start and location, expiring by the start time or after two hours. An auto handoff consumes the authorization *before* attempting to open Maps and is vetoed for stale observations, app suspension, driving, active meetings or another active Jarvis route. The receipt reports whether Apple Maps accepted the handoff, **not** whether the trip started or arrival was achieved. **Prepare local ETA message** stages text in the iPhone only; copying it is a distinct tap, and no message/recipient is sent or selected. Event dismissals revoke that event's grant. Grants, dismissals and bounded handoff receipts are device-only Keychain records; the user can clear receipts.
+
+**Current scope:** driving-route calendar departure protection, not unsupervised general objective inference, calendar modifications, email transmission, arbitrary device control or clinical health intervention. Do not describe this as physically accepted until it has been installed and validated on the actual phone.
 
 ## Concrete first slice: don't miss the appointment
 

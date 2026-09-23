@@ -92,6 +92,11 @@ struct JarvisIOSApp: App {
                     Label("Missions", systemImage: "target")
                 }
 
+                RealityMeshView()
+                    .tabItem {
+                        Label("Mesh", systemImage: "network")
+                    }
+
                 LocalIntelligenceMilestoneView()
                     .tabItem {
                         Label("Local", systemImage: "brain.head.profile")
@@ -115,6 +120,7 @@ struct JarvisIOSApp: App {
             .environmentObject(frontendIntelligence)
             .environmentObject(appModel.guardian)
             .environmentObject(appModel.missionControl)
+            .environmentObject(appModel.realityMesh)
             .environmentObject(knownPeople)
             .environmentObject(localPower)
             .environmentObject(localProductivity)

@@ -534,6 +534,48 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/guardian/calendar")
+def guardian_calendar_expectations(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Read-only, authenticated upcoming expectations for local iPhone evaluation.
+
+    Never send raw GPS or navigation history to the Jarvis backend. Calendar
+    summaries/locations are returned only to this authorized phone request;
+    MapKit resolves the destination and estimates travel on-device.
+    """
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.tools.google import query_calendar_events
+    from datetime import datetime, timezone
+
+    result = query_calendar_events(direction="future", days=1, limit=12)
+    if not result.ok:
+        # Unavailable calendar is unknown, NOT evidence of no commitments.
+        raise HTTPException(status_code=503, detail="Calendar unavailable for Guardian.")
+    raw = (result.data or {}).get("events") or []
+    events = []
+    for item in raw[:12]:
+        if not isinstance(item, dict):
+            continue
+        start = str(item.get("start") or "")[:48]
+        # Ignore all-day events, which are not travel deadlines.
+        if "T" not in start or not str(item.get("location") or "").strip():
+            continue
+        events.append({
+            "id": str(item.get("id") or "")[:180],
+            "summary": str(item.get("summary") or "Appointment")[:160],
+            "start": start,
+            "location": str(item.get("location") or "").strip()[:300],
+        })
+    return {
+        "ok": True,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "events": events,
+    }
+
+
 @app.get("/ambient/status")
 def ambient_opportunity_status(
     authorization: Annotated[str | None, Header()] = None,

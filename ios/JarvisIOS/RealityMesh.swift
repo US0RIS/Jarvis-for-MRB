@@ -253,13 +253,15 @@ final class RealityMeshController: ObservableObject {
         // voice path delegates automatically to a remote Mac app.
         guard !appActionBusy, appModel.settings.meshEnabled,
               UIApplication.shared.applicationState == .active,
-              ["macbook", "macmini"].contains(nodeID),
-              ["Safari", "Notes", "Calendar", "Preview", "Finder"].contains(appName),
+              ((["macbook", "macmini"].contains(nodeID)
+                  && ["Safari", "Notes", "Calendar", "Preview", "Finder"].contains(appName))
+               || (nodeID == "windows"
+                   && ["Notepad", "Calculator", "File Explorer", "Paint"].contains(appName))),
               nodes.contains(where: {
                   $0.id == nodeID && $0.status == "online"
                       && $0.capabilities["app_launch"] == "exact_user_tap_only"
               }) else {
-            appActionStatus = "Mac not online or separately authorized for exact app launch."
+            appActionStatus = "Device not online or separately authorized for exact app launch."
             return
         }
         appActionBusy = true
@@ -272,9 +274,9 @@ final class RealityMeshController: ObservableObject {
             guard appModel.settings.meshEnabled,
                   UIApplication.shared.applicationState == .active else { return }
             appActionStatus = result.processObserved
-                ? "Mac accepted launch of " + appName
+                ? nodeID + " accepted launch of " + appName
                     + "; process is observed running. Foreground focus/window not verified."
-                : "Mac accepted launch of " + appName
+                : nodeID + " accepted launch of " + appName
                     + "; process not independently observed. Foreground focus/window unknown."
         } catch {
             appActionStatus = "Cannot confirm Mac app launch; do not assume it failed or retry automatically."
@@ -454,10 +456,12 @@ struct RealityMeshView: View {
                             .foregroundStyle(.secondary)
                         if node.status == "online",
                            node.capabilities["app_launch"] == "exact_user_tap_only",
-                           ["macbook", "macmini"].contains(node.id) {
-                            Menu("Open an exact app on this Mac") {
+                           ["windows", "macbook", "macmini"].contains(node.id) {
+                            Menu("Open an exact app on this device") {
                                 ForEach(
-                                    ["Safari", "Notes", "Calendar", "Preview", "Finder"],
+                                    node.id == "windows"
+                                        ? ["Notepad", "Calculator", "File Explorer", "Paint"]
+                                        : ["Safari", "Notes", "Calendar", "Preview", "Finder"],
                                     id: \.self
                                 ) { appName in
                                     Button("Open " + appName + " on " + node.label) {

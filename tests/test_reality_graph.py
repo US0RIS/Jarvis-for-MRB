@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 
 from jarvis_mrb import reality_graph
@@ -8,18 +9,18 @@ from jarvis_mrb import reality_graph
 
 OBS = {
     "status": "ok",
-    "checked_at": "2026-09-23T05:00:00+00:00",
+    "checked_at": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
     "cameras": {
-        "status": "ok", "checked_at": "2026-09-23T05:00:00+00:00",
+        "status": "ok", "checked_at": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
         "cameras": [{"id": "cam-1", "name": "Main St"}, {"id": "cam-2", "name": "2nd St"}],
     },
     "conditions": {
-        "checked_at": "2026-09-23T05:00:00+00:00",
+        "checked_at": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
         "air_quality": {"status": "ok", "us_aqi": 41.2},
         "weather_alerts": {"status": "ok", "alerts": []},
     },
-    "incidents": {"status": "ok", "checked_at": "2026-09-23T05:00:00+00:00", "events": []},
-    "facilities": {"status": "ok", "checked_at": "2026-09-23T05:00:00+00:00", "facilities": [{}, {}]},
+    "incidents": {"status": "ok", "checked_at": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(), "events": []},
+    "facilities": {"status": "ok", "checked_at": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(), "facilities": [{}, {}]},
 }
 
 
@@ -94,6 +95,25 @@ class RealityGraphTests(unittest.TestCase):
         self.assertEqual(facts["fact:camera_route_congestion"]["confidence"], "tentative")
         direct = reality_graph.answer_mission_question(graph, "why is it delayed?")
         self.assertTrue(direct["answered_without_model"])
+
+    def test_future_provider_timestamp_does_not_drive_mission_facts(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph(
+            {"id": "future"},
+            [{"kind": "order", "source": "provider", "observed_at": "2026-09-23T06:00:00+00:00",
+              "delivered": True}],
+            now=now,
+        )
+        self.assertNotIn("fact:provider_reports_delivered",
+                         {fact["id"] for fact in graph["derived_facts"]})
+
+    def test_stale_place_value_is_not_reported_as_current(self):
+        stale = "2020-01-01T00:00:00+00:00"
+        obs = {**OBS, "checked_at": stale,
+               "conditions": {**OBS["conditions"], "checked_at": stale}}
+        graph = reality_graph.build_place_graph(34.1, -118.2, obs)
+        self.assertIsNone(reality_graph.answer_place_question(graph, "what is the air quality"))
+        self.assertIsNone(reality_graph.answer_place_question(graph, "weather alerts"))
 
     def test_stale_mission_observation_cannot_drive_fact(self):
         from datetime import datetime, timezone

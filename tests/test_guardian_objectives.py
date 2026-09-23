@@ -19,7 +19,9 @@ class GuardianObjectiveTests(TestCase):
         guardian.DB_PATH = Path(self.temp.name) / "guardian.sqlite3"
         self.addCleanup(setattr, guardian, "DB_PATH", original)
         guardian._PRESENCE.clear()
+        guardian._BUSY.clear()
         self.addCleanup(guardian._PRESENCE.clear)
+        self.addCleanup(guardian._BUSY.clear)
         self.goal = {
             "id": "goal:real", "title": "Deliver signed documents",
             "source_kind": "explicit_goal", "confidence": 1.0,
@@ -140,6 +142,32 @@ class GuardianObjectiveTests(TestCase):
             report = guardian.evaluate_once(now=NOW + timedelta(hours=1, minutes=1))
             self.assertFalse(report[0]["phone_consent_live"])
             attention.assert_not_called()
+
+    def test_busy_consent_defers_without_losing_exact_deadline(self):
+        item = guardian.enroll("goal:real", now=NOW)
+        guardian.ingest_presence({
+            "source_id": "phone-a", "enabled": True, "busy": True,
+            "observed_at": NOW.isoformat(),
+        }, now=NOW)
+        self.assertTrue(guardian._has_live_consent(NOW))
+        self.assertFalse(guardian._can_interrupt(NOW))
+        with patch("jarvis_mrb.agency_attention.consider") as attention:
+            result = guardian.evaluate_once(now=NOW)
+            self.assertEqual(result[0]["status"], "at_risk")
+            self.assertFalse(result[0]["phone_available_for_interruption"])
+            attention.assert_not_called()
+        guardian.ingest_presence({
+            "source_id": "phone-a", "enabled": True, "busy": False,
+            "observed_at": (NOW + timedelta(seconds=5)).isoformat(),
+        }, now=NOW + timedelta(seconds=5))
+        with patch("jarvis_mrb.agency_attention.consider", return_value={"emitted": True}) as attention, \
+             patch("jarvis_mrb.environment_state.get_state", return_value={
+                 "preferences": {"proactive_monitoring": True}
+             }):
+            result = guardian.evaluate_once(now=NOW + timedelta(seconds=6))
+            self.assertTrue(result[0]["phone_available_for_interruption"])
+            attention.assert_called_once()
+        self.assertEqual(item["id"], result[0]["id"])
 
     def test_full_and_invalid_enrollment_and_unknown(self):
         with self.assertRaisesRegex(ValueError, "no longer active"):

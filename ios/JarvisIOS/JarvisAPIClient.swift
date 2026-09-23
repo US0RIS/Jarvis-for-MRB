@@ -1,5 +1,22 @@
 import Foundation
 
+struct GuardianCalendarResponse: Decodable {
+    struct Event: Decodable, Identifiable {
+        let id: String
+        let summary: String
+        let start: String
+        let location: String
+    }
+    let ok: Bool
+    let checkedAt: String
+    let events: [Event]
+
+    enum CodingKeys: String, CodingKey {
+        case ok, events
+        case checkedAt = "checked_at"
+    }
+}
+
 struct JarvisAPIResponse: Decodable {
     let ok: Bool
     let message: String
@@ -333,6 +350,14 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
+    }
+
+    func guardianCalendarExpectations() async throws -> GuardianCalendarResponse {
+        let (data, response) = try await get(path: "guardian/calendar", timeout: 9)
+        try validate(response: response, data: data)
+        let result = try JSONDecoder().decode(GuardianCalendarResponse.self, from: data)
+        guard result.ok else { throw JarvisAPIError.badResponse }
+        return result
     }
 
     func agencyCommandView() async throws -> MemoMindCommandSnapshot {

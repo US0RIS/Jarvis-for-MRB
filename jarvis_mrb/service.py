@@ -160,6 +160,23 @@ class NearbyPublicCameraRequest(BaseModel):
     limit: int = 8
 
 
+class ConductorPlanRequest(BaseModel):
+    node_id: str
+    apps: list[str]
+    screen_requested: bool = False
+
+
+class ConductorExecuteRequest(BaseModel):
+    id: str
+    node_id: str
+    apps: list[str]
+    one_use_grant: str
+
+
+class ConductorMissionRequest(BaseModel):
+    id: str
+
+
 class MeshAppLaunchRequest(BaseModel):
     node_id: str
     app_name: str
@@ -565,6 +582,74 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.post("/conductor/workstation/plan")
+def conductor_workstation_plan(
+    request: ConductorPlanRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import conductor
+    try:
+        return conductor.plan(
+            request.node_id, request.apps, screen=request.screen_requested
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except conductor.MissionBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)[:200]) from exc
+
+
+@app.post("/conductor/workstation/execute")
+def conductor_workstation_execute(
+    request: ConductorExecuteRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import conductor
+    try:
+        return conductor.execute(
+            request.id, request.one_use_grant, request.node_id, request.apps
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except conductor.MissionBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)[:200]) from exc
+
+
+@app.post("/conductor/workstation/status")
+def conductor_workstation_status(
+    request: ConductorMissionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import conductor
+    try:
+        return conductor.get(request.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)[:200]) from exc
+
+
+@app.post("/conductor/workstation/revoke")
+def conductor_workstation_revoke(
+    request: ConductorMissionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import conductor
+    try:
+        return conductor.revoke(request.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)[:200]) from exc
 
 
 @app.post("/mesh/app/open")

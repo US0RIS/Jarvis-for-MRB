@@ -22,6 +22,12 @@ The purpose is **reliable tool selection and factual source retrieval**, not bla
 | `agency_goal_compiler.compile_observable_contract` used Qwen even for explicit achieved-state goals | Existing safe, grounded `_fallback_contract` is validated **first** for directly observable states; Qwen remains necessary for goals whose actual completion evidence is not spelled out. Tests that inject a custom compiler retain exact behavior. |
 | `meeting_notes._extract_actions` used Qwen even for explicit machine-readable action records | Strictly structured `ACTION: owner | task | deadline` lines are extracted with a bounded parser and quoted evidence; mixed/ordinary speech still uses semantic extraction. |
 
+## Reality Graph offload
+
+Routine physical-world reasoning now has a deterministic intermediate layer in `jarvis_mrb.reality_graph`. Place snapshots normalize existing camera-catalog, environmental, alert, incident and facility evidence with explicit freshness and provider state. Mission graphs additionally accept already-authorized normalized order/courier/traffic/public-camera/device observations and compute freshness, ETA/deadline math, stationary thresholds, route delays, provider delivery state and conservative cross-source delay correlation with **zero Qwen calls**.
+
+The graph deliberately distinguishes provider-reported delivery from personal receipt and camera congestion from person/vehicle identity. Stale observations cannot drive current facts. Routine questions such as whether a delivery is late, whether a provider reports it delivered, and whether fresh courier + route evidence are consistent with a traffic delay are answered deterministically. Unknown questions receive only a bounded semantic packet (derived facts + short evidence claims), never the raw provider payload, for optional model escalation. The graph has no action authority; Conductor/permission policy remains a separate boundary.
+
 ## Already deterministic before this work
 
 Permission risk labels, staged confirmation binding, verified execution/readback, most world-model/entity/term/conflict/chronology SQL, source timestamps, source-specific camera/world/sanctions/SEC/EPA contracts, iPhone location/button paths, Agency persisted status, jobs scheduling/cancellation execution, real provider authentication, transport framing and basic model selection were already code, **not** Qwen decisions.

@@ -21,7 +21,9 @@ The first **actual runtime** is built into the iPhone Jarvis app in the **Missio
 
 Counterfactual Guardian detects risk; **Mission Control retains the user-authorized outcome, rechecks the original authority source and physical state, and records whether an intervention or outcome occurred.** It reuses, but does not silently widen, Guardian's Calendar access, exact-event principle or the app's existing Core Location data. Agency stays separately governed by its own explicit goal/tool permissions, steps and verification. A Mission status never overrides Agency's protected approval policies.
 
-The current first pack is **appointment travel** only. It is real, source-backed mission execution on the phone, not a generalized planner that can freely operate Gmail, arbitrary apps or all HomeKit devices.
+The Missions tab also incorporates **existing separately enrolled Guardian goal watches**, showing user-authored deadlines, World Executive pending dependencies, exact next actions, snooze/revocation and local unsent follow-up drafting beside appointment missions. Their monitoring permission remains the Guardian switch: enabling Mission Control alone never enrolls a goal, and disabling Mission Control does not silently revoke an independently enrolled Guardian watch.
+
+The first **autonomous external-intervention execution pack is appointment travel only**. Cross-system goal watches are real sourced read/alert/draft loops, but not permission for Jarvis to freely operate Gmail, arbitrary PC apps, or all HomeKit devices. Future packs may combine these affordances under explicit mission grants.
 
 ## Next execution packs (not yet deployed)
 

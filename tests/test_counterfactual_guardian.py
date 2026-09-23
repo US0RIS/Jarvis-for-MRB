@@ -50,6 +50,10 @@ class CounterfactualGuardianContractTests(unittest.TestCase):
         self.assertIn("appModel.guardian.start()", self.app)
         self.assertIn(".environmentObject(appModel.guardian)", self.app)
         self.assertIn("lazy var guardian = CounterfactualGuardianController(appModel: self)", self.model)
+        self.assertIn("if Self.isGuardianIntent(text)", self.model)
+        self.assertIn('"will i make my next meeting"', self.model)
+        self.assertIn("await guardian.checkNow(manual: true)", self.model)
+        self.assertIn("if appModel.settings.guardianEnabled && !manual {", self.swift)
         self.assertIn("CounterfactualGuardian.swift in Sources", project)
         self.assertIn('GroupBox("JARVIS • Counterfactual Guardian")', physical)
 

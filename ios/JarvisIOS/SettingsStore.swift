@@ -26,6 +26,7 @@ final class SettingsStore: ObservableObject {
     @Published var guardianEnabled: Bool { didSet { defaults.set(guardianEnabled, forKey: "jarvis.guardianEnabled") } }
     @Published var missionControlEnabled: Bool { didSet { defaults.set(missionControlEnabled, forKey: "jarvis.missionControlEnabled") } }
     @Published var meshEnabled: Bool { didSet { defaults.set(meshEnabled, forKey: "jarvis.meshEnabled") } }
+    @Published var conductorEnabled: Bool { didSet { defaults.set(conductorEnabled, forKey: "jarvis.conductorEnabled") } }
     @Published var smartAudioDampingEnabled: Bool { didSet { defaults.set(smartAudioDampingEnabled, forKey: "jarvis.smartAudioDampingEnabled") } }
     @Published var dailyJournalEnabled: Bool { didSet { defaults.set(dailyJournalEnabled, forKey: "jarvis.dailyJournalEnabled") } }
     @Published var projectFocus: String { didSet { defaults.set(projectFocus, forKey: "jarvis.projectFocus") } }
@@ -104,6 +105,7 @@ final class SettingsStore: ObservableObject {
         guardianEnabled = defaults.object(forKey: "jarvis.guardianEnabled") as? Bool ?? false
         missionControlEnabled = defaults.object(forKey: "jarvis.missionControlEnabled") as? Bool ?? false
         meshEnabled = defaults.object(forKey: "jarvis.meshEnabled") as? Bool ?? false
+        conductorEnabled = defaults.object(forKey: "jarvis.conductorEnabled") as? Bool ?? false
         smartAudioDampingEnabled = defaults.object(forKey: "jarvis.smartAudioDampingEnabled") as? Bool ?? true
         dailyJournalEnabled = defaults.object(forKey: "jarvis.dailyJournalEnabled") as? Bool ?? false
         projectFocus = defaults.string(forKey: "jarvis.projectFocus") ?? "Jarvis"

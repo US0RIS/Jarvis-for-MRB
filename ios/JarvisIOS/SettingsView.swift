@@ -101,6 +101,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Mission Control") {
+                    Toggle("Enable foreground Mission Control", isOn: $settings.missionControlEnabled)
+                    Text("Off by default. Mission Control independently requires enabled Guardian and high-accuracy opted-in phone GPS. In Physical, enroll one exact primary Calendar appointment, see source-linked trajectory evidence and authorize one exact Maps launch. Two separate accurate GPS fixes can record proximity-based arrival; this is not proof of attending the meeting. The phone stores bounded mission receipts in device-only Keychain; only Apple MapKit receives the route origin/destination. No email or other third-party actions are authorized by this switch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Counterfactual Guardian") {
                     Toggle("Counterfactual Guardian: departures + enrolled goals", isOn: $settings.guardianEnabled)
                     Text("Off by default. While Jarvis is foregrounded, Guardian checks your primary Google Calendar and fresh opted-in iPhone GPS against Apple MapKit driving ETAs. Unknown provider/location data is never an all-clear. Apple receives the route origin/destination; Jarvis's PC does not store a new GPS trail. A single exact event/time/location Maps launch requires separate authorization. You can also individually enroll explicit user-goal deadlines in Physical: the Windows monitor may interrupt only while fresh foreground-phone consent exists and you are not driving, in a meeting or speaking. No messages are sent or broad tool authority granted.")

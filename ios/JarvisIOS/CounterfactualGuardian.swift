@@ -437,7 +437,8 @@ final class CounterfactualGuardianController: ObservableObject {
     }
 
     func stageETA(for id: String) {
-        guard let candidate = trajectories.first(where: { $0.id == id }) else { return }
+        guard appModel.settings.guardianEnabled,
+              let candidate = trajectories.first(where: { $0.id == id }) else { return }
         let arrival = candidate.estimatedArrival.formatted(date: .omitted, time: .shortened)
         stagedMessage = candidate.predictedLateMinutes > 0
             ? "I may be late for \(candidate.title). Current driving directions estimate my arrival around \(arrival)."
@@ -454,7 +455,8 @@ final class CounterfactualGuardianController: ObservableObject {
 
     @discardableResult
     func startDirections(for id: String, automatically: Bool = false) -> Bool {
-        guard let candidate = trajectories.first(where: { $0.id == id }),
+        guard appModel.settings.guardianEnabled,
+              let candidate = trajectories.first(where: { $0.id == id }),
               let destination = destinationByRisk[id],
               (0...90).contains(Date().timeIntervalSince(candidate.checkedAt)),
               candidate.startsAt > Date(),

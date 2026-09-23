@@ -29,6 +29,14 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var screenExpiresAt: Date?
     @Published private(set) var publicWatches: [ExternalWatchSummary] = []
     @Published private(set) var watchStatus = "No place watch enrolled from this screen."
+    @Published var conductorNodeID = "windows"
+    @Published private(set) var conductorSelectedApps: [String] = []
+    @Published var conductorShowScreen = false
+    @Published private(set) var conductorMission: ConductorWorkstationMission?
+    @Published private(set) var conductorStatus = "Select one device and up to three exact apps. Speech only requests preparation, not authority."
+    @Published private(set) var conductorBusy = false
+    private var conductorOneUseGrant: String?
+    private var conductorLastPreparedID: String?
 
     // RAM-only until the user explicitly enrolls a three-hour external watch.
     private var placeCoordinate: CLLocationCoordinate2D?
@@ -283,6 +291,172 @@ final class RealityMeshController: ObservableObject {
         }
     }
 
+    static func conductorApps(for nodeID: String) -> [String] {
+        nodeID == "windows"
+            ? ["Notepad", "Calculator", "File Explorer", "Paint"]
+            : ["Safari", "Notes", "Calendar", "Preview", "Finder"]
+    }
+
+    func selectConductorNode(_ nodeID: String) {
+        guard !conductorBusy, conductorMission == nil,
+              ["windows", "macbook", "macmini"].contains(nodeID) else { return }
+        conductorNodeID = nodeID
+        conductorSelectedApps = []
+        conductorShowScreen = false
+    }
+
+    func toggleConductorApp(_ app: String) {
+        guard !conductorBusy, conductorMission == nil,
+              Self.conductorApps(for: conductorNodeID).contains(app) else { return }
+        if let at = conductorSelectedApps.firstIndex(of: app) {
+            conductorSelectedApps.remove(at: at)
+        } else if conductorSelectedApps.count < 3 {
+            conductorSelectedApps.append(app)
+        }
+    }
+
+    func requestWorkstationPreparation() -> String {
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled else {
+            return "Enable both Reality Mesh and Conductor in Settings, then open the Mesh tab."
+        }
+        return "Conductor is ready on the Mesh tab. Choose your exact computer and up to "
+            + "three apps, then review and explicitly approve the one-use workstation mission. "
+            + "I have not launched any applications or opened a private screen."
+    }
+
+    func stageConductor() async {
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+              UIApplication.shared.applicationState == .active, !conductorBusy,
+              conductorMission == nil,
+              !conductorSelectedApps.isEmpty,
+              conductorSelectedApps.count <= 3,
+              nodes.contains(where: {
+                  $0.id == conductorNodeID && $0.status == "online"
+                  && $0.capabilities["app_launch"] == "exact_user_tap_only"
+                  && (!conductorShowScreen ||
+                      $0.capabilities["screen"] == "session_opt_in")
+              }) else {
+            conductorStatus = "Check online devices and exact app/screen permissions. No mission launched."
+            return
+        }
+        conductorBusy = true
+        defer { conductorBusy = false }
+        do {
+            let planned = try await client.conductorPlanWorkstation(
+                nodeID: conductorNodeID, apps: conductorSelectedApps,
+                screen: conductorShowScreen
+            )
+            guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+                  UIApplication.shared.applicationState == .active,
+                  conductorNodeID == planned.nodeID,
+                  conductorSelectedApps == planned.apps,
+                  conductorShowScreen == planned.screenRequested,
+                  let grant = planned.oneUseGrant else {
+                _ = try? await client.conductorRevoke(id: planned.id)
+                conductorStatus = "Configuration changed; one-use mission draft revoked."
+                return
+            }
+            conductorMission = planned
+            conductorOneUseGrant = grant  // RAM only, never UserDefaults/logs
+            conductorLastPreparedID = planned.id
+            conductorStatus = "Review exact device and apps below. Nothing executed yet. "
+                + "One-use grant expires in two minutes."
+        } catch {
+            conductorStatus = "Unable to stage an exact-device Conductor mission. "
+                + "Check Windows JARVIS_CONDUCTOR_ENABLED=1 and node opt-ins."
+        }
+    }
+
+    func executeConductor() async {
+        guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+              UIApplication.shared.applicationState == .active, !conductorBusy,
+              let planned = conductorMission,
+              planned.status == "planned",
+              let grant = conductorOneUseGrant,
+              planned.nodeID == conductorNodeID,
+              planned.apps == conductorSelectedApps,
+              planned.screenRequested == conductorShowScreen else {
+            conductorStatus = "Mission expired, changed or no live exact approval remains."
+            return
+        }
+        // The SwiftUI confirmation button is the explicit user approval.
+        // Consume locally before network IO, even when response is lost.
+        conductorOneUseGrant = nil
+        conductorBusy = true
+        conductorStatus = "Exact mission authorized once. Checking node and applying bounded steps…"
+        defer { conductorBusy = false }
+        do {
+            let result = try await client.conductorExecuteWorkstation(
+                id: planned.id, grant: grant,
+                nodeID: planned.nodeID, apps: planned.apps
+            )
+            guard appModel.settings.meshEnabled, appModel.settings.conductorEnabled,
+                  UIApplication.shared.applicationState == .active else {
+                _ = try? await client.conductorRevoke(id: planned.id)
+                conductorStatus = "Phone moved out of authorized foreground; mission state must be checked."
+                return
+            }
+            conductorMission = result
+            conductorStatus = "Conductor: " + result.status
+                + ". Read each independent process receipt; accepted launch does not prove focus."
+            if result.status == "verified_apps" && result.screenRequested {
+                await refreshFabric()
+                await startScreen(nodeID: result.nodeID)
+                if activeNodeID == result.nodeID {
+                    await refreshScreen()
+                }
+                conductorStatus += screenData == nil
+                    ? " Private screen display unavailable/unverified."
+                    : " Fresh private view is available in Mesh; 2-minute expiry."
+            }
+        } catch {
+            conductorStatus = "Exact one-use mission request had no confirmed response. "
+                + "Do not press again: inspect status for an uncertain or partial effect."
+            await refreshConductorStatus()
+        }
+    }
+
+    func refreshConductorStatus() async {
+        guard let id = conductorLastPreparedID else {
+            conductorStatus = "No local Conductor mission ID. No outcome asserted."
+            return
+        }
+        do {
+            conductorMission = try await client.conductorStatus(id: id)
+            conductorStatus = "Server reports " + (conductorMission?.status ?? "unknown")
+                + ". This is persisted source evidence, not proof of desktop focus."
+        } catch {
+            conductorStatus = "Cannot retrieve exact mission receipt; result unknown."
+        }
+    }
+
+    func revokeConductor() async {
+        conductorOneUseGrant = nil
+        guard let id = conductorLastPreparedID else {
+            conductorMission = nil
+            return
+        }
+        do {
+            let result = try await client.conductorRevoke(id: id)
+            conductorMission = result
+            conductorStatus = "Conductor: " + result.status
+                + ". In-flight external actions cannot be rolled back."
+        } catch {
+            conductorMission = nil
+            conductorStatus = "Local mission grant cleared. Backend revoke unconfirmed; "
+                + "no automatic retry and grant expires in two minutes."
+        }
+    }
+
+    func resetConductorSelection() {
+        conductorOneUseGrant = nil
+        conductorMission = nil
+        conductorLastPreparedID = nil
+        conductorSelectedApps = []
+        conductorShowScreen = false
+        conductorStatus = "Select an exact device and new apps. Past side effects are not undone."
+    }
+
     func startScreen(nodeID: String) async {
         guard appModel.settings.meshEnabled, activeNodeID == nil,
               UIApplication.shared.applicationState == .active,
@@ -390,6 +564,11 @@ final class RealityMeshController: ObservableObject {
         placeCandidates = []
         candidateItems = [:]
         publicWatches = []
+        conductorOneUseGrant = nil
+        conductorSelectedApps = []
+        conductorMission = nil
+        conductorLastPreparedID = nil
+        conductorStatus = "Conductor disabled and local one-use grant discarded."
         screenData = nil
         appActionStatus = "No remote app action requested."
         placeName = ""

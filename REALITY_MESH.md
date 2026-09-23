@@ -56,7 +56,7 @@ If Windows desktop capture cannot access a real interactive screen, Jarvis repor
 
 ## Presence at any named place
 
-On **Mesh → Presence anywhere**, enter a specific place such as **Melbourne Airport, Victoria**. The iPhone uses an explicit MapKit lookup. If several candidates remain, it asks for a more precise name instead of inventing a location. After the user taps **Establish remote presence**, the iPhone sends that resolved coordinate to the authenticated Windows service, which delegates to its existing four-source public awareness adapter:
+On **Mesh → Presence anywhere**, enter a specific place such as **Melbourne Airport, Victoria**. The iPhone uses an explicit MapKit lookup. If several candidates remain, it offers up to six actual MapKit candidate names and placemark addresses; the user selects the exact place before the phone shares any coordinate with the Windows backend. A changed or stale query invalidates these choices. After the user taps **Establish remote presence**, the iPhone sends that resolved coordinate to the authenticated Windows service, which delegates to its existing four-source public awareness adapter:
 
 - **Caltrans:** official California highway camera catalog. A listed image is a periodically published still unless a separately valid stream URL exists. **No integrated Melbourne traffic-camera API** is claimed. VicTraffic is a public information website, not proof its video streams are available.
 - **Open-Meteo/CAMS:** coarse *modelled* air quality with model timestamp, global scope; not a local sensor.

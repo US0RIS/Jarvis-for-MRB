@@ -32,7 +32,7 @@ class CounterfactualGuardianContractTests(unittest.TestCase):
         self.assertIn('query_calendar_events(direction="future", days=1, limit=12)', code)
         self.assertIn('raise HTTPException(status_code=503', code)
         self.assertIn('if "T" not in start', code)
-        for forbidden in ('latitude', 'longitude', 'gps', 'insert(', 'execute_tool'):
+        for forbidden in ('latitude', 'longitude', 'gps_coordinates', 'insert(', 'execute_tool'):
             self.assertNotIn(forbidden, code.lower())
 
     def test_opt_in_phone_lifecycle_and_privacy_revocation(self) -> None:

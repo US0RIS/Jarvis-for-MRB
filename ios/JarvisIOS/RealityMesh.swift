@@ -968,7 +968,33 @@ private struct ConductorPanelView: View {
     @EnvironmentObject var mesh: RealityMeshController
     @State private var confirmConductorExecution = false
 
+    private var approvalMessage: String {
+        let screen = mesh.conductorShowScreen
+            ? ". Includes temporary private screen viewing."
+            : ". No screen viewing."
+        return "One exact device: \(mesh.conductorNodeID). Apps: "
+            + mesh.conductorSelectedApps.joined(separator: ", ")
+            + screen
+            + " No terminal, email, file transfer, weapon or general OS input."
+    }
+
     var body: some View {
+        conductorContent
+            .confirmationDialog(
+                "Approve exact workstation actions?",
+                isPresented: $confirmConductorExecution,
+                titleVisibility: .visible
+            ) {
+                Button("Run exactly these device and app actions once") {
+                    Task { await mesh.executeConductor() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(approvalMessage)
+            }
+    }
+
+    private var conductorContent: some View {
         VStack(alignment: .leading, spacing: 12) {
                 Text("Conductor • Prepare my workstation")
                     .font(.headline)
@@ -1100,22 +1126,6 @@ private struct ConductorPanelView: View {
                     }
                     .buttonStyle(.bordered)
                 }
-        }
-        .confirmationDialog(
-            "Approve exact workstation actions?",
-            isPresented: $confirmConductorExecution,
-            titleVisibility: .visible
-        ) {
-            Button("Run exactly these device and app actions once") {
-                Task { await mesh.executeConductor() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("One exact device: " + mesh.conductorNodeID
-                 + ". Apps: " + mesh.conductorSelectedApps.joined(separator: ", ")
-                 + (mesh.conductorShowScreen
-                    ? ". Includes temporary private screen viewing." : ". No screen viewing.")
-                 + " No terminal, email, file transfer, weapon or general OS input.")
         }
     }
 }

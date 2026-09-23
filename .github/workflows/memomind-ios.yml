@@ -45,6 +45,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_reality_mesh.py" -v
       - name: Verify Windows screen opt-in, transient capture and revocation
         run: python -m unittest discover -s tests -p "test_mesh_windows_screen.py" -v
+      - name: Verify Windows exact app actions, startup grant, policy and readback
+        run: python -m unittest discover -s tests -p "test_mesh_windows_apps.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback
         run: python -m unittest discover -s tests -p "test_explicit_meeting_actions.py" -v
       - name: Verify model-free research, briefs and safe read-only workflows

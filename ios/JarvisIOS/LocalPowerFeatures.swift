@@ -320,6 +320,7 @@ final class LocalPowerFeaturesController: ObservableObject {
         let localSensorContextEnabled: Bool
         let sensorOpportunitiesEnabled: Bool
         let weatherContextEnabled: Bool
+        let guardianEnabled: Bool
     }
 
     init(
@@ -899,7 +900,8 @@ final class LocalPowerFeaturesController: ObservableObject {
                 rollingAudioMemoryEnabled: appModel.settings.rollingAudioMemoryEnabled,
                 localSensorContextEnabled: appModel.settings.localSensorContextEnabled,
                 sensorOpportunitiesEnabled: appModel.settings.sensorOpportunitiesEnabled,
-                weatherContextEnabled: appModel.settings.weatherContextEnabled
+                weatherContextEnabled: appModel.settings.weatherContextEnabled,
+                guardianEnabled: appModel.settings.guardianEnabled
             )
         }
 
@@ -920,6 +922,7 @@ final class LocalPowerFeaturesController: ObservableObject {
             appModel.settings.rollingAudioMemoryEnabled = false
             appModel.settings.sensorOpportunitiesEnabled = false
             appModel.settings.weatherContextEnabled = false
+            appModel.settings.guardianEnabled = false
         }
     }
 
@@ -935,6 +938,7 @@ final class LocalPowerFeaturesController: ObservableObject {
         appModel.settings.localSensorContextEnabled = snapshot.localSensorContextEnabled
         appModel.settings.sensorOpportunitiesEnabled = snapshot.sensorOpportunitiesEnabled
         appModel.settings.weatherContextEnabled = snapshot.weatherContextEnabled
+        appModel.settings.guardianEnabled = snapshot.guardianEnabled
         savedModeState = nil
     }
 

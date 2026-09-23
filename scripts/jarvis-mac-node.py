@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from typing import Any
 import ipaddress
 
@@ -30,6 +31,7 @@ VERSION = 1
 MAX_SCREEN_BYTES = 4_000_000
 MAX_SESSION_SECONDS = 300
 MAX_REQUEST_BYTES = 2048
+_EXACT_APPS = ("Safari", "Notes", "Calendar", "Preview", "Finder")
 
 
 def utcnow() -> datetime:
@@ -42,7 +44,8 @@ def iso(now: datetime) -> str:
 
 class NodeState:
     def __init__(self, *, token: str, device_id: str, label: str,
-                 allow_screen: bool = False) -> None:
+                 allow_screen: bool = False,
+                 allow_app_launch: bool = False) -> None:
         if len(token) < 32:
             raise ValueError("Node bearer token must be at least 32 random characters.")
         if not device_id or not device_id.replace("-", "").replace("_", "").isalnum():
@@ -51,6 +54,8 @@ class NodeState:
         self.device_id = device_id[:48]
         self.label = label[:100]
         self.allow_screen = bool(allow_screen)
+        self.allow_app_launch = bool(allow_app_launch)
+        self.last_app_request_at = 0.0
         self.session_expiry: datetime | None = None
         self.lock = threading.RLock()
 
@@ -71,6 +76,45 @@ class NodeState:
     def end(self) -> None:
         with self.lock:
             self.session_expiry = None
+
+    def authorize_exact_app(self, name: str) -> None:
+        if name not in _EXACT_APPS:
+            raise ValueError("Application not in Jarvis's fixed Mac allowlist.")
+        if not self.allow_app_launch or platform.system() != "Darwin":
+            raise PermissionError("Mac was not started with explicit app-launch consent.")
+        with self.lock:
+            now = time.monotonic()
+            if now - self.last_app_request_at < 3:
+                raise RuntimeError("Mac app launch rate limited.")
+            # Reserve before the external side effect. Never retry automatically.
+            self.last_app_request_at = now
+
+
+def _launch_exact_app(name: str) -> dict[str, Any]:
+    if name not in _EXACT_APPS or platform.system() != "Darwin":
+        raise ValueError("Only fixed registered macOS applications are supported.")
+    try:
+        launched = subprocess.run(
+            ["/usr/bin/open", "-a", name],
+            capture_output=True, check=False, timeout=8
+        )
+        if launched.returncode != 0:
+            raise RuntimeError("macOS did not accept the exact app launch request.")
+        # Running-process observation is NOT proof of focus or a new window.
+        running = subprocess.run(
+            ["/usr/bin/pgrep", "-x", name],
+            capture_output=True, check=False, timeout=3
+        )
+        seen = running.returncode == 0
+        return {
+            "status": ("launch_accepted_process_observed"
+                       if seen else "launch_accepted_process_unverified"),
+            "app_name": name,
+            "process_observed": seen,
+            "source": "macOS /usr/bin/open and pgrep; no foreground-focus claim",
+        }
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("Exact app launch or process check unavailable.") from exc
 
 
 def _capture_screen() -> tuple[str, bytes]:
@@ -145,6 +189,11 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 "capabilities": {
                     "status": "read_only",
                     "screen": ("session_opt_in" if state.allow_screen else "disabled"),
+                    "app_launch": (
+                        "exact_user_tap_only"
+                        if state.allow_app_launch and platform.system() == "Darwin"
+                        else "disabled"
+                    ),
                     "remote_input": "not_implemented",
                     "clipboard": "not_implemented",
                     "file_transfer": "not_implemented",
@@ -186,7 +235,7 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             if not self._authorized():
                 return
-            if self.path != "/v1/session":
+            if self.path not in {"/v1/session", "/v1/app/open"}:
                 self._json(404, {"status": "not_found"})
                 return
             try:
@@ -194,6 +243,16 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 if not 1 <= length <= MAX_REQUEST_BYTES:
                     raise ValueError("Invalid request size.")
                 payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("JSON object required.")
+                if self.path == "/v1/app/open":
+                    name = payload.get("app_name")
+                    if not isinstance(name, str):
+                        raise ValueError("Exact application required.")
+                    state.authorize_exact_app(name)
+                    result = _launch_exact_app(name)
+                    self._json(200, {**result, "device_id": state.device_id})
+                    return
                 duration = payload.get("duration_seconds", 120)
                 if type(duration) is not int:
                     raise ValueError("Duration must be a number of seconds.")
@@ -201,9 +260,11 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 self._json(200, {"status": "active", "expires_at": expiry,
                                  "device_id": state.device_id})
             except (ValueError, TypeError, AttributeError):
-                self._json(422, {"status": "invalid_session_request"})
+                self._json(422, {"status": "invalid_session_or_app_request"})
             except PermissionError:
-                self._json(403, {"status": "mac_screen_opt_in_required"})
+                self._json(403, {"status": "mac_startup_opt_in_required"})
+            except RuntimeError:
+                self._json(503, {"status": "exact_app_action_unavailable_or_rate_limited"})
 
         def do_DELETE(self) -> None:
             if not self._authorized():
@@ -235,16 +296,20 @@ def main() -> None:
     parser.add_argument("--label", default="Jarvis Mac")
     parser.add_argument("--allow-screen", action="store_true",
                         help="Explicitly allow 15–300s phone-initiated screenshot sessions")
+    parser.add_argument("--allow-app-launch", action="store_true",
+                        help="Separately enable five fixed Mac app names by explicit phone tap")
     args = parser.parse_args()
     token = os.environ.get("JARVIS_MESH_NODE_TOKEN", "")
     if not 1 <= args.port <= 65535:
         parser.error("Invalid TCP port")
     state = NodeState(token=token, device_id=args.device_id, label=args.label,
-                      allow_screen=args.allow_screen)
+                      allow_screen=args.allow_screen,
+                      allow_app_launch=args.allow_app_launch)
     host = _bind_address(args.bind)
     server = ThreadingHTTPServer((host, args.port), handler_for(state))
     print(f"Jarvis Mac node {state.device_id}: listening on {host}:{args.port}; "
-          f"screen opt-in: {state.allow_screen}; Mac OS permissions still apply.",
+          f"screen opt-in: {state.allow_screen}; exact app launch opt-in: "
+          f"{state.allow_app_launch}; Mac OS permissions still apply.",
           flush=True)
     server.serve_forever()
 

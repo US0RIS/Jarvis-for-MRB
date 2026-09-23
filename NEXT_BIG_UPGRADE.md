@@ -1,9 +1,13 @@
-# Next big upgrade after Reality Mesh: Jarvis Conductor
+# Historical Conductor design — v1 implemented, Field Ops next
+
+**Source implementation status:** Conductor's exact-device workstation pack, independently opted-in fixed one-app voice path, hashed short-lived one-use grants, reservations before side effects, backend step ledger, separate observed process verification, optional iPad screen view and explicit revoke are implemented on `jarvis/memomind-prep`. See **[CONDUCTOR.md](CONDUCTOR.md)** for the authoritative executable v1 contract and real-device release limitations. This document preserves the earlier vision; its more general device-bound cryptographic approvals and multi-device workflows are **not** implemented. The next selected, **not yet implemented**, major upgrade is **[EDITH Field Ops](EDITH_FIELD_OPS.md)**.
+
 
 **Decision:** The next major development cycle is **Conductor**, a single cross-device,
 evidence-verified mission executor over the already built Reality Mesh and Mission
-Control. This document is a selected engineering direction; it does **not**
-describe a deployed generalized executor.
+Control. This section records the initial engineering direction; the narrow first
+workstation pack is now implemented in source, but a generalized executor
+is **not** deployed.
 
 ## Why not another isolated integration?
 

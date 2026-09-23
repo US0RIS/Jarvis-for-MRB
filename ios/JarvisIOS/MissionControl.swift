@@ -277,6 +277,12 @@ final class JarvisMissionControl: ObservableObject {
         }
         do {
             let response = try await client.guardianCalendarExpectations()
+            guard appModel.settings.missionControlEnabled,
+                  appModel.settings.guardianEnabled else {
+                calendarCandidates = []
+                status = "Mission Control paused during the calendar read."
+                return
+            }
             guard let checked = Self.parse(response.checkedAt),
                   abs(Date().timeIntervalSince(checked)) <= 120 else {
                 status = "Calendar response timestamp unavailable or stale."
@@ -364,6 +370,9 @@ final class JarvisMissionControl: ObservableObject {
               UIApplication.shared.applicationState == .active else { return }
         isChecking = true
         lastPoll = Date()
+        // Do not reuse an old route or resolved place if any provider becomes
+        // unavailable during this pass; fail closed for physical actions.
+        destinations.removeAll()
         defer { isChecking = false }
         let live: GuardianCalendarResponse
         do {

@@ -382,16 +382,18 @@ final class JarvisMissionControl: ObservableObject {
             let exact = live.events.first {
                 $0.id == mission.calendarID
             }
-            if let exact, Self.parse(exact.start) != mission.startsAt
-                || exact?.location != nil && exact?.location != mission.literalDestination {
-                mission.phase = .reviewRequired
-                mission.status = "Calendar time or location changed. No automatic actions until the mission is replaced."
-                append(evidence("Primary Google Calendar", "source_changed",
-                                "Exact enrolled destination or start no longer matches the live event.",
-                                verified: true), to: &mission)
-                updated[index] = mission
-                grants.removeValue(forKey: mission.id)
-                continue
+            if let exact = exact {
+                if Self.parse(exact.start) != mission.startsAt
+                    || exact.location != mission.literalDestination {
+                    mission.phase = .reviewRequired
+                    mission.status = "Calendar time or location changed. No automatic actions until the mission is replaced."
+                    append(evidence("Primary Google Calendar", "source_changed",
+                                    "Exact enrolled destination or start no longer matches the live event.",
+                                    verified: true), to: &mission)
+                    updated[index] = mission
+                    grants.removeValue(forKey: mission.id)
+                    continue
+                }
             }
             guard exact != nil else {
                 mission.status = "Unknown: this event is missing from the bounded Calendar response, not proof it was cancelled."

@@ -127,6 +127,31 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    private static func meshIntent(_ rawText: String) -> (kind: String, place: String)? {
+        let cleaned = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+            .replacingOccurrences(
+                of: #"^jarvis[,:]?\\s+"#, with: "", options: .regularExpression
+            )
+        if [
+            "mesh status", "check the reality mesh",
+            "what devices are online", "show my connected devices",
+            "what computers can you see", "check my mac nodes",
+        ].contains(cleaned) { return ("nodes", "") }
+        for prefix in [
+            "establish remote presence at ", "establish presence at ",
+            "check public sources at ", "show me the world around ",
+        ] {
+            if cleaned.hasPrefix(prefix) {
+                let place = String(cleaned.dropFirst(prefix.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if (3...120).contains(place.count) { return ("place", place) }
+            }
+        }
+        return nil
+    }
+
     private static func missionIntent(_ rawText: String) -> String? {
         let phrase = rawText.lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -605,6 +630,26 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone Personal Notecard"
+            )
+            return
+        }
+
+        if let meshAction = Self.meshIntent(text) {
+            let reply: String
+            if meshAction.kind == "nodes" {
+                await realityMesh.refreshFabric()
+                reply = realityMesh.nodeStatus + " "
+                    + realityMesh.nodes.map { $0.label + ": " + $0.status }
+                        .joined(separator: "; ")
+            } else {
+                realityMesh.placeName = meshAction.place
+                await realityMesh.establishWorldPresence()
+                reply = realityMesh.worldStatus
+                    + " " + (realityMesh.place?.summary ?? "")
+            }
+            await finishLocalResponse(
+                reply, command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone Reality Mesh / live paired nodes and exact public place"
             )
             return
         }

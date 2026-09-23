@@ -55,6 +55,9 @@ class CounterfactualGuardianContractTests(unittest.TestCase):
         self.assertIn("await guardian.checkNow(manual: true)", self.model)
         self.assertIn("if appModel.settings.guardianEnabled && !manual {", self.swift)
         self.assertIn("CounterfactualGuardian.swift in Sources", project)
+        self.assertIn("self.grants.removeAll()", self.swift)
+        self.assertIn('status = "Guardian is off. Enable it before checking', self.swift)
+        self.assertIn("!appModel.settings.guardianEnabled", self.swift)
         self.assertIn('GroupBox("JARVIS • Counterfactual Guardian")', physical)
 
     def test_stale_unknown_ambiguous_or_virtual_evidence_never_makes_a_confident_risk(self) -> None:

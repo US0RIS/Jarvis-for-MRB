@@ -320,6 +320,10 @@ struct JarvisPhysicalHubView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                GroupBox("JARVIS • Mission Control") {
+                    JarvisMissionBoard()
+                }
+
                 GroupBox("JARVIS • Counterfactual Guardian") {
                     CounterfactualGuardianView()
                 }

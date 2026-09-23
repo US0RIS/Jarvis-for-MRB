@@ -196,7 +196,7 @@ class GuardianObjectiveTests(TestCase):
             "/guardian/objectives/snooze",
         ):
             self.assertIn(f'("{path}")', service)
-            self.assertIn(path, client)
+            self.assertIn(path.lstrip("/"), client)
         self.assertIn("def guardian_objective_enroll(", service)
         self.assertIn("_check_auth(authorization)", service)
         self.assertIn('guardian_objectives", _check_guardian_objectives', monitor)

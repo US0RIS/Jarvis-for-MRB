@@ -188,6 +188,16 @@ final class JarvisMissionControl: ObservableObject {
                 "video call", "online", "dial-in"].contains(where: location.contains)
     }
 
+    private static func ambiguousAlias(_ raw: String) -> Bool {
+        let text = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return [
+            "home", "my home", "my house", "house",
+            "work", "my work", "office", "my office",
+            "school", "my school", "classroom",
+            "meeting room", "conference room", "tbd", "to be determined",
+        ].contains(text)
+    }
+
     private func accurateLocation() -> CLLocation? {
         guard appModel.settings.localSensorContextEnabled,
               let sensor = frontend?.sensors,
@@ -206,7 +216,7 @@ final class JarvisMissionControl: ObservableObject {
     }
 
     private func resolveDestination(_ raw: String, near origin: CLLocation) async throws -> MKMapItem? {
-        guard !Self.virtual(raw) else { return nil }
+        guard !Self.virtual(raw), !Self.ambiguousAlias(raw) else { return nil }
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = raw
         request.region = MKCoordinateRegion(
@@ -291,6 +301,7 @@ final class JarvisMissionControl: ObservableObject {
             let now = Date()
             calendarCandidates = response.events.filter {
                 !$0.id.isEmpty && !Self.virtual($0.location)
+                    && !Self.ambiguousAlias($0.location)
                     && Self.parse($0.start).map {
                         (300...86400).contains($0.timeIntervalSince(now))
                     } == true
@@ -316,7 +327,8 @@ final class JarvisMissionControl: ObservableObject {
                 && $0.location == event.location
         }), let start = Self.parse(event.start),
               (300...86400).contains(start.timeIntervalSinceNow),
-              !Self.virtual(event.location), !event.location.isEmpty else {
+              !Self.virtual(event.location), !Self.ambiguousAlias(event.location),
+              !event.location.isEmpty else {
             return "Appointment source is no longer eligible. Reload the calendar."
         }
         guard missions.filter({ $0.eligibleForReview }).count < 5 else {

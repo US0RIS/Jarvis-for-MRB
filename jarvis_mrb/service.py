@@ -153,6 +153,12 @@ class PhysicalConditionsRequest(BaseModel):
     longitude: float
 
 
+class RealityGraphQuestionRequest(BaseModel):
+    latitude: float
+    longitude: float
+    question: str = ""
+
+
 class NearbyPublicCameraRequest(BaseModel):
     latitude: float
     longitude: float
@@ -717,6 +723,61 @@ def reality_mesh_place(
     from jarvis_mrb.reality_mesh import observe_place
     try:
         return observe_place(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+
+
+@app.post("/mesh/graph")
+def reality_graph_snapshot(
+    request: PhysicalConditionsRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph import build_place_graph
+    try:
+        return build_place_graph(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+@app.post("/mesh/graph/context")
+def reality_graph_context(
+    request: PhysicalConditionsRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph import build_place_graph, model_context
+    try:
+        return model_context(build_place_graph(request.latitude, request.longitude))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+@app.post("/mesh/graph/answer")
+def reality_graph_answer(
+    request: RealityGraphQuestionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph import build_place_graph, answer_place_question, model_context
+    try:
+        graph = build_place_graph(request.latitude, request.longitude)
+        direct = answer_place_question(graph, request.question)
+        if direct is not None:
+            return direct
+        return {
+            "answered_without_model": False,
+            "reason": "No deterministic rule matched; use the bounded semantic packet only if model reasoning is necessary.",
+            "model_context": model_context(graph),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
 

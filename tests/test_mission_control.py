@@ -25,6 +25,7 @@ class MissionControlContractTests(unittest.TestCase):
         self.assertIn('model.missionControl.attach(frontend: frontend)', self.app)
         self.assertIn('appModel.missionControl.start()', self.app)
         self.assertIn('.environmentObject(appModel.missionControl)', self.app)
+        self.assertIn('Label("Missions", systemImage: "target")', self.app)
         self.assertIn('lazy var missionControl = JarvisMissionControl(appModel: self)', self.model)
         self.assertIn('if let missionAction = Self.missionIntent(text)', self.model)
         self.assertIn('await missionControl.enrollNextAppointment()', self.model)

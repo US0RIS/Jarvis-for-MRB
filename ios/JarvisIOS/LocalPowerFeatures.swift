@@ -323,6 +323,7 @@ final class LocalPowerFeaturesController: ObservableObject {
         let guardianEnabled: Bool
         let missionControlEnabled: Bool
         let meshEnabled: Bool
+        let conductorEnabled: Bool
     }
 
     init(
@@ -905,7 +906,8 @@ final class LocalPowerFeaturesController: ObservableObject {
                 weatherContextEnabled: appModel.settings.weatherContextEnabled,
                 guardianEnabled: appModel.settings.guardianEnabled,
                 missionControlEnabled: appModel.settings.missionControlEnabled,
-                meshEnabled: appModel.settings.meshEnabled
+                meshEnabled: appModel.settings.meshEnabled,
+                conductorEnabled: appModel.settings.conductorEnabled
             )
         }
 
@@ -929,6 +931,7 @@ final class LocalPowerFeaturesController: ObservableObject {
             appModel.settings.guardianEnabled = false
             appModel.settings.missionControlEnabled = false
             appModel.settings.meshEnabled = false
+            appModel.settings.conductorEnabled = false
             appModel.missionControl.clearNavigationGrants()
         }
     }
@@ -948,6 +951,7 @@ final class LocalPowerFeaturesController: ObservableObject {
         appModel.settings.guardianEnabled = snapshot.guardianEnabled
         appModel.settings.missionControlEnabled = snapshot.missionControlEnabled
         appModel.settings.meshEnabled = snapshot.meshEnabled
+        appModel.settings.conductorEnabled = snapshot.conductorEnabled
         savedModeState = nil
     }
 

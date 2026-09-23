@@ -208,7 +208,12 @@ class MeshCoordinatorTests(unittest.TestCase):
         self.assertIn("mesh.stopScreen()", ui)
         self.assertIn("UIApplication.shared.applicationState == .active", ui)
         self.assertIn("MKLocalSearch(request: request).start().mapItems", ui)
-        self.assertIn("self.exact", ui.lower().replace("self.exact", "self.exact")) if False else None
+        self.assertIn('watchSelectedPlace(kind: "airspace_region")', ui)
+        self.assertIn('watchSelectedPlace(kind: "usgs_earthquakes")', ui)
+        self.assertIn('expiresHours: 3', ui)
+        self.assertIn('await client.stopExternalWatch(id)', ui)
+        self.assertIn('expiresHours: Int = 24', api)
+        self.assertIn('"_check_mesh_auth(authorization)"'.strip('"'), (ROOT / "jarvis_mrb/service.py").read_text())
         self.assertIn('path: "mesh/screen/" + nodeID', api)
         self.assertIn('path: "mesh/place"', api)
         self.assertIn('No network scans', ui)

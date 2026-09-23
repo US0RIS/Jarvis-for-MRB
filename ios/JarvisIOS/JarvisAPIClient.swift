@@ -1,5 +1,15 @@
 import Foundation
 
+struct ConductorRecentWorkstations: Decodable {
+    let checkedAt: String
+    let missions: [ConductorWorkstationMission]
+
+    enum CodingKeys: String, CodingKey {
+        case missions
+        case checkedAt = "checked_at"
+    }
+}
+
 struct ConductorWorkstationMission: Decodable, Identifiable {
     struct Step: Decodable, Identifiable {
         let nodeID: String
@@ -622,6 +632,14 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(ConductorWorkstationMission.self, from: data)
+    }
+
+    func conductorRecent() async throws -> [ConductorWorkstationMission] {
+        let (data, response) = try await get(
+            path: "conductor/workstation/recent", timeout: 10
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ConductorRecentWorkstations.self, from: data).missions
     }
 
     func conductorStatus(id: String) async throws -> ConductorWorkstationMission {

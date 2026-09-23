@@ -110,6 +110,10 @@ struct SettingsView: View {
 
                 Section("Conductor / EDITH-style workstation actions") {
                     Toggle("Allow exact one-use workstation missions", isOn: $settings.conductorEnabled)
+                    Toggle("Allow exact spoken app actions on paired computers", isOn: $settings.exactVoiceAppActionsEnabled)
+                    Text("Independent default-off low-risk voice authority: saying 'Jarvis, open Safari on my MacBook Air' or 'Jarvis, open Notepad on my PC' can act without another tap only when Mesh, Conductor, this switch, the Windows backend and that host's exact-app startup opt-in are all enabled. Exactly one named registered app per phrase; Jarvis creates and consumes a fresh one-use server grant, then checks independent process evidence. A voice transcript does not establish who spoke. Do not enable around untrusted speakers. Commands for unknown apps, terminal, screen capture, messaging, locks, purchases or physical force do not inherit this permission.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("Off by default, independent of Reality Mesh. Also set JARVIS_CONDUCTOR_ENABLED=1 on the authenticated Windows backend and separately opt in to exact app actions on each target host. Saying 'prepare my workstation' only presents the workflow: on the Mesh tab inspect one named device and up to three exact app names, confirm one two-minute server grant, and inspect independently timestamped process observations. An opted-in private screen is requested only when specifically selected. Privacy mode and leaving the Mesh tab revoke outstanding mission authority; in-flight OS actions cannot be undone. This does not grant remote keyboard/mouse, unrestricted commands, purchases, messages, tracking people, or physical-force actions. A phone UI confirmation is not cryptographic device attestation; protect the Jarvis API bearer.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

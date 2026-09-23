@@ -570,8 +570,10 @@ struct JarvisAPIClient {
     }
 
     func realityMeshOpenMacApp(nodeID: String, appName: String) async throws -> RealityMeshAppLaunchReceipt {
-        guard ["macbook", "macmini"].contains(nodeID),
-              ["Safari", "Notes", "Calendar", "Preview", "Finder"].contains(appName)
+        let macApps = ["Safari", "Notes", "Calendar", "Preview", "Finder"]
+        let windowsApps = ["Notepad", "Calculator", "File Explorer", "Paint"]
+        guard (["macbook", "macmini"].contains(nodeID) && macApps.contains(appName))
+                || (nodeID == "windows" && windowsApps.contains(appName))
         else { throw JarvisAPIError.badResponse }
         let (data, response) = try await postData(
             path: "mesh/app/open", body: ["node_id": nodeID, "app_name": appName]

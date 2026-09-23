@@ -341,7 +341,7 @@ final class CounterfactualGuardianController: ObservableObject {
             status = "\(found.count) current departure risk(s). Apple MapKit driving ETA and event timing were checked on this iPhone."
         }
         pruneGrantsAndDismissals()
-        if appModel.settings.guardianEnabled {
+        if appModel.settings.guardianEnabled && !manual {
             for candidate in found {
                 if dismissed[candidate.id].map({ $0 > Date() }) == true { continue }
                 if hasGrant(for: candidate), !appModel.isSending,
@@ -417,7 +417,7 @@ final class CounterfactualGuardianController: ObservableObject {
         let arrival = candidate.estimatedArrival.formatted(date: .omitted, time: .shortened)
         stagedMessage = candidate.predictedLateMinutes > 0
             ? "I may be late for \(candidate.title). Current driving directions estimate my arrival around \(arrival)."
-            : "Traffic looks tight for \(candidate.title). I may arrive close to the start."
+            : "Travel time looks tight for \(candidate.title). I may arrive close to the start."
         // A local draft only. No recipient, email account or messaging app is
         // selected; nothing is sent or written to the Windows backend.
     }

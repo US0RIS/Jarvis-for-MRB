@@ -2,7 +2,7 @@
 
 ## Implemented first execution pack: make the calendar appointment
 
-The first **actual runtime** is built into the iPhone Jarvis app at **Physical → Mission Control**. It is default-off and requires independently enabled Counterfactual Guardian, motion and location context, foreground phone access, and an authenticated existing Jarvis backend with primary Google Calendar access. It operates with no camera and no MemoMind SDK.
+The first **actual runtime** is built into the iPhone Jarvis app in the **Missions tab** (also at Physical → Mission Control). It is default-off and requires independently enabled Counterfactual Guardian, motion and location context, foreground phone access, and an authenticated existing Jarvis backend with primary Google Calendar access. It operates with no camera and no MemoMind SDK.
 
 **User loop:**
 1. Enable Mission Control (the user separately controls Guardian and location consent).

@@ -14,7 +14,7 @@ Actual reversible action path: after discovering Apple Home, the user may indivi
 
 Configuration: Physical → Ambient presence → Settings. Independently enable Proactive microphone + sensor opportunities, Motion / travel context, Sound Recognition for acoustic triggers, and optional weather/Health sources. Discover Apple Home on the Physical tab; enroll each permitted light. Geofenced home coordinates/radius must be configured. Do not interpret a sound label as proof of a visitor. The ability to use a future MemoMind HUD/audio stream still requires the actual official SDK and physical hardware.
 
-The next milestone is **[Counterfactual Guardian](COUNTERFACTUAL_GUARDIAN.md)**: detect an impending missed objective from expected vs observed trajectories and choose a minimally intrusive, explicitly authorized intervention. This is a design, not a claim that Jarvis now predicts arbitrary future events.
+**[Counterfactual Guardian](COUNTERFACTUAL_GUARDIAN.md) first slice now exists in source.** When independently enabled, the foreground iPhone checks up to three upcoming timed primary-Google-Calendar destinations against fresh accurate iPhone GPS and actual Apple MapKit driving routes. It alerts if travel time plus a stated five-minute buffer threatens the start time; failure to resolve a source produces an unknown status, not an invented all-clear. The user can open Apple Maps manually, enroll a one-use event/time/location-bound automatic Maps handoff, or stage a strictly local unsent ETA draft. Receipts are retained in the iPhone Keychain and distinguish handoff accepted from arrival verified. This is *not* generalized prediction, an always-on background process, or authority to send messages.
 
 ---
 

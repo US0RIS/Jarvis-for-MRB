@@ -108,7 +108,7 @@
 		10000000000000000000001E /* HomeEnvironmentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeEnvironmentController.swift; sourceTree = "<group>"; };
 		10000000000000000000001F /* CounterfactualGuardian.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CounterfactualGuardian.swift; sourceTree = "<group>"; };
 		100000000000000000000020 /* MissionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionControl.swift; sourceTree = "<group>"; };
-		100000000000000000000021 /* RealityMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealityMesh.swift; sourceTree = "<group>"; }
+		100000000000000000000021 /* RealityMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealityMesh.swift; sourceTree = "<group>"; };
 		10000000000000000000001C /* MemoMindBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoMindBridge.swift; sourceTree = "<group>"; };
 		10000000000000000000001D /* JarvisPhysicalControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisPhysicalControlView.swift; sourceTree = "<group>"; };
 		10000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };

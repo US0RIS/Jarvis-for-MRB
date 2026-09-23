@@ -98,12 +98,26 @@ def update_state(patch: dict[str, Any]) -> dict[str, Any]:
     # In particular, never save raw GPS coordinates or a health series to
     # environment_state.json or record_environment_snapshot on every phone ping.
     sensor_snapshot = working_patch.pop("sensor_snapshot", None)
+    # Guardian consent is a heartbeat, not a durable preference or a location
+    # history. Absence/expiry prevents new autonomous deadline interruptions.
+    guardian_snapshot = working_patch.pop("guardian_snapshot", None)
 
     with _LOCK:
         state = _deep_merge(get_state(), working_patch)
         state["updated_at"] = datetime.now().astimezone().isoformat()
         APP_DIR.mkdir(parents=True, exist_ok=True)
         STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if isinstance(guardian_snapshot, dict):
+        try:
+            from jarvis_mrb.guardian_objectives import ingest_presence
+            ingest_presence(guardian_snapshot)
+        except Exception as exc:
+            try:
+                from jarvis_mrb.runtime_health import record_failure
+                record_failure("guardian_presence", exc)
+            except Exception:
+                pass
 
     if isinstance(sensor_snapshot, dict):
         try:

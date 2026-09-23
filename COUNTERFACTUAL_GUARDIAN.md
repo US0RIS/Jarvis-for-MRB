@@ -1,6 +1,6 @@
 # Next capability: Counterfactual Guardian — notice what has *not* happened yet
 
-**Status:** first operational slice implemented in source on `jarvis/memomind-prep`: opt-in local iPhone calendar-route anticipation, genuine Apple MapKit route estimates, evidence cards, explicit event-scoped one-use Maps grants, local unsent ETA drafts, and Keychain-protected handoff receipts. This is not yet a general future-state prediction engine and has not been validated on a physical phone or vendor glasses.
+**Status:** two complementary source-implemented paths: (1) opt-in local iPhone Calendar + fresh GPS + real MapKit departure rescue, exact one-use Maps grants, unsent ETA drafts and local Keychain receipts; (2) individually enrolled, explicit goal-deadline watches with structured current-world dependency evidence, quiet-aware warning budgets, bounded snooze/revocation and unsent local follow-up drafts. Neither has been physically accepted on an iPhone or MemoMind hardware; arbitrary objectives, acts and future states are not automatically inferred.
 
 ## The conceptual leap
 
@@ -21,6 +21,16 @@ The Guardian shows a source- and time-labelled warning for supported impending d
 **Interventions:** a visible **Start directions** control opens Apple Maps only after the user taps it. The user may separately **Allow one automatic Maps launch**, bound to the calendar event ID, its exact start and location, expiring by the start time or after two hours. An auto handoff consumes the authorization *before* attempting to open Maps and is vetoed for stale observations, app suspension, driving, active meetings or another active Jarvis route. The receipt reports whether Apple Maps accepted the handoff, **not** whether the trip started or arrival was achieved. **Prepare local ETA message** stages text in the iPhone only; copying it is a distinct tap, and no message/recipient is sent or selected. Event dismissals revoke that event's grant. Grants, dismissals and bounded handoff receipts are device-only Keychain records; the user can clear receipts.
 
 **Current scope:** driving-route calendar departure protection, not unsupervised general objective inference, calendar modifications, email transmission, arbitrary device control or clinical health intervention. Do not describe this as physically accepted until it has been installed and validated on the actual phone.
+
+## Second operational path: defend explicitly enrolled goals
+
+Jarvis's existing World Executive retains user-authored goals as structured active intentions, with literal deadline timestamps, recorded next actions and *currently pending* linked commitments. The new `jarvis_mrb/guardian_objectives.py` module provides a separately enrolled, durable deadline ledger. Under **Physical → JARVIS • Counterfactual Guardian → Guard my explicit goal deadlines**, tap **Load explicit goals and watches**, then **Guard this exact goal and deadline** for each goal you wish to protect. The Guardian toggle is off by default; merely discovering a goal or producing an LLM suggestion does not enroll it. A timezone-aware precise deadline and explicit goal provenance are mandatory. Updating a deadline invalidates the original watch until the user reenrolls it.
+
+The Windows monitor checks the exact objective and its dependencies against the current world model. Within the final hour before a watched deadline, it may surface a message that *completion is not recorded* or *linked dependency X remains pending*; **neither is a prediction that the goal cannot be completed**, and no inference is made from a missing attachment or a silent microphone. Watches expire after the deadline grace window and cease on revocation or when the goal is no longer active. One new objective interruption is allowed per monitor cycle, deduplicated, and bounded by both the existing proactive-monitoring preference and a fresh authenticated foreground iPhone consent heartbeat. The heartbeat is stripped before backend persistence. It carries only consent, timestamp and whether the user is busy; it carries no GPS, biometrics, audio or content. Speaking, a meeting or driving defers rather than interrupts.
+
+The intervention broker currently exposes **review exact goal evidence**, **review the recorded next action**, and **prepare a local follow-up** if a structured pending dependency exists. Its execution authority is deliberately limited: no automatic Gmail/Calendar writes, arbitrary task execution, inferred HomeKit scope or auto-approved Agency plan. The iPhone can display and copy the suggested follow-up, not select a recipient or send it. The user can snooze any individual watch for one hour, revoke it, or turn off Guardian globally. The authenticated `/guardian/objectives` and `/guardian/objectives/evaluate` endpoints expose current provenance and prevent a background task from inventing a missing goal's state.
+
+This extends Jarvis from one calendar-triggered itinerary rule to **cross-source expectation management**: an explicit goal, an exact time bound and a different subsystem's pending dependency can create a useful warning even when there is no camera or sound event. Physical autonomy still requires each individual actuator's separate, bounded authorization (as in the existing enrolled HomeKit lights and one-use Maps launch); a general synthesized intervention executor remains excluded until hardware and authorization acceptance.
 
 ## Concrete first slice: don't miss the appointment
 
@@ -50,7 +60,7 @@ A second example: an explicitly enrolled daily check says the garage should be s
 
 1. Ship and physically test current iPhone acoustic + geofence + HomeKit light loop, including launch/relaunch, denied permissions, app suspension, mixed Bluetooth routes, rebound geofences, false doorbells and failed readback.
 2. Build a metadata-only read-only `expectation_evaluator` using already-authorized calendar queries + fresh opt-in phone location + actual MapKit route ETA, with a detailed reason/evidence card and no writes.
-3. Add typed, revocable `affordance_grants`: first navigation, local draft and enrolled lights; no generic HomeKit, arbitrary HTTP or iOS Shortcuts invocation.
+3. Keep typed, revocable `affordance_grants` across navigation, local drafts and enrolled lights; enforce their existing exact-target limits and test physical readback. No generic HomeKit, arbitrary HTTP or iOS Shortcuts invocation.
 4. Stage alternatives and verify outcomes. Measure prevented misses, false alarms per week, intervention utility, latency, and false claims of execution.
 5. Only then consider model-generated intervention hypotheses. A language model can expand *possibilities*, never evidence, authorization or physical capabilities.
 

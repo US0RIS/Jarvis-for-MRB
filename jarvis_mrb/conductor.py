@@ -182,6 +182,21 @@ def get(mission_id: str) -> dict[str, Any]:
     return _public(row)
 
 
+def recent(*, limit: int = 15) -> dict[str, Any]:
+    """No grant tokens; receipts survive phone restart and network failures."""
+    count = max(1, min(int(limit), 30))
+    with _database() as conn:
+        rows = conn.execute(
+            "SELECT * FROM workstation_missions ORDER BY created_at DESC LIMIT ?",
+            (count,),
+        ).fetchall()
+    return {
+        "checked_at": _iso(),
+        "missions": [_public(row) for row in rows],
+        "one_use_grants_returned": False,
+    }
+
+
 def revoke(mission_id: str) -> dict[str, Any]:
     # Revocation is checked before every step; in-flight external calls cannot
     # be rolled back, and that uncertainty is retained in the step evidence.

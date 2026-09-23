@@ -35,6 +35,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_sensor_opportunities.py" -v
       - name: Verify iPhone microphone/GPS/privacy and enrolled HomeKit actuator wiring
         run: python -m unittest discover -s tests -p "test_sensor_frontend_wiring.py" -v
+      - name: Verify Counterfactual Guardian evidence, exact grants and non-sending authority
+        run: python -m unittest discover -s tests -p "test_counterfactual_guardian.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback
         run: python -m unittest discover -s tests -p "test_explicit_meeting_actions.py" -v
       - name: Verify model-free research, briefs and safe read-only workflows

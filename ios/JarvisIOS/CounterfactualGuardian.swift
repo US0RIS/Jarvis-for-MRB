@@ -125,6 +125,18 @@ final class CounterfactualGuardianController: ObservableObject {
         loopTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled && self.started {
+                if !self.appModel.settings.guardianEnabled {
+                    // Off (including Privacy mode) means no latent automatic
+                    // grant survives a later re-enable.
+                    if !self.grants.isEmpty {
+                        self.grants.removeAll()
+                        self.persistGrants()
+                    }
+                    self.trajectories = []
+                    self.destinationByRisk = [:]
+                    self.stagedMessage = ""
+                    self.status = "Off — enable Counterfactual Guardian under Settings."
+                }
                 if self.appModel.settings.guardianEnabled,
                    self.appModel.settings.localSensorContextEnabled,
                    UIApplication.shared.applicationState == .active,
@@ -233,7 +245,10 @@ final class CounterfactualGuardianController: ObservableObject {
 
     func checkNow(manual: Bool = true) async {
         guard !isChecking else { return }
-        guard manual || appModel.settings.guardianEnabled else { return }
+        guard appModel.settings.guardianEnabled else {
+            status = "Guardian is off. Enable it before checking your calendar or location."
+            return
+        }
         guard UIApplication.shared.applicationState == .active else {
             status = "Guardian cannot check while the app is suspended."
             return
@@ -333,7 +348,7 @@ final class CounterfactualGuardianController: ObservableObject {
         // A route/calendar request can outlive an iOS foreground session or
         // explicit consent. Never fire an interruption from a stale session.
         guard UIApplication.shared.applicationState == .active,
-              manual || appModel.settings.guardianEnabled else {
+              appModel.settings.guardianEnabled else {
             trajectories = []
             destinationByRisk = [:]
             status = "Guardian paused — app inactive or automatic monitoring disabled."
@@ -526,7 +541,8 @@ struct CounterfactualGuardianView: View {
                 Task { await guardian.checkNow() }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(guardian.isChecking || !appModel.settings.localSensorContextEnabled)
+            .disabled(guardian.isChecking || !appModel.settings.guardianEnabled
+                      || !appModel.settings.localSensorContextEnabled)
             Text(guardian.status)
                 .font(.footnote)
                 .accessibilityIdentifier("guardian-evidence-status")

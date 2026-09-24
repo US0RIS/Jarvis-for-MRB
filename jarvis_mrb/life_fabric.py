@@ -445,7 +445,9 @@ def readiness(*, db_path: Path | None = None,
     finally:
         con.close()
     tasks = {row["id"]: row for row in records if row["kind"] == "task"}
-    satisfied = {"user_confirmed", "provider_reported", "sensor_observed", "document_supported"}
+    # A merchant "delivered" event or document alone is NOT proof that the
+    # user has received/fulfilled the intended outcome.
+    satisfied = {"user_confirmed", "sensor_observed"}
     due: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     for item in tasks.values():
@@ -533,14 +535,16 @@ def resume(handoff_id: str, *, db_path: Path | None = None) -> dict[str, Any]:
             raise ValueError("Not a handoff record.")
         handoff_row = _entry(con, record)
         linked = []
+        unavailable = []
         for ident in handoff_row["data"].get("linked_ids", []):
             try:
                 linked.append(_entry(con, _get(con, ident)))
             except ValueError:
-                linked.append({"id": ident, "availability": "retired_or_missing"})
+                unavailable.append(ident)
         return {
             "schema": "jarvis.life_fabric.handoff.v1",
             "handoff": handoff_row, "linked_records": linked,
+            "missing_link_ids": unavailable,
             "external_actions": 0,
             "note": "A restore packet, not a remote app or physical action.",
         }
@@ -596,6 +600,8 @@ def friction_candidates(*, db_path: Path | None = None,
     cutoff = (_now(now) - timedelta(days=30)).isoformat()
     con = _db(_path(db_path))
     try:
+        con.execute("DELETE FROM friction WHERE occurred_at<?", (cutoff,))
+        con.commit()
         rows = con.execute(
             """SELECT friction_key,MAX(label) AS label,COUNT(*) AS occurrences,
                       COUNT(DISTINCT substr(occurred_at,1,10)) AS days
@@ -609,6 +615,42 @@ def friction_candidates(*, db_path: Path | None = None,
             "basis": "explicitly logged incidents on at least three distinct UTC days within 30 days",
             "automation_authority": "none",
         }
+    finally:
+        con.close()
+
+
+def forget(record_id: str, *, expected_version: int,
+           db_path: Path | None = None) -> dict[str, Any]:
+    """Explicit permanent deletion of one record and its evidence receipts.
+
+    Other tasks referring to this id will become blocked/unknown, never done.
+    Filesystem backups/snapshots remain outside this SQLite deletion contract.
+    """
+    con = _db(_path(db_path))
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row = _get(con, record_id)
+        if row["version"] != expected_version:
+            raise ValueError("Stale record version; refresh before forgetting.")
+        receipts = con.execute(
+            "DELETE FROM receipts WHERE record_id=?", (record_id,),
+        ).rowcount
+        con.execute("DELETE FROM records WHERE id=?", (record_id,))
+        con.commit()
+        return {"deleted_records": 1, "deleted_receipts": receipts,
+                "other_dependencies_not_modified": True}
+    finally:
+        con.close()
+
+
+def clear_friction(*, db_path: Path | None = None) -> dict[str, Any]:
+    """Explicitly forget the Life Fabric Friction Observatory history."""
+    con = _db(_path(db_path))
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        count = con.execute("DELETE FROM friction").rowcount
+        con.commit()
+        return {"deleted_friction_events": count}
     finally:
         con.close()
 

@@ -189,7 +189,7 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
     newest: dict[str, dict[str, Any]] = {}
 
     ttl_by_kind = {"courier": 180.0, "traffic": 300.0, "camera": 180.0, "order": 300.0, "device": 60.0}
-    for idx, row in enumerate(observations[:100]):
+    for idx, row in enumerate(observations[-100:]):
         if not isinstance(row, dict):
             continue
         # A shared source bundle must not let observations explicitly tied to
@@ -216,6 +216,32 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
     courier = newest.get("courier")
     traffic = newest.get("traffic")
     camera = newest.get("camera")
+
+    # Create real typed graph edges. A route relation requires an explicit
+    # matching route ID; a nearby camera alone cannot establish coverage of
+    # this courier, and an unmatched source cannot explain a delay.
+    for kind, row in (("order", order), ("courier", courier), ("traffic", traffic), ("camera", camera)):
+        if not row:
+            continue
+        entity_id = f"{kind}:{mid}"
+        if kind == "camera":
+            entity_id = "camera:" + _safe_id(row.get("id") or row.get("source"))
+        entities.append(Entity(entity_id, kind, kind.capitalize() + " observation", {
+            "source": str(row.get("source") or "unknown")[:80],
+            "observed_at": str(row.get("observed_at") or ""),
+            "source_attestation": str(row.get("source_attestation") or "not_verified")[:60],
+        }))
+        relations.append(Relation(entity_id, "observed_for", "mission:" + mid,
+                                  (row["_evidence_id"],)))
+        rid = row.get("route_id")
+        if kind in {"courier", "traffic", "camera"} and isinstance(rid, str) and rid:
+            route_id = "route:" + _safe_id(rid)
+            if not any(item.id == route_id for item in entities):
+                entities.append(Entity(route_id, "route", "Declared route", {
+                    "provider_route_id": rid[:96], "geometry_verified": False,
+                }))
+            relations.append(Relation(entity_id, "reports_on_route", route_id,
+                                      (row["_evidence_id"],)))
 
     if order:
         status = str(order.get("status") or "unknown")[:60]
@@ -262,18 +288,20 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
     cause_evidence: list[str] = []
     courier_route = str(courier.get("route_id") or "") if courier else ""
     traffic_route = str(traffic.get("route_id") or "") if traffic else ""
-    # An explicit route mismatch cannot corroborate this courier's delay.
-    same_route = not (courier_route or traffic_route) or (
-        bool(courier_route) and courier_route == traffic_route
-    )
+    # Require a declared exact route join. Without it, observations are
+    # contemporaneous but not proven to describe the same journey.
+    same_route = bool(courier_route) and courier_route == traffic_route
     if same_route and "fact:courier_stationary" in fact_map and ("fact:route_delay_seconds" in fact_map or "fact:route_disruption" in fact_map):
         cause_evidence.extend(fact_map["fact:courier_stationary"].evidence_ids)
-        for key in ("fact:route_delay_seconds", "fact:route_disruption", "fact:camera_route_congestion"):
+        for key in ("fact:route_delay_seconds", "fact:route_disruption"):
             if key in fact_map:
                 cause_evidence.extend(fact_map[key].evidence_ids)
-        facts.append(DerivedFact("fact:delay_correlation", "stationary_plus_route_disruption", "route_disruption_consistent_with_delay",
+        camera_route = str(camera.get("route_id") or "") if camera else ""
+        if camera_route == courier_route and "fact:camera_route_congestion" in fact_map:
+            cause_evidence.extend(fact_map["fact:camera_route_congestion"].evidence_ids)
+        facts.append(DerivedFact("fact:delay_correlation", "stationary_plus_matching_route_disruption", "route_disruption_consistent_with_delay",
             "corroborated", tuple(dict.fromkeys(cause_evidence)),
-            "Independent fresh courier and route evidence are consistent with a traffic-related delay; this is correlation, not proof of cause."))
+            "Fresh courier and traffic observations declare the same route and are consistent with a traffic-related delay; this is correlation, not proof of cause or verified provider authenticity."))
 
     if deadline and now >= deadline and not any(f.id == "fact:provider_reports_delivered" for f in facts):
         facts.append(DerivedFact("fact:deadline_passed_without_delivery_confirmation", "deadline_state_machine", True, "high", tuple(),

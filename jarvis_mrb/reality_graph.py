@@ -317,6 +317,91 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
     }
 
 
+def build_fabric_graph(
+    node_snapshot: dict[str, Any] | None = None,
+    registry: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Live paired-node state plus non-live public-source registry.
+
+    Node capability is descriptive, not authorization. Unconfigured/offline
+    nodes and merely registered feeds never become observed live resources.
+    """
+    if node_snapshot is None or registry is None:
+        from jarvis_mrb import reality_mesh
+        if node_snapshot is None:
+            node_snapshot = reality_mesh.nodes()
+        if registry is None:
+            registry = reality_mesh.public_sources()
+    now = now or datetime.now(timezone.utc)
+    entities: list[Entity] = []
+    relations: list[Relation] = []
+    evidence: list[Evidence] = []
+    facts: list[DerivedFact] = []
+    online: list[str] = []
+    for idx, row in enumerate((node_snapshot.get("nodes") or [])[:10]):
+        if not isinstance(row, dict):
+            continue
+        nid = str(row.get("id") or "")
+        if nid not in {"windows", "macbook", "macmini"}:
+            continue
+        node_id = "device:" + nid
+        observed = str(row.get("observed_at") or row.get("checked_at") or "")
+        age = _age_seconds(observed, now=now)
+        fresh = _freshness(age, 60)
+        status = str(row.get("status") or "unknown")
+        verified_online = status == "online" and fresh == "fresh"
+        evid = f"ev:device:{_safe_id(nid)}:{idx}"
+        evidence.append(Evidence(evid, "paired_device_health", observed, age, fresh,
+            "Explicit node health status: " + status[:40] +
+            "; capability flags do not grant action authority."))
+        entities.append(Entity(node_id, "paired_device", str(row.get("label") or nid)[:100], {
+            "reported_status": status[:40],
+            "fresh_authenticated_health": verified_online and nid != "windows",
+            "local_host_health": verified_online and nid == "windows",
+            "screen_session_active": row.get("screen_session_active") is True,
+        }))
+        if verified_online:
+            online.append(nid)
+        capabilities = row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {}
+        for name in ("context", "screen", "app_launch", "remote_input", "file_transfer"):
+            state = str(capabilities.get(name) or "unknown")[:64]
+            cap_id = "capability:" + _safe_id(name)
+            if not any(e.id == cap_id for e in entities):
+                entities.append(Entity(cap_id, "capability", name.replace("_", " "), {}))
+            relations.append(Relation(node_id, "declares_capability", cap_id, (evid,)))
+            if verified_online and state in {"read_only", "session_opt_in", "exact_user_tap_only"}:
+                facts.append(DerivedFact(f"fact:{nid}:{name}", "fresh_capability_flag",
+                    state, "observed_capability_not_authority", (evid,),
+                    "Node declares this capability; independent user/host permissions still apply."))
+
+    for idx, row in enumerate((registry.get("sources") or [])[:24]):
+        if not isinstance(row, dict):
+            continue
+        rid = _safe_id(row.get("id") or idx)
+        sid = "registered_source:" + rid
+        entities.append(Entity(sid, "public_source_registry_entry", str(row.get("label") or rid)[:100], {
+            "coverage": str(row.get("coverage") or "unknown")[:160],
+            "status": "registered_not_currently_observed",
+            "claim_live": False,
+        }))
+        relations.append(Relation(sid, "may_observe", "place:provider_coverage_not_verified", ()))
+    facts.append(DerivedFact("fact:fresh_online_device_ids", "fresh_paired_node_health",
+        online, "high", tuple(e.id for e in evidence if e.freshness == "fresh"),
+        "Only fresh nodes with explicitly reported online status are listed."))
+    return {
+        "schema": "jarvis.reality_graph.fabric.v1",
+        "generated_at": now.isoformat(), "model_calls": 0,
+        "action_authority": "none",
+        "entities": [asdict(e) for e in entities],
+        "relations": [asdict(r) for r in relations],
+        "evidence": [asdict(e) for e in evidence],
+        "derived_facts": [asdict(f) for f in facts],
+        "registered_public_sources_are_live": False,
+    }
+
+
 def model_context(graph: dict[str, Any], *, max_facts: int = 12, max_evidence: int = 12) -> dict[str, Any]:
     """Bounded facts-first semantic packet for exceptional model reasoning.
 

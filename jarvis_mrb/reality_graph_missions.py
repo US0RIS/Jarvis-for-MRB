@@ -268,3 +268,16 @@ def delete(mission_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM graph_missions WHERE id = ?", (mid,))
         db.commit()
     return {"mission_id": mid, "state": "deleted", "action_authority": "none"}
+
+
+def list_active() -> list[dict[str, Any]]:
+    """Small bounded catalogue for exact voice/status routing; no observations."""
+    _require_enabled()
+    with _LOCK, _db() as db:
+        rows = db.execute(
+            "SELECT id,goal,deadline,expires_at FROM graph_missions "
+            "WHERE state = 'active' AND expires_at > ? ORDER BY created_at DESC LIMIT ?",
+            (_utc().isoformat(), _MAX_MISSIONS),
+        ).fetchall()
+    return [{"id": r["id"], "goal": r["goal"], "deadline": r["deadline"],
+             "expires_at": r["expires_at"]} for r in rows]

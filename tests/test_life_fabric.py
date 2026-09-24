@@ -104,6 +104,29 @@ class LifeFabricTests(unittest.TestCase):
         self.assertEqual(life.list_records(db_path=self.path)["records"], [])
         self.assertEqual(len(life.list_records(db_path=self.path, active_only=False)["records"]), 1)
 
+    def test_forget_deletes_one_record_and_receipts_not_dependencies(self):
+        root = self.task("Initial task")
+        dependent = self.task("Follow-up", depends_on=[root["id"]])
+        life.receipt(
+            root["id"], expected_version=1, outcome="verified",
+            source_kind="user_confirmation", evidence_ref="User confirmed",
+            db_path=self.path
+        )
+        result = life.forget(root["id"], expected_version=2, db_path=self.path)
+        self.assertEqual(result["deleted_records"], 1)
+        self.assertEqual(result["deleted_receipts"], 1)
+        current = life.list_records(db_path=self.path)["records"]
+        self.assertEqual([x["id"] for x in current], [dependent["id"]])
+        self.assertEqual(life.readiness(db_path=self.path, now=NOW)["blocked"][0]["id"], dependent["id"])
+        with self.assertRaises(ValueError):
+            life.forget(root["id"], expected_version=2, db_path=self.path)
+
+    def test_friction_history_can_be_cleared(self):
+        life.friction("Missed the bus", db_path=self.path, now=NOW)
+        self.assertEqual(life.clear_friction(db_path=self.path)["deleted_friction_events"], 1)
+        self.assertEqual(life.clear_friction(db_path=self.path)["deleted_friction_events"], 0)
+        self.assertEqual(life.friction_candidates(db_path=self.path, now=NOW)["candidates"], [])
+
     def test_only_actual_dependencies_allowed(self):
         with self.assertRaisesRegex(ValueError, "not found"):
             self.task(depends_on=["not-a-task"])
@@ -219,6 +242,7 @@ class LifeFabricTests(unittest.TestCase):
             "/life/capabilities", "/life/records/create", "/life/records",
             "/life/records/receipt", "/life/records/retire",
             "/life/readiness", "/life/transition", "/life/handoff",
+            "/life/records/forget", "/life/friction/clear",
             "/life/handoff/resume", "/life/friction/log",
             "/life/friction/candidates", "/life/what-if/minutes",
         ):
@@ -227,6 +251,7 @@ class LifeFabricTests(unittest.TestCase):
             "life_capabilities", "life_record_create", "life_records",
             "life_record_receipt", "life_record_retire", "life_readiness",
             "life_transition", "life_handoff", "life_handoff_resume",
+            "life_record_forget", "life_friction_clear",
             "life_friction_log", "life_friction_candidates", "life_what_if_minutes",
         ):
             chunk = service.split("def " + name + "(", 1)[1].split("\n\n@app.", 1)[0]

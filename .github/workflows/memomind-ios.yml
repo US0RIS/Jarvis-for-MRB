@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - jarvis/memomind-prep
+      - jarvis/human-extension-v1
   pull_request:
     paths:
       - "ios/**"
@@ -53,6 +54,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_conductor.py" -v
       - name: Verify deterministic Reality Graph and model-offload boundaries
         run: python -m unittest discover -s tests -p "test_reality_graph.py" -v
+      - name: Verify Reality Lens sensing, explicit memory and privacy
+        run: python -m unittest discover -s tests -p "test_reality_lens.py" -v
       - name: Verify durable opt-in Reality Graph missions and no-model answers
         run: python -m unittest discover -s tests -p "test_reality_graph_missions.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback

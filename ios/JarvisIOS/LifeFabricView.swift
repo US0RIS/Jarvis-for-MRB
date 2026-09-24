@@ -295,8 +295,8 @@ struct LifeFabricView: View {
                      + "for a real life event. No purchases or outreach occur.")
                     .font(.caption)
                 Picker("Transition", selection: $transitionKind) {
-                    ForEach(transitions, id: \.0) { item in
-                        Text(item.1).tag(item.0)
+                    ForEach(transitions.indices, id: \.self) { index in
+                        Text(transitions[index].1).tag(transitions[index].0)
                     }
                 }
                 TextField("Name this event", text: $transitionTitle)

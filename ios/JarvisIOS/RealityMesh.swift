@@ -16,6 +16,9 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var nodes: [RealityMeshNodesResponse.Node] = []
     @Published private(set) var sources: [RealityMeshSourceRegistry.Source] = []
     @Published private(set) var place: PhysicalAwarenessResponse?
+    @Published private(set) var placeGraph: RealityGraphPlaceResponse?
+    @Published private(set) var placeGraphStatus = "No Reality Graph snapshot for this place."
+    @Published private(set) var isCheckingPlaceGraph = false
     @Published private(set) var worldStatus = "Name an exact place, then make a one-time public-world observation."
     @Published private(set) var placeCandidates: [MeshPlaceChoice] = []
     @Published private(set) var nodeStatus = "Check explicit devices; Jarvis never scans a network."
@@ -102,6 +105,8 @@ final class RealityMeshController: ObservableObject {
         isCheckingWorld = true
         defer { isCheckingWorld = false }
         place = nil
+        placeGraph = nil
+        placeGraphStatus = "No Reality Graph snapshot for this place."
         placeCoordinate = nil
         resolvedPlaceName = ""
         placeCandidates = []
@@ -194,6 +199,41 @@ final class RealityMeshController: ObservableObject {
                 + ". Unsupported or stale sources remain unknown, not a safety clearance."
         } catch {
             worldStatus = "Public provider lookup unavailable. No observations asserted."
+        }
+    }
+
+    func refreshPlaceGraph() async {
+        guard appModel.settings.meshEnabled, !isCheckingPlaceGraph,
+              UIApplication.shared.applicationState == .active,
+              place != nil, let coordinate = placeCoordinate else {
+            placeGraphStatus = "Select one exact observed place first; no graph lookup performed."
+            return
+        }
+        let selectedName = resolvedPlaceName
+        isCheckingPlaceGraph = true
+        placeGraphStatus = "Compiling current provider evidence without Qwen…"
+        defer { isCheckingPlaceGraph = false }
+        do {
+            let graph = try await client.realityGraphPlace(
+                latitude: coordinate.latitude, longitude: coordinate.longitude
+            )
+            guard appModel.settings.meshEnabled,
+                  UIApplication.shared.applicationState == .active,
+                  let current = placeCoordinate,
+                  current.latitude == coordinate.latitude,
+                  current.longitude == coordinate.longitude,
+                  selectedName == resolvedPlaceName else { return }
+            placeGraph = graph
+            let fresh = Set(graph.evidence.filter { $0.freshness == "fresh" }.map(\.id))
+            let supported = graph.derivedFacts.filter {
+                !$0.evidenceIDs.isEmpty && $0.evidenceIDs.allSatisfy { fresh.contains($0) }
+            }.count
+            placeGraphStatus = "\(supported) fresh evidence-backed fact(s); "
+                + "\(graph.modelCalls) model calls. Snapshot "
+                + graph.generatedAt + ". Unavailable sources remain unknown."
+        } catch {
+            placeGraph = nil
+            placeGraphStatus = "Graph lookup unavailable. No current facts inferred."
         }
     }
 
@@ -661,6 +701,8 @@ final class RealityMeshController: ObservableObject {
         nodes = []
         sources = []
         place = nil
+        placeGraph = nil
+        placeGraphStatus = "Reality Mesh off; graph cleared."
         placeCoordinate = nil
         resolvedPlaceName = ""
         pendingQuery = ""
@@ -867,6 +909,9 @@ struct RealityMeshView: View {
                         .padding(8)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
                     }
+                }
+                if mesh.place != nil {
+                    RealityGraphPlacePanelView()
                 }
                 Divider()
                 Text("Time-bounded watch at my selected place")
@@ -1126,6 +1171,55 @@ private struct ConductorPanelView: View {
                     }
                     .buttonStyle(.bordered)
                 }
+        }
+    }
+}
+
+
+private struct RealityGraphPlacePanelView: View {
+    @EnvironmentObject var appModel: JarvisAppModel
+    @EnvironmentObject var mesh: RealityMeshController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Reality Graph • model-free place facts")
+                .font(.headline)
+            Text("A fresh independent provider check for the exact selected place. "
+                 + "Catalog entries are not confirmed live video, and an absent alert "
+                 + "is not an all-hazards clearance.")
+                .font(.caption)
+            Button(mesh.isCheckingPlaceGraph ? "Compiling graph…" : "Compile Reality Graph") {
+                Task { await mesh.refreshPlaceGraph() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(mesh.isCheckingPlaceGraph || !appModel.settings.meshEnabled)
+            Text(mesh.placeGraphStatus)
+                .font(.caption)
+                .accessibilityIdentifier("mesh-place-graph-status")
+            if let graph = mesh.placeGraph {
+                let fresh = Set(graph.evidence.filter { $0.freshness == "fresh" }.map(\.id))
+                ForEach(graph.derivedFacts) { fact in
+                    let supported = fact.evidenceIDs.isEmpty
+                        || fact.evidenceIDs.allSatisfy { fresh.contains($0) }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(fact.id.replacingOccurrences(of: "fact:", with: "")
+                            .replacingOccurrences(of: "_", with: " ")
+                            + ": " + fact.value.display)
+                            .font(.subheadline.weight(.medium))
+                        Text((supported ? "" : "Historical/stale — not current. ")
+                             + fact.explanation)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(7)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                }
+                ForEach(graph.providerStates.keys.sorted(), id: \.self) { key in
+                    Text(key + " • " + (graph.providerStates[key] ?? "unknown"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 }

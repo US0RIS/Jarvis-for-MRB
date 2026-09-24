@@ -898,6 +898,21 @@ def reality_graph_stored_stop(
         _stored_graph_error(exc)
 
 
+@app.post("/mesh/graph/missions/delete")
+def reality_graph_stored_delete(
+    request: RealityGraphStoredRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import delete
+    try:
+        return delete(request.mission_id)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
 @app.post("/mesh/screen/begin")
 def reality_mesh_screen_begin(
     request: MeshNodeSessionRequest,

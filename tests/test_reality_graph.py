@@ -58,6 +58,26 @@ class RealityGraphTests(unittest.TestCase):
         self.assertNotIn("relations", packet)
         self.assertNotIn("cameras", packet)
 
+    def test_model_packet_excludes_stale_facts_and_keeps_required_evidence(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph({"id": "packet"}, [
+            {"kind": "courier", "source": "old", "route_id": "r",
+             "observed_at": "2026-09-23T04:00:00+00:00",
+             "moving": False, "stationary_seconds": 900},
+            {"kind": "courier", "source": "recent", "route_id": "r",
+             "observed_at": "2026-09-23T04:59:50+00:00",
+             "moving": False, "stationary_seconds": 300},
+        ], now=now)
+        packet = reality_graph.model_context(graph, max_evidence=1)
+        referenced = {ref for fact in packet["facts"] for ref in fact["evidence_ids"]}
+        available = {ev["id"] for ev in packet["evidence"]}
+        self.assertTrue(referenced.issubset(available))
+        self.assertEqual(1, len(packet["evidence"]))
+        self.assertEqual("recent", packet["evidence"][0]["source"])
+        self.assertIn("observed_at", packet["evidence"][0])
+        self.assertNotIn("old", str(packet))
+        self.assertEqual("not_verified", packet["source_attestation"])
+
     def test_partial_provider_state_is_uncertainty_not_all_clear(self):
         obs = {**OBS, "cameras": {"status": "unavailable", "cameras": []}}
         graph = reality_graph.build_place_graph(34.1, -118.2, obs)

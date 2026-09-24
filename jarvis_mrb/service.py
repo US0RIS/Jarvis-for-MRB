@@ -164,6 +164,22 @@ class RealityGraphMissionRequest(BaseModel):
     observations: list[dict[str, Any]]
     question: str = ""
 
+class RealityGraphCreateRequest(BaseModel):
+    goal: str
+    deadline: str | None = None
+    lifetime_hours: int = 24
+
+
+class RealityGraphAppendRequest(BaseModel):
+    mission_id: str
+    observations: list[dict[str, Any]]
+
+
+class RealityGraphStoredRequest(BaseModel):
+    mission_id: str
+    question: str = ""
+
+
 
 class NearbyPublicCameraRequest(BaseModel):
     latitude: float
@@ -809,6 +825,77 @@ def reality_graph_mission(
         "model_context": model_context(graph),
         "model_needed": bool(request.question),
     }
+
+
+def _stored_graph_error(exc: Exception) -> None:
+    from jarvis_mrb.reality_graph_missions import GraphUnavailable
+    if isinstance(exc, KeyError):
+        raise HTTPException(status_code=404, detail=str(exc)[:200]) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    if isinstance(exc, GraphUnavailable):
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+    raise exc
+
+
+@app.post("/mesh/graph/missions/create")
+def reality_graph_stored_create(
+    request: RealityGraphCreateRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import create
+    try:
+        return create(request.goal, deadline=request.deadline, lifetime_hours=request.lifetime_hours)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/append")
+def reality_graph_stored_append(
+    request: RealityGraphAppendRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import append
+    try:
+        return append(request.mission_id, request.observations)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/snapshot")
+def reality_graph_stored_snapshot(
+    request: RealityGraphStoredRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import snapshot
+    try:
+        return snapshot(request.mission_id, question=request.question)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/stop")
+def reality_graph_stored_stop(
+    request: RealityGraphStoredRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import stop
+    try:
+        return stop(request.mission_id)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
 
 
 @app.post("/mesh/screen/begin")

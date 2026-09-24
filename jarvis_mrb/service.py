@@ -153,6 +153,62 @@ class PhysicalConditionsRequest(BaseModel):
     longitude: float
 
 
+class LifeCreateRequest(BaseModel):
+    kind: str
+    title: str
+    domain: str
+    description: str = ""
+    deadline_at: str | None = None
+    next_step: str = ""
+    depends_on: list[str] | None = None
+    quantity: float | None = None
+    location: str = ""
+    source_ref: str = ""
+    client_request_id: str | None = None
+
+
+class LifeReceiptRequest(BaseModel):
+    record_id: str
+    expected_version: int
+    outcome: str
+    source_kind: str
+    evidence_ref: str
+
+
+class LifeRetireRequest(BaseModel):
+    record_id: str
+    expected_version: int
+
+
+class LifeTransitionRequest(BaseModel):
+    template: str
+    title: str
+    client_request_id: str
+
+
+class LifeHandoffRequest(BaseModel):
+    title: str
+    summary: str
+    next_step: str
+    linked_ids: list[str]
+    client_request_id: str
+
+
+class LifeRecordRequest(BaseModel):
+    record_id: str
+
+
+class LifeFrictionRequest(BaseModel):
+    label: str
+    occurred_at: str | None = None
+
+
+class LifeWhatIfRequest(BaseModel):
+    activity_minutes: int
+    days: int
+    daily_free_minutes: int
+
+
 class RealityLensRequest(BaseModel):
     latitude: float
     longitude: float
@@ -787,6 +843,180 @@ def reality_graph_snapshot(
         return build_place_graph(request.latitude, request.longitude)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+# Life Fabric is a separately authorized personal ledger. These endpoints
+# never initiate payment, contact a third party or control any device.
+@app.get("/life/capabilities")
+def life_capabilities(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import capabilities
+    return capabilities()
+
+
+@app.post("/life/records/create")
+def life_record_create(
+    request: LifeCreateRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import create
+    try:
+        return create(**request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.get("/life/records")
+def life_records(
+    response: Response,
+    kind: str | None = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import list_records
+    try:
+        return list_records(kind=kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.post("/life/records/receipt")
+def life_record_receipt(
+    request: LifeReceiptRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import receipt
+    try:
+        return receipt(request.record_id, outcome=request.outcome,
+                       source_kind=request.source_kind, evidence_ref=request.evidence_ref,
+                       expected_version=request.expected_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.post("/life/records/retire")
+def life_record_retire(
+    request: LifeRetireRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import retire
+    try:
+        return retire(request.record_id, expected_version=request.expected_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.get("/life/readiness")
+def life_readiness(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import readiness
+    return readiness()
+
+
+@app.post("/life/transition")
+def life_transition(
+    request: LifeTransitionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import transition
+    try:
+        return transition(request.template, request.title,
+                          client_request_id=request.client_request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.post("/life/handoff")
+def life_handoff(
+    request: LifeHandoffRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import handoff
+    try:
+        return handoff(request.title, request.summary, request.next_step,
+                       request.linked_ids, client_request_id=request.client_request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.post("/life/handoff/resume")
+def life_handoff_resume(
+    request: LifeRecordRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import resume
+    try:
+        return resume(request.record_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.post("/life/friction/log")
+def life_friction_log(
+    request: LifeFrictionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import friction
+    try:
+        return friction(request.label, occurred_at=request.occurred_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.get("/life/friction/candidates")
+def life_friction_candidates(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import friction_candidates
+    return friction_candidates()
+
+
+@app.post("/life/what-if/minutes")
+def life_what_if_minutes(
+    request: LifeWhatIfRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import simulate_minutes
+    try:
+        return simulate_minutes(**request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
 
 
 @app.post("/reality/lens/sense")

@@ -253,3 +253,18 @@ def stop(mission_id: str) -> dict[str, Any]:
         db.execute("UPDATE graph_missions SET state = 'stopped' WHERE id = ?", (mid,))
         db.commit()
     return {"mission_id": mid, "state": "stopped", "action_authority": "none"}
+
+
+def delete(mission_id: str) -> dict[str, Any]:
+    """Remove mission and observation rows; does not promise SSD/WAL erasure."""
+    _require_enabled()
+    mid = _identity(mission_id, "Mission id")
+    with _LOCK, _db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT id FROM graph_missions WHERE id = ?", (mid,)).fetchone()
+        if row is None:
+            raise KeyError("No such Reality Graph mission.")
+        db.execute("DELETE FROM graph_observations WHERE mission_id = ?", (mid,))
+        db.execute("DELETE FROM graph_missions WHERE id = ?", (mid,))
+        db.commit()
+    return {"mission_id": mid, "state": "deleted", "action_authority": "none"}

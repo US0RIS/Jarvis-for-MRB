@@ -1152,32 +1152,30 @@ private struct RealityLensPanelView: View {
                 .font(.caption)
                 .accessibilityIdentifier("reality-lens-status")
             if let report = mesh.lensReport {
-                Text("Observed " + report.checkedAt + " • "
-                     + String(report.modelCalls) + " Qwen calls")
+                Text("Observed \(report.checkedAt) • \(report.modelCalls) Qwen calls")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 ForEach(report.observations) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.label + ": " + item.value.display)
+                        Text("\(item.label): \(item.value.display)")
                             .font(.subheadline)
-                        Text(item.source + " • " + item.observedAt)
+                        Text("\(item.source) • \(item.observedAt)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
                 ForEach(report.changes) { change in
                     Label(
-                        change.label + ": " + change.before.display + " → "
-                            + change.after.display,
+                        "\(change.label): \(change.before.display) → \(change.after.display)",
                         systemImage: "arrow.triangle.2.circlepath"
                     )
                     .font(.callout)
-                    Text(change.source + " • " + change.qualifier)
+                    Text("\(change.source) • \(change.qualifier)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 if !report.unknownMetrics.isEmpty {
-                    Text("Unknown or stale: " + report.unknownMetrics.joined(separator: ", "))
+                    Text("Unknown or stale: \(report.unknownMetrics.joined(separator: ", "))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1197,8 +1195,7 @@ private struct RealityLensPanelView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             ForEach(mesh.lensMemories) { memory in
-                Text(memory.label + " • " + memory.capturedAt
-                     + " • " + String(memory.factCount) + " sourced facts")
+                Text("\(memory.label) • \(memory.capturedAt) • \(memory.factCount) sourced facts")
                     .font(.caption2)
             }
         }

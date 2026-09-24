@@ -101,6 +101,23 @@ class PersistedRealityGraphTests(unittest.TestCase):
             store.append(mid, [observation("later")])
         self.assertEqual("stopped", store.snapshot(mid)["graph"]["entities"][0]["attributes"]["status"])
 
+    def test_explicit_delete_erases_accessible_rows(self):
+        mid = store.create("Remove test")["id"]
+        store.append(mid, [observation()])
+        self.assertEqual("deleted", store.delete(mid)["state"])
+        with self.assertRaises(KeyError):
+            store.snapshot(mid)
+
+    def test_unknown_question_returns_bounded_context_not_model_output(self):
+        mid = store.create("Question test")["id"]
+        store.append(mid, [observation()])
+        result = store.snapshot(mid, question="What should I buy?")
+        self.assertTrue(result["model_needed"])
+        self.assertIsNone(result["answer"])
+        self.assertEqual("client_supplied_not_provider_verified",
+                         result["model_context"]["source_attestation"])
+        self.assertTrue(result["model_context"]["omitted_raw_provider_payloads"])
+
     def test_late_observations_not_lost_after_first_hundred(self):
         mid = store.create("Long test")["id"]
         for batch in range(6):
@@ -115,7 +132,8 @@ class PersistedRealityGraphTests(unittest.TestCase):
     def test_authenticated_private_routes_are_declared(self):
         source = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text()
         for route in ("/mesh/graph/missions/create", "/mesh/graph/missions/append",
-                      "/mesh/graph/missions/snapshot", "/mesh/graph/missions/stop"):
+                      "/mesh/graph/missions/snapshot", "/mesh/graph/missions/stop",
+                      "/mesh/graph/missions/delete"):
             self.assertIn(route, source)
         self.assertIn("_check_mesh_auth(authorization)", source)
         self.assertIn('response.headers["Cache-Control"] = "private, no-store"', source)

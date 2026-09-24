@@ -134,6 +134,24 @@ struct LifeFabricFrictionCandidates: Decodable {
     let basis: String
 }
 
+struct LifeFabricDeleteReceipt: Decodable {
+    let deletedRecords: Int
+    let deletedReceipts: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deletedRecords = "deleted_records"
+        case deletedReceipts = "deleted_receipts"
+    }
+}
+
+struct LifeFabricFrictionClearReceipt: Decodable {
+    let deletedFrictionEvents: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deletedFrictionEvents = "deleted_friction_events"
+    }
+}
+
 struct LifeFabricWhatIf: Decodable {
     let availableMinutes: Int
     let remainingMinutes: Int
@@ -965,6 +983,23 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(RealityGraphPlaceResponse.self, from: data)
+    }
+
+    func lifeForget(id: String, version: Int) async throws -> LifeFabricDeleteReceipt {
+        let (data, response) = try await postData(
+            path: "life/records/forget",
+            body: ["record_id": id, "expected_version": version]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricDeleteReceipt.self, from: data)
+    }
+
+    func lifeClearFriction() async throws -> LifeFabricFrictionClearReceipt {
+        let (data, response) = try await postData(
+            path: "life/friction/clear", body: [:]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricFrictionClearReceipt.self, from: data)
     }
 
     func lifeReadiness() async throws -> LifeFabricReadiness {

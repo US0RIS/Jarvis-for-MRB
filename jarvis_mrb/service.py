@@ -868,7 +868,7 @@ def life_record_create(
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.life_fabric import create
     try:
-        return create(**request.model_dump())
+        return create(**request.dict())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
 
@@ -1040,7 +1040,7 @@ def life_what_if_minutes(
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.life_fabric import simulate_minutes
     try:
-        return simulate_minutes(**request.model_dump())
+        return simulate_minutes(**request.dict())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
 

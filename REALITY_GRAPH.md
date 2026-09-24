@@ -54,6 +54,12 @@ POST /mesh/graph/missions/delete
 
 The backend returns a mission ID, *not* an execution grant. Append is replay-idempotent for **identical observation IDs and contents**; conflicting reuse is rejected. Only fixed typed fields are stored. No raw camera pixels, arbitrary provider JSON, message contents or recipient identity fields. Each mission has up to 400 retained events; each reduction uses the 100 most recent; each append at most 20 records; at most 24 active missions. Stopped missions remain inspectable until deleted or lazily pruned. The ledger prunes expired missions after an additional 72-hour grace period on a subsequent create; there is no claim of a continuously running erase daemon or secure SSD overwrite. Use delete if immediate logical removal is needed. The SQLite file may also be present in local backups/WAL until ordinary database maintenance.
 
+## Spoken model-free mission readback
+
+When the persisted ledger is enabled, the existing Jarvis speech/text path can answer `Jarvis, show my reality graph missions`, `Jarvis, is my delivery late?`, `Jarvis, has my delivery arrived?`, `Jarvis, why is my delivery delayed?`, and `Jarvis, reality graph rg_<returned-id> status` **before Qwen is invoked**. The generic delivery phrases select a mission only if exactly one active goal refers to delivery/dinner/food/courier. If multiple goals match, Jarvis asks for the exact returned ID rather than mixing separate deliveries.
+
+These commands are read-only. The voice route never enrolls an observation source, authenticates a courier, places an order, purchases something or grants a new action. Spoken status is not a background watch and depends on a client having supplied recent observations. If no fresh linked observations exist, it reports uncertainty rather than generating a plausible story.
+
 ## Current vs proposed / required actual adapter work
 
 The graph can compute a food-delivery traffic explanation **only if** an authorized delivery integration supplies order state/courier movement and an actual route provider supplies comparable route observations. It does not yet have production Uber, DoorDash, courier GPS, identity verification or global public CCTV integration. Nor does a camera-catalog entry prove live footage exists. The existing integrated public place observations are narrower, and Caltrans highway coverage is California-specific.

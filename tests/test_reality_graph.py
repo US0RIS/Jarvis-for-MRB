@@ -97,10 +97,40 @@ class RealityGraphTests(unittest.TestCase):
         self.assertIn('accessibilityIdentifier("mesh-place-graph-status")', ui)
         self.assertIn("placeGraph = nil", ui)
 
+    def test_fabric_graph_separates_live_nodes_from_registered_sources(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_fabric_graph(
+            {"nodes": [
+                {"id": "windows", "label": "PC", "status": "online",
+                 "checked_at": "2026-09-23T04:59:59+00:00",
+                 "capabilities": {"app_launch": "exact_user_tap_only", "remote_input": "not_implemented"}},
+                {"id": "macbook", "label": "MacBook", "status": "unconfigured",
+                 "checked_at": "2026-09-23T04:59:59+00:00",
+                 "capabilities": {"app_launch": "unknown"}},
+            ]},
+            {"sources": [{"id": "caltrans", "label": "Caltrans",
+                          "coverage": "California state highways",
+                          "status": "integrated_not_checked"}]},
+            now=now,
+        )
+        facts = {f["id"]: f for f in graph["derived_facts"]}
+        self.assertEqual(["windows"], facts["fact:fresh_online_device_ids"]["value"])
+        self.assertIn("fact:windows:app_launch", facts)
+        self.assertNotIn("fact:macbook:app_launch", facts)
+        self.assertNotIn("fact:windows:remote_input", facts)
+        self.assertEqual("none", graph["action_authority"])
+        self.assertIs(graph["registered_public_sources_are_live"], False)
+        registry = [e for e in graph["entities"] if e["kind"] == "public_source_registry_entry"]
+        self.assertEqual(1, len(registry))
+        self.assertIs(registry[0]["attributes"]["claim_live"], False)
+        entity_ids = {e["id"] for e in graph["entities"]}
+        self.assertTrue(all(r["subject"] in entity_ids and r["object"] in entity_ids
+                            for r in graph["relations"]))
+
     def test_service_has_private_no_store_graph_routes(self):
         from pathlib import Path
         source = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text()
-        for route in ("/mesh/graph", "/mesh/graph/context", "/mesh/graph/answer", "/mesh/graph/mission"):
+        for route in ("/mesh/graph", "/mesh/graph/fabric", "/mesh/graph/context", "/mesh/graph/answer", "/mesh/graph/mission"):
             self.assertIn(route, source)
         self.assertIn("_check_mesh_auth(authorization)", source)
         self.assertIn('response.headers["Cache-Control"] = "private, no-store"', source)

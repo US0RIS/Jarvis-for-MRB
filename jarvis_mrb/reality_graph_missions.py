@@ -215,6 +215,9 @@ def snapshot(mission_id: str, *, question: str = "") -> dict[str, Any]:
         row = db.execute("SELECT * FROM graph_missions WHERE id = ?", (mid,)).fetchone()
         if row is None:
             raise KeyError("No such Reality Graph mission.")
+        total_observations = db.execute(
+            "SELECT COUNT(*) FROM graph_observations WHERE mission_id = ?", (mid,)
+        ).fetchone()[0]
         observations = [
             json.loads(r["data_json"]) for r in db.execute(
                 "SELECT data_json FROM graph_observations WHERE mission_id = ? ORDER BY observed_at DESC LIMIT 100",
@@ -228,8 +231,9 @@ def snapshot(mission_id: str, *, question: str = "") -> dict[str, Any]:
     graph = build_mission_graph(mission, list(reversed(observations)), now=now)
     graph["source_attestation"] = "client_supplied_not_provider_verified"
     graph["mission_expires_at"] = row["expires_at"]
-    graph["observation_count"] = len(observations)
-    graph["observations_truncated_to_recent"] = len(observations) == 100
+    graph["observation_count"] = total_observations
+    graph["observations_reduced"] = len(observations)
+    graph["observations_truncated_to_recent"] = total_observations > len(observations)
     result: dict[str, Any] = {"graph": graph, "answer": None, "model_needed": False}
     if question:
         result["answer"] = answer_mission_question(graph, question)

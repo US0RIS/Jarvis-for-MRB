@@ -129,6 +129,27 @@ class PersistedRealityGraphTests(unittest.TestCase):
         self.assertIn("fact:provider_reports_delivered",
                       {x["id"] for x in graph["derived_facts"]})
 
+    def test_spoken_delivery_question_bypasses_model_without_guessing(self):
+        from jarvis_mrb.reality_graph_dialogue import answer
+        from jarvis_mrb.agent import _fast_path
+        mid = store.create("Dinner delivered", deadline=stamp(3600))["id"]
+        store.append(mid, [observation("c1", "courier", eta_at=stamp(4200))])
+        reply = answer("Jarvis, is my delivery late?")
+        self.assertIn("after the mission deadline", reply)
+        self.assertIn("not independently authenticated", reply)
+        agent_reply = _fast_path("Jarvis, is my delivery late?")
+        self.assertTrue(agent_reply.ok)
+        self.assertIn("after the mission deadline", agent_reply.message)
+        self.assertIn(mid, answer("show my reality graph missions"))
+        self.assertIsNone(answer("what's the best pizza?"))
+
+    def test_multiple_delivery_missions_do_not_guess_target(self):
+        from jarvis_mrb.reality_graph_dialogue import answer
+        store.create("Dinner delivered")
+        store.create("Food delivered")
+        self.assertIn("several active delivery missions",
+                      answer("is my delivery late").lower())
+
     def test_authenticated_private_routes_are_declared(self):
         source = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text()
         for route in ("/mesh/graph/missions/create", "/mesh/graph/missions/append",

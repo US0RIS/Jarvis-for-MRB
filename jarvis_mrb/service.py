@@ -751,6 +751,17 @@ def reality_mesh_place(
 
 
 
+@app.get("/mesh/graph/fabric")
+def reality_graph_fabric(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph import build_fabric_graph
+    return build_fabric_graph()
+
+
 @app.post("/mesh/graph")
 def reality_graph_snapshot(
     request: PhysicalConditionsRequest,

@@ -897,6 +897,13 @@ def _current_goals_reply() -> AgentReply:
 
 def _fast_path(text: str) -> AgentReply | None:
     n = _normalize(text)
+    # An enrolled Reality Graph answer is a deterministic read, not a model
+    # planner decision. This same path is used by streaming and non-streaming.
+    from jarvis_mrb.reality_graph_dialogue import answer as graph_dialogue_answer
+    graph_reply = graph_dialogue_answer(text)
+    if graph_reply is not None:
+        note_routed("reality_graph_read")
+        return AgentReply(True, graph_reply)
     # Match explicit operations without Qwen. Every selected action still
     # goes through the existing permission-aware tool executor.
     deterministic = deterministic_dispatch(text)

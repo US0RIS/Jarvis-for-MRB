@@ -62,6 +62,7 @@ def _connect(path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=8.0)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA busy_timeout=8000")
+    con.execute("PRAGMA secure_delete=ON")
     con.execute(
         """CREATE TABLE IF NOT EXISTS snapshots (
              id TEXT PRIMARY KEY, place_key TEXT NOT NULL,
@@ -115,6 +116,8 @@ def _baseline(path: Path, key: str, cutoff: str) -> dict[str, Any] | None:
         return None
     con = _connect(path)
     try:
+        con.execute("DELETE FROM snapshots WHERE captured_at<?", (cutoff,))
+        con.commit()
         row = con.execute(
             """SELECT id,place_label,captured_at,metrics_json FROM snapshots
                WHERE place_key=? AND captured_at>=?
@@ -228,6 +231,8 @@ def list_memories(*, db_path: Path | None = None,
     if path.is_file():
         con = _connect(path)
         try:
+            con.execute("DELETE FROM snapshots WHERE captured_at<?", (cutoff,))
+            con.commit()
             result = con.execute(
                 """SELECT id,place_label,captured_at,metrics_json FROM snapshots
                    WHERE captured_at>=? ORDER BY captured_at DESC,rowid DESC LIMIT 30""",

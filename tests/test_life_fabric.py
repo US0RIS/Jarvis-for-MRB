@@ -205,7 +205,7 @@ class LifeFabricTests(unittest.TestCase):
 
     def test_payload_bounds_and_unknown_categories(self):
         with self.assertRaises(ValueError):
-            self.task(title="x"*300)
+            self.task("x"*300)
         with self.assertRaises(ValueError):
             life.create("task", "Something", "not-a-domain", db_path=self.path)
         with self.assertRaises(ValueError):

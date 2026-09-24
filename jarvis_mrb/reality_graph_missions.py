@@ -217,16 +217,19 @@ def snapshot(mission_id: str, *, question: str = "") -> dict[str, Any]:
             raise KeyError("No such Reality Graph mission.")
         observations = [
             json.loads(r["data_json"]) for r in db.execute(
-                "SELECT data_json FROM graph_observations WHERE mission_id = ? ORDER BY observed_at ASC LIMIT ?",
-                (mid, _MAX_OBSERVATIONS),
+                "SELECT data_json FROM graph_observations WHERE mission_id = ? ORDER BY observed_at DESC LIMIT 100",
+                (mid,),
             )
         ]
     mission = {"id": row["id"], "goal": row["goal"], "deadline": row["deadline"],
                "status": "expired" if _stamp(row["expires_at"]) <= now else row["state"]}
-    graph = build_mission_graph(mission, observations, now=now)
+    # The reducer processes at most 100 observations, so always select the newest
+    # 100 (not the oldest 100 of a long-running mission).
+    graph = build_mission_graph(mission, list(reversed(observations)), now=now)
     graph["source_attestation"] = "client_supplied_not_provider_verified"
     graph["mission_expires_at"] = row["expires_at"]
     graph["observation_count"] = len(observations)
+    graph["observations_truncated_to_recent"] = len(observations) == 100
     result: dict[str, Any] = {"graph": graph, "answer": None, "model_needed": False}
     if question:
         result["answer"] = answer_mission_question(graph, question)

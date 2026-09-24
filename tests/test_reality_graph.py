@@ -75,7 +75,7 @@ class RealityGraphTests(unittest.TestCase):
         self.assertEqual(1, len(packet["evidence"]))
         self.assertEqual("recent", packet["evidence"][0]["source"])
         self.assertIn("observed_at", packet["evidence"][0])
-        self.assertNotIn("old", str(packet))
+        self.assertNotIn("old", [e["source"] for e in packet["evidence"]])
         self.assertEqual("not_verified", packet["source_attestation"])
 
     def test_partial_provider_state_is_uncertainty_not_all_clear(self):

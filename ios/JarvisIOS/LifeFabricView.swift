@@ -39,6 +39,8 @@ struct LifeFabricView: View {
     @State private var whatIfStatus = ""
     @State private var pendingConfirm: LifeFabricRecord?
     @State private var pendingRetire: LifeFabricRecord?
+    @State private var pendingForget: LifeFabricRecord?
+    @State private var confirmFrictionClear = false
 
     private let domains = [
         "morning", "travel", "work", "food", "home", "shopping",
@@ -102,6 +104,24 @@ struct LifeFabricView: View {
             Text("This saves your confirmation. It does not assert a provider "
                  + "receipt, sensor observation or independently verified outcome.")
         }
+.confirmationDialog(
+            "Permanently forget this one Life Fabric record?",
+            isPresented: Binding(
+                get: { pendingForget != nil },
+                set: { if !$0 { pendingForget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete this record and its receipts", role: .destructive) {
+                if let item = pendingForget { Task { await forget(item) } }
+                pendingForget = nil
+            }
+            Button("Cancel", role: .cancel) { pendingForget = nil }
+        } message: {
+            Text("This removes the selected record from Jarvis's Life Fabric "
+                 + "ledger. Other tasks that depend on it become blocked. "
+                 + "This does not erase separate Jarvis records or backups.")
+        }
         .confirmationDialog(
             "Retire this record without claiming completion?",
             isPresented: Binding(
@@ -117,6 +137,18 @@ struct LifeFabricView: View {
                 pendingRetire = nil
             }
             Button("Cancel", role: .cancel) { pendingRetire = nil }
+        }
+        .confirmationDialog(
+            "Delete the entire Friction Observatory log?",
+            isPresented: $confirmFrictionClear,
+            titleVisibility: .visible
+        ) {
+            Button("Delete all manually logged inconveniences", role: .destructive) {
+                Task { await clearFriction() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This does not delete tasks or other separate Jarvis memories.")
         }
     }
 
@@ -278,6 +310,11 @@ struct LifeFabricView: View {
                             }
                             .buttonStyle(.bordered)
                             .disabled(busy)
+                            Button("Forget", role: .destructive) {
+                                pendingForget = record
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(busy)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -326,6 +363,11 @@ struct LifeFabricView: View {
                 if !frictionStatus.isEmpty {
                     Text(frictionStatus).font(.caption)
                 }
+                Button("Clear my friction log", role: .destructive) {
+                    confirmFrictionClear = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
                 ForEach(candidates) { candidate in
                     Text("\(candidate.label) • \(candidate.occurrences) occurrences "
                          + "on \(candidate.days) days. Consider a permanent fix.")
@@ -485,6 +527,33 @@ struct LifeFabricView: View {
             status = "Record retired. Completion was not fabricated."
         } catch {
             status = "Retirement unconfirmed or stale; inspect records before retrying."
+        }
+        busy = false
+        await refresh()
+    }
+
+    private func forget(_ item: LifeFabricRecord) async {
+        guard !busy else { return }
+        busy = true
+        do {
+            let result = try await client.lifeForget(id: item.id, version: item.version)
+            status = "Deleted \(result.deletedRecords) record and "
+                + "\(result.deletedReceipts) receipt(s). Other records unchanged."
+        } catch {
+            status = "Deletion unconfirmed or stale. Refresh before retrying."
+        }
+        busy = false
+        await refresh()
+    }
+
+    private func clearFriction() async {
+        guard !busy else { return }
+        busy = true
+        do {
+            let result = try await client.lifeClearFriction()
+            frictionStatus = "Deleted \(result.deletedFrictionEvents) friction event(s)."
+        } catch {
+            frictionStatus = "Cannot confirm friction history deletion; refresh."
         }
         busy = false
         await refresh()

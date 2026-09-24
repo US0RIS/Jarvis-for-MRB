@@ -481,7 +481,7 @@ def readiness(*, db_path: Path | None = None,
         "unknown": [x["id"] for x in tasks.values()
                     if x["completion_state"] == "outcome_unknown"][:60],
         "setup_required": not records,
-        "all_clear": False if not records else not due and not blocked,
+        "all_clear": False if not tasks else not due and not blocked,
         "all_clear_qualifier": "Only enrolled deadlines and dependencies; not an all-life safety clearance.",
     }
 

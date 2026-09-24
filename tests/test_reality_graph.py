@@ -81,9 +81,9 @@ class RealityGraphTests(unittest.TestCase):
             {"id": "dinner-1", "goal": "Dinner delivered", "deadline": "2026-09-23T05:20:00+00:00"},
             [
                 {"kind": "order", "source": "provider", "observed_at": "2026-09-23T04:59:30+00:00", "status": "picked_up"},
-                {"kind": "courier", "source": "provider", "observed_at": "2026-09-23T04:59:40+00:00", "eta_at": "2026-09-23T05:28:00+00:00", "moving": False, "stationary_seconds": 420},
-                {"kind": "traffic", "source": "route", "observed_at": "2026-09-23T04:59:45+00:00", "delay_seconds": 720, "disruption": "collision"},
-                {"kind": "camera", "source": "public-camera", "observed_at": "2026-09-23T04:59:50+00:00", "traffic_state": "stopped"},
+                {"kind": "courier", "source": "provider", "route_id": "route-A", "observed_at": "2026-09-23T04:59:40+00:00", "eta_at": "2026-09-23T05:28:00+00:00", "moving": False, "stationary_seconds": 420},
+                {"kind": "traffic", "source": "route", "route_id": "route-A", "observed_at": "2026-09-23T04:59:45+00:00", "delay_seconds": 720, "disruption": "collision"},
+                {"kind": "camera", "source": "public-camera", "route_id": "route-A", "observed_at": "2026-09-23T04:59:50+00:00", "traffic_state": "stopped"},
             ],
             now=now,
         )
@@ -150,6 +150,38 @@ class RealityGraphTests(unittest.TestCase):
         graph = reality_graph.build_place_graph(34.1, -118.2, obs)
         answer = reality_graph.answer_place_question(graph, "summarize this place")
         self.assertIn("Historical/stale source (not current)", answer["answer"])
+
+    def test_missing_route_link_is_not_a_delay_explanation(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph({"id": "route-unknown"}, [
+            {"kind": "courier", "source": "provider", "observed_at": "2026-09-23T04:59:00+00:00",
+             "moving": False, "stationary_seconds": 360},
+            {"kind": "traffic", "source": "public-road", "observed_at": "2026-09-23T04:59:00+00:00",
+             "disruption": "collision"},
+        ], now=now)
+        self.assertNotIn("fact:delay_correlation",
+                         {fact["id"] for fact in graph["derived_facts"]})
+        self.assertIsNone(reality_graph.answer_mission_question(graph, "why is it delayed"))
+
+    def test_matching_route_creates_inspectable_edges(self):
+        now = datetime(2026, 9, 23, 5, 0, tzinfo=timezone.utc)
+        graph = reality_graph.build_mission_graph({"id": "route-linked"}, [
+            {"kind": "courier", "source": "provider", "route_id": "r123",
+             "observed_at": "2026-09-23T04:59:00+00:00",
+             "moving": False, "stationary_seconds": 360},
+            {"kind": "traffic", "source": "public-road", "route_id": "r123",
+             "observed_at": "2026-09-23T04:59:00+00:00",
+             "disruption": "collision"},
+            {"kind": "camera", "source": "different-road", "route_id": "r999",
+             "observed_at": "2026-09-23T04:59:00+00:00",
+             "traffic_state": "stopped"},
+        ], now=now)
+        self.assertIn("route:r123", {e["id"] for e in graph["entities"]})
+        self.assertEqual(2, sum(e["predicate"] == "reports_on_route" and e["object"] == "route:r123"
+                                for e in graph["relations"]))
+        fact = next(f for f in graph["derived_facts"] if f["id"] == "fact:delay_correlation")
+        camera_ids = {e["id"] for e in graph["evidence"] if e["source"] == "different-road"}
+        self.assertTrue(camera_ids.isdisjoint(fact["evidence_ids"]))
 
     def test_stale_mission_observation_cannot_drive_fact(self):
         from datetime import datetime, timezone

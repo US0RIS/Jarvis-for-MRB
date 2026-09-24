@@ -318,18 +318,55 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
 
 
 def model_context(graph: dict[str, Any], *, max_facts: int = 12, max_evidence: int = 12) -> dict[str, Any]:
-    """Small semantic packet for the exceptional cases that still need a model."""
-    facts = list(graph.get("derived_facts") or [])[:max(0, min(max_facts, 30))]
-    evidence = list(graph.get("evidence") or [])[:max(0, min(max_evidence, 30))]
+    """Bounded facts-first semantic packet for exceptional model reasoning.
+
+    Stale/unsupported facts are excluded, even if the raw graph preserves
+    historical evidence for inspection. Always carry trust/freshness metadata.
+    """
+    fact_limit = max(0, min(max_facts, 30))
+    evidence_limit = max(0, min(max_evidence, 30))
+    rows = [e for e in graph.get("evidence", []) if isinstance(e, dict)]
+    lookup = {str(e.get("id")): e for e in rows if e.get("freshness") == "fresh"}
+    candidates = [
+        fact for fact in graph.get("derived_facts", [])
+        if isinstance(fact, dict) and
+        all(str(eid) in lookup for eid in (fact.get("evidence_ids") or ()))
+    ]
+    facts: list[dict[str, Any]] = []
+    required: list[str] = []
+    for fact in candidates:
+        if len(facts) >= fact_limit:
+            break
+        refs = list(dict.fromkeys(str(eid) for eid in (fact.get("evidence_ids") or ())))
+        if len(set(required).union(refs)) > evidence_limit:
+            continue
+        facts.append(fact)
+        for ref in refs:
+            if ref not in required:
+                required.append(ref)
+    # Preserve all evidence for selected facts before adding the newest fresh
+    # unrelated source observations; no references to omitted evidence.
+    selected = [lookup[eid] for eid in required]
+    for ev in reversed(rows):
+        if len(selected) >= evidence_limit:
+            break
+        if ev.get("freshness") == "fresh" and str(ev.get("id")) not in required:
+            selected.append(ev)
+            required.append(str(ev.get("id")))
     return {
         "schema": graph.get("schema"), "generated_at": graph.get("generated_at"),
         "scope": graph.get("scope"), "mission_id": graph.get("mission_id"),
         "provider_states": graph.get("provider_states"),
         "source_attestation": graph.get("source_attestation", "not_verified"),
         "facts": facts,
-        "evidence": [{"id": r.get("id"), "source": r.get("source"), "freshness": r.get("freshness"), "claim": r.get("claim")}
-                     for r in evidence if isinstance(r, dict)],
+        "evidence": [{
+            "id": row.get("id"), "source": row.get("source"),
+            "observed_at": row.get("observed_at"),
+            "age_seconds": row.get("age_seconds"),
+            "freshness": row.get("freshness"), "claim": row.get("claim"),
+        } for row in selected],
         "omitted_raw_provider_payloads": True,
+        "omitted_stale_or_unlinked_facts": len(graph.get("derived_facts") or []) - len(candidates),
     }
 
 

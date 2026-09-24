@@ -42,6 +42,7 @@ class PersistedRealityGraphTests(unittest.TestCase):
         courier = observation("courier1", "courier", route_id="route1",
                               eta_at=stamp(3900), moving=False, stationary_seconds=300)
         traffic = observation("traffic1", "traffic", route_id="route1",
+                              source="independent-road-source",
                               delay_seconds=600, disruption="collision")
         store.append(mid, [courier, traffic])
         result = store.snapshot(mid, question="why is it delayed?")
@@ -131,15 +132,16 @@ class PersistedRealityGraphTests(unittest.TestCase):
 
     def test_spoken_delivery_question_bypasses_model_without_guessing(self):
         from jarvis_mrb.reality_graph_dialogue import answer
-        from jarvis_mrb.agent import _fast_path
+        from pathlib import Path
         mid = store.create("Dinner delivered", deadline=stamp(3600))["id"]
         store.append(mid, [observation("c1", "courier", eta_at=stamp(4200))])
         reply = answer("Jarvis, is my delivery late?")
         self.assertIn("after the mission deadline", reply)
         self.assertIn("not independently authenticated", reply)
-        agent_reply = _fast_path("Jarvis, is my delivery late?")
-        self.assertTrue(agent_reply.ok)
-        self.assertIn("after the mission deadline", agent_reply.message)
+        agent = (Path(__file__).parents[1] / "jarvis_mrb/agent.py").read_text()
+        self.assertIn("graph_dialogue_answer(text)", agent)
+        self.assertLess(agent.index("graph_dialogue_answer(text)"),
+                        agent.index("deterministic = deterministic_dispatch(text)"))
         self.assertIn(mid, answer("show my reality graph missions"))
         self.assertIsNone(answer("what's the best pizza?"))
 

@@ -1,5 +1,65 @@
 import Foundation
 
+struct RealityGraphPlaceResponse: Decodable {
+    struct Scalar: Decodable {
+        let display: String
+
+        init(from decoder: Decoder) throws {
+            let box = try decoder.singleValueContainer()
+            if let value = try? box.decode(String.self) {
+                display = value
+            } else if let value = try? box.decode(Bool.self) {
+                display = value ? "true" : "false"
+            } else if let value = try? box.decode(Int.self) {
+                display = String(value)
+            } else if let value = try? box.decode(Double.self) {
+                display = String(value)
+            } else {
+                display = "not available"
+            }
+        }
+    }
+
+    struct Fact: Decodable, Identifiable {
+        let id: String
+        let value: Scalar
+        let confidence: String
+        let explanation: String
+        let evidenceIDs: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case id, value, confidence, explanation
+            case evidenceIDs = "evidence_ids"
+        }
+    }
+
+    struct Evidence: Decodable, Identifiable {
+        let id: String
+        let source: String
+        let observedAt: String
+        let freshness: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, source, freshness
+            case observedAt = "observed_at"
+        }
+    }
+
+    let generatedAt: String
+    let modelCalls: Int
+    let providerStates: [String: String]
+    let derivedFacts: [Fact]
+    let evidence: [Evidence]
+
+    enum CodingKeys: String, CodingKey {
+        case evidence
+        case generatedAt = "generated_at"
+        case modelCalls = "model_calls"
+        case providerStates = "provider_states"
+        case derivedFacts = "derived_facts"
+    }
+}
+
 struct ConductorRecentWorkstations: Decodable {
     let checkedAt: String
     let missions: [ConductorWorkstationMission]
@@ -668,6 +728,15 @@ struct JarvisAPIClient {
         let (data, response) = try await get(path: "mesh/public-sources", timeout: 9)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(RealityMeshSourceRegistry.self, from: data)
+    }
+
+    func realityGraphPlace(latitude: Double, longitude: Double) async throws -> RealityGraphPlaceResponse {
+        let (data, response) = try await postData(
+            path: "mesh/graph",
+            body: ["latitude": latitude, "longitude": longitude]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityGraphPlaceResponse.self, from: data)
     }
 
     func realityMeshPlace(latitude: Double, longitude: Double) async throws -> RealityMeshPlaceResponse {

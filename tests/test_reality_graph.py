@@ -85,6 +85,18 @@ class RealityGraphTests(unittest.TestCase):
         self.assertEqual(facts["fact:observation_completeness"]["value"], "partial")
         self.assertIn("cameras", facts["fact:observation_completeness"]["explanation"])
 
+    def test_phone_mesh_can_show_real_place_graph_without_model(self):
+        from pathlib import Path
+        root = Path(__file__).parents[1] / "ios/JarvisIOS"
+        client = (root / "JarvisAPIClient.swift").read_text()
+        ui = (root / "RealityMesh.swift").read_text()
+        self.assertIn("func realityGraphPlace(latitude:", client)
+        self.assertIn('path: "mesh/graph"', client)
+        self.assertIn("RealityGraphPlacePanelView()", ui)
+        self.assertIn("func refreshPlaceGraph() async", ui)
+        self.assertIn('accessibilityIdentifier("mesh-place-graph-status")', ui)
+        self.assertIn("placeGraph = nil", ui)
+
     def test_service_has_private_no_store_graph_routes(self):
         from pathlib import Path
         source = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text()

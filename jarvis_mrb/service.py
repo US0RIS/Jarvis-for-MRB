@@ -920,6 +920,32 @@ def life_record_retire(
         raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
 
 
+@app.post("/life/records/forget")
+def life_record_forget(
+    request: LifeRetireRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import forget
+    try:
+        return forget(request.record_id, expected_version=request.expected_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.post("/life/friction/clear")
+def life_friction_clear(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.life_fabric import clear_friction
+    return clear_friction()
+
+
 @app.get("/life/readiness")
 def life_readiness(
     response: Response,

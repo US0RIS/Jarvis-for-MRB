@@ -313,7 +313,7 @@ final class RealityMeshController: ObservableObject {
             lensMemories = report.memories
             lensMemoryStatus = "\(report.memories.count) recent manually saved snapshot(s). "
                 + "Only labels and source-backed numeric facts persist; "
-                + "automatic expiry after \(report.retentionDays) days."
+                + "excluded from results and pruned on access after \(report.retentionDays) days."
         } catch {
             lensMemories = []
             lensMemoryStatus = "Could not read saved lens memories; status unknown."

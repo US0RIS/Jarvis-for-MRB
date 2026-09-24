@@ -25,7 +25,9 @@ remember**. This adds three concrete capabilities in one interaction:
    **are not persisted** in this new ledger. No camera images, raw provider
    response, passive microphone data, continuous location trail or full device
    screen is stored by Reality Lens. Saved records expire from queries after
-   30 days and the ledger prunes on subsequent explicit saves. Its maximum is
+   30 days and are pruned whenever Reality Lens is next accessed; an offline
+   backend cannot expire disk rows on its own. SQLite secure deletion is
+   enabled for row removal, but cannot wipe filesystem backups or copies. Its maximum is
    120 snapshots. The user can inspect the newest 30 memory records.
 3. **Tactile change sense:** explicitly tap **Sense and compare** again. The
    backend compares each current fresh scalar only with the latest saved

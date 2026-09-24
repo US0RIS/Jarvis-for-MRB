@@ -291,7 +291,8 @@ def build_mission_graph(mission: dict[str, Any], observations: list[dict[str, An
     # Require a declared exact route join. Without it, observations are
     # contemporaneous but not proven to describe the same journey.
     same_route = bool(courier_route) and courier_route == traffic_route
-    if same_route and "fact:courier_stationary" in fact_map and ("fact:route_delay_seconds" in fact_map or "fact:route_disruption" in fact_map):
+    distinct_sources = bool(courier and traffic and courier.get("source") != traffic.get("source"))
+    if same_route and distinct_sources and "fact:courier_stationary" in fact_map and ("fact:route_delay_seconds" in fact_map or "fact:route_disruption" in fact_map):
         cause_evidence.extend(fact_map["fact:courier_stationary"].evidence_ids)
         for key in ("fact:route_delay_seconds", "fact:route_disruption"):
             if key in fact_map:
@@ -323,7 +324,9 @@ def model_context(graph: dict[str, Any], *, max_facts: int = 12, max_evidence: i
     return {
         "schema": graph.get("schema"), "generated_at": graph.get("generated_at"),
         "scope": graph.get("scope"), "mission_id": graph.get("mission_id"),
-        "provider_states": graph.get("provider_states"), "facts": facts,
+        "provider_states": graph.get("provider_states"),
+        "source_attestation": graph.get("source_attestation", "not_verified"),
+        "facts": facts,
         "evidence": [{"id": r.get("id"), "source": r.get("source"), "freshness": r.get("freshness"), "claim": r.get("claim")}
                      for r in evidence if isinstance(r, dict)],
         "omitted_raw_provider_payloads": True,

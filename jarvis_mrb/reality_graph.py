@@ -376,6 +376,8 @@ def build_fabric_graph(
                     state, "observed_capability_not_authority", (evid,),
                     "Node declares this capability; independent user/host permissions still apply."))
 
+    entities.append(Entity("coverage:public_unverified", "declared_coverage",
+                           "Provider-declared coverage, no live query", {}))
     for idx, row in enumerate((registry.get("sources") or [])[:24]):
         if not isinstance(row, dict):
             continue
@@ -386,7 +388,7 @@ def build_fabric_graph(
             "status": "registered_not_currently_observed",
             "claim_live": False,
         }))
-        relations.append(Relation(sid, "may_observe", "place:provider_coverage_not_verified", ()))
+        relations.append(Relation(sid, "declares_coverage", "coverage:public_unverified", ()))
     facts.append(DerivedFact("fact:fresh_online_device_ids", "fresh_paired_node_health",
         online, "high", tuple(e.id for e in evidence if e.freshness == "fresh"),
         "Only fresh nodes with explicitly reported online status are listed."))

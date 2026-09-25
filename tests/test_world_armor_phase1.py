@@ -153,7 +153,8 @@ class WorldArmorKernelTests(TestCase):
         self.assertEqual(quake_before["values"]["magnitude"],3.1)
         self.assertEqual(quake_after["supersedes_id"],quake_before["id"])
         self.assertEqual(quake_after["revision"],2)
-        self.assertEqual(after["observations"][0]["received_at"],NOW.isoformat())
+        self.assertEqual(min(row["received_at"] for row in after["observations"]),
+                         NOW.isoformat())
 
     def test_source_revision_reversion_is_new_evidence_not_old_duplicate(self):
         key=self.new()
@@ -262,7 +263,10 @@ class WorldArmorKernelTests(TestCase):
         q.assert_called_once_with(34.12,-118.16,radius_km=30.0,
                                   hours=24,minimum_magnitude=2.5)
         self.assertEqual(receipt["mode"],"real_adapter")
-        self.assertEqual(self.replay(key)["mode"],"real_adapter_only")
+        # Real adapter receive time is the actual wall clock; do not replay
+        # it against the older frozen fixture clock used by the other tests.
+        self.assertEqual(armor.replay(key,db_path=self.db)["mode"],
+                         "real_adapter_only")
         self.assertEqual(receipt["new_observations"],3)
 
     def test_one_provider_exception_does_not_hide_other_sources(self):

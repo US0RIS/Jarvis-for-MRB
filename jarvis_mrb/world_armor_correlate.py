@@ -2,13 +2,15 @@ from __future__ import annotations
 
 """Read-only Phase 1 spatiotemporal investigation over retained World Armor receipts.
 
-Existing provider adapters expose only the *selected query region*, not exact
-USGS epicentres, alert polygons or the Open-Meteo grid cell. Therefore every
-cross-source pair below is a TEMPORAL coincidence inside an investigation's
-sampling scope, NEVER proven co-location, common cause or independent truth.
+The USGS adapter may preserve a validated publisher epicenter, while NWS
+alert footprints and the Open-Meteo model-grid geometry are not retained.
+Cross-source pairs are therefore bounded temporal/spatial candidates, NEVER
+proof of exact co-location, common cause or independent truth.
 """
 
 from datetime import datetime, timedelta
+from hashlib import sha256
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -122,6 +124,10 @@ def correlate(
         and start <= datetime.fromisoformat(x["observed_at"]) <= end
     ]
     timed.sort(key=lambda x: (x["observed_at"], x["source"], x["id"]))
+    degraded = [
+        x for x in timed
+        if x.get("sample_coverage_status") != "ok"
+    ]
     receipt_only = [
         x for x in spatially_eligible
         if x["observed_at"] is None
@@ -139,6 +145,12 @@ def correlate(
             if delta > _WINDOW:
                 break
             if earlier["source"] == later["source"]:
+                continue
+            # Correlation requires the producing sample itself to have healthy
+            # source coverage. Stale/unavailable evidence remains visible but
+            # cannot corroborate another source.
+            if (earlier.get("sample_coverage_status") != "ok"
+                    or later.get("sample_coverage_status") != "ok"):
                 continue
             # Synthetic fixture data must never corroborate real-adapter data.
             if (earlier.get("adapter_mode") != later.get("adapter_mode")
@@ -183,9 +195,25 @@ def correlate(
         })
         for source in chosen
     }
+    query_plan = {
+        "version": 1,
+        "investigation_id": investigation_id,
+        "start_at": start.isoformat(),
+        "end_at": end.isoformat(),
+        "as_known_at": cutoff.isoformat(),
+        "source_ids": chosen,
+        "query_radius_km": radius,
+        "pair_window_seconds": int(_WINDOW.total_seconds()),
+    }
+    query_id = "query:" + sha256(
+        json.dumps(query_plan, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:20]
+
     return {
         "schema": "jarvis.world_armor.correlation.v1",
         "investigation_id": investigation_id,
+        "query_id": query_id,
+        "query_plan": query_plan,
         "as_known_at": cutoff.isoformat(),
         "observation_window": {
             "start": start.isoformat(), "end": end.isoformat(),
@@ -201,6 +229,7 @@ def correlate(
         },
         "source_ids": chosen,
         "timed_observations": timed,
+        "degraded_observations": degraded,
         "receipt_time_only_observations": receipt_only,
         "spatially_indeterminate_observations": spatial_indeterminate[:60],
         "candidate_links": candidates,

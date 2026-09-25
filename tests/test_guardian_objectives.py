@@ -179,12 +179,12 @@ class GuardianObjectiveTests(TestCase):
 
     def test_http_boundary_and_phone_privacy_wiring(self):
         root = Path(__file__).resolve().parents[1]
-        service = (root / "jarvis_mrb/service.py").read_text()
-        environment = (root / "jarvis_mrb/environment_state.py").read_text()
-        presence = (root / "ios/JarvisIOS/PersistentPresenceController.swift").read_text()
-        client = (root / "ios/JarvisIOS/JarvisAPIClient.swift").read_text()
-        view = (root / "ios/JarvisIOS/CounterfactualGuardian.swift").read_text()
-        monitor = (root / "jarvis_mrb/proactive_monitor.py").read_text()
+        service = (root / "jarvis_mrb/service.py").read_text(encoding="utf-8")
+        environment = (root / "jarvis_mrb/environment_state.py").read_text(encoding="utf-8")
+        presence = (root / "ios/JarvisIOS/PersistentPresenceController.swift").read_text(encoding="utf-8")
+        client = (root / "ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        view = (root / "ios/JarvisIOS/CounterfactualGuardian.swift").read_text(encoding="utf-8")
+        monitor = (root / "jarvis_mrb/proactive_monitor.py").read_text(encoding="utf-8")
         self.assertIn('guardian_snapshot = working_patch.pop("guardian_snapshot", None)', environment)
         self.assertIn('environment["guardian_snapshot"]', presence)
         self.assertIn('"busy": conversationActive', presence)

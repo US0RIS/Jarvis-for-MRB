@@ -26,6 +26,9 @@ dependencies = [
   "comtypes",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8.0.0"]
+
 [project.scripts]
 jarvis = "jarvis_mrb.cli:main"
 jarvis-service = "jarvis_mrb.service:main"

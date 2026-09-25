@@ -114,6 +114,17 @@ struct ArmorObservation: Decodable, Identifiable {
     }
 }
 
+struct ArmorSampleMoment: Decodable, Identifiable {
+    let id: String
+    let receivedAt: String
+    let adapterMode: String
+    enum CodingKeys: String, CodingKey {
+        case id
+        case receivedAt = "received_at"
+        case adapterMode = "adapter_mode"
+    }
+}
+
 struct ArmorReplay: Decodable {
     struct Region: Decodable {
         let id: String
@@ -124,6 +135,7 @@ struct ArmorReplay: Decodable {
     let investigation: Region
     let asKnownAt: String
     let observationCount: Int
+    let sampleTimeline: [ArmorSampleMoment]?
     let observations: [ArmorObservation]
     let coverage: [String: ArmorCoverage]
     let mode: String
@@ -132,6 +144,7 @@ struct ArmorReplay: Decodable {
         case investigation, observations, coverage, mode
         case asKnownAt = "as_known_at"
         case observationCount = "observation_count"
+        case sampleTimeline = "sample_timeline"
         case unknownIsNotAllClear = "unknown_is_not_all_clear"
     }
 }
@@ -185,6 +198,68 @@ struct ArmorChangeReport: Decodable {
     }
 }
 
+struct ArmorCorrelationReport: Decodable {
+    struct Window: Decodable {
+        let start: String
+        let end: String
+    }
+    struct Region: Decodable {
+        let latitude: Double
+        let longitude: Double
+        let radiusKM: Double
+        let geometryBasis: String
+        enum CodingKeys: String, CodingKey {
+            case latitude, longitude
+            case radiusKM = "radius_km"
+            case geometryBasis = "geometry_basis"
+        }
+    }
+    struct Coverage: Decodable {
+        let status: String
+        let scope: String
+    }
+    struct Link: Decodable, Identifiable {
+        let firstObservationID: String
+        let secondObservationID: String
+        let firstSource: String
+        let secondSource: String
+        let firstSourceTime: String
+        let secondSourceTime: String
+        let separationSeconds: Int
+        let spatialBasis: String
+        let note: String
+        var id: String { firstObservationID + ":" + secondObservationID }
+        enum CodingKeys: String, CodingKey {
+            case note
+            case firstObservationID = "first_observation_id"
+            case secondObservationID = "second_observation_id"
+            case firstSource = "first_source"
+            case secondSource = "second_source"
+            case firstSourceTime = "first_source_time"
+            case secondSourceTime = "second_source_time"
+            case separationSeconds = "separation_seconds"
+            case spatialBasis = "spatial_basis"
+        }
+    }
+    let observationWindow: Window
+    let queryRegion: Region
+    let timedObservations: [ArmorObservation]
+    let receiptTimeOnlyObservations: [ArmorObservation]
+    let candidateLinks: [Link]
+    let sourceCoverage: [String: Coverage]
+    let mode: String
+    let qualifier: String
+    enum CodingKeys: String, CodingKey {
+        case mode, qualifier
+        case observationWindow = "observation_window"
+        case queryRegion = "query_region"
+        case timedObservations = "timed_observations"
+        case receiptTimeOnlyObservations = "receipt_time_only_observations"
+        case candidateLinks = "candidate_links"
+        case sourceCoverage = "source_coverage"
+    }
+}
+
 struct ArmorSampleReceipt: Decodable {
     let newObservations: Int
     let receivedAt: String
@@ -215,6 +290,10 @@ struct WorldArmorView: View {
     @State private var asKnownAt = ""
     @State private var replayResult: ArmorReplay?
     @State private var changes: ArmorChangeReport?
+    @State private var correlations: ArmorCorrelationReport?
+    @State private var sampleTimes: [ArmorSampleMoment] = []
+    @State private var correlationWindowHours = 6
+    @State private var correlationEnd = Date()
     @State private var busy = false
     @State private var confirmForget = false
     @State private var status = "World Armor is off until enabled on your Jarvis backend."
@@ -242,6 +321,8 @@ struct WorldArmorView: View {
                     selectedRegion(selected)
                     actions
                     if let changes { changePanel(changes) }
+                    temporalQueryPanel
+                    if let correlations { correlationPanel(correlations) }
                     if let replayResult { replayPanel(replayResult) }
                 }
             }
@@ -254,6 +335,8 @@ struct WorldArmorView: View {
             if phase != .active {
                 replayResult = nil
                 changes = nil
+                correlations = nil
+                sampleTimes = []
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
         }

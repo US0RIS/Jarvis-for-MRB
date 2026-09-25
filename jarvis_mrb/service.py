@@ -225,6 +225,13 @@ class WorldArmorReplayRequest(BaseModel):
     investigation_id: str
     as_known_at: str | None = None
 
+class WorldArmorCorrelationRequest(BaseModel):
+    investigation_id: str
+    start_at: str
+    end_at: str
+    as_known_at: str | None = None
+    source_ids: list[str] | None = None
+
 
 class RealityLensRequest(BaseModel):
     latitude: float
@@ -792,6 +799,26 @@ def world_armor_changes(
     from jarvis_mrb.world_armor_phase1 import compare_recent
     try:
         return compare_recent(request.investigation_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/correlate")
+def world_armor_correlate(
+    request: WorldArmorCorrelationRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_correlate import correlate
+    try:
+        return correlate(
+            request.investigation_id,
+            start_at=request.start_at, end_at=request.end_at,
+            as_known_at=request.as_known_at,
+            source_ids=request.source_ids,
+        )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
 

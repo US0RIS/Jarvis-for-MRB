@@ -185,6 +185,47 @@ class WorldArmorCorrelationTests(TestCase):
         self.assertEqual(r["candidate_links"], [])
         self.assertFalse(r["coverage_adequate_to_claim_no_world_events"])
 
+    def test_narrow_radius_filters_source_reported_epicenter_not_model_grid(self):
+        inside=quake(at=BASE-timedelta(minutes=8))
+        inside["events"][0]["latitude"]=34.121
+        inside["events"][0]["longitude"]=-118.161
+        self.collect(quakes=inside)
+        q=self.query(query_radius_km=1)
+        self.assertEqual(len(q["timed_observations"]),2)
+        self.assertEqual(len(q["candidate_links"]),1)
+        self.assertIn("publisher_epicenter",
+                      q["candidate_links"][0]["spatial_basis"])
+        self.assertEqual(q["query_region"]["radius_km"],1.0)
+        self.assertFalse(q["candidate_links"][0]["physical_colocation_verified"])
+
+    def test_narrow_radius_excludes_far_epicenter_and_marks_unknown_separately(self):
+        distant=quake(at=BASE-timedelta(minutes=8))
+        distant["events"][0]["latitude"]=34.35
+        distant["events"][0]["longitude"]=-118.16
+        self.collect(quakes=distant)
+        far=self.query(query_radius_km=2)
+        self.assertEqual({x["source"] for x in far["timed_observations"]},
+                         {"openmeteo_model"})
+        self.assertEqual(far["candidate_links"],[])
+        self.assertEqual(far["spatially_indeterminate_observations"],[])
+        other=BASE+timedelta(minutes=20)
+        unknown=quake(at=other-timedelta(minutes=8))
+        self.collect(at=other,air=conditions(at=other),quakes=unknown)
+        r=self.query(query_radius_km=2)
+        self.assertEqual(len(r["spatially_indeterminate_observations"]),1)
+        self.assertEqual(r["spatially_indeterminate_observations"][0]["source"],
+                         "usgs_earthquakes")
+        self.assertEqual(r["candidate_links"],[])
+        # Missing epicenter still belongs to the original provider-radius
+        # observation and is usable only at full enrolled query scope.
+        full=self.query()
+        self.assertGreaterEqual(len(full["candidate_links"]),1)
+
+    def test_query_radius_cannot_expand_region_or_be_nan(self):
+        for value in (0,31,-1,float("nan"),float("inf"),"2",True):
+            with self.subTest(value=value),self.assertRaises(ValueError):
+                self.query(query_radius_km=value)
+
     def test_source_filters_must_be_known_distinct_bounded(self):
         self.collect()
         good = self.query(source_ids=["usgs_earthquakes"])

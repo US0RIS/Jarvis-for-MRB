@@ -32,6 +32,13 @@ struct MainView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     NavigationLink {
+                        LifeFabricView()
+                    } label: {
+                        Image(systemName: "checklist.checked")
+                    }
+                    .accessibilityLabel("Life Fabric")
+
+                    NavigationLink {
                         FrontendOperationsView()
                     } label: {
                         Image(systemName: "gauge.with.dots.needle.67percent")

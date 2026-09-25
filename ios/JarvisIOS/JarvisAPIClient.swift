@@ -1,5 +1,171 @@
 import Foundation
 
+struct LifeFabricRecord: Decodable, Identifiable {
+    struct Detail: Decodable {
+        let description: String?
+        let nextStep: String?
+        let location: String?
+        let quantity: Double?
+        let dependsOn: [String]?
+        let linkedIDs: [String]?
+        let template: String?
+
+        enum CodingKeys: String, CodingKey {
+            case description, location, quantity, template
+            case nextStep = "next_step"
+            case dependsOn = "depends_on"
+            case linkedIDs = "linked_ids"
+        }
+    }
+
+    let id: String
+    let kind: String
+    let domain: String
+    let title: String
+    let data: Detail
+    let deadlineAt: String?
+    let version: Int
+    let retiredAt: String?
+    let completionState: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, domain, title, data, version
+        case deadlineAt = "deadline_at"
+        case retiredAt = "retired_at"
+        case completionState = "completion_state"
+    }
+}
+
+struct LifeFabricRecords: Decodable {
+    let records: [LifeFabricRecord]
+    let truncated: Bool
+}
+
+struct LifeFabricReadiness: Decodable {
+    struct Due: Decodable, Identifiable {
+        let id: String
+        let title: String
+        let deadlineAt: String
+        let dueState: String
+        let completionState: String
+        let blocked: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, blocked
+            case deadlineAt = "deadline_at"
+            case dueState = "due_state"
+            case completionState = "completion_state"
+        }
+    }
+    struct Blocked: Decodable, Identifiable {
+        let id: String
+        let title: String
+        let blockingTaskIDs: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case id, title
+            case blockingTaskIDs = "blocking_task_ids"
+        }
+    }
+    let setupRequired: Bool
+    let allClear: Bool
+    let recordsTotal: Int
+    let tasksTotal: Int
+    let due: [Due]
+    let blocked: [Blocked]
+    let unknown: [String]
+    let allClearQualifier: String
+
+    enum CodingKeys: String, CodingKey {
+        case due, blocked, unknown
+        case setupRequired = "setup_required"
+        case allClear = "all_clear"
+        case recordsTotal = "records_total"
+        case tasksTotal = "tasks_total"
+        case allClearQualifier = "all_clear_qualifier"
+    }
+}
+
+struct LifeFabricTransition: Decodable {
+    let transition: LifeFabricRecord
+    let tasks: [LifeFabricRecord]
+    let replayed: Bool
+}
+
+struct LifeFabricHandoff: Decodable {
+    let handoff: LifeFabricRecord
+    let linkedRecords: [LifeFabricRecord]
+
+    enum CodingKeys: String, CodingKey {
+        case handoff
+        case linkedRecords = "linked_records"
+    }
+}
+
+struct LifeFabricFriction: Decodable {
+    let label: String
+    let occurrences30d: Int
+    let distinctUTCDays: Int
+    let candidateRepeatedFriction: Bool
+    let suggestion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case label, suggestion
+        case occurrences30d = "occurrences_30d"
+        case distinctUTCDays = "distinct_utc_days"
+        case candidateRepeatedFriction = "candidate_repeated_friction"
+    }
+}
+
+struct LifeFabricFrictionCandidates: Decodable {
+    struct Candidate: Decodable, Identifiable {
+        let frictionKey: String
+        let label: String
+        let occurrences: Int
+        let days: Int
+        var id: String { frictionKey }
+
+        enum CodingKeys: String, CodingKey {
+            case label, occurrences, days
+            case frictionKey = "friction_key"
+        }
+    }
+    let candidates: [Candidate]
+    let basis: String
+}
+
+struct LifeFabricDeleteReceipt: Decodable {
+    let deletedRecords: Int
+    let deletedReceipts: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deletedRecords = "deleted_records"
+        case deletedReceipts = "deleted_receipts"
+    }
+}
+
+struct LifeFabricFrictionClearReceipt: Decodable {
+    let deletedFrictionEvents: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deletedFrictionEvents = "deleted_friction_events"
+    }
+}
+
+struct LifeFabricWhatIf: Decodable {
+    let availableMinutes: Int
+    let remainingMinutes: Int
+    let fitsAssumedTimeBudget: Bool
+    let calendarConflictsChecked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case availableMinutes = "available_minutes"
+        case remainingMinutes = "remaining_minutes"
+        case fitsAssumedTimeBudget = "fits_assumed_time_budget"
+        case calendarConflictsChecked = "calendar_conflicts_checked"
+    }
+}
+
 struct RealityLensReport: Decodable {
     struct Observation: Decodable, Identifiable {
         let id: String
@@ -817,6 +983,127 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(RealityGraphPlaceResponse.self, from: data)
+    }
+
+    func lifeForget(id: String, version: Int) async throws -> LifeFabricDeleteReceipt {
+        let (data, response) = try await postData(
+            path: "life/records/forget",
+            body: ["record_id": id, "expected_version": version]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricDeleteReceipt.self, from: data)
+    }
+
+    func lifeClearFriction() async throws -> LifeFabricFrictionClearReceipt {
+        let (data, response) = try await postData(
+            path: "life/friction/clear", body: [:]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricFrictionClearReceipt.self, from: data)
+    }
+
+    func lifeReadiness() async throws -> LifeFabricReadiness {
+        let (data, response) = try await get(path: "life/readiness", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricReadiness.self, from: data)
+    }
+
+    func lifeRecords() async throws -> LifeFabricRecords {
+        let (data, response) = try await get(path: "life/records", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricRecords.self, from: data)
+    }
+
+    func lifeCreate(kind: String, title: String, domain: String,
+                    description: String, deadlineAt: String?, nextStep: String,
+                    location: String, quantity: Double?,
+                    requestID: String) async throws -> LifeFabricRecord {
+        var body: [String: Any] = [
+            "kind": kind, "title": title, "domain": domain,
+            "description": description, "next_step": nextStep,
+            "location": location, "client_request_id": requestID,
+        ]
+        if let deadlineAt { body["deadline_at"] = deadlineAt }
+        if let quantity { body["quantity"] = quantity }
+        let (data, response) = try await postData(path: "life/records/create", body: body)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricRecord.self, from: data)
+    }
+
+    func lifeConfirmDone(id: String, version: Int) async throws -> LifeFabricRecord {
+        let (data, response) = try await postData(
+            path: "life/records/receipt",
+            body: [
+                "record_id": id, "expected_version": version,
+                "outcome": "verified", "source_kind": "user_confirmation",
+                "evidence_ref": "Explicit user confirmation in Jarvis Life",
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricRecord.self, from: data)
+    }
+
+    func lifeRetire(id: String, version: Int) async throws -> LifeFabricRecord {
+        let (data, response) = try await postData(
+            path: "life/records/retire",
+            body: ["record_id": id, "expected_version": version]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricRecord.self, from: data)
+    }
+
+    func lifeTransition(template: String, title: String,
+                        requestID: String) async throws -> LifeFabricTransition {
+        let (data, response) = try await postData(
+            path: "life/transition",
+            body: ["template": template, "title": title,
+                   "client_request_id": requestID]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricTransition.self, from: data)
+    }
+
+    func lifeLogFriction(_ label: String) async throws -> LifeFabricFriction {
+        let (data, response) = try await postData(
+            path: "life/friction/log", body: ["label": label]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricFriction.self, from: data)
+    }
+
+    func lifeFrictionCandidates() async throws -> LifeFabricFrictionCandidates {
+        let (data, response) = try await get(path: "life/friction/candidates", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricFrictionCandidates.self, from: data)
+    }
+
+    func lifeHandoff(title: String, summary: String, nextStep: String,
+                     linkedIDs: [String], requestID: String) async throws -> LifeFabricRecord {
+        let (data, response) = try await postData(
+            path: "life/handoff",
+            body: ["title": title, "summary": summary, "next_step": nextStep,
+                   "linked_ids": linkedIDs, "client_request_id": requestID]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricRecord.self, from: data)
+    }
+
+    func lifeResume(_ id: String) async throws -> LifeFabricHandoff {
+        let (data, response) = try await postData(
+            path: "life/handoff/resume", body: ["record_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricHandoff.self, from: data)
+    }
+
+    func lifeWhatIf(activity: Int, days: Int, freePerDay: Int) async throws -> LifeFabricWhatIf {
+        let (data, response) = try await postData(
+            path: "life/what-if/minutes",
+            body: ["activity_minutes": activity, "days": days,
+                   "daily_free_minutes": freePerDay]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(LifeFabricWhatIf.self, from: data)
     }
 
     func realityLensSense(latitude: Double, longitude: Double, label: String,

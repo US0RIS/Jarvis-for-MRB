@@ -380,7 +380,10 @@ def check_once() -> None:
         _run_isolated("proactive_calendar", _check_calendar)
         _run_isolated("proactive_urgent_mail", _check_urgent_mail)
         _run_isolated("sensor_weather", _check_sensor_weather)
-        _run_isolated("guardian_objectives", _check_guardian_objectives)
+
+    # Explicitly enrolled goal watches remain independent of generic proactive
+    # suggestions, as they already are in the production background loop.
+    _run_isolated("guardian_objectives", _check_guardian_objectives)
 
     # Verification and persistent desired-state control are correctness/safety
     # loops, not optional notification features. Disabling general proactive

@@ -6,6 +6,22 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
+## Life Fabric — reduce five years of ordinary friction
+
+**[Life Fabric](LIFE_FABRIC.md)** adds a private, user-enrolled everyday-life
+ledger with an actual iPhone **Life Fabric** workspace, timezone-aware
+readiness and dependency checks, classified completion receipts, manually
+recorded assets, six eight-step life-transition checklists, explicit
+cross-device continuation packets, a Friction Observatory for three distinct
+reported days, and bounded time-budget what-ifs. A separate
+**[five-year inconvenience catalog](LIFE_FRICTION_CATALOG.md)** maps all 17
+ordinary-life domains to implemented primitives and the external connectors
+or hardware still required. It is a source- and authorization-aware foundation,
+**not** a claim that Jarvis can already automate every scenario in the
+catalog, passively observe your habits, charge a card, or verify medical,
+financial or physical outcomes without the necessary provider access.
+Nothing is deployed on your devices merely because CI passes.
+
 ## Human Extension v1 — executable first superpower slice
 
 **[Reality Lens](HUMAN_EXTENSION.md)** is the first deliberately non-chatbot

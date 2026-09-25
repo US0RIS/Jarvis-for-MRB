@@ -99,7 +99,7 @@ def _wsl_home() -> str | None:
             text=True,
             stdin=subprocess.DEVNULL,
             timeout=10.0,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             check=False,
         )
     except (OSError, subprocess.SubprocessError):

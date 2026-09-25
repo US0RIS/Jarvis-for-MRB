@@ -430,9 +430,13 @@ struct WorldArmorView: View {
                 ForEach(investigations) { entry in
                     Button {
                         selectedID = entry.id
+                        asKnownAt = ""
                         replayResult = nil
                         changes = nil
+                        correlations = nil
+                        sampleTimes = []
                         status = "Selected " + entry.label
+                        Task { await replay() }
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
@@ -732,6 +736,8 @@ struct WorldArmorView: View {
                 selectedID = nil
                 replayResult = nil
                 changes = nil
+                correlations = nil
+                sampleTimes = []
             }
             if capabilities?.enabled == true {
                 status = "Source registry integrated, not proof that live "
@@ -739,6 +745,8 @@ struct WorldArmorView: View {
             } else {
                 replayResult = nil
                 changes = nil
+                correlations = nil
+                sampleTimes = []
                 status = "Backend OFF: collection and replay disabled. "
                     + "Previously saved locations remain visible for deletion."
             }
@@ -746,6 +754,8 @@ struct WorldArmorView: View {
             capabilities = nil
             replayResult = nil
             changes = nil
+            correlations = nil
+            sampleTimes = []
             status = "World Armor unavailable: " + error.localizedDescription
         }
     }
@@ -767,6 +777,9 @@ struct WorldArmorView: View {
             selectedID = made.id
             replayResult = nil
             changes = nil
+            correlations = nil
+            sampleTimes = []
+            asKnownAt = ""
             status = "Created an expiring region. No provider checked yet."
         } catch {
             status = "Create blocked: " + error.localizedDescription
@@ -783,7 +796,10 @@ struct WorldArmorView: View {
             replayResult = try await client.worldArmorReplay(
                 selectedID, asKnownAt: nil
             )
+            sampleTimes = replayResult?.sampleTimeline ?? []
+            asKnownAt = ""
             changes = nil
+            correlations = nil
             status = "Received \(receipt.newObservations) new source records "
                 + "at " + receipt.receivedAt + ". Read coverage before "
                 + "drawing conclusions."
@@ -801,6 +817,9 @@ struct WorldArmorView: View {
             replayResult = try await client.worldArmorReplay(
                 selectedID, asKnownAt: cutoff.isEmpty ? nil : cutoff
             )
+            if cutoff.isEmpty {
+                sampleTimes = replayResult?.sampleTimeline ?? []
+            }
             status = "Viewing retained evidence, not issuing provider requests."
         } catch {
             status = "Replay blocked: " + error.localizedDescription
@@ -853,6 +872,8 @@ struct WorldArmorView: View {
             let receipt = try await client.worldArmorForget(selectedID)
             replayResult = nil
             changes = nil
+            correlations = nil
+            sampleTimes = []
             investigations = try await client.worldArmorInvestigations().investigations
             self.selectedID = nil
             status = "Removed \(receipt.deleted) investigation. "

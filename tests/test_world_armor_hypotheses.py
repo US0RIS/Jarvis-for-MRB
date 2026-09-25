@@ -107,6 +107,25 @@ class WorldArmorHypothesisTests(TestCase):
         for h in graph["hypotheses"]:
             self.assertTrue(set(h["supporting_observation_ids"]).issubset(ids))
 
+    def test_source_revision_edge_has_both_traversable_nodes(self):
+        self.collect()
+        later=NOW+timedelta(minutes=15)
+        changed=earthquakes(NOW-timedelta(minutes=12))
+        changed["events"][0]["magnitude"]=3.6
+        self.collect(at=later,air=conditions(later,aqi=52),quake=changed)
+        graph=self.graph(
+            end_at=(later+timedelta(minutes=1)).isoformat(),
+            now=later+timedelta(hours=1),
+        )
+        revisions=[e for e in graph["edges"]
+                   if e["type"]=="same_provider_revision"]
+        self.assertGreaterEqual(len(revisions),1)
+        ids={node["id"] for node in graph["nodes"]}
+        for edge in revisions:
+            self.assertIn(edge["from"],ids)
+            self.assertIn(edge["to"],ids)
+            self.assertFalse(edge["causal"])
+
     def test_nws_unknown_event_time_never_supports_temporal_hypothesis(self):
         self.collect()
         graph=self.graph(source_ids=["nws_point_alerts","usgs_earthquakes"])

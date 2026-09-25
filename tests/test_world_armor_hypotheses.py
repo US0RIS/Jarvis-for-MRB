@@ -126,6 +126,26 @@ class WorldArmorHypothesisTests(TestCase):
             self.assertIn(edge["to"],ids)
             self.assertFalse(edge["causal"])
 
+    def test_query_identity_carries_into_hypothesis_identity(self):
+        self.collect()
+        a=self.graph(query_radius_km=10)
+        b=self.graph(query_radius_km=10)
+        c=self.graph(query_radius_km=5)
+        self.assertEqual(a["query_id"],b["query_id"])
+        self.assertEqual(a["hypotheses"][0]["id"],b["hypotheses"][0]["id"])
+        self.assertNotEqual(a["query_id"],c["query_id"])
+        self.assertNotEqual(a["hypotheses"][0]["id"],c["hypotheses"][0]["id"])
+
+    def test_stale_model_sample_is_evidence_not_hypothesis_support(self):
+        air=conditions()
+        air["air_quality"]["status"]="stale"
+        self.collect(air=air)
+        graph=self.graph()
+        self.assertEqual(graph["hypotheses"],[])
+        self.assertEqual(graph["degraded_observation_count"],1)
+        model=next(n for n in graph["nodes"] if n["source"]=="openmeteo_model")
+        self.assertEqual(model["sample_coverage_status"],"stale")
+
     def test_nws_unknown_event_time_never_supports_temporal_hypothesis(self):
         self.collect()
         graph=self.graph(source_ids=["nws_point_alerts","usgs_earthquakes"])

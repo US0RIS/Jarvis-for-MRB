@@ -51,6 +51,9 @@ struct JarvisIOSApp: App {
             power: power
         )
         frontend.attach(persistentPresence: presence, meetingCapture: meeting)
+        presence.attach(frontend: frontend)
+        model.guardian.attach(frontend: frontend)
+        model.missionControl.attach(frontend: frontend)
 
         _appModel = StateObject(wrappedValue: model)
         _persistentPresence = StateObject(wrappedValue: presence)
@@ -71,6 +74,29 @@ struct JarvisIOSApp: App {
                         Label("Jarvis", systemImage: "waveform.circle.fill")
                     }
 
+                NavigationStack {
+                    JarvisPhysicalHubView()
+                }
+                .tabItem {
+                    Label("Physical", systemImage: "location.north.line")
+                }
+
+                NavigationStack {
+                    ScrollView {
+                        JarvisMissionBoard()
+                            .padding()
+                    }
+                    .navigationTitle("Missions")
+                }
+                .tabItem {
+                    Label("Missions", systemImage: "target")
+                }
+
+                RealityMeshView()
+                    .tabItem {
+                        Label("Mesh", systemImage: "network")
+                    }
+
                 LocalIntelligenceMilestoneView()
                     .tabItem {
                         Label("Local", systemImage: "brain.head.profile")
@@ -87,9 +113,14 @@ struct JarvisIOSApp: App {
                     }
             }
             .environmentObject(appModel)
+            .environmentObject(appModel.memoMind)
+            .environmentObject(appModel.homeEnvironment)
             .environmentObject(persistentPresence)
             .environmentObject(meetingCapture)
             .environmentObject(frontendIntelligence)
+            .environmentObject(appModel.guardian)
+            .environmentObject(appModel.missionControl)
+            .environmentObject(appModel.realityMesh)
             .environmentObject(knownPeople)
             .environmentObject(localPower)
             .environmentObject(localProductivity)
@@ -98,6 +129,8 @@ struct JarvisIOSApp: App {
             .task {
                 await persistentPresence.start()
                 await frontendIntelligence.start()
+                appModel.guardian.start()
+                appModel.missionControl.start()
                 await knownPeople.start(appModel: appModel)
                 await localPower.start()
                 localProductivity.start()

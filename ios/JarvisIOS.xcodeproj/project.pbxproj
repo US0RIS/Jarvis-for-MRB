@@ -31,6 +31,13 @@
 		200000000000000000000016 /* LocalIntelligenceMilestone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000018 /* LocalIntelligenceMilestone.swift */; };
 		200000000000000000000017 /* FrontendOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* FrontendOperations.swift */; };
 		200000000000000000000018 /* JarvisLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001A /* JarvisLiveActivityWidget.swift */; };
+		20000000000000000000001D /* HomeEnvironmentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001E /* HomeEnvironmentController.swift */; };
+		20000000000000000000001E /* CounterfactualGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001F /* CounterfactualGuardian.swift */; };
+		20000000000000000000001F /* MissionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* MissionControl.swift */; };
+		200000000000000000000020 /* RealityMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* RealityMesh.swift */; };
+		200000000000000000000022 /* LifeFabricView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000022 /* LifeFabricView.swift */; };
+		20000000000000000000001A /* MemoMindBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001C /* MemoMindBridge.swift */; };
+		20000000000000000000001B /* JarvisPhysicalControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000001D /* JarvisPhysicalControlView.swift */; };
 		200000000000000000000019 /* JarvisLiveActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 006000000000000000000002 /* JarvisLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		303000000000000000000001 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 301000000000000000000001 /* MWDATCore */; };
 		303000000000000000000002 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 302000000000000000000001 /* MWDATCamera */; };
@@ -99,6 +106,13 @@
 		100000000000000000000018 /* LocalIntelligenceMilestone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalIntelligenceMilestone.swift; sourceTree = "<group>"; };
 		100000000000000000000019 /* FrontendOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontendOperations.swift; sourceTree = "<group>"; };
 		10000000000000000000001A /* JarvisLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisLiveActivityWidget.swift; sourceTree = "<group>"; };
+		10000000000000000000001E /* HomeEnvironmentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeEnvironmentController.swift; sourceTree = "<group>"; };
+		10000000000000000000001F /* CounterfactualGuardian.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CounterfactualGuardian.swift; sourceTree = "<group>"; };
+		100000000000000000000020 /* MissionControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionControl.swift; sourceTree = "<group>"; };
+		100000000000000000000021 /* RealityMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealityMesh.swift; sourceTree = "<group>"; };
+		100000000000000000000022 /* LifeFabricView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeFabricView.swift; sourceTree = "<group>"; };
+		10000000000000000000001C /* MemoMindBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoMindBridge.swift; sourceTree = "<group>"; };
+		10000000000000000000001D /* JarvisPhysicalControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisPhysicalControlView.swift; sourceTree = "<group>"; };
 		10000000000000000000001B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -166,6 +180,13 @@
 				100000000000000000000006 /* SpeechSynthesizer.swift */,
 				100000000000000000000007 /* GeofenceManager.swift */,
 				100000000000000000000008 /* MetaGlassesManager.swift */,
+				10000000000000000000001C /* MemoMindBridge.swift */,
+				10000000000000000000001D /* JarvisPhysicalControlView.swift */,
+				10000000000000000000001E /* HomeEnvironmentController.swift */,
+				10000000000000000000001F /* CounterfactualGuardian.swift */,
+				100000000000000000000020 /* MissionControl.swift */,
+				100000000000000000000021 /* RealityMesh.swift */,
+				100000000000000000000022 /* LifeFabricView.swift */,
 				100000000000000000000010 /* JarvisIOS.entitlements */,
 				10000000000000000000000B /* Info.plist */,
 			);
@@ -297,6 +318,13 @@
 				200000000000000000000006 /* SpeechSynthesizer.swift in Sources */,
 				200000000000000000000007 /* GeofenceManager.swift in Sources */,
 				200000000000000000000008 /* MetaGlassesManager.swift in Sources */,
+				20000000000000000000001A /* MemoMindBridge.swift in Sources */,
+				20000000000000000000001B /* JarvisPhysicalControlView.swift in Sources */,
+				20000000000000000000001D /* HomeEnvironmentController.swift in Sources */,
+				20000000000000000000001E /* CounterfactualGuardian.swift in Sources */,
+				20000000000000000000001F /* MissionControl.swift in Sources */,
+				200000000000000000000020 /* RealityMesh.swift in Sources */,
+				200000000000000000000022 /* LifeFabricView.swift in Sources */,
 				200000000000000000000009 /* MainView.swift in Sources */,
 				20000000000000000000000A /* SettingsView.swift in Sources */,
 				20000000000000000000000B /* KeychainStore.swift in Sources */,

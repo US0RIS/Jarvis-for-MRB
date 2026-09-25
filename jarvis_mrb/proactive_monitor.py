@@ -239,25 +239,178 @@ def _proactive_enabled() -> bool:
         return True
 
 
+def _check_agency_runtime() -> None:
+    """Advance persistent desired states with a small action and interruption budget."""
+    from jarvis_mrb.agency_attention import consider
+    from jarvis_mrb.agency_plan import describe_pending_approval
+    from jarvis_mrb.agency_runtime import tick_all
+    from jarvis_mrb.desired_state import get_desired_state
+
+    report = tick_all(max_actions=2, limit=50)
+    candidates: list[dict[str, Any]] = []
+    for item in report.get("results") or []:
+        state_id = str(item.get("desired_state_id") or "")
+        state = get_desired_state(state_id) or {}
+        title = str(state.get("title") or state_id or "an Agency goal")
+        status = str(item.get("status") or "")
+        plan = item.get("plan") if isinstance(item.get("plan"), dict) else {}
+
+        if status == "awaiting_approval":
+            waiting = [
+                step for step in (plan.get("steps") or [])
+                if str(step.get("status") or "") == "awaiting_approval"
+            ]
+            step = waiting[0] if waiting else {}
+            approval_item = dict(step)
+            approval_item["desired_state_title"] = title
+            try:
+                from jarvis_mrb.agency_plan import resolved_arguments
+                approval_item["resolved_arguments"] = resolved_arguments(str(step.get("id") or ""))
+            except Exception:
+                approval_item["resolved_arguments"] = dict(step.get("arguments") or {})
+            action_description = describe_pending_approval(approval_item)
+            candidates.append(
+                {
+                    "kind": "approval_required",
+                    "message": (
+                        f"Agency needs your approval to continue {title}: {action_description}. "
+                        f"To authorize this exact pending action, say 'approve agency {title}'. "
+                        f"To reject it, say 'deny agency {title}'."
+                    ),
+                    "desired_state_id": state_id,
+                    "dedup_key": f"agency-approval:{plan.get('id')}:{step.get('id')}",
+                    "benefit": 90,
+                    "urgency": 70,
+                    "confidence": 1.0,
+                    "error_cost": 0,
+                    "attention_cost": 20,
+                    "severity": "warning",
+                    "dedup_seconds": 24 * 3600,
+                }
+            )
+        elif status == "blocked":
+            candidates.append(
+                {
+                    "kind": "blocked",
+                    "message": f"Agency is blocked on {title}.",
+                    "desired_state_id": state_id,
+                    "dedup_key": f"agency-blocked:{state_id}:{state.get('blocked_reason')}",
+                    "benefit": 55,
+                    "urgency": 20,
+                    "confidence": 1.0,
+                    "error_cost": 10,
+                    "attention_cost": 25,
+                    "severity": "info",
+                    "dedup_seconds": 24 * 3600,
+                }
+            )
+        elif status == "satisfied":
+            candidates.append(
+                {
+                    "kind": "satisfied",
+                    "message": f"Agency satisfied {title}.",
+                    "desired_state_id": state_id,
+                    "dedup_key": f"agency-satisfied:{state_id}:{state.get('satisfied_at')}",
+                    "benefit": 20,
+                    "urgency": 0,
+                    "confidence": 1.0,
+                    "error_cost": 0,
+                    "attention_cost": 25,
+                    "severity": "info",
+                    "dedup_seconds": 7 * 24 * 3600,
+                }
+            )
+
+    # At most one *new* interruption per monitor cycle. A duplicate of a previously
+    # emitted candidate does not consume the budget, allowing the next waiting
+    # exception to surface. Deferred candidates remain queryable and eligible later.
+    interruption_budget = 1
+    for candidate in candidates:
+        result = consider(
+            **candidate,
+            allow_emit=interruption_budget > 0,
+            suppress_reason="one-new-Agency-interruption-per-monitor-cycle",
+        )
+        if result.get("emitted"):
+            interruption_budget -= 1
+
+
+def _check_desired_states() -> None:
+    """Continuously reconcile declarative desired states against the world model.
+
+    This is intentionally observation-only. It may close or reopen a desired state
+    based on explicit machine-evaluable criteria, but it never grants action authority.
+    Planning/execution remains behind the normal Executive and permission layers.
+    """
+    from jarvis_mrb.desired_state import (
+        check_wake_watches,
+        evaluate_desired_state,
+        list_desired_states,
+        sync_from_intentions,
+    )
+
+    sync_from_intentions()
+    try:
+        from jarvis_mrb.agency_capability import reconcile_gaps
+        reconcile_gaps()
+    except Exception as exc:
+        _health_failure("agency_capability_reconcile", exc)
+    check_wake_watches()
+    for item in list_desired_states(limit=200):
+        if str(item.get("state") or "") in {"blocked", "paused", "retired"}:
+            continue
+        evaluate_desired_state(str(item["id"]), persist=True)
+
+
+def _check_sensor_weather() -> None:
+    """Source-labelled, opt-in weather context for explicit ambient goals."""
+    from jarvis_mrb.sensor_opportunities import check_weather
+    check_weather()
+
+
+def _check_guardian_objectives() -> None:
+    """Reconcile user-enrolled goal deadlines; phone consent gates alerts."""
+    from jarvis_mrb.guardian_objectives import evaluate_once
+    evaluate_once()
+
+
 def check_once() -> None:
-    if not _proactive_enabled():
-        return
-    _run_isolated("proactive_calendar", _check_calendar)
-    _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+    proactive = _proactive_enabled()
+    if proactive:
+        _run_isolated("proactive_calendar", _check_calendar)
+        _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+        _run_isolated("sensor_weather", _check_sensor_weather)
+
+    # Explicitly enrolled goal watches remain independent of generic proactive
+    # suggestions, as they already are in the production background loop.
+    _run_isolated("guardian_objectives", _check_guardian_objectives)
+
+    # Verification and persistent desired-state control are correctness/safety
+    # loops, not optional notification features. Disabling general proactive
+    # suggestions must not strand an already-approved action or active Agency goal.
     _run_isolated("action_verification", _check_action_verifications)
+    _run_isolated("desired_state_evaluation", _check_desired_states)
+    _run_isolated("agency_runtime", _check_agency_runtime)
 
 
 def _loop() -> None:
     time.sleep(8)
     cycle = 0
     while True:
-        if _proactive_enabled():
-            # Isolate each provider. Calendar failure must not suppress action
-            # verification; verifier failure must not suppress urgent-mail checks.
+        proactive = _proactive_enabled()
+        if proactive:
             _run_isolated("proactive_calendar", _check_calendar)
-            _run_isolated("action_verification", _check_action_verifications)
             if cycle % 3 == 0:
                 _run_isolated("proactive_urgent_mail", _check_urgent_mail)
+            _run_isolated("sensor_weather", _check_sensor_weather)
+        _run_isolated("guardian_objectives", _check_guardian_objectives)
+
+        # Always keep outcome verification and the persistent Agency control loop
+        # alive. Agency's own mode/permissions determine whether any action occurs.
+        _run_isolated("action_verification", _check_action_verifications)
+        _run_isolated("desired_state_evaluation", _check_desired_states)
+        _run_isolated("agency_runtime", _check_agency_runtime)
+
         cycle += 1
         time.sleep(60)
 

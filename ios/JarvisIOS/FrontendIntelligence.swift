@@ -151,7 +151,10 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
     @Published private(set) var courseDegrees: Double?
     @Published private(set) var altitudeMeters: Double?
     @Published private(set) var coordinate: CLLocationCoordinate2D?
+    @Published private(set) var horizontalAccuracyMeters: CLLocationAccuracy?
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var lastLocationAt: Date?
+    @Published private(set) var lastMotionAt: Date?
 
     private let motion = CMMotionActivityManager()
     private let location = CLLocationManager()
@@ -183,6 +186,7 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
                     else if sample.walking { self.activity = "Walking" }
                     else if sample.stationary { self.activity = "Stationary" }
                     else { self.activity = "Unknown" }
+                    self.lastMotionAt = Date()
                     self.lastUpdated = Date()
                 }
             }
@@ -222,6 +226,9 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
         guard let current = locations.last else { return }
         Task { @MainActor in
             coordinate = current.coordinate
+            horizontalAccuracyMeters = current.horizontalAccuracy >= 0
+                ? current.horizontalAccuracy : nil
+            lastLocationAt = current.timestamp
             altitudeMeters = current.verticalAccuracy >= 0 ? current.altitude : nil
             speedMPS = current.speed >= 0 ? current.speed : nil
             if current.course >= 0 { courseDegrees = current.course }
@@ -266,6 +273,7 @@ final class FrontendIntelligenceController: ObservableObject {
     private unowned let appModel: JarvisAppModel
     private weak var persistentPresence: PersistentPresenceController?
     private weak var meetingCapture: MeetingCaptureController?
+    var isMeetingActive: Bool { meetingCapture?.isActive ?? false }
     private var loopTask: Task<Void, Never>?
     private var started = false
     private var lastSnapshotAt = Date.distantPast
@@ -306,11 +314,39 @@ final class FrontendIntelligenceController: ObservableObject {
         loopTask?.cancel()
         loopTask = nil
         sensors.setEnabled(false)
+        AmbientSoundCapture.shared.stop()
     }
 
     private func runLoop() async {
         while !Task.isCancelled && started {
             sensors.setEnabled(appModel.settings.localSensorContextEnabled)
+            // Primary camera-free perception. Reuse speech/meeting capture when
+            // it owns the mic; only run a separate SoundAnalysis-only tap when
+            // idle, in foreground, and both user opt-ins are still enabled.
+            let ambientOpportunityAllowed = appModel.settings.sensorOpportunitiesEnabled
+                && appModel.settings.soundRecognitionEnabled
+                && UIApplication.shared.applicationState == .active
+                && !appModel.speechSynthesizer.isSpeaking
+                && !appModel.isSending
+                && !(meetingCapture?.isActive ?? false)
+            let idleTapAllowed = ambientOpportunityAllowed
+                && !appModel.speechRecognizer.isActive
+            await AmbientSoundCapture.shared.refresh(
+                enabled: idleTapAllowed,
+                audioRouteManager: appModel.audioRouteManager,
+                preferBluetooth: appModel.settings.preferBluetoothAudio
+            )
+            // A hands-free wake session already classifies sound through the
+            // existing SpeechRecognizer tap; do not start a second microphone.
+            // A spoken command/follow-up is not ambient context.
+            let wakeOnly = appModel.handsFreeEnabled
+                && appModel.voiceStatus == "Listening for “Jarvis”…"
+            if ambientOpportunityAllowed
+                && (!appModel.speechRecognizer.isActive || wakeOnly) {
+                await persistentPresence?.observeAmbientSound()
+            } else {
+                persistentPresence?.clearAmbientOpportunityEvidence()
+            }
             await captureLatestFrameIfNeeded()
 
             if appModel.settings.localFastPerceptionEnabled,
@@ -421,21 +457,21 @@ final class FrontendIntelligenceController: ObservableObject {
         guard !localOCRText.isEmpty else { return "I couldn't find clearly readable text in the current glasses frame." }
         UIPasteboard.general.string = localOCRText
         lastLocalAction = "Copied recognized text to iPhone clipboard"
-        return "I copied the visible text to the iPhone clipboard, sir."
+        return "I copied the visible text to the iPhone clipboard."
     }
 
     func readRecognizedText() async -> String {
         if localOCRText.isEmpty {
             _ = await scanLatestFrame(copyText: false)
         }
-        guard !localOCRText.isEmpty else { return "I couldn't find clearly readable text in the current glasses frame, sir." }
+        guard !localOCRText.isEmpty else { return "I couldn't find clearly readable text in the current glasses frame." }
         let compact = localOCRText.replacingOccurrences(of: "\n", with: " ")
         return String(compact.prefix(1200))
     }
 
     func scanBarcode() async -> String {
         _ = await scanLatestFrame(copyText: false)
-        guard let first = barcodeValues.first else { return "I don't see a readable QR code or barcode in the current frame, sir." }
+        guard let first = barcodeValues.first else { return "I don't see a readable QR code or barcode in the current frame." }
         UIPasteboard.general.string = first
         lastLocalAction = "Copied barcode/QR payload to iPhone clipboard"
         return "I found a code and copied its contents to the iPhone clipboard: \(String(first.prefix(500)))"
@@ -465,7 +501,7 @@ final class FrontendIntelligenceController: ObservableObject {
     }
 
     func sendNextQueuedCommand() async -> String {
-        guard let item = offlineQueue.items.first else { return "There are no queued commands, sir." }
+        guard let item = offlineQueue.items.first else { return "There are no queued commands." }
         let client = JarvisAPIClient(
             baseURL: appModel.settings.baseURL,
             fallbackBaseURL: appModel.settings.fallbackBaseURL,
@@ -478,7 +514,7 @@ final class FrontendIntelligenceController: ObservableObject {
             appModel.lastResponse = response.message
             return response.message
         } catch {
-            return "The server is still unreachable, sir. I left the queued command untouched."
+            return "The server is still unreachable. I left the queued command untouched."
         }
     }
 
@@ -539,19 +575,19 @@ final class FrontendIntelligenceController: ObservableObject {
         }
         if text.contains(" passive vision off ") || text.contains(" turn vision off ") || text.contains(" vision off ") {
             appModel.settings.passiveVisionEnabled = false
-            return "Passive vision is off, sir."
+            return "Passive vision is off."
         }
         if text.contains(" passive vision on ") || text.contains(" turn vision on ") || text.contains(" vision on ") {
             appModel.settings.passiveVisionEnabled = true
-            return "Passive vision is on, sir."
+            return "Passive vision is on."
         }
         if text.contains(" mute alerts ") || text.contains(" stop proactive alerts ") {
             appModel.settings.proactiveAnnouncements = false
-            return "Proactive spoken alerts are muted, sir."
+            return "Proactive spoken alerts are muted."
         }
         if text.contains(" unmute alerts ") || text.contains(" resume proactive alerts ") {
             appModel.settings.proactiveAnnouncements = true
-            return "Proactive spoken alerts are enabled, sir."
+            return "Proactive spoken alerts are enabled."
         }
         if text.contains(" mute responses ") || text.contains(" stop speaking responses ") {
             appModel.settings.speakResponses = false
@@ -559,18 +595,18 @@ final class FrontendIntelligenceController: ObservableObject {
         }
         if text.contains(" unmute responses ") || text.contains(" speak responses ") {
             appModel.settings.speakResponses = true
-            return "Spoken responses are enabled, sir."
+            return "Spoken responses are enabled."
         }
         if text.contains(" whisper for ") {
             let minutes = Self.firstInteger(in: text) ?? 10
             let bounded = max(1, min(minutes, 120))
             let until = Date().addingTimeInterval(Double(bounded) * 60)
             UserDefaults.standard.set(until.timeIntervalSince1970, forKey: "jarvis.forceWhisperUntil")
-            return "Whisper mode is forced for \(bounded) minute\(bounded == 1 ? "" : "s"), sir."
+            return "Whisper mode is forced for \(bounded) minute\(bounded == 1 ? "" : "s")."
         }
         if text.contains(" stop whispering ") || text.contains(" normal voice ") {
             UserDefaults.standard.removeObject(forKey: "jarvis.forceWhisperUntil")
-            return "Normal voice restored, sir."
+            return "Normal voice restored."
         }
         if text.contains(" connection diagnostics ") || text.contains(" network diagnostics ") {
             await probeConnections()

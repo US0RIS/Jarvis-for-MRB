@@ -21,7 +21,7 @@ def main() -> None:
 
     from jarvis_mrb.world_diagnostics import validate
 
-    result = validate()
+    result = validate(require_agency=True)
     print(
         json.dumps(
             result,

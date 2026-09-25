@@ -13,6 +13,7 @@ import httpx
 
 from jarvis_mrb.event_bus import emit_proactive
 from jarvis_mrb.fact_checker import check_claim
+from jarvis_mrb.explicit_meeting_actions import extract_structured_actions
 from jarvis_mrb.planner_model import FAST_MODEL
 
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
@@ -120,6 +121,9 @@ def append_transcript(meeting_id: int, text: str) -> None:
 def _extract_actions(transcript: str) -> list[dict[str, str]]:
     if not transcript.strip():
         return []
+    structured = extract_structured_actions(transcript)
+    if structured is not None:
+        return structured
     system = """Extract only concrete follow-up commitments and action items from a meeting transcript.
 Do not infer hidden intentions or assign an action to a person unless the transcript explicitly supports it.
 Return JSON only: {"actions":[{"owner":"speaker label/name if explicit, otherwise unspecified","task":"concise action","due":"explicit due date/time or empty","evidence":"short supporting phrase"}]}

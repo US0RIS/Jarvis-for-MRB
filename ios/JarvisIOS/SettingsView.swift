@@ -88,6 +88,51 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Camera-free Ambient Presence") {
+                    Toggle("Proactive microphone + sensor opportunities", isOn: $settings.sensorOpportunitiesEnabled)
+                    Toggle("Motion / travel context and GPS", isOn: $settings.localSensorContextEnabled)
+                    Toggle("Classify environmental sounds locally", isOn: $settings.soundRecognitionEnabled)
+                    Toggle("Geofenced system profiles", isOn: $settings.geofencedProfilesEnabled)
+                    Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
+                    Toggle("Use modelled outdoor temperature (Open-Meteo)", isOn: $settings.weatherContextEnabled)
+                        .disabled(!settings.sensorOpportunitiesEnabled || !settings.localSensorContextEnabled)
+                    Text("The iPhone can combine separately opted-in GPS/motion, geofence events and on-device sound labels from the normal voice microphone or a foreground-only idle classifier. Only explicit standing reminders or individually preauthorized HomeKit lights may be affected. Raw audio and transcripts are not transmitted by this sensor engine. Coordinates are rounded and transient; Apple Health is read-only; outdoor temperature is a source-labelled weather model, not a thermometer in the phone or glasses.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Reality Mesh") {
+                    Toggle("Allow explicit device and public-world lookups", isOn: $settings.meshEnabled)
+                    Text("Off by default. The Mesh tab checks the real Windows host and only Macs paired through the Windows service's private Tailscale configuration. Remote Mac screen viewing requires a separate Mac startup opt-in, macOS Screen Recording permission and an explicit short session from the phone. Private screenshots travel through Jarvis's authenticated Windows backend and remain in iPhone RAM; a stop or background transition clears them. Named place queries send a MapKit-resolved coordinate to the backend and its supported public providers only on your tap. Separately enrolled three-hour aircraft/USGS watches persist on the Windows host until stopped or expired, even if this phone's Mesh switch is later disabled; use the exact Stop watch button to revoke them. Screen viewing is view-only. On Macs started with a separate --allow-app-launch flag, exact named buttons can open only Safari, Notes, Calendar, Preview or Finder, with source-labelled acceptance and process observation; there is still no remote keyboard/mouse access, arbitrary terminal execution or global camera coverage.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Conductor / EDITH-style workstation actions") {
+                    Toggle("Allow exact one-use workstation missions", isOn: $settings.conductorEnabled)
+                    Toggle("Allow exact spoken app actions on paired computers", isOn: $settings.exactVoiceAppActionsEnabled)
+                    Text("Independent default-off low-risk voice authority: saying 'Jarvis, open Safari on my MacBook Air' or 'Jarvis, open Notepad on my PC' can act without another tap only when Mesh, Conductor, this switch, the Windows backend and that host's exact-app startup opt-in are all enabled. Exactly one named registered app per phrase; Jarvis creates and consumes a fresh one-use server grant, then checks independent process evidence. A voice transcript does not establish who spoke. Do not enable around untrusted speakers. Commands for unknown apps, terminal, screen capture, messaging, locks, purchases or physical force do not inherit this permission.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Off by default, independent of Reality Mesh. Also set JARVIS_CONDUCTOR_ENABLED=1 on the authenticated Windows backend and separately opt in to exact app actions on each target host. Saying 'prepare my workstation' only presents the workflow: on the Mesh tab inspect one named device and up to three exact app names, confirm one two-minute server grant, and inspect independently timestamped process observations. An opted-in private screen is requested only when specifically selected. Privacy mode and leaving the Mesh tab revoke outstanding mission authority; in-flight OS actions cannot be undone. This does not grant remote keyboard/mouse, unrestricted commands, purchases, messages, tracking people, or physical-force actions. A phone UI confirmation is not cryptographic device attestation; protect the Jarvis API bearer.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Mission Control") {
+                    Toggle("Enable foreground Mission Control", isOn: $settings.missionControlEnabled)
+                    Text("Off by default. Mission Control independently requires enabled Guardian and high-accuracy opted-in phone GPS. In Physical, enroll one exact primary Calendar appointment, see source-linked trajectory evidence and authorize one exact Maps launch. Two separate accurate GPS fixes can record proximity-based arrival; this is not proof of attending the meeting. The phone stores bounded mission receipts in device-only Keychain; only Apple MapKit receives the route origin/destination. No email or other third-party actions are authorized by this switch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Counterfactual Guardian") {
+                    Toggle("Counterfactual Guardian: departures + enrolled goals", isOn: $settings.guardianEnabled)
+                    Text("Off by default. While Jarvis is foregrounded, Guardian checks your primary Google Calendar and fresh opted-in iPhone GPS against Apple MapKit driving ETAs. Unknown provider/location data is never an all-clear. Apple receives the route origin/destination; Jarvis's PC does not store a new GPS trail. A single exact event/time/location Maps launch requires separate authorization. You can also individually enroll explicit user-goal deadlines in Physical: the Windows monitor may interrupt only while fresh foreground-phone consent exists and you are not driving, in a meeting or speaking. No messages are sent or broad tool authority granted.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Persistent Presence") {
                     Toggle("Passive vision", isOn: $settings.passiveVisionEnabled)
                     Toggle("Adaptive remote vision bandwidth", isOn: $settings.adaptiveBandwidthEnabled)
@@ -102,8 +147,6 @@ struct SettingsView: View {
                         Text("Urgent only").tag("urgent")
                     }
 
-                    Toggle("Geofenced system profiles", isOn: $settings.geofencedProfilesEnabled)
-                    Toggle("Apple Watch / Health context", isOn: $settings.healthContextEnabled)
                     TextField("Current project focus", text: $settings.projectFocus)
 
                     Text("Passive vision sends sampled glasses frames to the existing PC backend. The separate iPhone visual cache below does not depend on the backend and is intentionally not presented as general scene understanding.")
@@ -135,7 +178,6 @@ struct SettingsView: View {
                     Toggle("Continuous on-device fast perception", isOn: $settings.localFastPerceptionEnabled)
                     Toggle("Offline command staging", isOn: $settings.offlineQueueEnabled)
                     Toggle("Local voice command aliases", isOn: $settings.localCommandAliasesEnabled)
-                    Toggle("Motion / travel context", isOn: $settings.localSensorContextEnabled)
                     Toggle("Frontend diagnostics", isOn: $settings.frontendDiagnosticsEnabled)
                     Toggle("Allow offline meeting capture", isOn: $settings.offlineMeetingCaptureEnabled)
 
@@ -164,7 +206,6 @@ struct SettingsView: View {
                     Divider()
 
                     Toggle("30-second RAM-only rolling audio memory", isOn: $settings.rollingAudioMemoryEnabled)
-                    Toggle("Classify environmental sounds locally", isOn: $settings.soundRecognitionEnabled)
                     Toggle("Detect major visual scene changes", isOn: $settings.visualChangeDetectionEnabled)
                     if settings.visualChangeDetectionEnabled {
                         VStack(alignment: .leading, spacing: 4) {

@@ -83,12 +83,32 @@ def _should_refine(query: str) -> bool:
 def refine_query(query: str) -> str:
     """Condense conversational speech into a search-engine query when useful.
 
-    Short, already-search-like queries bypass the model entirely. Longer voice
-    requests get one tiny 8B rewrite that preserves named entities, dates, and
-    constraints while removing conversational filler.
+    Default: strip only certain unambiguous conversational prefixes. Qwen
+    rewriting is an explicit opt-in for operators who want semantic expansion.
     """
     original = " ".join(query.strip().split())
     if not original or not _should_refine(original):
+        return original
+    if os.environ.get("JARVIS_WEB_QUERY_USE_QWEN", "").strip().lower() not in {"1", "true", "yes"}:
+        # Drop only fixed conversational prefixes, never rewrite a proper noun,
+        # technical identifier, date, qualifier, negative or quoted search term.
+        prefix = re.match(
+            r"(?i)^(?:can you|could you|please) (?:find|look up|search for)\s+",
+            original,
+        )
+        if prefix:
+            return original[prefix.end():].strip() or original
+        specific = re.match(
+            r"(?i)^(?:what's|what is) the latest on\s+(.+)$",
+            original,
+        )
+        if specific:
+            return (specific.group(1).strip() + " latest")[:400]
+        prefix = re.match(r"(?i)^look up information about\s+", original)
+        if prefix:
+            return original[prefix.end():].strip() or original
+        # For complex compound requests, passing the original verbatim is
+        # safer than a lossy 8B paraphrase.
         return original
     system = """Rewrite the user's spoken request into one concise search-engine query.
 Preserve all names, dates, locations, product/model numbers, negations, and constraints that affect the answer.

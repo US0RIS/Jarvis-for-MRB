@@ -22,12 +22,38 @@ final class JarvisAppModel: ObservableObject {
     let speechSynthesizer: SpeechSynthesizer
     let geofenceManager: GeofenceManager
     let metaGlasses: MetaGlassesManager
+    let memoMind: MemoMindBridge
+    let homeEnvironment: HomeEnvironmentController
+    lazy var guardian = CounterfactualGuardianController(appModel: self)
+    lazy var missionControl = JarvisMissionControl(appModel: self)
+    lazy var realityMesh = RealityMeshController(appModel: self)
+
+    // Physical-world observations belong to the iPhone session, not a HUD
+    // accessory. The same state is used by buttons and Gen 1 Meta voice input.
+    @Published private(set) var nearbyPublicCameras: [PublicCameraListing] = []
+    @Published private(set) var nearbyCameraStatus = "Tap Search or ask Jarvis to find nearby public cameras."
+    @Published private(set) var nearbyCameraCoverage = ""
+    @Published private(set) var nearbyCameraSourceURL = ""
+    @Published private(set) var nearbyCameraBusy = false
+    @Published private(set) var analyzingPublicCameraID: String?
+    @Published private(set) var publicCameraAnalyses: [String: String] = [:]
+    @Published private(set) var nearbyConditions: PhysicalConditionsResponse?
+    @Published private(set) var nearbyConditionsStatus = "Tap Check or ask Jarvis for nearby conditions."
+    @Published private(set) var nearbyConditionsBusy = false
+    @Published private(set) var nearbyFacilities: NearbyFacilitiesResponse?
+    @Published private(set) var nearbyFacilitiesStatus = "Tap Find or ask Jarvis about nearby public resources."
+    @Published private(set) var nearbyFacilitiesBusy = false
+    @Published private(set) var latestPhysicalAwareness: PhysicalAwarenessResponse?
+    @Published private(set) var physicalAwarenessStatus = "Tap Brief or say: Jarvis, establish situational awareness."
+    @Published private(set) var physicalAwarenessBusy = false
+    private lazy var nearbyCameraLocation = PublicCameraLocationRequest()
 
     var frontendCommandHandler: ((String) async -> String?)?
     var offlineQueueHandler: ((String) -> Void)?
     var offlineResponseHandler: ((String) async -> String?)?
 
     private lazy var navigationController = JarvisNavigationController(appModel: self)
+    var isCurrentlyNavigating: Bool { navigationController.isNavigating }
     private var wakeWordTask: Task<Void, Never>?
     private var confirmationFollowUpDeadline: Date?
     private var conversationalFollowUpDeadline: Date?
@@ -48,6 +74,8 @@ final class JarvisAppModel: ObservableObject {
         speechSynthesizer = SpeechSynthesizer(audioRouteManager: audioRouteManager)
         geofenceManager = GeofenceManager()
         metaGlasses = MetaGlassesManager()
+        memoMind = MemoMindBridge()
+        homeEnvironment = HomeEnvironmentController()
 
         geofenceManager.onHomeArrival = { [weak self] in
             Task { @MainActor in
@@ -63,6 +91,489 @@ final class JarvisAppModel: ObservableObject {
             apiToken: settings.apiToken,
             sessionID: settings.conversationSessionID
         )
+    }
+
+    func discoverNearbyPublicCameras(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
+        try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
+    }
+
+    func establishPhysicalAwareness() async -> String {
+        guard !physicalAwarenessBusy else { return "A physical-world briefing is already in progress." }
+        physicalAwarenessBusy = true
+        physicalAwarenessStatus = "Requesting a one-time iPhone location…"
+        defer { physicalAwarenessBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            physicalAwarenessStatus = "Checking public viewpoints, air model, official alerts and mapped facilities…"
+            let overview = try await client.physicalAwareness(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            latestPhysicalAwareness = overview
+            nearbyPublicCameras = overview.cameras.cameras
+            nearbyCameraCoverage = overview.cameras.coverage
+            nearbyCameraSourceURL = overview.cameras.sourceURL
+            nearbyCameraStatus = overview.cameras.sourceNote
+            publicCameraAnalyses = [:]
+            nearbyConditions = overview.conditions
+            nearbyConditionsStatus = overview.conditions.airQuality.sourceNote
+            nearbyFacilities = overview.facilities
+            nearbyFacilitiesStatus = overview.facilities.sourceNote
+            physicalAwarenessStatus = overview.summary
+            return overview.summary + " Details and source caveats are in the Physical tab."
+        } catch {
+            physicalAwarenessStatus = "Physical-world briefing unavailable: " + error.localizedDescription
+            return physicalAwarenessStatus
+        }
+    }
+
+    private static func exactSpokenAppIntent(_ rawText: String) -> (node: String, app: String)? {
+        var phrase = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        phrase = phrase.replacingOccurrences(
+            of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+        )
+        guard phrase.hasPrefix("open ") else { return nil }
+        let endings: [(String, String)] = [
+            (" on my macbook air", "macbook"),
+            (" on macbook air", "macbook"),
+            (" on my mac mini", "macmini"),
+            (" on mac mini", "macmini"),
+            (" on my windows pc", "windows"),
+            (" on my pc", "windows"),
+            (" on the windows pc", "windows"),
+            (" on the pc", "windows"),
+        ]
+        guard let suffix = endings.first(where: { phrase.hasSuffix($0.0) }) else {
+            return nil
+        }
+        let app = String(phrase.dropFirst(5).dropLast(suffix.0.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let windows = [
+            "notepad": "Notepad", "calculator": "Calculator",
+            "file explorer": "File Explorer", "paint": "Paint",
+        ]
+        let mac = [
+            "safari": "Safari", "notes": "Notes", "calendar": "Calendar",
+            "preview": "Preview", "finder": "Finder",
+        ]
+        guard let exact = (suffix.1 == "windows" ? windows : mac)[app] else {
+            return nil
+        }
+        return (suffix.1, exact)
+    }
+
+    private static func meshIntent(_ rawText: String) -> (kind: String, place: String)? {
+        let cleaned = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+            .replacingOccurrences(
+                of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+            )
+        if [
+            "mesh status", "check the reality mesh",
+            "what devices are online", "show my connected devices",
+            "what computers can you see", "check my mac nodes",
+        ].contains(cleaned) { return ("nodes", "") }
+        if [
+            "prepare my workstation", "get my workstation ready",
+            "prepare the workstation", "start a workstation mission",
+            "ready my computer", "get my computer ready",
+        ].contains(cleaned) { return ("workstation", "") }
+        for prefix in [
+            "establish remote presence at ", "establish presence at ",
+            "check public sources at ", "show me the world around ",
+        ] {
+            if cleaned.hasPrefix(prefix) {
+                let place = String(cleaned.dropFirst(prefix.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if (3...120).contains(place.count) { return ("place", place) }
+            }
+        }
+        return nil
+    }
+
+    private static func missionIntent(_ rawText: String) -> String? {
+        let phrase = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+            .replacingOccurrences(
+                of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+            )
+        if [
+            "mission status", "check mission status", "check my missions",
+            "what are my missions", "what's my next mission",
+            "check my mission", "mission control status",
+        ].contains(phrase) { return "status" }
+        if [
+            "make sure i get to my next meeting on time",
+            "start a mission for my next appointment",
+            "start my next meeting mission",
+            "guard my next appointment",
+            "start mission for my next meeting",
+        ].contains(phrase) { return "enroll_next" }
+        return nil
+    }
+
+    private static func isGuardianIntent(_ rawText: String) -> Bool {
+        let phrase = rawText.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+            .replacingOccurrences(
+                of: #"^jarvis[,:]?\s+"#, with: "", options: .regularExpression
+            )
+        return [
+            "check next departures", "check my next departures",
+            "will i make my next meeting", "am i going to be late",
+            "am i going to be late for my next meeting",
+            "will i make my next appointment",
+            "check my departure risk", "check counterfactual guardian",
+        ].contains(phrase)
+    }
+
+    private static func isPhysicalAwarenessIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "establish situational awareness", "give me a physical world briefing",
+            "physical world briefing", "brief me on my surroundings",
+            "check my surroundings", "what do the public sensors say around me",
+        ].contains(normalized)
+    }
+
+    func analyzePublishedCameraStill(_ cameraID: String) async -> String {
+        guard analyzingPublicCameraID == nil else {
+            return "I am already analyzing a published camera still."
+        }
+        guard let camera = nearbyPublicCameras.first(where: { $0.id == cameraID }),
+              !camera.imageURL.isEmpty else {
+            return "Select an available official still from the Physical tab first."
+        }
+        analyzingPublicCameraID = cameraID
+        defer { analyzingPublicCameraID = nil }
+        publicCameraAnalyses[cameraID] = "Retrieving one official still for local analysis…"
+        do {
+            let analysis = try await client.analyzeOfficialPublicCamera(cameraID)
+            let response = analysis.description + " " + analysis.sourceNote
+            publicCameraAnalyses[cameraID] = response
+            return "\(analysis.cameraName): " + response
+        } catch {
+            let error = "Image analysis unavailable: " + error.localizedDescription
+            publicCameraAnalyses[cameraID] = error
+            return error
+        }
+    }
+
+    private static func isAnalyzePublicStillIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "analyze the nearest public camera",
+            "analyze nearest public camera",
+            "describe the nearest public camera",
+            "analyze the nearest traffic camera",
+        ].contains(normalized)
+    }
+
+    func searchNearbyPublicCameras() async -> String {
+        guard !nearbyCameraBusy else { return "A public camera search is already running." }
+        nearbyCameraBusy = true
+        nearbyPublicCameras = []
+        publicCameraAnalyses = [:]
+        nearbyCameraCoverage = ""
+        nearbyCameraSourceURL = ""
+        nearbyCameraStatus = "Requesting a one-time iPhone location…"
+        defer { nearbyCameraBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            nearbyCameraStatus = "Checking officially published camera catalogs…"
+            let response = try await discoverNearbyPublicCameras(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            nearbyPublicCameras = response.cameras
+            nearbyCameraCoverage = response.coverage
+            nearbyCameraSourceURL = response.sourceURL
+            if response.cameras.isEmpty {
+                nearbyCameraStatus = response.sourceNote
+                return response.status == "unsupported_region"
+                    ? "I don't have an integrated public-camera provider for this area. The Physical tab shows the available official source."
+                    : "No published highway cameras were returned nearby. \(response.sourceNote)"
+            }
+            let first = response.cameras[0]
+            nearbyCameraStatus = "\(response.cameras.count) published camera feeds nearby. Footage freshness is not verified."
+            return "I found \(response.cameras.count) published traffic-camera feeds within ten kilometers. Nearest: \(first.title), about \(String(format: "%.1f", first.distanceKM)) kilometers away. Open Physical on your iPhone for images. I have not analyzed the footage."
+        } catch {
+            nearbyCameraStatus = "Camera lookup unavailable: " + error.localizedDescription
+            return nearbyCameraStatus
+        }
+    }
+
+    private static func isPublicCameraIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "find nearby public cameras", "find public cameras near me",
+            "what public cameras are nearby", "show nearby public cameras",
+            "find nearby traffic cameras", "find traffic cameras near me",
+            "show nearby traffic cameras", "what traffic cameras are nearby",
+        ].contains(normalized)
+    }
+
+    func searchNearbyPublicFacilities() async -> String {
+        guard !nearbyFacilitiesBusy else { return "A public resources search is already running." }
+        nearbyFacilitiesBusy = true
+        nearbyFacilities = nil
+        nearbyFacilitiesStatus = "Requesting a one-time iPhone location…"
+        defer { nearbyFacilitiesBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            nearbyFacilitiesStatus = "Checking OpenStreetMap public facilities…"
+            let response = try await client.discoverNearbyFacilities(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            nearbyFacilities = response
+            if response.status != "ok" {
+                nearbyFacilitiesStatus = response.sourceNote
+                return nearbyFacilitiesStatus
+            }
+            if response.facilities.isEmpty {
+                nearbyFacilitiesStatus = "No mapped toilets, water or defibrillators returned within 1.5 km. This does not mean none exist."
+                return nearbyFacilitiesStatus
+            }
+            let nearest = response.facilities[0]
+            nearbyFacilitiesStatus = "\(response.facilities.count) mapped public facilities within 1.5 km. Nearest: \(nearest.title), approximately \(nearest.distanceM) meters away. Mapping may be incomplete."
+            return nearbyFacilitiesStatus + " Open Physical on your iPhone for walking directions."
+        } catch {
+            nearbyFacilitiesStatus = "Public resources unavailable: " + error.localizedDescription
+            return nearbyFacilitiesStatus
+        }
+    }
+
+    private static func isNearbyFacilitiesIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "find public resources near me", "find nearby public resources",
+            "find nearby water fountains", "find drinking water near me",
+            "where is the nearest public toilet", "find public toilets near me",
+            "find a public defibrillator near me", "find defibrillators near me",
+        ].contains(normalized)
+    }
+
+    func searchPhysicalConditions() async -> String {
+        guard !nearbyConditionsBusy else { return "A local conditions check is already running." }
+        nearbyConditionsBusy = true
+        nearbyConditions = nil
+        nearbyConditionsStatus = "Requesting a one-time iPhone location…"
+        defer { nearbyConditionsBusy = false }
+        do {
+            let position = try await nearbyCameraLocation.locateOnce()
+            nearbyConditionsStatus = "Checking published physical-world conditions…"
+            let response = try await client.discoverPhysicalConditions(
+                latitude: position.coordinate.latitude,
+                longitude: position.coordinate.longitude
+            )
+            nearbyConditions = response
+            let air = response.airQuality
+            let alerts = response.weatherAlerts
+            var parts: [String] = []
+            if air.status == "ok" {
+                if let aqi = air.usAQI {
+                    parts.append("Modelled air quality is US AQI \(Int(aqi))")
+                } else {
+                    parts.append("Air quality data is incomplete")
+                }
+                if let uv = air.uvIndex {
+                    parts.append("UV index \(String(format: "%.1f", uv))")
+                }
+            } else {
+                parts.append("Air quality is \(air.status)")
+            }
+            if alerts.status == "ok" {
+                if alerts.alerts.isEmpty {
+                    parts.append("no active NWS weather alerts were returned for this point; other hazards have not been checked")
+                } else {
+                    let events = alerts.alerts.prefix(3).map { $0.event }
+                    parts.append("\(alerts.alerts.count) NWS alerts: " + events.joined(separator: ", "))
+                }
+            } else if alerts.status == "unsupported_region" {
+                parts.append("official weather alerts are not integrated for this region")
+            } else {
+                parts.append("official weather alerts could not be checked")
+            }
+            nearbyConditionsStatus = parts.joined(separator: "; ") + "."
+            return nearbyConditionsStatus + " More detail and source times are in the Physical tab."
+        } catch {
+            nearbyConditionsStatus = "Physical conditions unavailable: " + error.localizedDescription
+            return nearbyConditionsStatus
+        }
+    }
+
+    private static func isPhysicalConditionsIntent(_ rawText: String) -> Bool {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        return [
+            "check conditions around me", "what are the conditions around me",
+            "check nearby air quality", "what's the air quality near me",
+            "what is the air quality near me", "check nearby weather alerts",
+            "are there weather alerts near me", "what are the weather alerts near me",
+        ].contains(normalized)
+    }
+
+    func listDiligenceMatters() async throws -> [DiligenceMatterSummary] {
+        try await client.listDiligenceMatters()
+    }
+
+    func createDiligenceMatter(label: String, projectEntityID: String) async throws -> DiligenceMatterSummary {
+        try await client.createDiligenceMatter(label: label, projectEntityID: projectEntityID)
+    }
+
+    func registerDiligenceIssuer(matterID: String, cik: String, name: String) async throws {
+        try await client.registerDiligenceIssuer(matterID: matterID, cik: cik, name: name)
+    }
+
+    func registerDiligenceEPAFacility(
+        matterID: String, cik: String, frsID: String, label: String
+    ) async throws {
+        try await client.registerDiligenceEPAFacility(
+            matterID: matterID, cik: cik, frsID: frsID, label: label
+        )
+    }
+
+    func registerNumericDiligenceClaim(
+        matterID: String, cik: String, taxonomy: String, tag: String,
+        value: Double, unit: String, start: String, end: String, sourceRef: String
+    ) async throws {
+        try await client.registerNumericDiligenceClaim(
+            matterID: matterID, cik: cik, taxonomy: taxonomy, tag: tag,
+            value: value, unit: unit, start: start, end: end, sourceRef: sourceRef
+        )
+    }
+
+    func checkDiligenceMatter(matterID: String, includeSanctions: Bool) async throws -> [String: Any] {
+        try await client.checkDiligenceMatter(
+            matterID: matterID, includeSanctions: includeSanctions
+        )
+    }
+
+    func createNearestPublicCameraWatch(condition: String) async -> String {
+        guard let nearest = nearbyPublicCameras.first(where: { !$0.imageURL.isEmpty }) else {
+            return "Find published public cameras in the iPhone Physical tab first. "
+                + "I will not choose an unverified camera on your behalf."
+        }
+        do {
+            let watch = try await client.createExternalWatch(
+                kind: "camera", label: nearest.title,
+                config: ["camera_id": nearest.id, "condition": condition],
+                seconds: condition.isEmpty ? 3600 : 900
+            )
+            return "Created a 24-hour public-camera watch on \(nearest.title). "
+                + (condition.isEmpty
+                    ? "Jarvis will record a change log without speculative alerts. "
+                    : "Jarvis will report a possible \(condition.replacingOccurrences(of: "_", with: " ")) only after two different still images receive conservative model matches. ")
+                + "View or stop the watch on your iPhone. Watch ID: \(watch.id)."
+        } catch {
+            return "Could not start public-camera watch: " + error.localizedDescription
+        }
+    }
+
+    private static func nearestCameraWatchCondition(_ rawText: String) -> String? {
+        var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        if normalized.hasPrefix("jarvis, ") {
+            normalized = String(normalized.dropFirst(8))
+        } else if normalized.hasPrefix("jarvis ") {
+            normalized = String(normalized.dropFirst(7))
+        }
+        switch normalized {
+        case "watch the nearest public camera", "watch nearest public camera",
+             "watch the nearest traffic camera":
+            return ""
+        case "watch the nearest public camera for smoke",
+             "watch nearest public camera for smoke",
+             "watch the nearest traffic camera for smoke":
+            return "smoke_visible"
+        case "watch the nearest public camera for congestion",
+             "watch the nearest traffic camera for congestion":
+            return "road_congestion"
+        default:
+            return nil
+        }
+    }
+
+    func findPublicCamerasAt(latitude: Double, longitude: Double) async throws -> PublicCameraDiscoveryResponse {
+        try await client.discoverNearbyPublicCameras(latitude: latitude, longitude: longitude)
+    }
+
+    func createExternalWatch(
+        kind: String, label: String, config: [String: Any], seconds: Int
+    ) async throws -> ExternalWatchSummary {
+        try await client.createExternalWatch(
+            kind: kind, label: label, config: config, seconds: seconds
+        )
+    }
+
+    func createMatterSECWatch(
+        matterID: String, cik: String, label: String
+    ) async throws -> ExternalWatchSummary {
+        try await client.createExternalWatch(
+            kind: "sec_filings", label: label,
+            config: ["cik": cik], seconds: 3600,
+            scope: "matter:" + matterID
+        )
+    }
+
+    func getMatterSECWatches(_ matterID: String) async throws -> [ExternalWatchSummary] {
+        try await client.getExternalWatches(scope: "matter:" + matterID)
+    }
+
+    func stopMatterSECWatch(_ id: String, matterID: String) async throws -> ExternalWatchSummary {
+        try await client.stopExternalWatch(id, scope: "matter:" + matterID)
+    }
+
+    func getExternalWatches() async throws -> [ExternalWatchSummary] {
+        try await client.getExternalWatches()
+    }
+
+    func checkExternalWatch(_ id: String) async throws -> ExternalWatchCheckResponse {
+        try await client.checkExternalWatch(id)
+    }
+
+    func stopExternalWatch(_ id: String) async throws -> ExternalWatchSummary {
+        try await client.stopExternalWatch(id)
+    }
+
+    func refreshMemoMindCommandView() async throws {
+        let snapshot = try await client.agencyCommandView()
+        memoMind.presentCommandView(snapshot)
     }
 
     func checkConnection() async {
@@ -102,6 +613,12 @@ final class JarvisAppModel: ObservableObject {
         conversationLog.append(FrontendConversationTurn(role: role, text: cleaned, model: model))
         if conversationLog.count > 120 { conversationLog.removeFirst(conversationLog.count - 120) }
         FrontendConversationStore.save(conversationLog)
+        if role == "assistant" {
+            memoMind.presentAssistantReply(
+                cleaned,
+                requiresConfirmation: Self.responseRequestsConfirmation(cleaned)
+            )
+        }
     }
 
     private func finishLocalResponse(
@@ -159,6 +676,54 @@ final class JarvisAppModel: ObservableObject {
             return
         }
 
+        if let exactAction = Self.exactSpokenAppIntent(text) {
+            let reply = await realityMesh.executeSpokenExactApp(
+                nodeID: exactAction.node, appName: exactAction.app
+            )
+            await finishLocalResponse(
+                reply, command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone exact spoken Conductor app / separately enrolled one-use action"
+            )
+            return
+        }
+
+        if let meshAction = Self.meshIntent(text) {
+            let reply: String
+            if meshAction.kind == "nodes" {
+                await realityMesh.refreshFabric()
+                reply = realityMesh.nodeStatus + " "
+                    + realityMesh.nodes.map { $0.label + ": " + $0.status }
+                        .joined(separator: "; ")
+            } else if meshAction.kind == "workstation" {
+                reply = realityMesh.requestWorkstationPreparation()
+            } else {
+                realityMesh.placeName = meshAction.place
+                await realityMesh.establishWorldPresence()
+                reply = realityMesh.worldStatus
+                    + " " + (realityMesh.place?.summary ?? "")
+            }
+            await finishLocalResponse(
+                reply, command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone Reality Mesh / precise read-only request or Conductor staging"
+            )
+            return
+        }
+
+        if let missionAction = Self.missionIntent(text) {
+            let reply: String
+            if missionAction == "enroll_next" {
+                reply = await missionControl.enrollNextAppointment()
+            } else {
+                await missionControl.checkNow()
+                reply = missionControl.spokenStatus
+            }
+            await finishLocalResponse(
+                reply, command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone Mission Control / explicit event / MapKit verified observations"
+            )
+            return
+        }
+
         // Navigation is a first-class iPhone capability. Route it before the generic
         // frontend stack and before the PC so a spoken "Jarvis, take me to ..." can
         // resolve a place and begin guidance even when the Windows agent is offline.
@@ -169,6 +734,104 @@ final class JarvisAppModel: ObservableObject {
                 command: text,
                 fromHandsFree: fromHandsFree,
                 routeReason: "iPhone MapKit turn-by-turn navigation"
+            )
+            return
+        }
+
+        if Self.isGuardianIntent(text) {
+            await guardian.checkNow(manual: true)
+            let message = guardian.trajectories.first.map {
+                $0.brief + " The evidence and options are in Physical → Counterfactual Guardian."
+            } ?? guardian.status
+            await finishLocalResponse(
+                message,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone calendar + fresh GPS + actual MapKit driving ETA"
+            )
+            return
+        }
+
+        // The Gen 1 Ray-Bans provide microphone/speaker I/O over the existing
+        // Bluetooth audio route. They do not need MemoMind or a glasses HUD.
+        if let cameraCondition = Self.nearestCameraWatchCondition(text) {
+            let response = await createNearestPublicCameraWatch(condition: cameraCondition)
+            await finishLocalResponse(
+                response,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "Explicit expiring official camera watch"
+            )
+            return
+        }
+
+        if Self.isPhysicalAwarenessIntent(text) {
+            let briefing = await establishPhysicalAwareness()
+            await finishLocalResponse(
+                briefing,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "One-shot sourced physical situational briefing"
+            )
+            return
+        }
+
+        if Self.isAnalyzePublicStillIntent(text) {
+            let nearest = nearbyPublicCameras.first(where: { !$0.imageURL.isEmpty })
+            let description = nearest == nil
+                ? "Discover published public cameras in the Physical tab first."
+                : await analyzePublishedCameraStill(nearest!.id)
+            await finishLocalResponse(
+                description,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "Explicit selected public still + local vision model"
+            )
+            return
+        }
+
+        if Self.isNearbyFacilitiesIntent(text) {
+            let facilityReply = await searchNearbyPublicFacilities()
+            await finishLocalResponse(
+                facilityReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone location + public mapped resources"
+            )
+            return
+        }
+
+        if Self.isPhysicalConditionsIntent(text) {
+            let conditionsReply = await searchPhysicalConditions()
+            await finishLocalResponse(
+                conditionsReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone location + official weather warnings / global air model"
+            )
+            return
+        }
+
+        if Self.isPublicCameraIntent(text) {
+            let cameraReply = await searchNearbyPublicCameras()
+            await finishLocalResponse(
+                cameraReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone location + official public camera discovery"
+            )
+            return
+        }
+
+        // An explicitly discovered Apple Home is a direct phone-local control
+        // surface. Only narrow, exact-name light commands are handled here;
+        // every action gets a fresh HomeKit state readback.
+        if let homeReply = await homeEnvironment.handleCommand(text) {
+            await finishLocalResponse(
+                homeReply,
+                command: text,
+                fromHandsFree: fromHandsFree,
+                routeReason: "iPhone HomeKit verified light control"
             )
             return
         }
@@ -883,7 +1546,7 @@ final class JarvisAppModel: ObservableObject {
 
     static func spokenResponse(for response: String) -> String {
         if responseRequestsConfirmation(response) {
-            return "Ready, sir. Say confirm or cancel."
+            return "Ready. Say confirm or cancel."
         }
         return response
     }

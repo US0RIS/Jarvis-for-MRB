@@ -18,7 +18,13 @@ and forget records. It has **no** universal global feeds, standing watches,
 camera recording, distributed workers, trading, actuation, or
 device-deployment claim. A new iPhone/iPad World Armor workbench provides
 explicit region entry, selected-region MapKit preview, one-shot Observe,
-source coverage, two-sample Compare, Replay and Forget; none runs passively. The larger design below remains a roadmap.
+source coverage, two-sample Compare, Replay and Forget; none runs passively.
+The stacked `jarvis/world-armor-correlation-workbench` branch adds an
+**explicit read-only 6/24/72-hour historical correlation query** over these
+retained records, a true receipt-time rewind menu and evidence cards on the
+iPad/iPhone. A cross-source match means only source-reported *time proximity
+within the same selected inquiry region*, not exact physical co-location or
+causation. The larger design below remains a roadmap.
 
 ## World Armor — proposed planetary-scale extension
 
@@ -26,9 +32,11 @@ source coverage, two-sample Compare, Replay and Forget; none runs passively. The
 Fabric and Distributed Agency: source-qualified infrastructure OSINT, spatial
 and temporal correlation, uncertainty-aware event investigations, explicit
 regional watches, and tightly scoped computation across authorized paired
-devices. **Design only / Roadmap:** no World Armor collector, event store, new
-API endpoint, RF sensor, global AIS service, trading service, or cloud worker
-was implemented or deployed by this document. The Reality Browser, Presence,
+devices. **Design-only PR #7 / broader Roadmap:** the specification itself did not
+implement runtime capabilities. The separate stacked Phase 1 code branch
+contains a limited event store and read-only authenticated endpoints, **not**
+a global collector, RF sensor, live AIS service, trading service, cloud worker
+or device-deployment verification. The Reality Browser, Presence,
 Causal Debugger, Synthetic Senses and Parallel Existence ideas are preserved
 and remain on hold.
 

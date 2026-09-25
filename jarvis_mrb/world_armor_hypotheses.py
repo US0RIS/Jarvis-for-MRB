@@ -34,6 +34,8 @@ def _node(observation: dict[str, Any]) -> dict[str, Any]:
         "lineage": observation["lineage"],
         "geometry_basis": observation["geometry_basis"],
         "adapter_mode": observation.get("adapter_mode", "unknown"),
+        "sample_coverage_status": observation.get("sample_coverage_status","unknown"),
+        "sample_coverage_checked_at": observation.get("sample_coverage_checked_at"),
         "values": observation["values"],
     }
 
@@ -121,8 +123,7 @@ def build_evidence_graph(
             "causal":False,
             "assertion":"Independent source reports occurred close in source time.",
         })
-        hid=_stable_id("hyp",first,second,joined["observation_window"]["start"],
-                       joined["observation_window"]["end"])
+        hid=_stable_id("hyp",first,second,joined["query_id"])
         exact_spatial=("publisher_epicenter_within_selected_query_radius"
                        in pair["spatial_basis"])
         missing=[
@@ -170,6 +171,8 @@ def build_evidence_graph(
     return {
         "schema":"jarvis.world_armor.evidence_graph.v1",
         "investigation_id":investigation_id,
+        "query_id":joined["query_id"],
+        "query_plan":joined["query_plan"],
         "as_known_at":joined["as_known_at"],
         "observation_window":joined["observation_window"],
         "query_region":joined["query_region"],
@@ -179,6 +182,7 @@ def build_evidence_graph(
         "source_coverage":joined["source_coverage"],
         "unavailable_or_unchecked_sources":sorted(unavailable),
         "receipt_time_only_count":len(joined["receipt_time_only_observations"]),
+        "degraded_observation_count":len(joined["degraded_observations"]),
         "spatially_indeterminate_count":len(
             joined["spatially_indeterminate_observations"]
         ),

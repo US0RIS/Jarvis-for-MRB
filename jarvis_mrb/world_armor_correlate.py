@@ -111,6 +111,11 @@ def correlate(
             spatially_eligible.append(obs)
         else:
             spatial_indeterminate.append(obs)
+    spatial_indeterminate = [
+        x for x in spatial_indeterminate
+        if x["observed_at"] is not None
+        and start <= datetime.fromisoformat(x["observed_at"]) <= end
+    ]
     timed = [
         x for x in spatially_eligible
         if x["observed_at"] is not None

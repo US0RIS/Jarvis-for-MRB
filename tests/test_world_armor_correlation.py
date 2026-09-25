@@ -147,6 +147,25 @@ class WorldArmorCorrelationTests(TestCase):
         self.assertGreaterEqual(len(r["timed_observations"]), 2)
         self.assertEqual(r["candidate_links"], [])
 
+    def test_fixture_cannot_corroborate_a_real_source_observation(self):
+        self.collect(quakes=quake(status="unavailable"))
+        real_air=conditions(at=LATER,status="unavailable",
+                            nws_status="unsupported_region")
+        with patch.object(armor, "_clock", return_value=LATER), \
+             patch("jarvis_mrb.physical_conditions.physical_conditions",
+                   return_value=real_air), \
+             patch("jarvis_mrb.public_incidents.regional_earthquakes",
+                   return_value=quake(at=LATER-timedelta(minutes=8))):
+            armor.observe_once(self.key,db_path=self.db)
+        r=self.query()
+        self.assertEqual(r["mode"],"mixed")
+        self.assertEqual(len(r["timed_observations"]),2)
+        self.assertEqual(r["candidate_links"],[])
+        self.assertEqual(
+            {x["adapter_mode"] for x in r["timed_observations"]},
+            {"fixture","real_adapter"},
+        )
+
     def test_as_known_then_cutoff_excludes_later_source_report(self):
         self.collect(quakes=quake(status="unavailable"))
         self.collect(at=LATER, air=conditions(at=LATER,aq=51),

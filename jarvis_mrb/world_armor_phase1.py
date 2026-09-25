@@ -220,7 +220,9 @@ def create_investigation(label: str, latitude: float, longitude: float, *,
 
 def list_investigations(*, db_path: Path | None = None,
                         now: datetime | None = None) -> dict[str, Any]:
-    _require_enabled()
+    # Authenticated readback remains available while the feature is disabled
+    # so an operator can find an ID and delete retained private locations.
+    # The flag still blocks *all* observation, creation and replay.
     path = Path(db_path) if db_path is not None else STORE
     if not path.is_file():
         return {"investigations": [], "setup_required": True}

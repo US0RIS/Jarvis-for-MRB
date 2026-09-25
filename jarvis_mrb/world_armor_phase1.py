@@ -131,7 +131,7 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 lineage TEXT NOT NULL,
                 geometry_basis TEXT NOT NULL,
                 values_json TEXT NOT NULL,
-                UNIQUE(investigation_id,provider,provider_key,digest)
+                UNIQUE(investigation_id,provider,provider_key,revision)
             );
             CREATE INDEX IF NOT EXISTS ix_armor_time
                 ON observations(investigation_id,received_at);
@@ -239,7 +239,9 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     fixture, and is not exposed as a user-supplied-source API endpoint.
     """
     checked = received.isoformat()
-    air = conditions.get("air_quality") if isinstance(conditions, dict) else None
+    conditions = conditions if isinstance(conditions, dict) else {}
+    quake = quake if isinstance(quake, dict) else {}
+    air = conditions.get("air_quality")
     alerts = conditions.get("weather_alerts") if isinstance(conditions, dict) else None
     air = air if isinstance(air, dict) else {}
     alerts = alerts if isinstance(alerts, dict) else {}
@@ -255,6 +257,9 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
         and type(reading) in (int, float) and math.isfinite(reading)
         and 0 <= reading <= 500
     )
+    if accepted_air and _clock(received) + timedelta(seconds=30) < datetime.fromisoformat(model_at):
+        accepted_air = False
+        air_status = "stale"
     if accepted_air:
         collected.append({
             "provider": "openmeteo_model",
@@ -277,6 +282,8 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     })
 
     alert_status = str(alerts.get("status") or "unavailable")
+    if alert_status == "ok" and not isinstance(alerts.get("alerts"), list):
+        alert_status = "unavailable"
     count = 0
     if alert_status == "ok" and isinstance(alerts.get("alerts"), list):
         for a in alerts["alerts"][:15]:
@@ -305,6 +312,8 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     })
 
     quake_status = str(quake.get("status") or "unavailable")
+    if quake_status == "ok" and not isinstance(quake.get("events"), list):
+        quake_status = "unavailable"
     count = 0
     if quake_status == "ok" and isinstance(quake.get("events"), list):
         for q in quake["events"][:50]:
@@ -314,6 +323,8 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             key = str(q.get("id") or "")
             mag = q.get("magnitude")
             if not key or not event_time or type(mag) not in (int, float) or not math.isfinite(mag):
+                continue
+            if datetime.fromisoformat(event_time) > received + timedelta(seconds=30):
                 continue
             collected.append({
                 "provider": "usgs_earthquakes", "provider_key": key[:70],
@@ -368,17 +379,13 @@ def _capture(investigation_id: str, conditions: dict[str, Any],
         for o in collected:
             digest = _digest(o["values"])
             prior = con.execute(
-                "SELECT id,revision FROM observations "
+                "SELECT id,revision,digest FROM observations "
                 "WHERE investigation_id=? AND provider=? AND provider_key=? "
                 "ORDER BY revision DESC LIMIT 1",
                 (investigation_id, o["provider"], o["provider_key"]),
             ).fetchone()
-            duplicate = con.execute(
-                "SELECT id FROM observations WHERE investigation_id=? AND provider=? "
-                "AND provider_key=? AND digest=?",
-                (investigation_id, o["provider"], o["provider_key"], digest),
-            ).fetchone()
-            if duplicate:
+            # A->B->A is a new source revision, not a duplicate of ancient A.
+            if prior and prior["digest"] == digest:
                 continue
             con.execute(
                 """INSERT INTO observations (

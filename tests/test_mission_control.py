@@ -9,16 +9,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class MissionControlContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.mission = (ROOT / "ios/JarvisIOS/MissionControl.swift").read_text()
-        self.app = (ROOT / "ios/JarvisIOS/JarvisIOSApp.swift").read_text()
-        self.model = (ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text()
-        self.settings = (ROOT / "ios/JarvisIOS/SettingsStore.swift").read_text()
-        self.power = (ROOT / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text()
-        self.api = (ROOT / "ios/JarvisIOS/JarvisAPIClient.swift").read_text()
+        self.mission = (ROOT / "ios/JarvisIOS/MissionControl.swift").read_text(encoding="utf-8")
+        self.app = (ROOT / "ios/JarvisIOS/JarvisIOSApp.swift").read_text(encoding="utf-8")
+        self.model = (ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
+        self.settings = (ROOT / "ios/JarvisIOS/SettingsStore.swift").read_text(encoding="utf-8")
+        self.power = (ROOT / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text(encoding="utf-8")
+        self.api = (ROOT / "ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
 
     def test_source_compiles_in_phone_with_first_class_mission_board(self):
-        pbx = (ROOT / "ios/JarvisIOS.xcodeproj/project.pbxproj").read_text()
-        physical = (ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text()
+        pbx = (ROOT / "ios/JarvisIOS.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        physical = (ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text(encoding="utf-8")
         self.assertIn('MissionControl.swift in Sources', pbx)
         self.assertIn('GroupBox("JARVIS • Mission Control")', physical)
         self.assertIn('JarvisMissionBoard()', physical)
@@ -49,7 +49,7 @@ class MissionControlContractTests(unittest.TestCase):
             'missions.filter({ $0.eligibleForReview }).count < 5',
         ):
             if value == 'No raw GPS history':
-                self.assertIn('No raw GPS history', (ROOT / 'MISSION_CONTROL.md').read_text())
+                self.assertIn('No raw GPS history', (ROOT / 'MISSION_CONTROL.md').read_text(encoding="utf-8"))
             else:
                 self.assertIn(value, self.mission)
         self.assertNotIn('sendEnvironment(', self.mission)
@@ -76,7 +76,7 @@ class MissionControlContractTests(unittest.TestCase):
         self.assertIn('private static func ambiguousAlias(_ raw: String)', self.mission)
         self.assertIn('!Self.ambiguousAlias(event.location)', self.mission)
         self.assertIn('mission.status = "Unknown: no fresh high-accuracy phone fix;', self.mission)
-        self.assertIn('route estimates', (ROOT / "MISSION_CONTROL.md").read_text())
+        self.assertIn('route estimates', (ROOT / "MISSION_CONTROL.md").read_text(encoding="utf-8"))
 
     def test_narrow_automatic_intervention_and_receipt_are_not_faked(self):
         for value in (
@@ -113,7 +113,7 @@ class MissionControlContractTests(unittest.TestCase):
             self.assertFalse(cap['actual_external_outcome_verified'])
             self.assertFalse(cap['live_connection_verified'])
             self.assertIn(cap['effect'], {'read_only', 'local_write', 'external_write'})
-        source = (ROOT / 'jarvis_mrb/service.py').read_text()
+        source = (ROOT / 'jarvis_mrb/service.py').read_text(encoding="utf-8")
         self.assertIn('@app.get("/missions/affordances")', source)
         self.assertIn('def mission_affordance_catalog(', source)
         self.assertIn('_check_auth(authorization)', source)

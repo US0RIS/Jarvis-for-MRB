@@ -479,12 +479,20 @@ struct WorldArmorView: View {
                     Marker(entry.label, coordinate: CLLocationCoordinate2D(
                         latitude: entry.latitude, longitude: entry.longitude
                     ))
+                    MapCircle(
+                        center: CLLocationCoordinate2D(
+                            latitude: entry.latitude, longitude: entry.longitude
+                        ),
+                        radius: max(1, min(entry.radiusKM, correlationQueryRadiusKM)) * 1_000
+                    )
+                    .foregroundStyle(Color.blue.opacity(0.10))
                 }
                 .frame(height: 230)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .accessibilityLabel("Map of explicitly saved investigation region")
-                Text("MapKit displays the center, not verified sensor coverage "
-                     + "or a surveyed boundary. Map tiles may be requested from Apple.")
+                Text("The circle is your requested radial search area, NOT "
+                     + "verified sensor coverage or a surveyed boundary. "
+                     + "Map tiles may be requested from Apple.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text("Expires: " + entry.expiresAt)

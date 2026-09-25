@@ -35,6 +35,30 @@ class OfficialEarthquakeTests(unittest.TestCase):
         self.assertEqual(params["limit"], 50)
         self.assertIn("not all local emergencies", answer["source_note"])
 
+    def test_usgs_geojson_epicenter_is_publisher_location_not_query_center(self) -> None:
+        now_ms = int(time.time() * 1000)
+        payload = {"features": [
+            {"id": "us_geo_1", "properties": {
+                "mag": 3.1, "time": now_ms, "place": "reported region",
+                "url": "https://earthquake.usgs.gov/"
+            }, "geometry": {"type": "Point",
+                            "coordinates": [-118.15, 34.11, 7.2]}},
+            {"id": "us_geo_2", "properties": {
+                "mag": 3.2, "time": now_ms, "place": "unknown geometry"
+            }, "geometry": {"type": "Point", "coordinates": [999, 34.1]}}
+        ]}
+        with patch("jarvis_mrb.public_incidents.httpx.Client") as client:
+            stream=client.return_value.__enter__.return_value.stream.return_value.__enter__.return_value
+            stream.iter_bytes.return_value=[json.dumps(payload).encode()]
+            result=regional_earthquakes(34.12,-118.16)
+        self.assertEqual(result["status"],"ok")
+        self.assertEqual(
+            (result["events"][0]["latitude"],result["events"][0]["longitude"]),
+            (34.11,-118.15),
+        )
+        self.assertIsNone(result["events"][1]["latitude"])
+        self.assertIsNone(result["events"][1]["longitude"])
+
     def test_not_unbounded_or_emergency_all_clear(self) -> None:
         with self.assertRaises(ValueError):
             regional_earthquakes(0, 0, radius_km=1000)

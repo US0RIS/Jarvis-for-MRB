@@ -231,6 +231,7 @@ class WorldArmorCorrelationRequest(BaseModel):
     end_at: str
     as_known_at: str | None = None
     source_ids: list[str] | None = None
+    query_radius_km: float | None = None
 
 
 class RealityLensRequest(BaseModel):
@@ -818,6 +819,7 @@ def world_armor_correlate(
             start_at=request.start_at, end_at=request.end_at,
             as_known_at=request.as_known_at,
             source_ids=request.source_ids,
+            query_radius_km=request.query_radius_km,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)

@@ -120,6 +120,20 @@ class WorldArmorCorrelationTests(TestCase):
         self.assertNotEqual(first["query_id"],source_only["query_id"])
         self.assertEqual(first["query_plan"]["pair_window_seconds"],3600)
         self.assertEqual(first["query_plan"]["query_radius_km"],10.0)
+        later_clock=self.query(query_radius_km=10,
+                               now=BASE+timedelta(hours=3))
+        self.assertEqual(first["query_id"],later_clock["query_id"])
+        self.assertEqual(first["as_known_at"],BASE.isoformat())
+        next_receipt=BASE+timedelta(minutes=20)
+        self.collect(
+            at=next_receipt,
+            air=conditions(at=next_receipt,aq=46),
+            quakes=quake(status="unavailable"),
+        )
+        changed=self.query(query_radius_km=10,
+                           now=BASE+timedelta(hours=3))
+        self.assertNotEqual(first["query_id"],changed["query_id"])
+        self.assertEqual(changed["as_known_at"],next_receipt.isoformat())
 
     def test_stale_sample_remains_visible_but_cannot_corroborate(self):
         self.collect(air=conditions(status="stale"))

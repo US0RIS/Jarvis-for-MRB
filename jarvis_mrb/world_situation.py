@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 from jarvis_mrb.world_model import DB_PATH, SELF_ID
+from jarvis_mrb.situation_evidence import compile_evidence
 
 _SITUATION_CUES = (
     "before i go in",
@@ -384,7 +385,10 @@ def _recent_evidence(entity_ids: set[str], selected_event_id: int, limit: int = 
     return result
 
 
-def compile_situation(query: str) -> dict[str, Any] | None:
+def compile_situation(
+    query: str, *, phone_mission: dict[str, Any] | None = None,
+    resolved_place: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if not is_situation_query(query):
         return None
     _refresh_near_term_if_needed()
@@ -409,6 +413,13 @@ def compile_situation(query: str) -> dict[str, Any] | None:
     commitment_ids = {str(item["id"]) for item in commitments}
     intentions = _linked_intentions(all_ids, commitment_ids, limit=5)
     recent = _recent_evidence(all_ids, int(event.get("world_event_id") or 0), limit=10)
+    # The additional modules have separate privacy/authority boundaries.
+    # Read existing evidence only; never evaluate Guardian or sense a camera,
+    # and never pretend phone-local Mission Control is PC-readable.
+    cross_source = compile_evidence(
+        event, intentions, projects,
+        phone_mission=phone_mission, resolved_place=resolved_place,
+    )
 
     return {
         "meeting": event,
@@ -417,12 +428,18 @@ def compile_situation(query: str) -> dict[str, Any] | None:
         "intentions": intentions,
         "commitments": commitments,
         "recent_evidence": recent,
+        "cross_source_evidence": cross_source,
         "selection_reasons": reasons,
     }
 
 
-def context_for_query(query: str) -> str:
-    situation = compile_situation(query)
+def context_for_query(
+    query: str, *, phone_mission: dict[str, Any] | None = None,
+    resolved_place: dict[str, Any] | None = None,
+) -> str:
+    situation = compile_situation(
+        query, phone_mission=phone_mission, resolved_place=resolved_place,
+    )
     if not situation:
         return ""
     meeting = situation["meeting"]
@@ -458,6 +475,43 @@ def context_for_query(query: str) -> str:
         due = f" (due {item.get('due')})" if item.get("due") else ""
         lines.append(f"- Pending obligation: {owner}{item.get('action')}{due}")
 
+    cross_source = situation.get("cross_source_evidence") or {}
+    sections = cross_source.get("sections") or {}
+    if any(sections.values()):
+        lines.append("ADDITIONAL SOURCE-QUALIFIED, EVENT-RELATED EVIDENCE:")
+    for item in (sections.get("guardian") or [])[:4]:
+        lines.append(
+            f"- [Guardian enrolled watch {item['watch_id']} | last evaluated "
+            f"{item['observed_at']}] {item['title']}: {item['signal']}; "
+            f"due {item['deadline_at']}. {item['qualifier']}"
+        )
+    for item in (sections.get("life_fabric") or [])[:6]:
+        lines.append(
+            f"- [Life Fabric user-enrolled task {item['task_id']} | "
+            f"{item['link']}] {item['title']}: {item['due_state']}; "
+            f"completion {item['completion_state']}; "
+            f"blocked {item['blocked']}. {item['qualifier']}"
+        )
+    for item in (sections.get("mission_control") or [])[:1]:
+        lines.append(
+            f"- [iPhone Mission Control | phone snapshot {item['observed_at']}] "
+            f"Exact-event mission phase {item['phase']}; {item['qualifier']}"
+        )
+    for item in (sections.get("reality_lens") or [])[:4]:
+        lines.append(
+            f"- [Reality Lens saved snapshots | {item['observed_at']} | "
+            f"provider {item['provider']}] {item['label']}: "
+            f"{item['before']} -> {item['after']}. {item['qualifier']}"
+        )
+    statuses = cross_source.get("source_status") or {}
+    missing = []
+    if statuses.get("mission_control") == "phone_local_not_shared":
+        missing.append("phone-local Mission Control was not shared")
+    if statuses.get("reality_lens") == "exact_place_not_linked":
+        missing.append("the calendar has no verified Reality Lens place match")
+    if missing:
+        lines.append("- Coverage limits: " + "; ".join(missing)
+                     + ". No all-clear may be inferred.")
     evidence = situation.get("recent_evidence") or []
     if evidence:
         lines.append("RECENT CONNECTED EVIDENCE:")
@@ -487,4 +541,9 @@ def status() -> dict[str, Any]:
         "cancelled_events_excluded": True,
         "generic_all_day_events_excluded": True,
         "recent_evidence_parses_iso_and_rfc_dates": True,
+        "additional_source_qualified_evidence": True,
+        "guardian_read_only_no_alert_emission": True,
+        "life_fabric_only_linked_manual_tasks": True,
+        "iphone_mission_auto_sync": False,
+        "lens_location_label_only_join": False,
     }

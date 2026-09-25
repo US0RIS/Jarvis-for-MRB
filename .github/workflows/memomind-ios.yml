@@ -120,5 +120,7 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Isolated world acceptance check
         run: python3 -m jarvis_mrb.world_acceptance_check
+      - name: Initialize isolated CI world (never user deployment)
+        run: python3 -m jarvis_mrb.world_prepare --no-backup
       - name: Isolated CI world diagnostics (not a deployed host)
         run: python3 -m jarvis_mrb.world_check

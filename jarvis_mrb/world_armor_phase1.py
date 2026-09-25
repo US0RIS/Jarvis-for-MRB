@@ -523,6 +523,132 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
     }
 
 
+
+def compare_recent(investigation_id: str, *, db_path: Path | None = None,
+                   now: datetime | None = None) -> dict[str, Any]:
+    """Compare two *received* samples; never infer physical causation.
+
+    Records are cumulative and idempotent, so observations absent from one
+    insert do not prove provider disappearance. Only newly RECEIVED reports
+    and revisions with adequate source coverage are presented as differences.
+    """
+    _require_enabled()
+    instant = _clock(now)
+    path = Path(db_path) if db_path is not None else STORE
+    with closing(_connect(path, create=False)) as con:
+        row = _record(con, investigation_id, instant)
+        samples = [dict(x) for x in con.execute(
+            "SELECT id,received_at,adapter_mode FROM samples "
+            "WHERE investigation_id=? AND received_at<=? "
+            "ORDER BY received_at DESC,id DESC LIMIT 2",
+            (row["id"],instant.isoformat()),
+        )]
+    empty = {
+        "schema":"jarvis.world_armor.change.v1",
+        "investigation_id":row["id"],
+        "comparison":"requires_two_distinct_received_samples",
+        "source_changes":[], "modelled_air_quality_change":None,
+        "source_record_changes":[],
+        "causal_claims":0, "external_actions":0, "model_calls":0,
+        "disappearances_inferred":False,
+        "qualifier": "Received evidence is incomplete, not a continuous world history.",
+    }
+    if len(samples)<2 or samples[0]["received_at"]==samples[1]["received_at"]:
+        return empty
+    latest, previous = samples[0], samples[1]
+    before = replay(investigation_id, as_known_at=previous["received_at"],
+                    db_path=path, now=instant)
+    after = replay(investigation_id, as_known_at=latest["received_at"],
+                   db_path=path, now=instant)
+    coverage_change = []
+    for provider in _PROVIDERS:
+        older=(before["coverage"].get(provider) or {}).get("status","not_checked")
+        newer=(after["coverage"].get(provider) or {}).get("status","not_checked")
+        if older != newer:
+            coverage_change.append({
+                "source":provider, "before":older,"after":newer,
+                "kind":"source_availability_change_not_world_event",
+            })
+    eligible = {
+        source for source in _PROVIDERS
+        if (before["coverage"].get(source) or {}).get("status")=="ok"
+        and (after["coverage"].get(source) or {}).get("status")=="ok"
+    }
+    earlier = {(x["source"],x["provider_key"]):x for x in before["observations"]}
+    later = {(x["source"],x["provider_key"]):x for x in after["observations"]}
+    reported = []
+    for (source,key),current in sorted(later.items()):
+        if source not in eligible or current["received_at"]!=latest["received_at"]:
+            continue
+        prior = earlier.get((source,key))
+        if source=="openmeteo_model":
+            continue
+        if prior is None:
+            reported.append({
+                "source":source, "kind":"newly_received_record_not_newly_occurred_event",
+                "record_key":key, "received_at":current["received_at"],
+                "observed_at":current["observed_at"],
+                "after":current["values"],
+                "observation_id":current["id"],
+                "note":"First seen within this investigation; not proof of onset.",
+            })
+        elif prior["digest"]!=current["digest"]:
+            reported.append({
+                "source":source, "kind":"source_record_revision",
+                "record_key":key, "received_at":current["received_at"],
+                "observed_at":current["observed_at"],
+                "before":prior["values"],"after":current["values"],
+                "before_observation_id":prior["id"],
+                "observation_id":current["id"],
+                "note":"The source report changed; not an independently verified outcome.",
+            })
+
+    aqi_change = None
+    if "openmeteo_model" in eligible:
+        old_air = [x for x in before["observations"]
+                   if x["source"]=="openmeteo_model" and
+                   x["kind"]=="modelled_us_aqi"]
+        new_air = [x for x in after["observations"]
+                   if x["source"]=="openmeteo_model" and
+                   x["kind"]=="modelled_us_aqi"]
+        if old_air and new_air:
+            old=max(old_air,key=lambda x:(x["observed_at"] or "",x["received_at"],x["id"]))
+            new=max(new_air,key=lambda x:(x["observed_at"] or "",x["received_at"],x["id"]))
+            if (new["received_at"]==latest["received_at"]
+                    and (new["id"]!=old["id"])
+                    and new["values"]["us_aqi"]!=old["values"]["us_aqi"]):
+                aqi_change = {
+                    "source":"openmeteo_model",
+                    "kind":"modelled_aqi_difference_not_measured_street_condition",
+                    "before":old["values"]["us_aqi"],
+                    "after":new["values"]["us_aqi"],
+                    "delta":round(new["values"]["us_aqi"]-old["values"]["us_aqi"],1),
+                    "before_model_at":old["observed_at"],
+                    "after_model_at":new["observed_at"],
+                    "before_observation_id":old["id"],
+                    "observation_id":new["id"],
+                    "observed_same_query_point":True,
+                    "note":"Source-consistent model comparison; no causal or safety claim.",
+                }
+    return {
+        "schema":"jarvis.world_armor.change.v1",
+        "investigation_id":row["id"],
+        "comparison":"two_received_samples",
+        "previous_received_at":previous["received_at"],
+        "latest_received_at":latest["received_at"],
+        "previous_mode":previous["adapter_mode"],
+        "latest_mode":latest["adapter_mode"],
+        "source_changes":coverage_change,
+        "modelled_air_quality_change":aqi_change,
+        "source_record_changes":reported[:65],
+        "sources_with_comparable_coverage":sorted(eligible),
+        "sources_without_comparable_coverage":sorted(set(_PROVIDERS)-eligible),
+        "causal_claims":0, "external_actions":0, "model_calls":0,
+        "disappearances_inferred":False,
+        "qualifier":"First received is not first occurred. A missing result is not a verified disappearance or all-clear.",
+    }
+
+
 def forget(investigation_id: str, *, db_path: Path | None = None) -> dict[str, Any]:
     """Forget even while disabled, so revocation cannot lock users out of deletion."""
     path = Path(db_path) if db_path is not None else STORE

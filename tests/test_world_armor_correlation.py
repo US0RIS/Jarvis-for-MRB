@@ -33,7 +33,7 @@ def conditions(at=BASE, aq=40, alerts=True, status="ok", nws_status="ok"):
     }
 
 
-def quake(at=BASE + timedelta(minutes=8), status="ok", identifier="us-earth-7"):
+def quake(at=BASE - timedelta(minutes=8), status="ok", identifier="us-earth-7"):
     return {
         "status": status, "checked_at": at.isoformat(),
         "events": [{
@@ -64,7 +64,7 @@ class WorldArmorCorrelationTests(TestCase):
         return armor.ingest_fixture(
             self.key,
             air if air is not None else conditions(at=at),
-            quakes if quakes is not None else quake(at=at+timedelta(minutes=8)),
+            quakes if quakes is not None else quake(at=at-timedelta(minutes=8)),
             db_path=self.db, now=at,
         )
 
@@ -131,7 +131,9 @@ class WorldArmorCorrelationTests(TestCase):
                          {"openmeteo_model"})
 
     def test_cross_source_time_separation_over_hour_has_no_link(self):
-        self.collect(quakes=quake(at=BASE+timedelta(minutes=90)))
+        later = BASE+timedelta(minutes=90)
+        self.collect(at=later, air=conditions(at=BASE),
+                     quakes=quake(at=later))
         r = self.query(end_at=(BASE+timedelta(hours=2)).isoformat())
         self.assertEqual(len(r["timed_observations"]), 2)
         self.assertEqual(r["candidate_links"], [])
@@ -148,7 +150,7 @@ class WorldArmorCorrelationTests(TestCase):
     def test_as_known_then_cutoff_excludes_later_source_report(self):
         self.collect(quakes=quake(status="unavailable"))
         self.collect(at=LATER, air=conditions(at=LATER,aq=51),
-                     quakes=quake(at=LATER+timedelta(minutes=4)))
+                     quakes=quake(at=LATER-timedelta(minutes=4)))
         old = self.query(as_known_at=(BASE+timedelta(minutes=1)).isoformat())
         latest = self.query()
         self.assertEqual(old["candidate_links"], [])
@@ -208,7 +210,7 @@ class WorldArmorCorrelationTests(TestCase):
     def test_replay_returns_real_sample_timeline_not_fabricated_continuity(self):
         self.collect()
         self.collect(at=LATER, air=conditions(at=LATER),
-                     quakes=quake(at=LATER+timedelta(minutes=3)))
+                     quakes=quake(at=LATER-timedelta(minutes=3)))
         r = armor.replay(self.key, db_path=self.db,
                          now=BASE+timedelta(hours=2))
         self.assertEqual(len(r["sample_timeline"]), 2)

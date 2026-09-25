@@ -28,6 +28,7 @@ as Reality Mesh. A tokenless backend returns 503, not access to your region.
 - `POST /world-armor/v1/observe` — JSON `{"investigation_id":"<returned 32-char ID>"}`; requests providers **one time**, no scheduling.
 - `POST /world-armor/v1/replay` — JSON `{"investigation_id":"<ID>","as_known_at":"2026-09-24T20:00:00Z"}`, or omit `as_known_at` for the latest saved receipts.
 - `POST /world-armor/v1/changes` — JSON `{"investigation_id":"<ID>"}`; deterministically compare the last two saved receipt times, separate modelled AQI changes, source record revisions, **first received** (not necessarily newly occurred) events and source outage/recovery. If fewer than two receipts or evidence coverage is inadequate, show that explicitly. No provider request or background watch.
+- `POST /world-armor/v1/correlate` — JSON `{"investigation_id":"<ID>","start_at":"2026-09-24T18:00:00Z","end_at":"2026-09-24T20:00:00Z","as_known_at":"2026-09-24T20:10:00Z","source_ids":["openmeteo_model","usgs_earthquakes"]}`. `as_known_at` and `source_ids` are optional. Query **retained records only** with an exact 0–72h source-observed-time window in the saved region. A cross-source time match is a **candidate**, not a verified shared location or cause. NWS entries without a provider event timestamp appear in a separate *receipt-time-only* list. The API does not call providers, create a watch or act.
 - `POST /world-armor/v1/forget` — JSON `{"investigation_id":"<ID>"}`; allowed even after World Armor is turned off so deletion isn't held hostage by a feature switch.
   The iPhone/iPad workbench continues to list existing regions and offer Forget when disabled; Observe and Replay remain blocked.
 
@@ -35,6 +36,34 @@ Each returns `Cache-Control: private, no-store`; callers must supply
 `Authorization: Bearer <YOUR_PRIVATE_JARVIS_TOKEN>`. The feature flag
 does **not** generate a token for you. No client or provider credentials
 should ever be committed to this repo.
+
+### iPad/iPhone correlation workbench
+
+The existing native World Armor view now has a chosen-region MapKit center, a
+6/24/72-hour observation-window selector, a date/time window-end picker,
+read-only cross-source correlation cards, explicit provider coverage, and a
+receipt-time rewind menu backed by the actual bounded `sample_timeline`.
+MapKit's pin is the **user's inquiry location**; it is not a verified
+earthquake epicenter, NWS alert polygon or sensor view footprint. Users must
+explicitly tap `Observe once` to contact providers; `Correlate saved sources`
+and `Replay retained evidence` read only saved receipts. Evidence clears
+from the phone's view when the app leaves the foreground or Reality Mesh
+privacy is disabled. Native iOS build success is not actual device acceptance.
+
+### Spatial/temporal limits (deliberate)
+
+A selected region is the only presently valid spatial query. The existing USGS
+adapter returns an event's time and *membership within the queried radius*,
+but not its coordinates; NWS is queried for a point without preserving the
+alert footprint and does not expose an issuance time; modelled AQI belongs to
+a coarse model grid for a selected point. Consequently this release can join
+**independent provider reports temporally within the same user-selected
+query scope**, but cannot compute exact event-to-event distance, camera
+sightlines, route intersection or asserted causal chains. It must not say
+“physically co-located” on this evidence. Source time must be known to join
+on event time; unknown-time NWS items can be displayed only as **received at**
+a specific time. `as_known_at` is the cutoff on when Jarvis received records,
+not a reconstruction of all real-world activity.
 
 ### Storage and interpretation
 
@@ -94,7 +123,8 @@ real camera imagery or successful source observations on your equipment.
 ### What is next
 
 Phase 1 follow-up: source-specific footprint and exact sample/provider
-coverage audit, more capable temporal/spatial query UX and explicit source license record; then a
+coverage audit, verified geometry from licensed primary sources and explicit
+source license record; then a
 reproducible *cross-source* spatial/temporal correlation demonstration.
 Later phases add actual approved watches and leased typed workers.
 See W0–W16 in [the full spec](WORLD_ARMOR_SPEC.md).

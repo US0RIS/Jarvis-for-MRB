@@ -2805,6 +2805,128 @@ struct WorldArmorView: View {
         }
     }
 
+    private var crossRegionQueryPanel: some View {
+        GroupBox("5 · Compare two enrolled regions") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Contrast two independently selected places using only "
+                     + "their existing, retained provider reports. Neither "
+                     + "region is sensed again.")
+                    .font(.caption)
+                Picker("Second enrolled region", selection: $secondRegionID) {
+                    Text("Choose another region").tag("")
+                    ForEach(investigations.filter {
+                        $0.id != (selectedID ?? "")
+                    }) { area in
+                        Text(area.label + " • " + area.id.prefix(8))
+                            .tag(area.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                Button(busy ? "Comparing…" : "Compare two saved places") {
+                    Task { await compareSavedRegions() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    busy || capabilities?.enabled != true ||
+                    secondRegionID.isEmpty ||
+                    secondRegionID == (selectedID ?? "")
+                )
+                Text("Uses the 6/24/72-hour observation window and optional "
+                     + "as-known-at cutoff above. An unsampled region cannot "
+                     + "be treated as an all-clear.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func crossRegionPanel(_ report: ArmorCrossRegionReport) -> some View {
+        GroupBox("Two-region evidence • not a global causal model") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Query identity " + report.queryID)
+                    .font(.caption2.monospaced())
+                Text(String(format: "Regional centers %.1f km apart",
+                            report.centerSeparationKM))
+                    .font(.subheadline.weight(.medium))
+                Text(report.enrolledRegionsOverlapGeometrically
+                     ? "The enrolled query circles overlap, not the provider coverage."
+                     : "The enrolled query circles do not overlap.")
+                    .font(.caption)
+                Text("Source receipts: " + report.primary.mode + " / "
+                     + report.secondary.mode)
+                    .font(.caption)
+                Text("Evidence received by Jarvis: "
+                     + report.primary.asKnownAt + " / "
+                     + report.secondary.asKnownAt)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(report.sourceCoverage.keys.sorted(), id: \.self) { key in
+                    if let state = report.sourceCoverage[key] {
+                        Text(key + " • first: " + state.primary
+                             + " • second: " + state.secondary)
+                            .font(.caption2)
+                    }
+                }
+                if let problem = report.comparisonBlockReason {
+                    Text(problem)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Divider()
+                Text("Same-model, same-period US AQI contrasts")
+                    .font(.headline)
+                if report.modelledAQIComparisons.isEmpty {
+                    Text("No comparable, source-time-aligned and healthy "
+                         + "modelled AQI samples. Not proof of equal air quality.")
+                        .font(.caption)
+                }
+                ForEach(report.modelledAQIComparisons) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.modelTime).font(.caption2.monospaced())
+                        Text(String(format: "First %.1f  ·  Second %.1f  ·  Difference %+.1f",
+                                    item.primaryModelledUSAQI,
+                                    item.secondaryModelledUSAQI,
+                                    item.differenceSecondaryMinusPrimary))
+                            .font(.subheadline.weight(.medium))
+                        Text(item.qualifier)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
+                Divider()
+                Text("Shared USGS source-event IDs")
+                    .font(.headline)
+                if report.sharedUSGSSourceEvents.isEmpty {
+                    Text("No shared IDs in these saved reports. Neither absence "
+                         + "nor completeness of earthquakes is established.")
+                        .font(.caption)
+                }
+                ForEach(report.sharedUSGSSourceEvents) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.providerKey)
+                            .font(.subheadline.weight(.medium))
+                        if item.revisionOrReceiptDisagreement {
+                            Text("Source records differ by revision or occurrence time.")
+                                .font(.caption)
+                        }
+                        Text(item.qualifier)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
+                Text(report.qualifier)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func correlationPanel(_ report: ArmorCorrelationReport) -> some View {
         GroupBox("Temporal relationship candidates • not causal findings") {
             VStack(alignment: .leading, spacing: 9) {
@@ -4153,6 +4275,33 @@ struct WorldArmorView: View {
             correlations = nil
             evidenceGraph = nil
             status = "Correlation unavailable: " + error.localizedDescription
+        }
+    }
+
+    private func compareSavedRegions() async {
+        guard let selectedID, !busy, !secondRegionID.isEmpty,
+              secondRegionID != selectedID else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let formatter = ISO8601DateFormatter()
+            let end = correlationEnd
+            let start = end.addingTimeInterval(
+                -Double(correlationWindowHours) * 3_600
+            )
+            let cutoff = asKnownAt.trimmingCharacters(in: .whitespacesAndNewlines)
+            crossRegionReport = try await client.worldArmorCompareRegions(
+                primaryID: selectedID,
+                secondaryID: secondRegionID,
+                startAt: formatter.string(from: start),
+                endAt: formatter.string(from: end),
+                asKnownAt: cutoff.isEmpty ? nil : cutoff
+            )
+            status = "Compared retained records from both enrolled regions. "
+                + "Inspect model source-time alignment and provider coverage."
+        } catch {
+            crossRegionReport = nil
+            status = "Cross-region query unavailable: " + error.localizedDescription
         }
     }
 

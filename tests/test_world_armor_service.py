@@ -47,6 +47,24 @@ class WorldArmorServiceBoundaryTests(TestCase):
                     request,Response(),authorization="Bearer private-secret")
             self.assertEqual(ctx.exception.status_code,503)
 
+    def test_source_delta_route_enforces_private_auth_and_never_polls(self):
+        request=service.WorldArmorIdRequest(investigation_id="a"*32)
+        with patch.object(service, "API_TOKEN", "private-secret"), \
+             patch("jarvis_mrb.world_armor_phase1.compare_recent",
+                   return_value={"comparison":"two_received_samples",
+                                 "external_actions":0,"model_calls":0}) as read:
+            with self.assertRaises(HTTPException) as context:
+                service.world_armor_changes(request,Response(),authorization=None)
+            self.assertEqual(context.exception.status_code,401)
+            read.assert_not_called()
+            response=Response()
+            result=service.world_armor_changes(
+                request,response,authorization="Bearer private-secret")
+            self.assertEqual(result["comparison"],"two_received_samples")
+            self.assertEqual(response.headers["Cache-Control"],"private, no-store")
+            read.assert_called_once_with("a"*32)
+
+
 
 if __name__ == "__main__":
     import unittest

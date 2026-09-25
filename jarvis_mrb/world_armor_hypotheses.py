@@ -77,7 +77,9 @@ def build_evidence_graph(
 
     edges: list[dict[str, Any]]=[]
     for revision in replayed["revisions"]:
-        if revision["new_id"] not in eligible_ids:
+        # Every emitted edge must be traversable inside this bounded graph.
+        if (revision["new_id"] not in eligible_ids
+                or revision["supersedes_id"] not in eligible_ids):
             continue
         edges.append({
             "id":_stable_id("edge","revision",

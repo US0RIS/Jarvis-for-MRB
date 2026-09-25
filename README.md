@@ -21,9 +21,12 @@ explicit region entry, selected-region MapKit preview, one-shot Observe,
 source coverage, two-sample Compare, Replay and Forget; none runs passively.
 The stacked `jarvis/world-armor-correlation-workbench` branch adds an
 **explicit read-only 6/24/72-hour historical correlation query** over these
-retained records, a true receipt-time rewind menu and evidence cards on the
-iPad/iPhone. A cross-source match means only source-reported *time proximity
-within the same selected inquiry region*, not exact physical co-location or
+retained records, a true receipt-time rewind menu, source geometry where
+actually reported, and evidence cards on the iPad/iPhone. It also builds a
+deterministic typed evidence graph whose hypotheses remain
+`candidate_unverified` and visibly carry alternate explanations and missing
+evidence. A cross-source match means only source-reported *time proximity
+within a bounded inquiry region*, not exact physical co-location or
 causation. The larger design below remains a roadmap.
 
 ## World Armor — proposed planetary-scale extension

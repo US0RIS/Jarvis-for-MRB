@@ -6,6 +6,18 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
+## World Armor Phase 1 — limited executable evidence kernel
+
+**[Phase 1 runbook](docs/WORLD_ARMOR_PHASE1.md)** implements a default-off,
+authenticated, one-shot infrastructure investigation on the
+`jarvis/world-armor-phase1-kernel` branch: explicitly save a bounded region,
+sample existing USGS earthquake / NWS point-alert / modelled AQI adapters,
+retain source-qualified normalized observations and independent coverage
+statuses, replay the data received as of a selected time, inspect revisions,
+and forget records. It has **no** universal global feeds, standing watches,
+camera recording, distributed workers, trading, actuation, iPhone map, or
+device-deployment claim. The larger design below remains a roadmap.
+
 ## World Armor — proposed planetary-scale extension
 
 **[Full design specification](docs/WORLD_ARMOR_SPEC.md)** for the Planetary Event

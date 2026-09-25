@@ -6,6 +6,20 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
+## Meeting prebrief convergence — read-only source-qualified evidence
+
+On the stacked `jarvis/situation-evidence-unification` branch,
+[Situation Evidence](SITUATION_EVIDENCE.md) augments the existing
+`world_situation` meeting compiler with previously evaluated **linked**
+Guardian watches and **matching** user-enrolled Life Fabric deadlines,
+dependencies and completion states. Every item carries provenance and
+coverage limits. It does not run a Guardian alert, infer all-clear or
+actuate devices. iPhone Mission Control is still phone-local and calendar
+events are not yet bound to exact Reality Lens coordinates; those inputs
+are available only through explicit, exact-event optional snapshots and
+are **not** claimed as automatically wired. This feature is branch source,
+not merged to `main` or observed deployed.
+
 ## Life Fabric — reduce five years of ordinary friction
 
 **[Life Fabric](LIFE_FABRIC.md)** adds a private, user-enrolled everyday-life

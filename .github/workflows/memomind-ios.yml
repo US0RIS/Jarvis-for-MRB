@@ -7,6 +7,7 @@ on:
       - jarvis/human-extension-v1
       - jarvis/life-friction-fabric
       - jarvis/converge-main-2026-09
+      - jarvis/situation-evidence-unification
   pull_request:
     paths:
       - "ios/**"
@@ -60,6 +61,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_reality_lens.py" -v
       - name: Verify Life Fabric timelines, possessions, handoffs, friction and actual evidence semantics
         run: python -m unittest discover -s tests -p "test_life_fabric.py" -v
+      - name: Verify meeting prebrief source fusion, freshness and privacy boundaries
+        run: python -m unittest discover -s tests -p "test_situation_evidence.py" -v
       - name: Verify durable opt-in Reality Graph missions and no-model answers
         run: python -m unittest discover -s tests -p "test_reality_graph_missions.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback

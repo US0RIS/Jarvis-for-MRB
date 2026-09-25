@@ -283,6 +283,79 @@ class WorldArmorKernelTests(TestCase):
         self.assertEqual(receipt["coverage"][2]["status"],"ok")
 
 
+    def test_changes_requires_two_receipts_not_a_fabricated_baseline(self):
+        key=self.new()
+        empty=armor.compare_recent(key,db_path=self.db,
+                                   now=NOW+timedelta(minutes=30))
+        self.assertEqual(empty["comparison"],
+                         "requires_two_distinct_received_samples")
+        self.assertEqual(empty["source_record_changes"],[])
+        self.ingest(key)
+        one=armor.compare_recent(key,db_path=self.db,
+                                 now=NOW+timedelta(minutes=30))
+        self.assertIsNone(one["modelled_air_quality_change"])
+        self.assertFalse(one["disappearances_inferred"])
+
+    def test_changes_model_measurement_and_revision_and_first_received_event(self):
+        key=self.new()
+        self.ingest(key,time=NOW)
+        later=NOW+timedelta(minutes=10)
+        updated=conditions(aqi=65,model=later)
+        updated["weather_alerts"]["alerts"][0]["headline"]="Alert source revised headline"
+        newer_quakes=quakes(events=quakes()["events"]+[{
+            "id":"us-456","magnitude":2.8,"place":"Previous hours",
+            "occurred_at":(NOW-timedelta(hours=2)).isoformat(),
+            "reviewed":True,"source_url":"https://earthquake.usgs.gov/",
+        }])
+        self.ingest(key,air=updated,quake=newer_quakes,time=later)
+        changed=armor.compare_recent(key,db_path=self.db,
+                                     now=NOW+timedelta(minutes=30))
+        self.assertEqual(changed["comparison"],"two_received_samples")
+        aqi=changed["modelled_air_quality_change"]
+        self.assertEqual((aqi["before"],aqi["after"],aqi["delta"]),(44,65,21))
+        self.assertEqual(aqi["after_model_at"],later.isoformat())
+        changes=changed["source_record_changes"]
+        self.assertEqual(len(changes),2)
+        self.assertEqual({x["kind"] for x in changes},
+                         {"source_record_revision",
+                          "newly_received_record_not_newly_occurred_event"})
+        fresh=next(x for x in changes if x["record_key"]=="us-456")
+        self.assertIn("not proof of onset",fresh["note"])
+        self.assertEqual(fresh["observed_at"],
+                         (NOW-timedelta(hours=2)).isoformat())
+        self.assertFalse(changed["disappearances_inferred"])
+        self.assertEqual(changed["causal_claims"],0)
+
+    def test_changes_never_turn_provider_outage_into_world_event(self):
+        key=self.new()
+        self.ingest(key,time=NOW)
+        self.ingest(key,air=conditions(aqi=77,nws_status="unavailable"),
+                    quake=quakes(status="unavailable"),
+                    time=NOW+timedelta(minutes=15))
+        changed=armor.compare_recent(key,db_path=self.db,
+                                     now=NOW+timedelta(minutes=30))
+        self.assertEqual(changed["sources_with_comparable_coverage"],
+                         ["openmeteo_model"])
+        self.assertEqual(
+            {x["source"] for x in changed["source_changes"]},
+            {"nws_point_alerts","usgs_earthquakes"},
+        )
+        self.assertEqual(changed["source_record_changes"],[])
+        self.assertIn("all-clear",changed["qualifier"])
+        self.assertEqual(changed["modelled_air_quality_change"],None)
+
+    def test_changes_duplicate_reports_never_claim_world_delta(self):
+        key=self.new()
+        self.ingest(key,time=NOW)
+        self.ingest(key,time=NOW+timedelta(minutes=10))
+        changed=armor.compare_recent(key,db_path=self.db,
+                                     now=NOW+timedelta(minutes=30))
+        self.assertEqual(changed["source_record_changes"],[])
+        self.assertIsNone(changed["modelled_air_quality_change"])
+        self.assertEqual(changed["sources_with_comparable_coverage"],
+                         sorted(armor._PROVIDERS))
+
+
 
 if __name__ == "__main__":
     import unittest

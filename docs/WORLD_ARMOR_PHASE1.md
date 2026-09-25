@@ -29,6 +29,7 @@ as Reality Mesh. A tokenless backend returns 503, not access to your region.
 - `POST /world-armor/v1/replay` — JSON `{"investigation_id":"<ID>","as_known_at":"2026-09-24T20:00:00Z"}`, or omit `as_known_at` for the latest saved receipts.
 - `POST /world-armor/v1/changes` — JSON `{"investigation_id":"<ID>"}`; deterministically compare the last two saved receipt times, separate modelled AQI changes, source record revisions, **first received** (not necessarily newly occurred) events and source outage/recovery. If fewer than two receipts or evidence coverage is inadequate, show that explicitly. No provider request or background watch.
 - `POST /world-armor/v1/correlate` — JSON `{"investigation_id":"<ID>","start_at":"2026-09-24T18:00:00Z","end_at":"2026-09-24T20:00:00Z","as_known_at":"2026-09-24T20:10:00Z","source_ids":["openmeteo_model","usgs_earthquakes"],"query_radius_km":10}`. `as_known_at` and `source_ids` are optional. Query **retained records only** with an exact 0–72h source-observed-time window in the saved region. Optional `query_radius_km` narrows, never expands, the operator's enrolled radius. A cross-source time match is a **candidate**, not a verified shared location or cause. NWS entries without a provider event timestamp appear in a separate *receipt-time-only* list. The API does not call providers, create a watch or act.
+- `POST /world-armor/v1/hypotheses/query` — same bounded window/radius request shape as `correlate`. Reads retained evidence only and emits an evidence graph with typed `temporal_overlap` / source-revision edges plus **candidate_unverified** cross-source co-occurrence hypotheses. Every candidate exposes supporting observation IDs, independent-lineage count, spatial precision, assumptions, missing evidence, and alternate explanations. It emits zero causal/wrongdoing/identity claims and grants no action.
 - `POST /world-armor/v1/forget` — JSON `{"investigation_id":"<ID>"}`; allowed even after World Armor is turned off so deletion isn't held hostage by a feature switch.
   The iPhone/iPad workbench continues to list existing regions and offer Forget when disabled; Observe and Replay remain blocked.
 
@@ -39,10 +40,12 @@ should ever be committed to this repo.
 
 ### iPad/iPhone correlation workbench
 
-The existing native World Armor view now has a chosen-region MapKit center, a
-6/24/72-hour observation-window selector, a within-enrollment spatial
-radius slider, a date/time window-end picker, read-only cross-source
-correlation cards, explicit provider coverage, and a
+The existing native World Armor view now has a chosen-region MapKit center and
+radial search circle, publisher-reported USGS epicenter markers where actually
+available, a 6/24/72-hour observation-window selector, a within-enrollment
+spatial radius slider, a date/time window-end picker, read-only cross-source
+correlation cards, evidence/hypothesis cards with alternatives and missing
+evidence, explicit provider coverage, and a
 receipt-time rewind menu backed by the actual bounded `sample_timeline`.
 MapKit's pin is the **user's inquiry location**; it is not a verified
 earthquake epicenter, NWS alert polygon or sensor view footprint. Users must
@@ -50,6 +53,18 @@ explicitly tap `Observe once` to contact providers; `Correlate saved sources`
 and `Replay retained evidence` read only saved receipts. Evidence clears
 from the phone's view when the app leaves the foreground or Reality Mesh
 privacy is disabled. Native iOS build success is not actual device acceptance.
+
+### Evidence graph and hypothesis discipline
+
+The workbench can now turn retained eligible source observations into a
+deterministic evidence graph. A displayed hypothesis means only that two
+independent source lineages meet the current typed co-occurrence rule. It is
+always `candidate_unverified`; the UI shows alternatives and evidence still
+needed. Synthetic fixture evidence cannot corroborate a real-adapter
+observation. Every edge must reference evidence inside the bounded graph.
+No free-form model prompt or user-written accusation is accepted by this
+endpoint, and there is no path from a hypothesis to Agency, Conductor, trading,
+messaging, device control or any other action.
 
 ### Spatial/temporal limits (deliberate)
 

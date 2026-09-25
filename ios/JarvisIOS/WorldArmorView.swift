@@ -61,8 +61,6 @@ struct ArmorCoverage: Decodable {
         case checkedAt = "checked_at"
         case reportedCount = "reported_count"
         case adapterMode = "adapter_mode"
-        case sampleCoverageStatus = "sample_coverage_status"
-        case sampleCoverageCheckedAt = "sample_coverage_checked_at"
     }
 }
 
@@ -120,6 +118,8 @@ struct ArmorObservation: Decodable, Identifiable {
         case receivedAt = "received_at"
         case geometryBasis = "geometry_basis"
         case adapterMode = "adapter_mode"
+        case sampleCoverageStatus = "sample_coverage_status"
+        case sampleCoverageCheckedAt = "sample_coverage_checked_at"
     }
 }
 

@@ -9,12 +9,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 class CounterfactualGuardianContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.swift = (_ROOT / "ios/JarvisIOS/CounterfactualGuardian.swift").read_text()
-        self.api = (_ROOT / "ios/JarvisIOS/JarvisAPIClient.swift").read_text()
-        self.app = (_ROOT / "ios/JarvisIOS/JarvisIOSApp.swift").read_text()
-        self.model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text()
-        self.settings = (_ROOT / "ios/JarvisIOS/SettingsStore.swift").read_text()
-        self.service = (_ROOT / "jarvis_mrb/service.py").read_text()
+        self.swift = (_ROOT / "ios/JarvisIOS/CounterfactualGuardian.swift").read_text(encoding="utf-8")
+        self.api = (_ROOT / "ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        self.app = (_ROOT / "ios/JarvisIOS/JarvisIOSApp.swift").read_text(encoding="utf-8")
+        self.model = (_ROOT / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
+        self.settings = (_ROOT / "ios/JarvisIOS/SettingsStore.swift").read_text(encoding="utf-8")
+        self.service = (_ROOT / "jarvis_mrb/service.py").read_text(encoding="utf-8")
 
     def test_calendar_endpoint_is_read_only_authenticated_bounded_and_does_not_request_gps(self) -> None:
         module = ast.parse(self.service)
@@ -36,9 +36,9 @@ class CounterfactualGuardianContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, code.lower())
 
     def test_opt_in_phone_lifecycle_and_privacy_revocation(self) -> None:
-        project = (_ROOT / "ios/JarvisIOS.xcodeproj/project.pbxproj").read_text()
-        power = (_ROOT / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text()
-        physical = (_ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text()
+        project = (_ROOT / "ios/JarvisIOS.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        power = (_ROOT / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text(encoding="utf-8")
+        physical = (_ROOT / "ios/JarvisIOS/JarvisPhysicalControlView.swift").read_text(encoding="utf-8")
         self.assertIn(
             'guardianEnabled = defaults.object(forKey: "jarvis.guardianEnabled") as? Bool ?? false',
             self.settings
@@ -61,7 +61,7 @@ class CounterfactualGuardianContractTests(unittest.TestCase):
         self.assertIn('GroupBox("JARVIS • Counterfactual Guardian")', physical)
 
     def test_stale_unknown_ambiguous_or_virtual_evidence_never_makes_a_confident_risk(self) -> None:
-        sensors = (_ROOT / "ios/JarvisIOS/FrontendIntelligence.swift").read_text()
+        sensors = (_ROOT / "ios/JarvisIOS/FrontendIntelligence.swift").read_text(encoding="utf-8")
         self.assertIn("horizontalAccuracyMeters = current.horizontalAccuracy", sensors)
         self.assertIn("lastLocationAt = current.timestamp", sensors)
         for required in (
@@ -120,7 +120,7 @@ class CounterfactualGuardianContractTests(unittest.TestCase):
         for forbidden in ("sendEmail(", "sendMessage(", "MFMessageCompose", "gmail.send",
                           "unrestricted actuator", "healthContext.heartRateBPM"):
             self.assertNotIn(forbidden, self.swift)
-        self.assertIn('containsPrivateData: true', (_ROOT / "ios/JarvisIOS/MemoMindBridge.swift").read_text())
+        self.assertIn('containsPrivateData: true', (_ROOT / "ios/JarvisIOS/MemoMindBridge.swift").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -502,6 +502,7 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
         }
     sample_modes = {row["id"]: row["adapter_mode"] for row in samples}
     visible: dict[tuple[str,str], dict[str, Any]] = {}
+    observation_history: list[dict[str, Any]] = []
     revision_history: list[dict[str, Any]] = []
     for row in obs:
         entry = {
@@ -514,6 +515,7 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
             "lineage":row["lineage"],"geometry_basis":row["geometry_basis"],
             "values":json.loads(row["values_json"]),
         }
+        observation_history.append(entry)
         visible[(row["provider"],row["provider_key"])] = entry
         if row["supersedes_id"]:
             revision_history.append({
@@ -535,6 +537,7 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
              "adapter_mode":row["adapter_mode"]} for row in samples
         ],
         "observation_count":len(observations),"observations":observations,
+        "observation_history":observation_history[:1200],
         "revisions":revision_history[:1200],"coverage":last_cover,
         "coverage_complete_for_integrated_sources":available,
         "mode": ("fixture_only" if modes==["fixture"] else

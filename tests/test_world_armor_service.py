@@ -367,6 +367,46 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertIn("world-armor/v1/cameras/inspect", client)
         self.assertIn("world-armor/v1/cameras/page-media", client)
 
+    def test_cross_region_endpoint_requires_bearer_token_and_no_client_observations(self):
+        expected = {
+            "primary_id", "secondary_id", "start_at", "end_at", "as_known_at"
+        }
+        self.assertEqual(set(service.WorldArmorCrossRegionRequest.model_fields),
+                         expected)
+        body = service.WorldArmorCrossRegionRequest(
+            primary_id="1"*32,secondary_id="2"*32,
+            start_at="2026-09-25T12:00:00Z",
+            end_at="2026-09-25T13:00:00Z",
+        )
+        response=Response()
+        with patch.object(service, "API_TOKEN", "private-secret"):
+            with self.assertRaises(HTTPException) as denied:
+                service.world_armor_compare_regions(body, response,
+                                                    authorization=None)
+            self.assertEqual(denied.exception.status_code,401)
+            with patch.dict(os.environ, {"JARVIS_WORLD_ARMOR_ENABLED":"0"}):
+                with self.assertRaises(HTTPException) as disabled:
+                    service.world_armor_compare_regions(
+                        body,response,authorization="Bearer private-secret"
+                    )
+                self.assertEqual(disabled.exception.status_code,503)
+        self.assertEqual(response.headers["Cache-Control"],"private, no-store")
+        self.assertIn("/world-armor/v1/regions/compare",
+                      {route.path for route in service.app.routes})
+
+    def test_cross_region_ios_is_typed_and_clears_background_evidence(self):
+        from pathlib import Path
+        root=Path(__file__).resolve().parents[1]
+        view=(root/"ios/JarvisIOS/WorldArmorView.swift").read_text(encoding="utf-8")
+        client=(root/"ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        self.assertIn("worldArmorCompareRegions(",view)
+        self.assertIn("crossRegionQueryPanel",view)
+        self.assertIn("crossRegionPanel(",view)
+        self.assertIn("crossRegionReport = nil",view)
+        self.assertIn("secondRegionID",view)
+        self.assertIn("modelledAQIComparisons",view)
+        self.assertIn("regions/compare",client)
+
     def test_disabled_create_does_not_touch_database(self):
         request=service.WorldArmorCreateRequest(
             label="Test",latitude=34.1,longitude=-118.2)

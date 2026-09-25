@@ -1,5 +1,85 @@
 import Foundation
 
+struct RealityLensReport: Decodable {
+    struct Observation: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let value: RealityGraphPlaceResponse.Scalar
+        let source: String
+        let observedAt: String
+        let qualifier: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, label, value, source, qualifier
+            case observedAt = "observed_at"
+        }
+    }
+
+    struct Change: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let before: RealityGraphPlaceResponse.Scalar
+        let after: RealityGraphPlaceResponse.Scalar
+        let source: String
+        let observedAt: String
+        let qualifier: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, label, before, after, source, qualifier
+            case observedAt = "observed_at"
+        }
+    }
+
+    let placeLabel: String
+    let checkedAt: String
+    let modelCalls: Int
+    let remembered: Bool
+    let baselineAt: String?
+    let baselineAvailable: Bool
+    let observations: [Observation]
+    let changes: [Change]
+    let unknownMetrics: [String]
+    let suggestedHapticPulses: Int
+    let retentionDays: Int
+
+    enum CodingKeys: String, CodingKey {
+        case remembered, observations, changes
+        case placeLabel = "place_label"
+        case checkedAt = "checked_at"
+        case modelCalls = "model_calls"
+        case baselineAt = "baseline_at"
+        case baselineAvailable = "baseline_available"
+        case unknownMetrics = "unknown_metrics"
+        case suggestedHapticPulses = "suggested_haptic_pulses"
+        case retentionDays = "retention_days"
+    }
+}
+
+struct RealityLensMemories: Decodable {
+    struct Memory: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let capturedAt: String
+        let factCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case id, label
+            case capturedAt = "captured_at"
+            case factCount = "fact_count"
+        }
+    }
+    let memories: [Memory]
+    let retentionDays: Int
+    enum CodingKeys: String, CodingKey {
+        case memories
+        case retentionDays = "retention_days"
+    }
+}
+
+struct RealityLensForgetReceipt: Decodable {
+    let deleted: Int
+}
+
 struct RealityGraphPlaceResponse: Decodable {
     struct Scalar: Decodable {
         let display: String
@@ -737,6 +817,32 @@ struct JarvisAPIClient {
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(RealityGraphPlaceResponse.self, from: data)
+    }
+
+    func realityLensSense(latitude: Double, longitude: Double, label: String,
+                         remember: Bool) async throws -> RealityLensReport {
+        let (data, response) = try await postData(
+            path: "reality/lens/sense",
+            body: ["latitude": latitude, "longitude": longitude,
+                   "label": label, "remember": remember]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityLensReport.self, from: data)
+    }
+
+    func realityLensMemories() async throws -> RealityLensMemories {
+        let (data, response) = try await get(path: "reality/lens/memories", timeout: 9)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityLensMemories.self, from: data)
+    }
+
+    func realityLensForget(latitude: Double, longitude: Double) async throws -> RealityLensForgetReceipt {
+        let (data, response) = try await postData(
+            path: "reality/lens/forget",
+            body: ["latitude": latitude, "longitude": longitude]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RealityLensForgetReceipt.self, from: data)
     }
 
     func realityMeshPlace(latitude: Double, longitude: Double) async throws -> RealityMeshPlaceResponse {

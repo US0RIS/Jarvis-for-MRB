@@ -6,6 +6,20 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
+## Human Extension v1 — executable first superpower slice
+
+**[Reality Lens](HUMAN_EXTENSION.md)** is the first deliberately non-chatbot
+human-extension workflow on `jarvis/human-extension-v1`: use the existing
+iPhone Mesh named-place resolver, sense actual supported public environmental
+sources, explicitly remember a bounded source-backed observation on the
+private Jarvis PC, revisit later for a deterministic change comparison, and
+feel a short user-triggered haptic signal if a supported fresh provider value
+changed. Unknown/stale sources remain unknown; the lens does not continuously
+track the user, save raw media or authorize remote actions. This is a concrete
+**remote perception + external episodic memory + tactile feedback** loop,
+not a claim that the full human-extension roadmap is already deployed.
+The matching iPhone/backend builds still require physical-device acceptance.
+
 ## Camera-free ambient autonomy — active development branch
 
 The camera-centred opportunity matcher is retired. On `jarvis/memomind-prep`, opt-in iPhone acoustic sound classification (foreground or active voice capture), separately timestamped phone motion and location/geofence and modelled, source-labelled outdoor temperature can match *explicit existing standing reminders* through Agency Attention. The source metadata is transient and cannot authorize tools or physical actions. Health is separately opt-in read-only context, not a diagnosis or actuating signal.

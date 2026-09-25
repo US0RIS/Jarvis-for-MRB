@@ -19,6 +19,11 @@ final class RealityMeshController: ObservableObject {
     @Published private(set) var placeGraph: RealityGraphPlaceResponse?
     @Published private(set) var placeGraphStatus = "No Reality Graph snapshot for this place."
     @Published private(set) var isCheckingPlaceGraph = false
+    @Published private(set) var lensReport: RealityLensReport?
+    @Published private(set) var lensMemories: [RealityLensMemories.Memory] = []
+    @Published private(set) var lensStatus = "Resolve one place to use the Reality Lens."
+    @Published private(set) var lensBusy = false
+    @Published private(set) var lensMemoryStatus = "Stored only when you explicitly tap Remember."
     @Published private(set) var worldStatus = "Name an exact place, then make a one-time public-world observation."
     @Published private(set) var placeCandidates: [MeshPlaceChoice] = []
     @Published private(set) var nodeStatus = "Check explicit devices; Jarvis never scans a network."
@@ -107,6 +112,8 @@ final class RealityMeshController: ObservableObject {
         place = nil
         placeGraph = nil
         placeGraphStatus = "No Reality Graph snapshot for this place."
+        lensReport = nil
+        lensStatus = "New place; prior reality observations cleared from this view."
         placeCoordinate = nil
         resolvedPlaceName = ""
         placeCandidates = []
@@ -234,6 +241,101 @@ final class RealityMeshController: ObservableObject {
         } catch {
             placeGraph = nil
             placeGraphStatus = "Graph lookup unavailable. No current facts inferred."
+        }
+    }
+
+    /// The user directs one fresh public-world observation at an exact MapKit
+    /// place. A separate Remember tap persists only small numeric source facts.
+    func senseSelectedPlace(remember: Bool) async {
+        guard !lensBusy, appModel.settings.meshEnabled,
+              UIApplication.shared.applicationState == .active,
+              place != nil, let coordinate = placeCoordinate,
+              !resolvedPlaceName.isEmpty else {
+            lensStatus = "Choose a uniquely resolved, observed place first."
+            return
+        }
+        let selectedName = resolvedPlaceName
+        lensBusy = true
+        lensStatus = remember
+            ? "Observing and explicitly saving a 30-day source-qualified baseline…"
+            : "Sensing fresh sources and comparing to your last saved baseline…"
+        defer { lensBusy = false }
+        do {
+            let received = try await client.realityLensSense(
+                latitude: coordinate.latitude, longitude: coordinate.longitude,
+                label: selectedName, remember: remember
+            )
+            guard appModel.settings.meshEnabled,
+                  UIApplication.shared.applicationState == .active,
+                  let current = placeCoordinate,
+                  current.latitude == coordinate.latitude,
+                  current.longitude == coordinate.longitude,
+                  resolvedPlaceName == selectedName else { return }
+            lensReport = received
+            let baselineText = received.baselineAvailable
+                ? "Comparison baseline: " + (received.baselineAt ?? "unknown") + ". "
+                : "No previously saved baseline for this exact place. "
+            lensStatus = baselineText
+                + "\(received.observations.count) fresh scalar observations, "
+                + "\(received.changes.count) supported changes. "
+                + (received.remembered
+                   ? "New memory saved for up to \(received.retentionDays) days."
+                   : "This observation was NOT saved.")
+            if remember { await refreshLensMemories() }
+            // An intentional foreground Sense tap can encode a verified
+            // provider-value change as a tactile cue. No background alerts.
+            if !remember, received.suggestedHapticPulses > 0 {
+                for n in 0..<min(received.suggestedHapticPulses, 3) {
+                    guard appModel.settings.meshEnabled,
+                          UIApplication.shared.applicationState == .active,
+                          resolvedPlaceName == selectedName else { break }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    if n < received.suggestedHapticPulses - 1 {
+                        try? await Task.sleep(for: .milliseconds(180))
+                    }
+                }
+            }
+        } catch {
+            lensReport = nil
+            lensStatus = remember
+                ? "Memory write could not be confirmed. Check saved memories before retrying."
+                : "Reality sensing unavailable. No change or all-clear is inferred."
+        }
+    }
+
+    func refreshLensMemories() async {
+        guard appModel.settings.meshEnabled,
+              UIApplication.shared.applicationState == .active else { return }
+        do {
+            let report = try await client.realityLensMemories()
+            guard appModel.settings.meshEnabled,
+                  UIApplication.shared.applicationState == .active else { return }
+            lensMemories = report.memories
+            lensMemoryStatus = "\(report.memories.count) recent manually saved snapshot(s). "
+                + "Only labels and source-backed numeric facts persist; "
+                + "excluded from results and pruned on access after \(report.retentionDays) days."
+        } catch {
+            lensMemories = []
+            lensMemoryStatus = "Could not read saved lens memories; status unknown."
+        }
+    }
+
+    func forgetSelectedLensPlace() async {
+        guard !lensBusy, appModel.settings.meshEnabled,
+              UIApplication.shared.applicationState == .active,
+              let coordinate = placeCoordinate else { return }
+        lensBusy = true
+        defer { lensBusy = false }
+        do {
+            let result = try await client.realityLensForget(
+                latitude: coordinate.latitude, longitude: coordinate.longitude
+            )
+            lensReport = nil
+            lensStatus = "Confirmed deletion of \(result.deleted) snapshot(s) "
+                + "for the selected exact place. Other places are unchanged."
+            await refreshLensMemories()
+        } catch {
+            lensStatus = "Could not verify memory deletion. Inspect the memory list."
         }
     }
 
@@ -703,6 +805,10 @@ final class RealityMeshController: ObservableObject {
         place = nil
         placeGraph = nil
         placeGraphStatus = "Reality Mesh off; graph cleared."
+        lensReport = nil
+        lensMemories = []
+        lensStatus = "Local lens view cleared. Saved backend memories are unchanged until forgotten."
+        lensMemoryStatus = "Reality Mesh off."
         placeCoordinate = nil
         resolvedPlaceName = ""
         pendingQuery = ""
@@ -912,6 +1018,7 @@ struct RealityMeshView: View {
                 }
                 if mesh.place != nil {
                     RealityGraphPlacePanelView()
+                    RealityLensPanelView()
                 }
                 Divider()
                 Text("Time-bounded watch at my selected place")
@@ -1007,6 +1114,109 @@ struct RealityMeshView: View {
     }
 }
 
+
+
+// An intentional extra sense: fresh public measurements, explicit short-term
+// source memory and tactile change feedback, without voice or model planning.
+private struct RealityLensPanelView: View {
+    @EnvironmentObject private var appModel: JarvisAppModel
+    @EnvironmentObject private var mesh: RealityMeshController
+    @State private var confirmForget = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Reality Lens • sense and remember", systemImage: "eye.circle")
+                .font(.headline)
+            Text("Feel whether supported public measurements changed since an "
+                 + "explicitly saved observation of this exact place. "
+                 + "Two or three light taps mean a recorded value changed; "
+                 + "silence is NOT proof the place is safe or unchanged.")
+                .font(.caption)
+            HStack {
+                Button(mesh.lensBusy ? "Sensing…" : "Sense and compare") {
+                    Task { await mesh.senseSelectedPlace(remember: false) }
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Remember now • 30 days") {
+                    Task { await mesh.senseSelectedPlace(remember: true) }
+                }
+                .buttonStyle(.bordered)
+            }
+            .disabled(!appModel.settings.meshEnabled || mesh.lensBusy)
+            Text("Remember stores the selected place's label and small, source-backed "
+                 + "numeric facts on your private Jarvis PC; no photos, GPS trail, "
+                 + "raw feed or continuous recording. Sense alone does not save.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(mesh.lensStatus)
+                .font(.caption)
+                .accessibilityIdentifier("reality-lens-status")
+            if let report = mesh.lensReport {
+                Text("Observed \(report.checkedAt) • \(report.modelCalls) Qwen calls")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(report.observations) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(item.label): \(item.value.display)")
+                            .font(.subheadline)
+                        Text("\(item.source) • \(item.observedAt)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(report.changes) { change in
+                    Label(
+                        "\(change.label): \(change.before.display) → \(change.after.display)",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    .font(.callout)
+                    Text("\(change.source) • \(change.qualifier)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if !report.unknownMetrics.isEmpty {
+                    Text("Unknown or stale: \(report.unknownMetrics.joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Button("Show my saved observations") {
+                    Task { await mesh.refreshLensMemories() }
+                }
+                .buttonStyle(.bordered)
+                Button("Forget this place", role: .destructive) {
+                    confirmForget = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(mesh.lensBusy)
+            }
+            Text(mesh.lensMemoryStatus)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            ForEach(mesh.lensMemories) { memory in
+                Text("\(memory.label) • \(memory.capturedAt) • \(memory.factCount) sourced facts")
+                    .font(.caption2)
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .confirmationDialog(
+            "Delete saved observations for this exact place?",
+            isPresented: $confirmForget,
+            titleVisibility: .visible
+        ) {
+            Button("Delete only this place's saved observations", role: .destructive) {
+                Task { await mesh.forgetSelectedLensPlace() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the Reality Lens memory on your Jarvis PC "
+                 + "for the selected coordinates. It does not delete separate "
+                 + "public watches or world-model records.")
+        }
+    }
+}
 
 private struct ConductorPanelView: View {
     @EnvironmentObject var appModel: JarvisAppModel

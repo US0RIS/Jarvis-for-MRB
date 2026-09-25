@@ -153,6 +153,18 @@ class PhysicalConditionsRequest(BaseModel):
     longitude: float
 
 
+class RealityLensRequest(BaseModel):
+    latitude: float
+    longitude: float
+    label: str
+    remember: bool = False
+
+
+class RealityLensForgetRequest(BaseModel):
+    latitude: float
+    longitude: float
+
+
 class RealityGraphQuestionRequest(BaseModel):
     latitude: float
     longitude: float
@@ -775,6 +787,49 @@ def reality_graph_snapshot(
         return build_place_graph(request.latitude, request.longitude)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)[:250]) from exc
+
+
+@app.post("/reality/lens/sense")
+def reality_lens_sense(
+    request: RealityLensRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """One explicit place observation; memory is strictly opt-in per request."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_lens import sense_place
+    try:
+        return sense_place(request.latitude, request.longitude,
+                           request.label, remember=request.remember)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
+@app.get("/reality/lens/memories")
+def reality_lens_memories(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_lens import list_memories
+    return list_memories()
+
+
+@app.post("/reality/lens/forget")
+def reality_lens_forget(
+    request: RealityLensForgetRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_lens import forget_place
+    try:
+        return forget_place(request.latitude, request.longitude)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
 
 
 @app.post("/mesh/graph/context")

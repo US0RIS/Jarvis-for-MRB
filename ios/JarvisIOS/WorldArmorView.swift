@@ -73,8 +73,11 @@ struct ArmorValues: Decodable {
     let place: String?
     let reviewed: Bool?
     let sourceURL: String?
+    let latitude: Double?
+    let longitude: Double?
     enum CodingKeys: String, CodingKey {
         case event, headline, severity, magnitude, place, reviewed
+        case latitude, longitude
         case usAQI = "us_aqi"
         case sourceURL = "source_url"
     }
@@ -264,6 +267,54 @@ struct ArmorCorrelationReport: Decodable {
     }
 }
 
+struct ArmorEvidenceGraph: Decodable {
+    struct Edge: Decodable, Identifiable {
+        let id: String
+        let type: String
+        let from: String
+        let to: String
+        let assertion: String
+        let causal: Bool
+    }
+    struct Hypothesis: Decodable, Identifiable {
+        let id: String
+        let status: String
+        let type: String
+        let claim: String
+        let supportingObservationIDs: [String]
+        let contradictingObservationIDs: [String]
+        let independentLineageCount: Int
+        let spatialPrecision: String
+        let assumptions: [String]
+        let missingEvidence: [String]
+        let alternativeExplanations: [String]
+        let prohibitedConclusion: String
+        enum CodingKeys: String, CodingKey {
+            case id, status, type, claim, assumptions
+            case supportingObservationIDs = "supporting_observation_ids"
+            case contradictingObservationIDs = "contradicting_observation_ids"
+            case independentLineageCount = "independent_lineage_count"
+            case spatialPrecision = "spatial_precision"
+            case missingEvidence = "missing_evidence"
+            case alternativeExplanations = "alternative_explanations"
+            case prohibitedConclusion = "prohibited_conclusion"
+        }
+    }
+    let nodes: [ArmorObservation]
+    let edges: [Edge]
+    let hypotheses: [Hypothesis]
+    let unavailableOrUncheckedSources: [String]
+    let receiptTimeOnlyCount: Int
+    let spatiallyIndeterminateCount: Int
+    let qualifier: String
+    enum CodingKeys: String, CodingKey {
+        case nodes, edges, hypotheses, qualifier
+        case unavailableOrUncheckedSources = "unavailable_or_unchecked_sources"
+        case receiptTimeOnlyCount = "receipt_time_only_count"
+        case spatiallyIndeterminateCount = "spatially_indeterminate_count"
+    }
+}
+
 struct ArmorSampleReceipt: Decodable {
     let newObservations: Int
     let receivedAt: String
@@ -295,6 +346,7 @@ struct WorldArmorView: View {
     @State private var replayResult: ArmorReplay?
     @State private var changes: ArmorChangeReport?
     @State private var correlations: ArmorCorrelationReport?
+    @State private var evidenceGraph: ArmorEvidenceGraph?
     @State private var sampleTimes: [ArmorSampleMoment] = []
     @State private var correlationWindowHours = 6
     @State private var correlationQueryRadiusKM = 30.0
@@ -328,6 +380,7 @@ struct WorldArmorView: View {
                     if let changes { changePanel(changes) }
                     temporalQueryPanel
                     if let correlations { correlationPanel(correlations) }
+                    if let evidenceGraph { hypothesisPanel(evidenceGraph) }
                     if let replayResult { replayPanel(replayResult) }
                 }
             }
@@ -341,6 +394,7 @@ struct WorldArmorView: View {
                 replayResult = nil
                 changes = nil
                 correlations = nil
+                evidenceGraph = nil
                 sampleTimes = []
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
@@ -440,6 +494,7 @@ struct WorldArmorView: View {
                         replayResult = nil
                         changes = nil
                         correlations = nil
+                        evidenceGraph = nil
                         sampleTimes = []
                         status = "Selected " + entry.label
                         Task { await replay() }
@@ -486,6 +541,23 @@ struct WorldArmorView: View {
                         radius: max(1, min(entry.radiusKM, correlationQueryRadiusKM)) * 1_000
                     )
                     .foregroundStyle(Color.blue.opacity(0.10))
+                    if let correlations {
+                        ForEach(correlations.timedObservations) { observation in
+                            if observation.source == "usgs_earthquakes",
+                               let eventLat = observation.values.latitude,
+                               let eventLon = observation.values.longitude {
+                                Marker(
+                                    observation.values.magnitude.map {
+                                        "USGS M" + String(format: "%.1f", $0)
+                                    } ?? "USGS report",
+                                    coordinate: CLLocationCoordinate2D(
+                                        latitude: eventLat, longitude: eventLon
+                                    )
+                                )
+                                .tint(.orange)
+                            }
+                        }
+                    }
                 }
                 .frame(height: 230)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -668,6 +740,63 @@ struct WorldArmorView: View {
         }
     }
 
+    private func hypothesisPanel(_ graph: ArmorEvidenceGraph) -> some View {
+        GroupBox("Evidence graph • candidate explanations") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("\(graph.nodes.count) evidence node(s) • "
+                     + "\(graph.edges.count) typed edge(s) • "
+                     + "\(graph.hypotheses.count) unverified hypothesis candidate(s)")
+                    .font(.subheadline.weight(.medium))
+                if !graph.unavailableOrUncheckedSources.isEmpty {
+                    Text("Unavailable/unchecked: "
+                         + graph.unavailableOrUncheckedSources.joined(separator: ", "))
+                        .font(.caption)
+                }
+                ForEach(graph.hypotheses) { hypothesis in
+                    DisclosureGroup(hypothesis.claim) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Status: " + hypothesis.status
+                                 + " • independent lineages: "
+                                 + String(hypothesis.independentLineageCount))
+                                .font(.caption)
+                            Text("Spatial precision: " + hypothesis.spatialPrecision)
+                                .font(.caption2)
+                            if !hypothesis.missingEvidence.isEmpty {
+                                Text("Still needed")
+                                    .font(.caption.weight(.semibold))
+                                ForEach(hypothesis.missingEvidence, id: \.self) {
+                                    Text("• " + $0).font(.caption2)
+                                }
+                            }
+                            if !hypothesis.alternativeExplanations.isEmpty {
+                                Text("Alternatives")
+                                    .font(.caption.weight(.semibold))
+                                ForEach(hypothesis.alternativeExplanations, id: \.self) {
+                                    Text("• " + $0).font(.caption2)
+                                }
+                            }
+                            Text(hypothesis.prohibitedConclusion)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
+                if graph.hypotheses.isEmpty {
+                    Text("No cross-source hypothesis candidate is supported "
+                         + "by these retained, timestamped observations.")
+                        .font(.caption)
+                }
+                Text(graph.qualifier)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func changePanel(_ report: ArmorChangeReport) -> some View {
         GroupBox("Observed differences, not assumed causes") {
             VStack(alignment: .leading, spacing: 8) {
@@ -790,6 +919,7 @@ struct WorldArmorView: View {
             replayResult = nil
             changes = nil
             correlations = nil
+            evidenceGraph = nil
             sampleTimes = []
             status = "World Armor unavailable: " + error.localizedDescription
         }
@@ -886,17 +1016,30 @@ struct WorldArmorView: View {
             )
             let formatter = ISO8601DateFormatter()
             let cutoff = asKnownAt.trimmingCharacters(in: .whitespacesAndNewlines)
-            correlations = try await client.worldArmorCorrelate(
+            async let correlationRequest = client.worldArmorCorrelate(
                 selectedID,
                 startAt: formatter.string(from: start),
                 endAt: formatter.string(from: end),
                 asKnownAt: cutoff.isEmpty ? nil : cutoff,
                 radiusKM: correlationQueryRadiusKM
             )
-            status = "Read-only historical correlation complete. "
-                + "Inspect source time, scope and unknown coverage."
+            async let graphRequest = client.worldArmorHypotheses(
+                selectedID,
+                startAt: formatter.string(from: start),
+                endAt: formatter.string(from: end),
+                asKnownAt: cutoff.isEmpty ? nil : cutoff,
+                radiusKM: correlationQueryRadiusKM
+            )
+            let (newCorrelations, newGraph) = try await (
+                correlationRequest, graphRequest
+            )
+            correlations = newCorrelations
+            evidenceGraph = newGraph
+            status = "Read-only evidence graph complete. Inspect source time, "
+                + "spatial limits, alternatives and missing evidence."
         } catch {
             correlations = nil
+            evidenceGraph = nil
             status = "Correlation unavailable: " + error.localizedDescription
         }
     }

@@ -230,6 +230,20 @@ class WorldArmorKernelTests(TestCase):
             self.assertEqual(armor.forget(ids[0],db_path=self.db)["deleted"],0)
         self.new()
 
+    def test_feature_off_still_allows_listing_for_explicit_deletion(self):
+        key=self.new()
+        self.ingest(key)
+        with patch.dict(os.environ, {"JARVIS_WORLD_ARMOR_ENABLED":"0"}):
+            records=armor.list_investigations(db_path=self.db,now=NOW)
+            self.assertEqual([x["id"] for x in records["investigations"]],[key])
+            with self.assertRaises(armor.ArmorDisabled):
+                self.ingest(key,time=NOW+timedelta(minutes=5))
+            with self.assertRaises(armor.ArmorDisabled):
+                self.replay(key)
+            self.assertEqual(armor.forget(key,db_path=self.db)["deleted"],1)
+        self.assertEqual(armor.list_investigations(
+            db_path=self.db,now=NOW)["investigations"],[])
+
     def test_expiry_prunes_rows_and_child_rows_without_claiming_backup_erasure(self):
         key=self.new(lifetime_hours=1)
         self.ingest(key)

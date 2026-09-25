@@ -25,7 +25,9 @@ retained records, a true receipt-time rewind menu, source geometry where
 actually reported, and evidence cards on the iPad/iPhone. It also builds a
 deterministic typed evidence graph whose hypotheses remain
 `candidate_unverified` and visibly carry alternate explanations and missing
-evidence. A cross-source match means only source-reported *time proximity
+evidence. Correlation requests also emit a stable canonical `query_id`;
+sample-level source status prevents stale evidence from corroborating fresh
+evidence while leaving the degraded observation inspectable. A cross-source match means only source-reported *time proximity
 within a bounded inquiry region*, not exact physical co-location or
 causation. The larger design below remains a roadmap.
 

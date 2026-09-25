@@ -27,6 +27,7 @@ as Reality Mesh. A tokenless backend returns 503, not access to your region.
 - `GET /world-armor/v1/investigations` — explicitly saved regions.
 - `POST /world-armor/v1/observe` — JSON `{"investigation_id":"<returned 32-char ID>"}`; requests providers **one time**, no scheduling.
 - `POST /world-armor/v1/replay` — JSON `{"investigation_id":"<ID>","as_known_at":"2026-09-24T20:00:00Z"}`, or omit `as_known_at` for the latest saved receipts.
+- `POST /world-armor/v1/changes` — JSON `{"investigation_id":"<ID>"}`; deterministically compare the last two saved receipt times, separate modelled AQI changes, source record revisions, **first received** (not necessarily newly occurred) events and source outage/recovery. If fewer than two receipts or evidence coverage is inadequate, show that explicitly. No provider request or background watch.
 - `POST /world-armor/v1/forget` — JSON `{"investigation_id":"<ID>"}`; allowed even after World Armor is turned off so deletion isn't held hostage by a feature switch.
 
 Each returns `Cache-Control: private, no-store`; callers must supply
@@ -51,6 +52,7 @@ should ever be committed to this repo.
 - Existing USGS adapter gives event time/magnitude/source ID but no
   geographic coordinates per earthquake: the selected region is a query
   radius, **not the event's epicenter**.
+- Changes compare compatible results for the same explicitly selected region: modelled AQI before/after; source-native earthquake/alert first-seen records and exact ID revisions. Provider failures appear as **source-status changes**, never as real-world changes or implied resolution. A missing record is not a proven disappearance because the current normalization does not retain per-sample complete provider-ID membership.
 - Duplicate provider record content is deduplicated; changed contents with
   the same provider key create a new revision and explicit supersession.
   `replay(as_known_at)` selects what Jarvis had received then. Prior source

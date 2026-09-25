@@ -781,6 +781,21 @@ def world_armor_replay(
         _armor_error(exc)
 
 
+@app.post("/world-armor/v1/changes")
+def world_armor_changes(
+    request: WorldArmorIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import compare_recent
+    try:
+        return compare_recent(request.investigation_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
 @app.post("/world-armor/v1/forget")
 def world_armor_forget(
     request: WorldArmorIdRequest,

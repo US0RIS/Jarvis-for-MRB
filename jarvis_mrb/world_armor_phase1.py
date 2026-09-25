@@ -492,8 +492,10 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
                WHERE s.investigation_id=? AND s.received_at<=?
                ORDER BY s.received_at,s.id""", (investigation_id, cutoff)
         ).fetchall()
+    coverage_by_sample: dict[tuple[str,str], dict[str, Any]] = {}
     last_cover: dict[str, dict[str, Any]] = {}
     for row in cover:
+        coverage_by_sample[(row["sample_id"],row["provider"])] = dict(row)
         last_cover[row["provider"]] = {
             "source": row["provider"], "status": row["status"],
             "checked_at": row["checked_at"], "received_at": row["received_at"],
@@ -508,6 +510,12 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
         entry = {
             "id":row["id"],"source":row["provider"],
             "adapter_mode":sample_modes.get(row["sample_id"], "unknown"),
+            "sample_coverage_status":(
+                coverage_by_sample.get((row["sample_id"],row["provider"])) or {}
+            ).get("status","unknown"),
+            "sample_coverage_checked_at":(
+                coverage_by_sample.get((row["sample_id"],row["provider"])) or {}
+            ).get("checked_at"),
             "provider_key":row["provider_key"],"kind":row["kind"],
             "observed_at":row["observed_at"],"published_at":row["published_at"],
             "received_at":row["received_at"],"revision":row["revision"],

@@ -193,16 +193,16 @@ class ConductorMissionTests(unittest.TestCase):
         action.assert_called_once()
 
     def test_source_http_routes_are_bearer_protected(self):
-        service = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text()
+        service = (Path(__file__).parents[1] / "jarvis_mrb/service.py").read_text(encoding="utf-8")
         for name in ("plan", "execute", "status", "revoke"):
             self.assertIn('"/conductor/workstation/' + name + '"', service)
         self.assertIn("_check_mesh_auth(authorization)", service)
         self.assertIn("conductor.execute(", service)
         self.assertIn('@app.get("/conductor/workstation/recent")', service)
-        node = (Path(__file__).parents[1] / "scripts/jarvis-mac-node.py").read_text()
+        node = (Path(__file__).parents[1] / "scripts/jarvis-mac-node.py").read_text(encoding="utf-8")
         self.assertIn('self.path == "/v1/apps"', node)
         self.assertIn('"/usr/bin/pgrep", "-x", name', node)
-        swift = (Path(__file__).parents[1] / "ios/JarvisIOS/RealityMesh.swift").read_text()
+        swift = (Path(__file__).parents[1] / "ios/JarvisIOS/RealityMesh.swift").read_text(encoding="utf-8")
         self.assertIn("func executeConductor() async", swift)
         self.assertIn("func revokeConductor() async", swift)
         self.assertIn("func inspectConductorReceipt(_ id: String) async", swift)
@@ -212,13 +212,13 @@ class ConductorMissionTests(unittest.TestCase):
         self.assertIn("func executeSpokenExactApp(nodeID: String, appName: String)", swift)
         self.assertIn("conductorPlanWorkstation(", swift)
         self.assertIn("conductorExecuteWorkstation(", swift)
-        voice = (Path(__file__).parents[1] / "ios/JarvisIOS/JarvisAppModel.swift").read_text()
+        voice = (Path(__file__).parents[1] / "ios/JarvisIOS/JarvisAppModel.swift").read_text(encoding="utf-8")
         self.assertIn("private static func exactSpokenAppIntent", voice)
         self.assertIn("executeSpokenExactApp(", voice)
         self.assertIn('routeReason: "iPhone exact spoken Conductor app / separately enrolled one-use action"', voice)
-        settings = (Path(__file__).parents[1] / "ios/JarvisIOS/SettingsStore.swift").read_text()
+        settings = (Path(__file__).parents[1] / "ios/JarvisIOS/SettingsStore.swift").read_text(encoding="utf-8")
         self.assertIn('exactVoiceAppActionsEnabled = defaults.object(forKey: "jarvis.exactVoiceAppActionsEnabled") as? Bool ?? false', settings)
-        privacy = (Path(__file__).parents[1] / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text()
+        privacy = (Path(__file__).parents[1] / "ios/JarvisIOS/LocalPowerFeatures.swift").read_text(encoding="utf-8")
         self.assertIn("appModel.settings.exactVoiceAppActionsEnabled = false", privacy)
 
 

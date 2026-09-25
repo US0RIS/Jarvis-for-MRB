@@ -94,6 +94,15 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertIn("alternativeExplanations",view)
         self.assertIn("missingEvidence",view)
         self.assertIn("MapCircle(",view)
+        observation_section=view.split("struct ArmorObservation",1)[1].split(
+            "struct ArmorSampleMoment",1
+        )[0]
+        coverage_section=view.split("struct ArmorCoverage",1)[1].split(
+            "struct ArmorValues",1
+        )[0]
+        self.assertIn('sampleCoverageStatus = "sample_coverage_status"',
+                      observation_section)
+        self.assertNotIn("sampleCoverageStatus",coverage_section)
         self.assertIn("temporalQueryPanel",view)
         self.assertIn("correlationPanel(",view)
         self.assertIn("sampleTimeline",view)

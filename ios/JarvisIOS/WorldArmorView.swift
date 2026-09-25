@@ -104,6 +104,7 @@ struct ArmorObservation: Decodable, Identifiable {
     let revision: Int
     let lineage: String
     let geometryBasis: String
+    let adapterMode: String?
     let values: ArmorValues
     enum CodingKeys: String, CodingKey {
         case id, source, kind, revision, lineage, values
@@ -111,6 +112,7 @@ struct ArmorObservation: Decodable, Identifiable {
         case publishedAt = "published_at"
         case receivedAt = "received_at"
         case geometryBasis = "geometry_basis"
+        case adapterMode = "adapter_mode"
     }
 }
 
@@ -701,7 +703,8 @@ struct WorldArmorView: View {
                 Divider()
                 ForEach(report.observations.prefix(60)) { row in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(row.source + " • revision \(row.revision)")
+                        Text(row.source + " • revision \(row.revision)"
+                             + " • " + (row.adapterMode ?? "unknown source mode"))
                             .font(.subheadline.weight(.medium))
                         Text(row.values.brief)
                         Text("Source observation: "

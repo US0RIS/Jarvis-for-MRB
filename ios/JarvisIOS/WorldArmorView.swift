@@ -1445,6 +1445,24 @@ struct WorldArmorView: View {
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
         }
+        .onChange(of: secondRegionID) { _, _ in
+            crossRegionReport = nil
+        }
+        .onChange(of: correlationWindowHours) { _, _ in
+            crossRegionReport = nil
+            correlations = nil
+            evidenceGraph = nil
+        }
+        .onChange(of: correlationEnd) { _, _ in
+            crossRegionReport = nil
+            correlations = nil
+            evidenceGraph = nil
+        }
+        .onChange(of: asKnownAt) { _, _ in
+            crossRegionReport = nil
+            correlations = nil
+            evidenceGraph = nil
+        }
         .confirmationDialog(
             "Forget this investigation and all of its local evidence?",
             isPresented: $confirmForget,
@@ -1543,6 +1561,7 @@ struct WorldArmorView: View {
                         changes = nil
                         correlations = nil
                         evidenceGraph = nil
+                        crossRegionReport = nil
                         sampleTimes = []
                         status = "Selected " + entry.label
                         Task { await replay() }
@@ -2817,7 +2836,7 @@ struct WorldArmorView: View {
                     ForEach(investigations.filter {
                         $0.id != (selectedID ?? "")
                     }) { area in
-                        Text(area.label + " • " + area.id.prefix(8))
+                        Text(area.label + " • " + String(area.id.prefix(8)))
                             .tag(area.id)
                     }
                 }
@@ -3282,6 +3301,10 @@ struct WorldArmorView: View {
             // Listing and forgetting retained regions remains available after
             // collection is disabled; no new provider request is issued here.
             investigations = try await client.worldArmorInvestigations().investigations
+            if !investigations.contains(where: { $0.id == secondRegionID }) {
+                secondRegionID = ""
+                crossRegionReport = nil
+            }
             watches = (try? await client.worldArmorWatches())?.watches ?? []
             if let page = try? await client.worldArmorPlatformSources() {
                 platformSources = page.sources
@@ -3349,6 +3372,7 @@ struct WorldArmorView: View {
             changes = nil
             correlations = nil
             evidenceGraph = nil
+            crossRegionReport = nil
             sampleTimes = []
             status = "World Armor unavailable: " + error.localizedDescription
         }
@@ -4174,6 +4198,7 @@ struct WorldArmorView: View {
             changes = nil
             correlations = nil
             evidenceGraph = nil
+            crossRegionReport = nil
             sampleTimes = []
             asKnownAt = ""
             status = "Created an expiring region. No provider checked yet."
@@ -4198,6 +4223,7 @@ struct WorldArmorView: View {
             changes = nil
             correlations = nil
             evidenceGraph = nil
+            crossRegionReport = nil
             status = "Received \(receipt.newObservations) new source records "
                 + "at " + receipt.receivedAt + ". Read coverage before "
                 + "drawing conclusions."
@@ -4217,6 +4243,7 @@ struct WorldArmorView: View {
             )
             correlations = nil
             evidenceGraph = nil
+            crossRegionReport = nil
             if cutoff.isEmpty {
                 sampleTimes = replayResult?.sampleTimeline ?? []
             }
@@ -4274,6 +4301,7 @@ struct WorldArmorView: View {
         } catch {
             correlations = nil
             evidenceGraph = nil
+            crossRegionReport = nil
             status = "Correlation unavailable: " + error.localizedDescription
         }
     }
@@ -4315,9 +4343,11 @@ struct WorldArmorView: View {
             changes = nil
             correlations = nil
             evidenceGraph = nil
+            crossRegionReport = nil
             sampleTimes = []
             investigations = try await client.worldArmorInvestigations().investigations
             self.selectedID = nil
+            if secondRegionID == selectedID { secondRegionID = "" }
             status = "Removed \(receipt.deleted) investigation. "
                 + "External source records and backups were not erased."
         } catch {

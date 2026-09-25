@@ -46,7 +46,7 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertEqual(
             set(service.WorldArmorCorrelationRequest.model_fields),
             {"investigation_id", "start_at", "end_at",
-             "as_known_at", "source_ids"},
+             "as_known_at", "source_ids", "query_radius_km"},
         )
         with patch.object(service,"API_TOKEN","private-secret"):
             with self.assertRaises(HTTPException) as ctx:

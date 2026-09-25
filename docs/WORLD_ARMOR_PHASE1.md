@@ -54,6 +54,24 @@ and `Replay retained evidence` read only saved receipts. Evidence clears
 from the phone's view when the app leaves the foreground or Reality Mesh
 privacy is disabled. Native iOS build success is not actual device acceptance.
 
+### Reproducible query plan and sample-level coverage
+
+Every read-only correlation now returns a canonical `query_id` plus its exact
+typed `query_plan`: investigation, source-observed-time window, as-known
+receipt cutoff, selected source IDs, bounded radius and pair window. When the
+operator chooses “latest saved evidence” rather than an explicit cutoff, the
+cutoff canonicalizes to the newest retained sample receipt (or the requested
+window end if no sample exists), **not the wall clock**. Re-running an unchanged
+retained evidence set therefore produces the same query ID; collecting another
+sample advances it.
+
+Each observation also carries the coverage status of the exact sample that
+produced it. A stale model result remains inspectable evidence, but cannot
+support an independent-source correlation or hypothesis unless its producing
+sample was `status=ok`. Later provider outage does not rewrite an earlier
+healthy receipt; coverage is evidence-time-specific as well as summarized at
+the latest receipt.
+
 ### Evidence graph and hypothesis discipline
 
 The workbench can now turn retained eligible source observations into a

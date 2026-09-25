@@ -28,7 +28,7 @@ as Reality Mesh. A tokenless backend returns 503, not access to your region.
 - `POST /world-armor/v1/observe` — JSON `{"investigation_id":"<returned 32-char ID>"}`; requests providers **one time**, no scheduling.
 - `POST /world-armor/v1/replay` — JSON `{"investigation_id":"<ID>","as_known_at":"2026-09-24T20:00:00Z"}`, or omit `as_known_at` for the latest saved receipts.
 - `POST /world-armor/v1/changes` — JSON `{"investigation_id":"<ID>"}`; deterministically compare the last two saved receipt times, separate modelled AQI changes, source record revisions, **first received** (not necessarily newly occurred) events and source outage/recovery. If fewer than two receipts or evidence coverage is inadequate, show that explicitly. No provider request or background watch.
-- `POST /world-armor/v1/correlate` — JSON `{"investigation_id":"<ID>","start_at":"2026-09-24T18:00:00Z","end_at":"2026-09-24T20:00:00Z","as_known_at":"2026-09-24T20:10:00Z","source_ids":["openmeteo_model","usgs_earthquakes"]}`. `as_known_at` and `source_ids` are optional. Query **retained records only** with an exact 0–72h source-observed-time window in the saved region. A cross-source time match is a **candidate**, not a verified shared location or cause. NWS entries without a provider event timestamp appear in a separate *receipt-time-only* list. The API does not call providers, create a watch or act.
+- `POST /world-armor/v1/correlate` — JSON `{"investigation_id":"<ID>","start_at":"2026-09-24T18:00:00Z","end_at":"2026-09-24T20:00:00Z","as_known_at":"2026-09-24T20:10:00Z","source_ids":["openmeteo_model","usgs_earthquakes"],"query_radius_km":10}`. `as_known_at` and `source_ids` are optional. Query **retained records only** with an exact 0–72h source-observed-time window in the saved region. Optional `query_radius_km` narrows, never expands, the operator's enrolled radius. A cross-source time match is a **candidate**, not a verified shared location or cause. NWS entries without a provider event timestamp appear in a separate *receipt-time-only* list. The API does not call providers, create a watch or act.
 - `POST /world-armor/v1/forget` — JSON `{"investigation_id":"<ID>"}`; allowed even after World Armor is turned off so deletion isn't held hostage by a feature switch.
   The iPhone/iPad workbench continues to list existing regions and offer Forget when disabled; Observe and Replay remain blocked.
 
@@ -40,8 +40,9 @@ should ever be committed to this repo.
 ### iPad/iPhone correlation workbench
 
 The existing native World Armor view now has a chosen-region MapKit center, a
-6/24/72-hour observation-window selector, a date/time window-end picker,
-read-only cross-source correlation cards, explicit provider coverage, and a
+6/24/72-hour observation-window selector, a within-enrollment spatial
+radius slider, a date/time window-end picker, read-only cross-source
+correlation cards, explicit provider coverage, and a
 receipt-time rewind menu backed by the actual bounded `sample_timeline`.
 MapKit's pin is the **user's inquiry location**; it is not a verified
 earthquake epicenter, NWS alert polygon or sensor view footprint. Users must
@@ -52,15 +53,14 @@ privacy is disabled. Native iOS build success is not actual device acceptance.
 
 ### Spatial/temporal limits (deliberate)
 
-A selected region is the only presently valid spatial query. The existing USGS
-adapter returns an event's time and *membership within the queried radius*,
-but not its coordinates; NWS is queried for a point without preserving the
-alert footprint and does not expose an issuance time; modelled AQI belongs to
-a coarse model grid for a selected point. Consequently this release can join
-**independent provider reports temporally within the same user-selected
-query scope**, but cannot compute exact event-to-event distance, camera
-sightlines, route intersection or asserted causal chains. It must not say
-“physically co-located” on this evidence. Source time must be known to join
+The enrolled region bounds every subsequent spatial query: the center is
+immutable and the requested radius can only shrink. Actual valid USGS
+publisher epicenters are checked by geographic distance when present.
+Reports with unknown epicenters cannot satisfy the narrower radius. NWS is
+queried for a point without retaining full alert footprint or issuance time;
+modelled AQI belongs to a coarse model grid. Thus Jarvis can join independent
+reports temporally within a bounded queried region, but cannot infer exact
+event-to-event co-location, road sightlines, route impact or causation. Source time must be known to join
 on event time; unknown-time NWS items can be displayed only as **received at**
 a specific time. `as_known_at` is the cutoff on when Jarvis received records,
 not a reconstruction of all real-world activity.
@@ -79,9 +79,10 @@ not a reconstruction of all real-world activity.
 - Existing NWS adapter provides alert IDs but not publication/issue times or
   alert footprint: `observed_at` and `published_at` deliberately null;
   the selected point is the **query point**, not an alert footprint.
-- Existing USGS adapter gives event time/magnitude/source ID but no
-  geographic coordinates per earthquake: the selected region is a query
-  radius, **not the event's epicenter**.
+- USGS reports now retain validated publisher-supplied GeoJSON epicenter
+  coordinates when available; malformed and older source reports have an
+  explicitly unknown epicenter. The selected region's center is **not** an
+  earthquake epicenter.
 - Changes compare compatible results for the same explicitly selected region: modelled AQI before/after; source-native earthquake/alert first-seen records and exact ID revisions. Provider failures appear as **source-status changes**, never as real-world changes or implied resolution. A missing record is not a proven disappearance because the current normalization does not retain per-sample complete provider-ID membership.
 - Duplicate provider record content is deduplicated; changed contents with
   the same provider key create a new revision and explicit supersession.

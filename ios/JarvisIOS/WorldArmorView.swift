@@ -245,6 +245,7 @@ struct ArmorCorrelationReport: Decodable {
     }
     let observationWindow: Window
     let queryRegion: Region
+    let spatiallyIndeterminateObservations: [ArmorObservation]
     let timedObservations: [ArmorObservation]
     let receiptTimeOnlyObservations: [ArmorObservation]
     let candidateLinks: [Link]
@@ -255,6 +256,7 @@ struct ArmorCorrelationReport: Decodable {
         case mode, qualifier
         case observationWindow = "observation_window"
         case queryRegion = "query_region"
+        case spatiallyIndeterminateObservations = "spatially_indeterminate_observations"
         case timedObservations = "timed_observations"
         case receiptTimeOnlyObservations = "receipt_time_only_observations"
         case candidateLinks = "candidate_links"
@@ -295,6 +297,7 @@ struct WorldArmorView: View {
     @State private var correlations: ArmorCorrelationReport?
     @State private var sampleTimes: [ArmorSampleMoment] = []
     @State private var correlationWindowHours = 6
+    @State private var correlationQueryRadiusKM = 30.0
     @State private var correlationEnd = Date()
     @State private var busy = false
     @State private var confirmForget = false
@@ -432,6 +435,7 @@ struct WorldArmorView: View {
                 ForEach(investigations) { entry in
                     Button {
                         selectedID = entry.id
+                        correlationQueryRadiusKM = entry.radiusKM
                         asKnownAt = ""
                         replayResult = nil
                         changes = nil
@@ -542,6 +546,19 @@ struct WorldArmorView: View {
                      + "The current providers do not report exact shared "
                      + "event footprints, so matches are temporal candidates only.")
                     .font(.caption)
+                Text("Narrowed search radius: "
+                     + "\(correlationQueryRadiusKM.formatted()) km")
+                    .font(.subheadline.weight(.medium))
+                Slider(
+                    value: $correlationQueryRadiusKM,
+                    in: 1...(selected?.radiusKM ?? 30),
+                    step: 1
+                )
+                .accessibilityLabel("Historical evidence query radius in kilometers")
+                Text("The radius cannot exceed the region you enrolled. "
+                     + "Exact earthquake epicenters are used only when "
+                     + "present in the official source.")
+                    .font(.caption2)
                 Picker("Observation window", selection: $correlationWindowHours) {
                     ForEach([6, 24, 72], id: \.self) { hours in
                         Text("Previous \(hours) hours").tag(hours)
@@ -627,6 +644,13 @@ struct WorldArmorView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                }
+                if !report.spatiallyIndeterminateObservations.isEmpty {
+                    Text("Location unknown in narrowed query: "
+                         + "\(report.spatiallyIndeterminateObservations.count) "
+                         + "retained earthquake reports excluded from exact "
+                         + "radius matching.")
+                        .font(.caption)
                 }
                 Text(report.qualifier)
                     .font(.caption2)
@@ -778,6 +802,7 @@ struct WorldArmorView: View {
             )
             investigations = try await client.worldArmorInvestigations().investigations
             selectedID = made.id
+            correlationQueryRadiusKM = radiusKM
             replayResult = nil
             changes = nil
             correlations = nil
@@ -857,7 +882,8 @@ struct WorldArmorView: View {
                 selectedID,
                 startAt: formatter.string(from: start),
                 endAt: formatter.string(from: end),
-                asKnownAt: cutoff.isEmpty ? nil : cutoff
+                asKnownAt: cutoff.isEmpty ? nil : cutoff,
+                radiusKM: correlationQueryRadiusKM
             )
             status = "Read-only historical correlation complete. "
                 + "Inspect source time, scope and unknown coverage."

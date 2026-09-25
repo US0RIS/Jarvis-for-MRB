@@ -6,6 +6,7 @@ on:
       - jarvis/memomind-prep
       - jarvis/human-extension-v1
       - jarvis/life-friction-fabric
+      - jarvis/converge-main-2026-09
   pull_request:
     paths:
       - "ios/**"

@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      APPDATA: ${{ runner.temp }}/jarvis-isolated-world
+      APPDATA: /tmp/jarvis-isolated-world-ci
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4

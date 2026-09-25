@@ -8,6 +8,7 @@ This module never executes tools, drafts outbound mail, or grants authority.
 Authenticated foreground iPhone heartbeats are required for interruptions.
 """
 
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -128,7 +129,7 @@ def _deadline(item: dict[str, Any], now: datetime) -> datetime | None:
 
 def eligible(*, now: datetime | None = None) -> list[dict[str, Any]]:
     instant = now or _now()
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         enrolled = {
             str(row["intention_id"]): (str(row["status"]), str(row["deadline_at"]))
             for row in conn.execute(
@@ -159,7 +160,7 @@ def enroll(intention_id: str, *, now: datetime | None = None) -> dict[str, Any]:
     due = _deadline(match, instant)
     if due is None or due < instant - timedelta(hours=1):
         raise ValueError("Only explicit active goals with a precise timezone-aware deadline are eligible.")
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         count = conn.execute(
             "SELECT count(*) FROM guardian_objective_watches WHERE status='active'"
         ).fetchone()[0]
@@ -189,7 +190,7 @@ def enroll(intention_id: str, *, now: datetime | None = None) -> dict[str, Any]:
 
 
 def revoke(watch_id: str) -> dict[str, Any]:
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         result = conn.execute(
             "UPDATE guardian_objective_watches SET status='revoked',snoozed_until='' WHERE id=?",
             (str(watch_id or ""),)
@@ -206,7 +207,7 @@ def snooze(watch_id: str, *, hours: int = 1, now: datetime | None = None) -> dic
     if not 1 <= duration <= 24:
         raise ValueError("Snooze must be between 1 and 24 hours.")
     until = _iso(instant + timedelta(hours=duration))
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         result = conn.execute(
             """
             UPDATE guardian_objective_watches SET snoozed_until=?
@@ -276,7 +277,7 @@ def _preflight(item: dict[str, Any], deadline: datetime, now: datetime) -> dict[
 
 
 def _record(row_id: str, checked: datetime, signal: str, *, alerted: bool) -> None:
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         conn.execute(
             """
             UPDATE guardian_objective_watches
@@ -297,7 +298,7 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
     immutable: a changed source date requires re-enrollment.
     """
     instant = now or _now()
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         rows = [dict(row) for row in conn.execute(
             "SELECT * FROM guardian_objective_watches WHERE status='active' "
             "ORDER BY deadline_at LIMIT 30"
@@ -319,7 +320,7 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
         watch_id = row["id"]
         enrolled_deadline = _stamp(row["deadline_at"])
         if enrolled_deadline is not None and instant > enrolled_deadline + timedelta(hours=24):
-            with _connect() as conn:
+            with closing(_connect()) as conn, conn:
                 conn.execute(
                     "UPDATE guardian_objective_watches SET status='expired' "
                     "WHERE id=? AND status='active'",
@@ -331,7 +332,7 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
         deadline = _stamp(row["deadline_at"])
         current_deadline = _deadline(goal, instant) if goal else None
         if goal is None or deadline is None:
-            with _connect() as conn:
+            with closing(_connect()) as conn, conn:
                 conn.execute(
                     "UPDATE guardian_objective_watches SET status='inactive',"
                     "last_checked_at=?,last_signal='goal_no_longer_active' "
@@ -417,7 +418,7 @@ def evaluate_once(*, now: datetime | None = None, emit: bool = True) -> list[dic
 
 def overview(*, now: datetime | None = None) -> dict[str, Any]:
     instant = now or _now()
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         rows = [dict(row) for row in conn.execute(
             "SELECT * FROM guardian_objective_watches ORDER BY created_at DESC LIMIT 100"
         )]

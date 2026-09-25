@@ -24,11 +24,12 @@ as Reality Mesh. A tokenless backend returns 503, not access to your region.
 
 - `GET /world-armor/v1/capabilities` — status and precise limits; never contacts providers.
 - `POST /world-armor/v1/investigations` — JSON `{"label":"Test corridor","latitude":34.12,"longitude":-118.16,"radius_km":30,"lifetime_hours":24}`.
-- `GET /world-armor/v1/investigations` — explicitly saved regions.
+- `GET /world-armor/v1/investigations` — explicitly saved regions, **including while collection is disabled** so they remain available for user-directed forgetting. This does not contact providers.
 - `POST /world-armor/v1/observe` — JSON `{"investigation_id":"<returned 32-char ID>"}`; requests providers **one time**, no scheduling.
 - `POST /world-armor/v1/replay` — JSON `{"investigation_id":"<ID>","as_known_at":"2026-09-24T20:00:00Z"}`, or omit `as_known_at` for the latest saved receipts.
 - `POST /world-armor/v1/changes` — JSON `{"investigation_id":"<ID>"}`; deterministically compare the last two saved receipt times, separate modelled AQI changes, source record revisions, **first received** (not necessarily newly occurred) events and source outage/recovery. If fewer than two receipts or evidence coverage is inadequate, show that explicitly. No provider request or background watch.
 - `POST /world-armor/v1/forget` — JSON `{"investigation_id":"<ID>"}`; allowed even after World Armor is turned off so deletion isn't held hostage by a feature switch.
+  The iPhone/iPad workbench continues to list existing regions and offer Forget when disabled; Observe and Replay remain blocked.
 
 Each returns `Cache-Control: private, no-store`; callers must supply
 `Authorization: Bearer <YOUR_PRIVATE_JARVIS_TOKEN>`. The feature flag

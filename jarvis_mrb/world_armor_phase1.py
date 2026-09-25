@@ -85,10 +85,12 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=10)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
+    # SQLite secure_delete is connection-local on some builds; apply to the
+    # prune/list connection as well as explicit forget.
+    con.execute("PRAGMA secure_delete=ON")
     if create:
         con.executescript(
             """
-            PRAGMA secure_delete=ON;
             CREATE TABLE IF NOT EXISTS investigations (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,

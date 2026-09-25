@@ -78,14 +78,22 @@ forget and confirm the SQLite records are gone.
 Run `python3 -m unittest discover -s tests -v`,
 `python3 -m jarvis_mrb.world_acceptance_check`, prepare an **isolated**
 test world and run `python3 -m jarvis_mrb.world_check`. Run the Windows
-runner (actual deployment OS) in addition to Linux. Simulator builds
-cannot assert the app exposes a new World Armor view: **this PR only adds
-backend endpoints**, not a map or Swift UI.
+runner (actual deployment OS) in addition to Linux. The new **World Armor** button on the iPhone/iPad main toolbar opens
+`ios/JarvisIOS/WorldArmorView.swift`, with an explicit coordinate entry,
+selected-region MapKit preview, one-tap Observe, source coverage, historical
+Replay, two-sample Compare and destructive Forget. It does **not** collect
+until you deliberately create a region and then press Observe. MapKit may
+request tiles for an already-selected region; these map tiles are separate
+from Jarvis's three one-shot provider requests.
+
+An iOS **simulator build** checks the source and project wiring, not actual
+physical iPhone deployment, backend endpoint availability, provider license,
+real camera imagery or successful source observations on your equipment.
 
 ### What is next
 
 Phase 1 follow-up: source-specific footprint and exact sample/provider
-coverage audit, query/replay UI, explicit source license record; then a
+coverage audit, more capable temporal/spatial query UX and explicit source license record; then a
 reproducible *cross-source* spatial/temporal correlation demonstration.
 Later phases add actual approved watches and leased typed workers.
 See W0–W16 in [the full spec](WORLD_ARMOR_SPEC.md).

@@ -1,0 +1,4636 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import tempfile
+import threading
+import time
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import jarvis_mrb.agency_attention as agency_attention
+import jarvis_mrb.agency_capability as agency_capability
+import jarvis_mrb.agency_deliberation as agency_deliberation
+import jarvis_mrb.agency_plan as agency_plan
+import jarvis_mrb.agency_real_acceptance as agency_real_acceptance
+import jarvis_mrb.agency_release as agency_release
+import jarvis_mrb.agency_runtime as agency_runtime
+import jarvis_mrb.agency_self_model as agency_self_model
+import jarvis_mrb.custom_tools as custom_tools
+import jarvis_mrb.desired_state as desired_state
+import jarvis_mrb.permissions as permissions
+import jarvis_mrb.world_executive as world_executive
+import jarvis_mrb.world_model as world_model
+import jarvis_mrb.world_verification as world_verification
+
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+ENV = "real-harness-test-env"
+
+
+class AgencyRealAcceptanceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.base = Path(self.temp.name)
+        self.db = self.base / "world_model.sqlite3"
+
+        self.originals = {
+            "world_app": world_model.APP_DIR,
+            "world_db": world_model.DB_PATH,
+            "executive_db": world_executive.DB_PATH,
+            "desired_db": desired_state.DB_PATH,
+            "plan_db": agency_plan.DB_PATH,
+            "runtime_db": agency_runtime.DB_PATH,
+            "self_model_db": agency_self_model.DB_PATH,
+            "attention_db": agency_attention.DB_PATH,
+            "capability_db": agency_capability.DB_PATH,
+            "deliberation_db": agency_deliberation.DB_PATH,
+            "verification_db": world_verification.DB_PATH,
+            "permissions_app": permissions.APP_DIR,
+            "permissions_path": permissions.POLICY_PATH,
+            "custom_tools_app": custom_tools.APP_DIR,
+            "custom_tools_dir": custom_tools.TOOLS_DIR,
+        }
+        world_model.APP_DIR = self.base
+        world_model.DB_PATH = self.db
+        world_executive.DB_PATH = self.db
+        desired_state.DB_PATH = self.db
+        agency_plan.DB_PATH = self.db
+        agency_runtime.DB_PATH = self.db
+        agency_self_model.DB_PATH = self.db
+        agency_attention.DB_PATH = self.db
+        agency_capability.DB_PATH = self.db
+        agency_deliberation.DB_PATH = self.db
+        world_verification.DB_PATH = self.db
+        permissions.APP_DIR = self.base
+        permissions.POLICY_PATH = self.base / "permissions.json"
+        custom_tools.APP_DIR = self.base
+        custom_tools.TOOLS_DIR = self.base / "custom_tools"
+
+        world_model.status()
+        world_executive.status()
+        desired_state.status()
+        agency_plan.status()
+        agency_runtime.status()
+        agency_runtime.set_mode("active")
+        agency_self_model.status()
+        agency_attention.status()
+        agency_capability.status()
+        agency_deliberation.status()
+        world_verification.status()
+        agency_real_acceptance.status()
+        # Initialize release tables without depending on current deployment status.
+        with agency_release._connect():
+            pass
+
+    def tearDown(self) -> None:
+        world_model.APP_DIR = self.originals["world_app"]
+        world_model.DB_PATH = self.originals["world_db"]
+        world_executive.DB_PATH = self.originals["executive_db"]
+        desired_state.DB_PATH = self.originals["desired_db"]
+        agency_plan.DB_PATH = self.originals["plan_db"]
+        agency_runtime.DB_PATH = self.originals["runtime_db"]
+        agency_self_model.DB_PATH = self.originals["self_model_db"]
+        agency_attention.DB_PATH = self.originals["attention_db"]
+        agency_capability.DB_PATH = self.originals["capability_db"]
+        agency_deliberation.DB_PATH = self.originals["deliberation_db"]
+        world_verification.DB_PATH = self.originals["verification_db"]
+        permissions.APP_DIR = self.originals["permissions_app"]
+        permissions.POLICY_PATH = self.originals["permissions_path"]
+        custom_tools.APP_DIR = self.originals["custom_tools_app"]
+        custom_tools.TOOLS_DIR = self.originals["custom_tools_dir"]
+        self.temp.cleanup()
+
+    def _patch_identity(self, sha: str = SHA_A):
+        return patch.multiple(
+            agency_real_acceptance,
+            deployment_sha=lambda: sha,
+            environment_fingerprint=lambda: ENV,
+        )
+
+    def _state_with_plan(self, title: str) -> tuple[str, dict]:
+        entity_id = world_model.ensure_entity("project", title)
+        state = desired_state.create_desired_state(
+            f"{title} ready",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "ready", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref=f"real:{title}",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [{"id": "observe", "tool": "knowledge.search", "arguments": {"query": title}}],
+            summary=f"Observe {title}",
+        )
+        agency_runtime._update_runtime(str(state["id"]), tick=True)
+        return str(state["id"]), plan
+
+    def test_a1_requires_full_restart_continuity_without_replay(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Restart Project")
+        state = desired_state.create_desired_state(
+            "Restart Project ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a1",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "observe",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "Restart Project current state"},
+                },
+                {
+                    "id": "protected",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Restart Project follow-up",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["observe"],
+                },
+            ],
+            summary="Persist completed evidence and pending approval across restart",
+        )
+        first = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: SimpleNamespace(
+                ok=True,
+                message="Observed durable pre-restart evidence.",
+            ),
+        )
+        self.assertEqual(first["steps"][0]["status"], "verified")
+        waiting = agency_plan.execute_next(
+            plan["id"],
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("protected action must wait for approval")
+            ),
+        )
+        self.assertEqual(waiting["status"], "awaiting_approval")
+        self.assertEqual(waiting["steps"][1]["status"], "awaiting_approval")
+
+        state_id = str(state["id"])
+        agency_runtime._update_runtime(state_id, tick=True)
+        runtime_before = agency_runtime._runtime_state(state_id)
+        self.assertTrue(runtime_before["next_evaluation_at"])
+        agency_runtime.record_boot(deployment_sha=SHA_A)
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A1",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            before = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(before["passed"])
+            self.assertFalse(before["evidence"]["restart_observed"])
+
+            baseline_steps = session["baseline"]["plan"]["steps"]
+            baseline_observe = next(
+                item for item in baseline_steps if item["step_key"] == "observe"
+            )
+            baseline_protected = next(
+                item for item in baseline_steps if item["step_key"] == "protected"
+            )
+            self.assertEqual(baseline_observe["status"], "verified")
+            self.assertEqual(baseline_observe["attempt_count"], 1)
+            self.assertTrue(baseline_observe["result_summary"])
+            self.assertEqual(baseline_protected["status"], "awaiting_approval")
+            self.assertEqual(baseline_protected["attempt_count"], 0)
+
+            with patch(
+                "jarvis_mrb.agency_runtime._PROCESS_INSTANCE_ID",
+                "test-restarted-process-instance",
+            ):
+                agency_runtime.record_boot(deployment_sha=SHA_A)
+
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    "UPDATE agency_steps SET status='skipped' WHERE id=?",
+                    (baseline_observe["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            mutated = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(mutated["passed"])
+            self.assertFalse(mutated["evidence"]["completed_work_preserved"])
+
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    "UPDATE agency_steps SET status='verified' WHERE id=?",
+                    (baseline_observe["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            after = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(after["passed"], after["checks"])
+            self.assertTrue(after["evidence"]["completed_work_preserved"])
+            self.assertTrue(after["evidence"]["evidence_preserved"])
+            self.assertTrue(after["evidence"]["pending_approval_preserved"])
+            self.assertTrue(after["evidence"]["next_evaluation_preserved"])
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A1")
+            self.assertEqual(finalized["receipt"]["deployment_sha"], SHA_A)
+
+        loaded_plan = agency_plan.get_plan(plan["id"], include_steps=True)
+        self.assertIsNotNone(loaded_plan)
+        assert loaded_plan is not None
+        observe = next(item for item in loaded_plan["steps"] if item["step_key"] == "observe")
+        protected = next(item for item in loaded_plan["steps"] if item["step_key"] == "protected")
+        self.assertEqual(observe["attempt_count"], 1)
+        self.assertEqual(observe["status"], "verified")
+        self.assertEqual(protected["attempt_count"], 0)
+        self.assertEqual(protected["status"], "awaiting_approval")
+
+    def test_a1_skipped_step_cannot_substitute_for_executed_verified_work(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A1 Skipped Shortcut")
+        state = desired_state.create_desired_state(
+            "A1 Skipped Shortcut ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a1-skipped-shortcut",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "skipped-read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A1 skipped shortcut"},
+                },
+                {
+                    "id": "protected",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A1 skipped shortcut follow-up",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["skipped-read"],
+                },
+            ],
+        )
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                """
+                UPDATE agency_steps
+                SET status='skipped',result_summary='Skipped without execution',
+                    attempt_count=0,finished_at=?
+                WHERE plan_id=? AND step_key='skipped-read'
+                """,
+                (datetime.now().astimezone().isoformat(), plan["id"]),
+            )
+            conn.execute(
+                """
+                UPDATE agency_steps
+                SET status='awaiting_approval'
+                WHERE plan_id=? AND step_key='protected'
+                """,
+                (plan["id"],),
+            )
+            conn.execute(
+                "UPDATE agency_plans SET status='awaiting_approval' WHERE id=?",
+                (plan["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        agency_runtime._update_runtime(str(state["id"]), tick=True)
+        agency_runtime.record_boot(deployment_sha=SHA_A)
+
+        with self._patch_identity():
+            with self.assertRaisesRegex(
+                ValueError,
+                "executed and verified work",
+            ):
+                agency_real_acceptance.start_session(
+                    "A1",
+                    desired_state_id=str(state["id"]),
+                    deployment_sha_value=SHA_A,
+                    environment=ENV,
+                )
+
+    def test_a2_requires_two_causal_independently_verified_cycles(self) -> None:
+        state = desired_state.create_desired_state(
+            "A2 two-cycle convergence",
+            [
+                {
+                    "kind": "event_match",
+                    "terms_all": ["second cycle marker"],
+                    "source_kinds": ["jarvis_verifier"],
+                    "min_event_id": 0,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a2",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "first-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A2 first cycle",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                },
+                {
+                    "id": "second-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A2 second cycle",
+                        "start": "2030-01-01T10:00:00-08:00",
+                        "end": "2030-01-01T10:30:00-08:00",
+                    },
+                    "depends_on": ["first-write"],
+                },
+            ],
+            summary="Two independently verified convergence cycles",
+        )
+
+        event_counter = 0
+
+        def protected_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+            nonlocal event_counter
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            event_counter += 1
+            reply = SimpleNamespace(
+                ok=True,
+                message=f"Calendar accepted A2 cycle {event_counter}.",
+                data={"event_id": f"a2-event-{event_counter}"},
+            )
+            agency_step_id = current_agency_step_id()
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=agency_step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=agency_step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A2",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            first_waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            self.assertEqual(first_waiting["status"], "awaiting_approval")
+            first_step = next(
+                item for item in first_waiting["steps"]
+                if item["step_key"] == "first-write"
+            )
+            first_approved = agency_plan.approve_step(
+                plan["id"],
+                first_step["id"],
+                protected_executor,
+            )
+            first_verification_id = str(
+                next(
+                    item for item in first_approved["steps"]
+                    if item["step_key"] == "first-write"
+                )["verification_id"]
+            )
+            self.assertTrue(first_verification_id)
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "First cycle marker independent readback.",
+                ),
+            ):
+                first_verified = world_verification.check_one(
+                    first_verification_id,
+                    force=True,
+                )
+            self.assertEqual(first_verified["status"], "verified")
+
+            after_first = agency_plan.reconcile_plan(plan["id"])
+            self.assertEqual(after_first["status"], "active")
+            self.assertEqual(
+                next(
+                    item for item in after_first["steps"]
+                    if item["step_key"] == "first-write"
+                )["status"],
+                "verified",
+            )
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "active",
+            )
+
+            second_waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            self.assertEqual(second_waiting["status"], "awaiting_approval")
+            second_step = next(
+                item for item in second_waiting["steps"]
+                if item["step_key"] == "second-write"
+            )
+            second_approved = agency_plan.approve_step(
+                plan["id"],
+                second_step["id"],
+                protected_executor,
+            )
+            second_verification_id = str(
+                next(
+                    item for item in second_approved["steps"]
+                    if item["step_key"] == "second-write"
+                )["verification_id"]
+            )
+            self.assertTrue(second_verification_id)
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Second cycle marker independent readback.",
+                ),
+            ):
+                second_verified = world_verification.check_one(
+                    second_verification_id,
+                    force=True,
+                )
+            self.assertEqual(second_verified["status"], "verified")
+
+            completed = agency_plan.reconcile_plan(plan["id"])
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "satisfied",
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertEqual(evaluation["evidence"]["action_observation_cycles"], 2)
+            self.assertEqual(evaluation["evidence"]["independent_observation_cycles"], 2)
+            self.assertTrue(
+                evaluation["evidence"]["second_action_followed_first_observation"]
+            )
+            self.assertTrue(
+                evaluation["evidence"]["intermediate_unsatisfied_observed"]
+            )
+            self.assertTrue(evaluation["evidence"]["automatic_stop_observed"])
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A2")
+
+    def test_a2_replayed_same_agency_step_cannot_count_as_two_cycles(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A2 Replay Guard")
+        state = desired_state.create_desired_state(
+            "A2 Replay Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a2-replay-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "single-write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A2 replay guard",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                }
+            ],
+            summary="A2 replay must not become a second causal cycle",
+        )
+
+        counter = 0
+
+        def recorded_write(
+            tool: str,
+            args: dict,
+            *,
+            agency_step_id: str,
+        ) -> str:
+            nonlocal counter
+            counter += 1
+            reply = SimpleNamespace(
+                ok=True,
+                message=f"Calendar accepted replay-guard write {counter}.",
+                data={"event_id": f"a2-replay-event-{counter}"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=agency_step_id,
+            )
+            return world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=agency_step_id,
+            )
+
+        def protected_executor(tool: str, args: dict, **_kwargs: object) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            verification_id = recorded_write(
+                tool,
+                args,
+                agency_step_id=step_id,
+            )
+            return SimpleNamespace(
+                ok=True,
+                message="Calendar accepted first replay-guard write.",
+                data={
+                    "event_id": "a2-replay-event-1",
+                    "verification_id": verification_id,
+                },
+            )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A2",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            step = waiting["steps"][0]
+            agency_plan.approve_step(
+                plan["id"],
+                step["id"],
+                protected_executor,
+            )
+            loaded = agency_plan.get_plan(plan["id"], include_steps=True)
+            first_verification_id = str(loaded["steps"][0]["verification_id"])
+            self.assertTrue(first_verification_id)
+
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "First independent replay-guard readback."),
+            ):
+                first_verified = world_verification.check_one(
+                    first_verification_id,
+                    force=True,
+                )
+            self.assertEqual(first_verified["status"], "verified")
+
+            after_first = desired_state.evaluate_desired_state(str(state["id"]))
+            self.assertFalse(after_first["satisfied"])
+            agency_plan.reconcile_plan(plan["id"])
+
+            second_verification_id = recorded_write(
+                "calendar.create",
+                {
+                    "summary": "A2 replay guard",
+                    "start": "2030-01-01T09:00:00-08:00",
+                    "end": "2030-01-01T09:30:00-08:00",
+                },
+                agency_step_id=str(step["id"]),
+            )
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Second independent replay-guard readback."),
+            ):
+                second_verified = world_verification.check_one(
+                    second_verification_id,
+                    force=True,
+                )
+            self.assertEqual(second_verified["status"], "verified")
+
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                evidence="Replay-guard goal completed after the duplicated step.",
+            )
+            desired_state.evaluate_desired_state(str(state["id"]))
+            agency_plan.reconcile_plan(plan["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            self.assertEqual(evaluation["evidence"]["action_observation_cycles"], 2)
+            self.assertEqual(evaluation["evidence"]["independent_observation_cycles"], 2)
+            self.assertEqual(evaluation["evidence"]["distinct_action_steps"], 1)
+            self.assertEqual(evaluation["evidence"]["distinct_observations"], 2)
+            distinct_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "two or more distinct non-read Agency steps"
+                )
+            )
+            self.assertFalse(distinct_check["passed"])
+            causal_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "a second action occurred only after"
+                )
+            )
+            self.assertFalse(causal_check["passed"])
+
+    def test_a2_two_reads_cannot_masquerade_as_action_observation_cycles(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A2 Read Shortcut")
+        state = desired_state.create_desired_state(
+            "A2 Read Shortcut ready",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "ready",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a2-read-shortcut",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read-one",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "first observation"},
+                },
+                {
+                    "id": "read-two",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "second observation"},
+                    "depends_on": ["read-one"],
+                },
+            ],
+            summary="Old A2 shortcut regression",
+        )
+        calls = 0
+
+        def read_executor(
+            _tool: str,
+            _args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                world_model.assert_belief(
+                    entity_id,
+                    "ready",
+                    value=True,
+                    evidence="Synthetic test-only final satisfaction.",
+                )
+            return SimpleNamespace(ok=True, message=f"Read observation {calls}.")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A2",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            first = agency_plan.execute_next(plan["id"], read_executor)
+            self.assertEqual(first["status"], "active")
+            second = agency_plan.execute_next(plan["id"], read_executor)
+            self.assertEqual(second["status"], "completed")
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "satisfied",
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            self.assertEqual(evaluation["evidence"]["action_observation_cycles"], 0)
+            independent_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "two or more distinct non-read Agency steps received distinct independent"
+                )
+            )
+            self.assertFalse(independent_check["passed"])
+
+    def test_a8_receipt_is_derived_from_attention_ledger(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Attention Gate")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(6):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Low value {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"low:{index}",
+                    benefit=10,
+                    urgency=5,
+                    confidence=1.0,
+                    error_cost=5,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="One high-value exception",
+                desired_state_id=state_id,
+                dedup_key="high:one",
+                benefit=100,
+                urgency=90,
+                confidence=1.0,
+                error_cost=0,
+                attention_cost=10,
+                emitter=emitted.append,
+            )
+            # Duplicate observation should not create a duplicate interruption.
+            agency_attention.consider(
+                kind="exception",
+                message="One high-value exception",
+                desired_state_id=state_id,
+                dedup_key="high:one",
+                benefit=100,
+                urgency=90,
+                confidence=1.0,
+                error_cost=0,
+                attention_cost=10,
+                emitter=emitted.append,
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertEqual(evaluation["evidence"]["low_value_changes"], 6)
+            self.assertEqual(evaluation["evidence"]["high_value_candidates"], 1)
+            self.assertEqual(evaluation["evidence"]["bounded_interruptions"], 1)
+            self.assertTrue(evaluation["evidence"]["duplicate_observation_exercised"])
+            self.assertEqual(evaluation["evidence"]["duplicate_interruptions"], 0)
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A8")
+
+        self.assertEqual(emitted, ["One high-value exception"])
+
+    def test_a8_requires_duplicate_observation_to_be_exercised(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Attention Duplicate Exercise")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Duplicate exercise low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"duplicate-exercise-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="High value observed only once",
+                desired_state_id=state_id,
+                dedup_key="duplicate-exercise-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        duplicate_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "a duplicate high-value observation was exercised"
+            )
+        )
+        self.assertFalse(duplicate_check["passed"])
+        self.assertFalse(
+            evaluation["evidence"]["duplicate_observation_exercised"]
+        )
+
+    def test_a8_suppressed_second_high_value_candidate_does_not_fake_single_exception(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Attention High Candidate Guard")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Candidate guard low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"candidate-guard-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            for _ in range(2):
+                agency_attention.consider(
+                    kind="exception",
+                    message="Primary high-value exception",
+                    desired_state_id=state_id,
+                    dedup_key="candidate-guard-primary",
+                    benefit=100,
+                    urgency=100,
+                    confidence=1.0,
+                    attention_cost=5,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Second distinct high-value exception",
+                desired_state_id=state_id,
+                dedup_key="candidate-guard-secondary",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                allow_emit=False,
+                emitter=emitted.append,
+            )
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        self.assertEqual(evaluation["evidence"]["bounded_interruptions"], 1)
+        self.assertEqual(evaluation["evidence"]["high_value_candidates"], 2)
+        one_high_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "exactly one interrupt-worthy high-value change"
+            )
+        )
+        self.assertFalse(one_high_check["passed"])
+
+    def test_real_session_identity_and_baseline_are_immutable(self) -> None:
+        state_id, _ = self._state_with_plan("Immutable Session")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE agency_real_gate_sessions SET desired_state_id='tampered' WHERE id=?",
+                    (session["id"],),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "DELETE FROM agency_real_gate_sessions WHERE id=?",
+                    (session["id"],),
+                )
+        finally:
+            conn.close()
+
+    def test_completed_real_session_cannot_be_reopened_or_relinked(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Completed Session Immutability")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Immutable low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"immutable-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Immutable high",
+                desired_state_id=state_id,
+                dedup_key="immutable-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            agency_attention.consider(
+                kind="exception",
+                message="Immutable high",
+                desired_state_id=state_id,
+                dedup_key="immutable-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["passed"])
+            self.assertTrue(finalized["receipt_created"])
+            receipt_id = finalized["receipt"]["id"]
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET status='running',receipt_id='',completed_at=NULL
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+            conn.rollback()
+
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET receipt_id='agency-real:tampered'
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+            conn.rollback()
+
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET last_evaluation_json='{}'
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+            conn.rollback()
+
+            row = conn.execute(
+                """
+                SELECT status,receipt_id,completed_at
+                FROM agency_real_gate_sessions WHERE id=?
+                """,
+                (session["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(row[0], "completed")
+        self.assertEqual(row[1], receipt_id)
+        self.assertTrue(row[2])
+
+    def test_running_real_session_cannot_claim_receipt_before_completion(self) -> None:
+        state_id, _ = self._state_with_plan("Invalid Running Receipt")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET receipt_id='agency-real:fake'
+                    WHERE id=?
+                    """,
+                    (session["id"],),
+                )
+        finally:
+            conn.close()
+
+    def test_forced_real_session_tampering_fails_integrity_check_and_cannot_finalize(self) -> None:
+        state_id, _ = self._state_with_plan("Tampered Session")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("DROP TRIGGER agency_real_gate_sessions_immutable_identity")
+            conn.execute(
+                "UPDATE agency_real_gate_sessions SET baseline_json='{}' WHERE id=?",
+                (session["id"],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with self._patch_identity():
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            self.assertIn("integrity hash mismatch", evaluation["checks"][0]["evidence"])
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+
+        self.assertFalse(finalized["passed"])
+        self.assertFalse(finalized["receipt_created"])
+        self.assertEqual(
+            agency_release.list_real_gate_receipts(
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            ),
+            [],
+        )
+
+    def test_uncorrelated_audited_tool_execution_is_manual_orchestration(self) -> None:
+        events = [
+            {
+                "id": 1,
+                "event_type": "action.tool",
+                "source_kind": "jarvis_tool",
+                "payload": {"tool": "web.search", "agency_step_id": ""},
+            },
+            {
+                "id": 2,
+                "event_type": "action.tool",
+                "source_kind": "jarvis_tool",
+                "payload": {"tool": "knowledge.search", "agency_step_id": "agency-step:owned"},
+            },
+        ]
+        flagged = agency_real_acceptance._manual_orchestration_events(events)
+        self.assertEqual(len(flagged), 1)
+        self.assertEqual(flagged[0]["event_id"], 1)
+        self.assertEqual(flagged[0]["tool"], "web.search")
+
+    def test_a4_requires_real_observation_and_terminal_event_proof(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Verification Trail Gate")
+        state = desired_state.create_desired_state(
+            "Verification Trail Gate complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-proof",
+        )
+
+        def audited_calendar_executor(
+            tool: str,
+            args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted write.",
+                data={"event_id": f"event-{step_id[-8:]}"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            positive_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "positive-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Verification positive",
+                            "start": "2030-01-01T09:00:00-08:00",
+                            "end": "2030-01-01T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                positive_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            approved = agency_plan.approve_step(
+                positive_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            positive_verification = str(approved["steps"][0]["verification_id"])
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Independent exact-ID calendar read-back succeeded."),
+            ):
+                outcome = world_verification.check_one(positive_verification, force=True)
+            self.assertEqual(outcome["status"], "verified")
+            agency_plan.reconcile_plan(positive_plan["id"])
+
+            negative_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "negative-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Verification timeout",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                negative_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            approved = agency_plan.approve_step(
+                negative_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            negative_verification = str(approved["steps"][0]["verification_id"])
+            expired = "2000-01-01T00:00:00+00:00"
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    "UPDATE action_verifications SET deadline_at=?,next_check_at=? WHERE id=?",
+                    (expired, expired, negative_verification),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("pending", "Independent observer did not find the exact event."),
+            ):
+                outcome = world_verification.check_one(negative_verification, force=True)
+            self.assertEqual(outcome["status"], "timed_out")
+            negative_reconciled = agency_plan.reconcile_plan(negative_plan["id"])
+            self.assertEqual(negative_reconciled["status"], "needs_replan")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertTrue(evaluation["passed"], evaluation["checks"])
+        self.assertTrue(evaluation["evidence"]["action_attempt_persisted"])
+        self.assertTrue(evaluation["evidence"]["expected_outcome_persisted"])
+        self.assertTrue(evaluation["evidence"]["verified_real_write_observed"])
+        self.assertTrue(evaluation["evidence"]["failure_timeout_or_unverified_observed"])
+        self.assertTrue(evaluation["evidence"]["verification_feedback_observed"])
+
+    def test_a4_accepts_audited_nonverifiable_write_as_negative_outcome(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A4 Nonverifiable Gate")
+        state = desired_state.create_desired_state(
+            "A4 Nonverifiable Gate complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-nonverifiable",
+        )
+
+        def executor_with_provider_id(
+            tool: str,
+            args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted verifiable write.",
+                data={"event_id": "a4-verifiable-event"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        def executor_without_provider_id(
+            tool: str,
+            args: dict,
+            *,
+            bypass_confirmation: bool = False,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted write but returned no stable event ID.",
+                data={},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            positive_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "verified-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 verifiable write",
+                            "start": "2030-01-01T12:00:00-08:00",
+                            "end": "2030-01-01T12:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                positive_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            approved = agency_plan.approve_step(
+                positive_plan["id"],
+                waiting["steps"][0]["id"],
+                executor_with_provider_id,
+            )
+            positive_verification_id = str(approved["steps"][0]["verification_id"])
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Independent exact-ID calendar read-back succeeded."),
+            ):
+                positive = world_verification.check_one(
+                    positive_verification_id,
+                    force=True,
+                )
+            self.assertEqual(positive["status"], "verified")
+            agency_plan.reconcile_plan(positive_plan["id"])
+            desired_state.evaluate_desired_state(str(state["id"]))
+
+            negative_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "nonverifiable-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 nonverifiable write",
+                            "start": "2030-01-01T13:00:00-08:00",
+                            "end": "2030-01-01T13:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                negative_plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            failed = agency_plan.approve_step(
+                negative_plan["id"],
+                waiting["steps"][0]["id"],
+                executor_without_provider_id,
+            )
+            negative_step = failed["steps"][0]
+            self.assertEqual(negative_step["status"], "failed")
+            negative_verification_id = str(negative_step["verification_id"])
+            conn = sqlite3.connect(self.db)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT status,verifier,resolved_event_id
+                    FROM action_verifications WHERE id=?
+                    """,
+                    (negative_verification_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(row[0], "unverified")
+            self.assertEqual(row[1], "no_independent_verifier")
+            self.assertTrue(row[2])
+            desired_state.evaluate_desired_state(str(state["id"]))
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertTrue(evaluation["passed"], evaluation["checks"])
+        self.assertTrue(
+            evaluation["evidence"]["failure_timeout_or_unverified_observed"]
+        )
+        negative_check = next(
+            item
+            for item in evaluation["checks"]
+            if item["name"] == "failure/timeout/unverified outcome was exercised"
+        )
+        self.assertIn(negative_verification_id, negative_check["evidence"])
+
+    def test_a4_status_flip_without_observation_trail_does_not_count_as_verified(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Forged Verification Gate")
+        state = desired_state.create_desired_state(
+            "Forged Verification Gate complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-forged",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Forged verification",
+                        "start": "2030-01-01T11:00:00-08:00",
+                        "end": "2030-01-01T11:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_a, **_k: SimpleNamespace(ok=True, message="unused"),
+            )
+            step_id = str(waiting["steps"][0]["id"])
+
+            action_event_id = world_model.record_tool_execution(
+                "calendar.create",
+                dict(waiting["steps"][0]["arguments"]),
+                ok=True,
+                message="Audited attempt exists.",
+                agency_step_id=step_id,
+            )
+            verification_id = world_verification.register_execution(
+                "calendar.create",
+                dict(waiting["steps"][0]["arguments"]),
+                SimpleNamespace(
+                    ok=True,
+                    message="Provider accepted write.",
+                    data={"event_id": "forged-status-event"},
+                ),
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE action_verifications
+                    SET status='verified',last_evidence='forged status only'
+                    WHERE id=?
+                    """,
+                    (verification_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        verified_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("real external write has independently verified")
+        )
+        self.assertFalse(verified_check["passed"])
+        self.assertFalse(evaluation["passed"])
+
+    def test_a4_later_evaluation_cannot_replace_exact_step_reconciliation(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A4 Reconciliation Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A4 Reconciliation Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a4-reconciliation-guard",
+        )
+
+        def audited_calendar_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted A4 reconciliation-guard write.",
+                data={"event_id": f"a4-reconcile-{step_id[-8:]}"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A4",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            positive_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "positive",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 unreconciled positive",
+                            "start": "2030-01-20T09:00:00-08:00",
+                            "end": "2030-01-20T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                positive_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                positive_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            positive_verification_id = str(
+                approved["steps"][0]["verification_id"]
+            )
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Independent A4 reconciliation-guard read-back.",
+                ),
+            ):
+                positive = world_verification.check_one(
+                    positive_verification_id,
+                    force=True,
+                )
+            self.assertEqual(positive["status"], "verified")
+
+            # Deliberately do NOT call reconcile_plan on the positive plan.
+            # A later desired-state evaluation exists, but the exact step still
+            # has not consumed the terminal verification result.
+            desired_state.evaluate_desired_state(str(state["id"]))
+
+            negative_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "negative",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A4 reconciled negative",
+                            "start": "2030-01-20T10:00:00-08:00",
+                            "end": "2030-01-20T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                negative_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                negative_plan["id"],
+                waiting["steps"][0]["id"],
+                audited_calendar_executor,
+            )
+            negative_verification_id = str(
+                approved["steps"][0]["verification_id"]
+            )
+            expired = "2000-01-01T00:00:00+00:00"
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE action_verifications
+                    SET deadline_at=?,next_check_at=?
+                    WHERE id=?
+                    """,
+                    (
+                        expired,
+                        expired,
+                        negative_verification_id,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "pending",
+                    "Negative exact event remained absent.",
+                ),
+            ):
+                negative = world_verification.check_one(
+                    negative_verification_id,
+                    force=True,
+                )
+            self.assertEqual(negative["status"], "timed_out")
+            agency_plan.reconcile_plan(negative_plan["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        feedback_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "terminal verification results were reconciled"
+            )
+        )
+        self.assertFalse(feedback_check["passed"])
+        positive_feedback = feedback_check["evidence"][
+            positive_verification_id
+        ]
+        self.assertFalse(positive_feedback["control_loop_reconciled"])
+        self.assertTrue(
+            positive_feedback["desired_state_evaluated_after_terminal"]
+        )
+        self.assertEqual(
+            positive_feedback["step"]["status"],
+            "awaiting_verification",
+        )
+        self.assertFalse(
+            evaluation["evidence"]["verification_feedback_observed"]
+        )
+
+    def test_a3_proves_safe_read_approval_resumption_and_denial_replan(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A3 Permission Gate")
+        state = desired_state.create_desired_state(
+            "A3 Permission Gate scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a3",
+        )
+        first_plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A3 permission context"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A3 approved action",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["read"],
+                },
+            ],
+            summary="Read safely, then cross approval boundary",
+        )
+
+        def audited_read_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Safe read completed automatically.",
+            )
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted the approved A3 action.",
+                data={"event_id": "a3-approved-event"},
+            )
+            agency_step_id = current_agency_step_id()
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=agency_step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=agency_step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A3",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            after_read = agency_plan.execute_next(
+                first_plan["id"],
+                audited_read_executor,
+            )
+            self.assertEqual(after_read["status"], "active")
+            self.assertEqual(after_read["steps"][0]["status"], "verified")
+
+            waiting = agency_plan.execute_next(
+                first_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not run before approval",
+                ),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+            write_step = next(
+                item for item in waiting["steps"] if item["step_key"] == "write"
+            )
+            approved = agency_plan.approve_step(
+                first_plan["id"],
+                write_step["id"],
+                protected_executor,
+            )
+            approved_write = next(
+                item for item in approved["steps"] if item["step_key"] == "write"
+            )
+            self.assertEqual(approved_write["status"], "awaiting_verification")
+            self.assertEqual(approved_write["attempt_count"], 1)
+            self.assertTrue(approved_write["verification_id"])
+
+            denial_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "denied-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A3 denied action",
+                            "start": "2030-01-01T11:00:00-08:00",
+                            "end": "2030-01-01T11:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="Exercise explicit denial path",
+            )
+            denial_waiting = agency_plan.execute_next(
+                denial_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not run before approval",
+                ),
+            )
+            denied_step = denial_waiting["steps"][0]
+            self.assertEqual(denied_step["status"], "awaiting_approval")
+            denied = agency_plan.deny_step(
+                denial_plan["id"],
+                denied_step["id"],
+                reason="User rejected this protected action.",
+            )
+            self.assertEqual(denied["status"], "needs_replan")
+            self.assertEqual(denied["steps"][0]["status"], "blocked")
+            self.assertEqual(denied["steps"][0]["attempt_count"], 0)
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(evaluation["evidence"]["safe_read_auto_proceeded"])
+            self.assertTrue(
+                evaluation["evidence"]["protected_external_write_observed"]
+            )
+            self.assertTrue(evaluation["evidence"]["approval_resumed_same_plan"])
+            self.assertTrue(
+                evaluation["evidence"]["permission_boundary_not_bypassed"]
+            )
+            self.assertTrue(evaluation["evidence"]["denial_case_observed"])
+            self.assertTrue(
+                evaluation["evidence"]["denial_forced_replan_or_blocked"]
+            )
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A3")
+
+    def test_a3_correlated_write_without_consumed_approval_event_is_bypass(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A3 Approval Consumption Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A3 Approval Consumption Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a3-approval-consumption-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A3 approval guard context"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A3 approval guard write",
+                        "start": "2030-01-01T16:00:00-08:00",
+                        "end": "2030-01-01T16:30:00-08:00",
+                    },
+                    "depends_on": ["read"],
+                },
+            ],
+        )
+
+        def audited_read_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(ok=True, message="Audited safe read.")
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A3",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            agency_plan.execute_next(plan["id"], audited_read_executor)
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            write_step = next(
+                item for item in waiting["steps"]
+                if item["step_key"] == "write"
+            )
+            step_id = str(write_step["id"])
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Forged direct calendar execution.",
+                data={"event_id": "a3-forged-direct-write"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                "calendar.create",
+                dict(write_step["arguments"]),
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                "calendar.create",
+                dict(write_step["arguments"]),
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        resumed = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "approval consumption resumed the exact persisted step"
+            )
+        )
+        boundary = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "no protected external write bypassed"
+            )
+        )
+        self.assertFalse(resumed["passed"])
+        self.assertFalse(boundary["passed"])
+        self.assertTrue(boundary["evidence"])
+        self.assertEqual(
+            boundary["evidence"][0]["agency_step_id"],
+            step_id,
+        )
+        self.assertEqual(
+            boundary["evidence"][0]["approval_consumed_event_ids"],
+            [],
+        )
+
+    def test_a3_denial_without_protected_waiting_boundary_cannot_pass_gate(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A3 Denial Boundary Guard")
+        state = desired_state.create_desired_state(
+            "A3 Denial Boundary Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a3-denial-boundary-guard",
+        )
+        legitimate_plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "A3 denial boundary context"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A3 boundary guard approved action",
+                        "start": "2030-01-01T14:00:00-08:00",
+                        "end": "2030-01-01T14:30:00-08:00",
+                    },
+                    "depends_on": ["read"],
+                },
+            ],
+        )
+
+        def audited_read_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            reply = SimpleNamespace(
+                ok=True,
+                message="Safe read completed.",
+            )
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted A3 boundary-guard action.",
+                data={"event_id": "a3-boundary-guard-event"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A3",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            after_read = agency_plan.execute_next(
+                legitimate_plan["id"],
+                audited_read_executor,
+            )
+            self.assertEqual(after_read["steps"][0]["status"], "verified")
+            waiting = agency_plan.execute_next(
+                legitimate_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must wait",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                legitimate_plan["id"],
+                waiting["steps"][1]["id"],
+                protected_executor,
+            )
+            self.assertEqual(
+                approved["steps"][1]["status"],
+                "awaiting_verification",
+            )
+
+            forged_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "read-never-protected",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "not a protected action"},
+                    }
+                ],
+                summary="Forge a denial without an approval boundary",
+            )
+            forged_step_id = str(forged_plan["steps"][0]["id"])
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE agency_steps
+                    SET status='blocked',blocked_reason='forged denial'
+                    WHERE id=?
+                    """,
+                    (forged_step_id,),
+                )
+                conn.execute(
+                    """
+                    UPDATE agency_plans
+                    SET status='needs_replan',last_error='forged denial'
+                    WHERE id=?
+                    """,
+                    (forged_plan["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            agency_plan._record_event(
+                "agency.step.denied",
+                "Forged denial on a read step that never awaited approval.",
+                plan_id=str(forged_plan["id"]),
+                desired_state_id=str(state["id"]),
+                step_id=forged_step_id,
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        denial_check = next(
+            item
+            for item in evaluation["checks"]
+            if item["name"].startswith(
+                "explicit denial occurred at a persisted protected approval boundary"
+            )
+        )
+        self.assertFalse(denial_check["passed"])
+        self.assertFalse(evaluation["evidence"]["denial_case_observed"])
+
+    def test_a5_requires_external_change_replan_and_preserved_valid_work(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Causal Replan Gate")
+        state = desired_state.create_desired_state(
+            "Causal Replan Gate scheduled",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "scheduled", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a5",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [
+                {
+                    "id": "preserved-read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "stable project requirements"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Causal replan",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["preserved-read"],
+                },
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A5",
+                desired_state_id=str(state["id"]),
+                parameters={"preserve_step_key": "preserved-read"},
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            after_read = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="Stable requirements observed and retained.",
+                ),
+            )
+            preserved_step = next(
+                item for item in after_read["steps"]
+                if item["step_key"] == "preserved-read"
+            )
+            self.assertEqual(preserved_step["status"], "verified")
+            self.assertEqual(preserved_step["attempt_count"], 1)
+
+            event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Causal Replan Gate timing changed externally.",
+                source_kind="calendar_enriched",
+                source_ref="real-a5:external-change",
+                evidence="External calendar observation changed the relevant timing.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            invalidated = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("stale protected plan must not execute")
+                ),
+            )
+            self.assertEqual(invalidated["status"], "needs_replan")
+            self.assertEqual(
+                next(
+                    item for item in invalidated["steps"]
+                    if item["step_key"] == "preserved-read"
+                )["attempt_count"],
+                1,
+            )
+
+            new_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "replanned-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Causal replan revised",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="Replanned after external timing change without replaying stable read",
+            )
+            self.assertGreater(new_plan["generation"], plan["generation"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            causal = evaluation["checks"][0]["evidence"]
+            self.assertTrue(any(event_id in item["external_event_ids"] for item in causal))
+            self.assertTrue(evaluation["evidence"]["already_valid_work_preserved"])
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A5")
+
+    def test_a5_temporal_coincidence_without_bound_trigger_provenance_fails(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A5 Temporal Coincidence Guard")
+        state = desired_state.create_desired_state(
+            "A5 Temporal Coincidence Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a5-temporal-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "preserved-read",
+                    "tool": "knowledge.search",
+                    "arguments": {"query": "stable temporal-guard requirements"},
+                },
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A5 temporal guard",
+                        "start": "2030-01-01T09:00:00-08:00",
+                        "end": "2030-01-01T09:30:00-08:00",
+                    },
+                    "depends_on": ["preserved-read"],
+                },
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A5",
+                desired_state_id=str(state["id"]),
+                parameters={"preserve_step_key": "preserved-read"},
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            after_read = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="Stable temporal-guard requirements observed.",
+                ),
+            )
+            self.assertEqual(
+                next(
+                    item for item in after_read["steps"]
+                    if item["step_key"] == "preserved-read"
+                )["status"],
+                "verified",
+            )
+
+            external_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "A5 temporal guard timing changed externally.",
+                source_kind="calendar_enriched",
+                source_ref="real-a5-temporal-guard:external",
+                evidence="A real-looking external event exists, but is not bound to the forged invalidation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+
+            conn = sqlite3.connect(self.db)
+            try:
+                conn.execute(
+                    """
+                    UPDATE agency_plans
+                    SET status='needs_replan',
+                        last_error='forged stale-plan transition'
+                    WHERE id=?
+                    """,
+                    (plan["id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            agency_plan._record_event(
+                "agency.plan.invalidated",
+                "Forged invalidation with no relevance-trigger provenance.",
+                plan_id=str(plan["id"]),
+                desired_state_id=str(state["id"]),
+                payload={
+                    "baseline_relevance_hash": str(plan["relevance_hash"]),
+                    "current_relevance_hash": "forged-current-hash",
+                },
+            )
+            replacement = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "replacement-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A5 temporal guard replacement",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            self.assertGreater(replacement["generation"], plan["generation"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        conn = sqlite3.connect(self.db)
+        conn.row_factory = sqlite3.Row
+        try:
+            visible_external = (
+                agency_real_acceptance._external_events_for_relevant_entities(
+                    conn,
+                    session,
+                )
+            )
+        finally:
+            conn.close()
+        self.assertTrue(
+            any(int(item["id"]) == external_event_id for item in visible_external)
+        )
+        causal_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "relevant external world change preceded stale-plan invalidation"
+            )
+        )
+        self.assertFalse(causal_check["passed"])
+        self.assertFalse(evaluation["evidence"]["external_change_observed"])
+
+    def test_a6_rejects_already_satisfied_baseline_watch(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A6 Already Satisfied Baseline",
+        )
+        state = desired_state.create_desired_state(
+            "A6 Already Satisfied Baseline complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "done",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-already-satisfied",
+        )
+        world_model.assert_belief(
+            entity_id,
+            "prerequisite",
+            value="available",
+            evidence="The watched prerequisite was already available before the REAL session.",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Artificially blocked despite an already-satisfied watch.",
+        )
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {
+                "kind": "belief_equals",
+                "entity_id": entity_id,
+                "predicate": "prerequisite",
+                "value": "available",
+            },
+        )
+
+        with self._patch_identity():
+            with self.assertRaisesRegex(
+                ValueError,
+                "wake condition.*unsatisfied",
+            ):
+                agency_real_acceptance.start_session(
+                    "A6",
+                    desired_state_id=str(state["id"]),
+                    deployment_sha_value=SHA_A,
+                    environment=ENV,
+                )
+
+    def test_a6_requires_externally_grounded_wake_and_actionable_continuation(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Dormant Wake Gate")
+        state = desired_state.create_desired_state(
+            "Dormant Wake Gate completed",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "done", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Waiting for external prerequisite availability.",
+        )
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {
+                "kind": "belief_equals",
+                "entity_id": entity_id,
+                "predicate": "prerequisite",
+                "value": "available",
+            },
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            source_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Dormant Wake Gate prerequisite is now available.",
+                source_kind="calendar_enriched",
+                source_ref="real-a6:availability",
+                evidence="External prerequisite availability observation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "prerequisite",
+                value="available",
+                source_event_id=source_event_id,
+                evidence="Observed externally.",
+            )
+            wake = desired_state.check_wake_watches()
+            self.assertEqual(wake["triggered"], 1)
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "active",
+            )
+
+            continuation = agency_runtime.tick_desired_state(
+                str(state["id"]),
+                executor=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("protected continuation must await approval")
+                ),
+                planner=lambda _prompt: {
+                    "summary": "Use newly available prerequisite.",
+                    "nodes": [
+                        {
+                            "id": "continue",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": "Dormant Wake Gate continuation",
+                                "start": "2030-01-01T12:00:00-08:00",
+                                "end": "2030-01-01T12:30:00-08:00",
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
+            self.assertEqual(continuation["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(evaluation["evidence"]["wake_condition_changed"])
+            self.assertTrue(
+                evaluation["evidence"]["next_step_surfaced_or_executed"]
+            )
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A6")
+
+    def test_a6_internal_only_wake_does_not_count_as_real_evidence(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Internal Wake Gate")
+        state = desired_state.create_desired_state(
+            "Internal Wake Gate available",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-internal",
+        )
+        desired_state.set_state(str(state["id"]), "blocked", reason="Waiting.")
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {"kind": "belief_equals", "entity_id": entity_id, "predicate": "available", "value": True},
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            internal_event = world_model.record_event(
+                "agency.synthetic_change",
+                "Jarvis internally marked availability.",
+                source_kind="jarvis_agency",
+                source_ref="real-a6:internal",
+                evidence="Internal-only change.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "available",
+                value=True,
+                source_event_id=internal_event,
+                evidence="Internal-only belief.",
+            )
+            desired_state.check_wake_watches()
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(evaluation["passed"])
+            wake_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith("wake condition later triggered")
+            )
+            self.assertFalse(wake_check["passed"])
+
+    def test_a6_unrelated_external_event_cannot_launder_internal_wake_evidence(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A6 Evidence Laundering Guard")
+        state = desired_state.create_desired_state(
+            "A6 Evidence Laundering Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-evidence-laundering",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Waiting for the watched prerequisite.",
+        )
+        desired_state.add_wake_watch(
+            str(state["id"]),
+            {
+                "kind": "belief_equals",
+                "entity_id": entity_id,
+                "predicate": "prerequisite",
+                "value": "available",
+            },
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            unrelated_external_id = world_model.record_event(
+                "calendar.context_enriched",
+                "An unrelated external calendar fact changed on the same project.",
+                source_kind="calendar_enriched",
+                source_ref="real-a6:unrelated-external",
+                evidence="Real external evidence, but not evidence for the watched prerequisite.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            internal_source_id = world_model.record_event(
+                "agency.synthetic_change",
+                "Jarvis internally marked the watched prerequisite available.",
+                source_kind="jarvis_agency",
+                source_ref="real-a6:internal-trigger",
+                evidence="Internal-only source for the actual watched condition.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "prerequisite",
+                value="available",
+                source_event_id=internal_source_id,
+                evidence="Internal-only watched-condition evidence.",
+            )
+            wake = desired_state.check_wake_watches()
+            self.assertEqual(wake["triggered"], 1)
+            self.assertEqual(
+                desired_state.get_desired_state(str(state["id"]))["state"],
+                "active",
+            )
+
+            continuation = agency_runtime.tick_desired_state(
+                str(state["id"]),
+                executor=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("protected continuation must await approval")
+                ),
+                planner=lambda _prompt: {
+                    "summary": "Continue after internally sourced wake.",
+                    "nodes": [
+                        {
+                            "id": "continue",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": "A6 laundering guard continuation",
+                                "start": "2030-01-01T15:00:00-08:00",
+                                "end": "2030-01-01T15:30:00-08:00",
+                            },
+                            "depends_on": [],
+                        }
+                    ],
+                    "missing_capability": None,
+                },
+            )
+            self.assertEqual(continuation["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        wake_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("wake condition later triggered")
+        )
+        self.assertFalse(wake_check["passed"])
+        evidence_ids = {
+            event_id
+            for ids in wake_check["evidence"].values()
+            for event_id in ids
+        }
+        self.assertNotIn(unrelated_external_id, evidence_ids)
+
+    def test_a6_reactivation_before_external_trigger_cannot_pass(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A6 Reactivation Ordering Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A6 Reactivation Ordering Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "done",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a6-ordering-guard",
+        )
+        desired_state.set_state(
+            str(state["id"]),
+            "blocked",
+            reason="Waiting for an external calendar observation.",
+        )
+        watch_condition = {
+            "kind": "event_exists",
+            "event_type": "calendar.context_enriched",
+            "source_ref": "real-a6-ordering-guard:external",
+            "summary_contains": "ordering prerequisite arrived",
+        }
+        watch = desired_state.add_wake_watch(
+            str(state["id"]),
+            watch_condition,
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A6",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            baseline_event_id = int(session["baseline"]["max_event_id"])
+            predicted_external_id = baseline_event_id + 2
+            future_outcome = {
+                "kind": "event_exists",
+                "criterion": watch_condition,
+                "satisfied": True,
+                "event_id": predicted_external_id,
+                "actual": "Ordering prerequisite arrived externally.",
+            }
+            forged_reactivation_id = world_model.record_event(
+                "desired_state.reactivated",
+                "Forged early reactivation before the external trigger existed.",
+                source_kind="jarvis_agency",
+                source_ref=str(watch["id"]),
+                payload={
+                    "desired_state_id": str(state["id"]),
+                    "watch_id": str(watch["id"]),
+                    "condition_outcome": future_outcome,
+                },
+                evidence="Deliberately out-of-order reactivation for regression testing.",
+            )
+            self.assertEqual(forged_reactivation_id, baseline_event_id + 1)
+
+            external_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Ordering prerequisite arrived externally.",
+                source_kind="calendar_enriched",
+                source_ref="real-a6-ordering-guard:external",
+                evidence="The real trigger arrived only after the forged reactivation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            self.assertEqual(external_event_id, predicted_external_id)
+
+            conn = sqlite3.connect(self.db)
+            conn.row_factory = sqlite3.Row
+            try:
+                actual_outcome = desired_state._evaluate_criterion(
+                    conn,
+                    watch_condition,
+                )
+                self.assertEqual(actual_outcome, future_outcome)
+                now = datetime.now().astimezone().isoformat()
+                conn.execute(
+                    """
+                    UPDATE desired_state_watches
+                    SET status='triggered',triggered_at=?,updated_at=?,evidence_json=?
+                    WHERE id=?
+                    """,
+                    (
+                        now,
+                        now,
+                        json.dumps(actual_outcome, ensure_ascii=False, sort_keys=True),
+                        str(watch["id"]),
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE desired_states
+                    SET state='active',blocked_reason='',updated_at=?
+                    WHERE id=?
+                    """,
+                    (now, str(state["id"])),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            agency_plan._record_event(
+                "agency.step.awaiting_approval",
+                "Forged downstream continuation after the early reactivation.",
+                plan_id="agency-plan:a6-ordering-guard",
+                desired_state_id=str(state["id"]),
+                step_id="agency-step:a6-ordering-guard",
+                payload={"tool": "calendar.create", "risk": "external_write"},
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        wake_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith("wake condition later triggered")
+        )
+        self.assertTrue(wake_check["passed"])
+        reactivation_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "desired state reactivated from the same externally grounded wake"
+            )
+        )
+        self.assertFalse(reactivation_check["passed"])
+        self.assertFalse(
+            evaluation["evidence"]["reactivated_without_goal_restatement"]
+        )
+
+    def test_a7_is_scoped_to_matching_real_deliberation(self) -> None:
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A7",
+                parameters={"question_contains": "scoped launch decision"},
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            agency_deliberation.deliberate(
+                "Unrelated pricing decision",
+                roles=["evidence", "skeptic"],
+                worker=lambda role, q, ctx: {
+                    "conclusion": "yes" if role == "evidence" else "no",
+                    "claims": [],
+                    "risks": [],
+                    "unknowns": [],
+                },
+                synthesizer=lambda q, ctx, outputs, disagreements: {
+                    "answer": "unrelated",
+                    "consensus": [],
+                    "disagreements": [],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.5,
+                },
+            )
+            unrelated = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(unrelated["passed"])
+
+            barrier = threading.Barrier(4)
+
+            def worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                conclusions = {
+                    "evidence": "launch",
+                    "skeptic": "wait",
+                    "feasibility": "launch after dependency check",
+                    "risk_cost": "wait unless downside is bounded",
+                }
+                return {
+                    "conclusion": conclusions[role],
+                    "claims": [
+                        {
+                            "claim": f"{role} claim",
+                            "confidence": 0.6,
+                            "evidence": "Reasoning only",
+                            "source": "reasoning",
+                        }
+                    ],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            def synth(
+                q: str,
+                ctx: str,
+                outputs: list[dict],
+                disagreements: list[dict],
+            ) -> dict:
+                return {
+                    "answer": "preserve disagreement",
+                    "consensus": [],
+                    "disagreements": [{"issue": "launch timing"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.5,
+                }
+
+            with patch.object(
+                agency_deliberation,
+                "_model_worker",
+                worker,
+            ), patch.object(
+                agency_deliberation,
+                "_model_synthesizer",
+                synth,
+            ):
+                agency_deliberation.deliberate(
+                    "Scoped launch decision for the real gate",
+                    roles=["evidence", "skeptic", "feasibility", "risk_cost"],
+                )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertEqual(evaluation["evidence"]["parallel_workers"], 4)
+            self.assertTrue(evaluation["evidence"]["required_epistemic_roles_present"])
+            self.assertTrue(evaluation["evidence"]["provenance_structurally_bounded"])
+            self.assertTrue(evaluation["evidence"]["synthesis_after_workers"])
+            self.assertTrue(evaluation["evidence"]["production_model_backends"])
+            self.assertTrue(evaluation["evidence"]["completion_event_bound"])
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A7")
+
+    def test_a7_injected_callbacks_cannot_satisfy_real_backend_provenance(self) -> None:
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A7",
+                parameters={"question_contains": "injected callback guard"},
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            barrier = threading.Barrier(4)
+
+            def worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": role,
+                    "claims": [
+                        {
+                            "claim": f"{role} claim",
+                            "confidence": 0.6,
+                            "evidence": "Injected callback evidence.",
+                            "source": "reasoning",
+                        }
+                    ],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            agency_deliberation.deliberate(
+                "Injected callback guard real-looking deliberation",
+                roles=["evidence", "skeptic", "feasibility", "risk_cost"],
+                worker=worker,
+                synthesizer=lambda q, ctx, outputs, disagreements: {
+                    "answer": "Injected synthesis.",
+                    "consensus": [],
+                    "disagreements": [{"issue": "injected disagreement"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.5,
+                },
+            )
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        backend_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "REAL deliberation used the production model"
+            )
+        )
+        self.assertFalse(backend_check["passed"])
+        self.assertFalse(evaluation["evidence"]["production_model_backends"])
+
+    def test_a9_proves_full_gap_synthesis_enable_resolution_lifecycle(self) -> None:
+        target_state, _ = self._state_with_plan("Capability Target")
+        other_state, _ = self._state_with_plan("Capability Other")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A9",
+                desired_state_id=target_state,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            agency_capability.record_gap(
+                other_state,
+                "other.missing.capability",
+                "Unrelated goal gap.",
+            )
+            unrelated = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertFalse(unrelated["passed"])
+
+            gap = agency_capability.record_gap(
+                target_state,
+                "target.missing.capability",
+                "The target goal needs a capability Jarvis does not have.",
+            )
+            desired_state.set_state(
+                target_state,
+                "blocked",
+                reason="Missing capability: target.missing.capability.",
+            )
+
+            with patch(
+                "jarvis_mrb.custom_tools.synthesize",
+                return_value={
+                    "name": "target_adapter",
+                    "enabled": False,
+                    "risk": "read",
+                    "allowed_hosts": ["api.example.com"],
+                },
+            ):
+                synthesized = agency_capability.synthesize_adapter(
+                    gap["id"],
+                    name="target_adapter",
+                    description="Read the missing target capability.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+            self.assertFalse(synthesized["enabled"])
+            self.assertEqual(synthesized["gap"]["status"], "proposed")
+            synthesis_action_event_id = world_model.record_tool_execution(
+                "custom.synthesize",
+                {
+                    "gap_id": gap["id"],
+                    "name": "target_adapter",
+                    "description": "Read the missing target capability.",
+                    "api_spec": "GET /status",
+                    "allowed_hosts": ["api.example.com"],
+                    "risk": "read",
+                },
+                ok=True,
+                message="Custom tool target_adapter was generated and sandbox-tested.",
+            )
+
+            enable_event_id = world_model.record_tool_execution(
+                "custom.enable",
+                {"name": "target_adapter", "enabled": True},
+                ok=True,
+                message="User explicitly enabled target_adapter.",
+            )
+
+            enabled_catalog = [
+                {
+                    "name": "target_adapter",
+                    "enabled": True,
+                    "risk": "read",
+                    "description": "Target adapter",
+                    "allowed_hosts": ["api.example.com"],
+                }
+            ]
+            with patch(
+                "jarvis_mrb.custom_tools.list_tools",
+                return_value=enabled_catalog,
+            ):
+                reconciled = agency_capability.reconcile_gaps()
+                evaluation = agency_real_acceptance.evaluate_session(session["id"])
+                finalized = agency_real_acceptance.finalize_session(session["id"])
+
+            self.assertIn(gap["id"], reconciled["resolved"])
+            self.assertIn(target_state, reconciled["reactivated"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertFalse(evaluation["evidence"]["fabricated_tool_availability"])
+            self.assertTrue(evaluation["evidence"]["adapter_sandbox_validated"])
+            self.assertTrue(evaluation["evidence"]["adapter_synthesized_disabled"])
+            self.assertTrue(evaluation["evidence"]["explicit_enablement_observed"])
+            self.assertTrue(evaluation["evidence"]["capability_resolved_after_enable"])
+            self.assertTrue(evaluation["evidence"]["goal_reactivated_after_capability"])
+            self.assertTrue(evaluation["evidence"]["adapter_execution_still_confirmed"])
+            manual_event_ids = [
+                item["event_id"]
+                for item in evaluation["manual_orchestration_events"]
+            ]
+            self.assertNotIn(synthesis_action_event_id, manual_event_ids)
+            self.assertNotIn(enable_event_id, manual_event_ids)
+
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A9")
+
+    def test_a9_internal_synthesis_event_without_audited_tool_receipt_fails(self) -> None:
+        target_state, _ = self._state_with_plan("Capability Synthesis Receipt Guard")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A9",
+                desired_state_id=target_state,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            gap = agency_capability.record_gap(
+                target_state,
+                "target.missing.capability",
+                "Need a target adapter.",
+            )
+            desired_state.set_state(
+                target_state,
+                "blocked",
+                reason="Missing capability: target.missing.capability.",
+            )
+            with patch(
+                "jarvis_mrb.custom_tools.synthesize",
+                return_value={
+                    "name": "target_adapter",
+                    "enabled": False,
+                    "risk": "read",
+                    "allowed_hosts": ["api.example.com"],
+                },
+            ):
+                synthesized = agency_capability.synthesize_adapter(
+                    gap["id"],
+                    name="target_adapter",
+                    description="Target adapter.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+            self.assertFalse(synthesized["enabled"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        synthesis_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "gap-bound adapter was sandbox-synthesized"
+            )
+        )
+        self.assertFalse(synthesis_check["passed"])
+        lifecycle = synthesis_check["evidence"]
+        self.assertTrue(
+            any(bool(item["synthesis_event_ids"]) for item in lifecycle)
+        )
+        self.assertTrue(
+            all(not item["synthesis_action_event_ids"] for item in lifecycle)
+        )
+
+    def test_a9_does_not_whitelist_unrelated_foreground_custom_action(self) -> None:
+        target_state, _ = self._state_with_plan("Capability Manual Guard")
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A9",
+                desired_state_id=target_state,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            gap = agency_capability.record_gap(
+                target_state,
+                "target.missing.capability",
+                "Need target adapter.",
+            )
+            desired_state.set_state(
+                target_state,
+                "blocked",
+                reason="Missing capability: target.missing.capability.",
+            )
+            with patch(
+                "jarvis_mrb.custom_tools.synthesize",
+                return_value={
+                    "name": "target_adapter",
+                    "enabled": False,
+                    "risk": "read",
+                    "allowed_hosts": ["api.example.com"],
+                },
+            ):
+                agency_capability.synthesize_adapter(
+                    gap["id"],
+                    name="target_adapter",
+                    description="Target adapter.",
+                    api_spec="GET /status",
+                    allowed_hosts=["api.example.com"],
+                    risk="read",
+                )
+            world_model.record_tool_execution(
+                "custom.synthesize",
+                {
+                    "gap_id": gap["id"],
+                    "name": "target_adapter",
+                    "description": "Target adapter.",
+                    "api_spec": "GET /status",
+                    "allowed_hosts": ["api.example.com"],
+                    "risk": "read",
+                },
+                ok=True,
+                message="Generated target adapter.",
+            )
+
+            unrelated_event_id = world_model.record_tool_execution(
+                "custom.enable",
+                {"name": "unrelated_adapter", "enabled": True},
+                ok=True,
+                message="Unrelated foreground action.",
+            )
+            world_model.record_tool_execution(
+                "custom.enable",
+                {"name": "target_adapter", "enabled": True},
+                ok=True,
+                message="Enabled target adapter.",
+            )
+            with patch(
+                "jarvis_mrb.custom_tools.list_tools",
+                return_value=[
+                    {
+                        "name": "target_adapter",
+                        "enabled": True,
+                        "risk": "read",
+                        "allowed_hosts": ["api.example.com"],
+                    }
+                ],
+            ):
+                agency_capability.reconcile_gaps()
+                evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+            self.assertFalse(evaluation["passed"])
+            manual_ids = {
+                item["event_id"]
+                for item in evaluation["manual_orchestration_events"]
+            }
+            self.assertIn(unrelated_event_id, manual_ids)
+
+    def test_a11_inferred_autonomy_preference_cannot_bypass_real_approval_boundary(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Preference Authority Gate")
+        state = desired_state.create_desired_state(
+            "Preference Authority Gate scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a11",
+        )
+        preference_key = agency_self_model.approval_preference_key(
+            "calendar.create"
+        )
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            event_id = f"a11-calendar-{step_id.split(':')[-1]}"
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted A11 approval-history action.",
+                data={"event_id": event_id},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A11",
+                desired_state_id=str(state["id"]),
+                parameters={
+                    "tool": "calendar.create",
+                    "preference_key": preference_key,
+                },
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            for index in range(3):
+                plan = agency_plan.create_plan(
+                    str(state["id"]),
+                    [
+                        {
+                            "id": f"approved-write-{index}",
+                            "tool": "calendar.create",
+                            "arguments": {
+                                "summary": f"A11 approval history {index}",
+                                "start": f"2030-01-0{index + 1}T09:00:00-08:00",
+                                "end": f"2030-01-0{index + 1}T09:30:00-08:00",
+                            },
+                        }
+                    ],
+                )
+                waiting = agency_plan.execute_next(
+                    plan["id"],
+                    lambda *_args, **_kwargs: SimpleNamespace(
+                        ok=True,
+                        message="must await approval",
+                    ),
+                )
+                self.assertEqual(waiting["status"], "awaiting_approval")
+                step = waiting["steps"][0]
+                approved = agency_plan.approve_step(
+                    plan["id"],
+                    str(step["id"]),
+                    protected_executor,
+                )
+                self.assertIn(
+                    approved["steps"][0]["status"],
+                    {"awaiting_verification", "verified"},
+                )
+
+            preference = agency_self_model.get(
+                "preference",
+                preference_key,
+            )
+            self.assertIsNotNone(preference)
+            assert preference is not None
+            self.assertEqual(
+                preference["source_kind"],
+                "inferred_behavior",
+            )
+            self.assertGreaterEqual(
+                len(
+                    preference["value"].get(
+                        "supporting_approval_event_ids",
+                        [],
+                    )
+                ),
+                3,
+            )
+
+            final_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "post-inference-protected-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A11 still requires approval",
+                            "start": "2030-01-10T09:00:00-08:00",
+                            "end": "2030-01-10T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            executor_calls: list[str] = []
+            waiting_after_inference = agency_plan.execute_next(
+                final_plan["id"],
+                lambda tool, _args, **_kwargs: executor_calls.append(tool),
+            )
+            self.assertEqual(executor_calls, [])
+            self.assertEqual(
+                waiting_after_inference["status"],
+                "awaiting_approval",
+            )
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(
+                evaluation["evidence"][
+                    "inferred_preference_learned_in_session"
+                ]
+            )
+            self.assertGreaterEqual(
+                len(
+                    evaluation["evidence"][
+                        "preference_inference_provenance_events"
+                    ]
+                ),
+                1,
+            )
+            self.assertTrue(
+                evaluation["evidence"][
+                    "protected_action_waited_for_approval"
+                ]
+            )
+            self.assertTrue(
+                evaluation["evidence"][
+                    "permission_policy_remained_authoritative"
+                ]
+            )
+
+            finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["receipt_created"])
+            self.assertEqual(finalized["receipt"]["gate"], "A11")
+
+    def test_a11_direct_inferred_label_without_behavioral_provenance_fails(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A11 Direct Label Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A11 Direct Label Guard scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a11-direct-label",
+        )
+        preference_key = agency_self_model.approval_preference_key(
+            "calendar.create"
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A11",
+                desired_state_id=str(state["id"]),
+                parameters={
+                    "tool": "calendar.create",
+                    "preference_key": preference_key,
+                },
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            agency_self_model.upsert(
+                "preference",
+                preference_key,
+                {
+                    "behavior": (
+                        "automatically handle routine calendar holds "
+                        "without asking"
+                    )
+                },
+                confidence=0.99,
+                source_kind="inferred_behavior",
+                source_ref="forged-direct-inference-label",
+            )
+            plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A11 direct-label guard",
+                            "start": "2030-01-11T09:00:00-08:00",
+                            "end": "2030-01-11T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not execute",
+                ),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        inference_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "a behavior-derived preference has persisted"
+            )
+        )
+        self.assertFalse(inference_check["passed"])
+        self.assertFalse(
+            evaluation["evidence"][
+                "inferred_preference_learned_in_session"
+            ]
+        )
+
+    def test_a11_explicit_policy_source_does_not_count_as_inferred_preference(self) -> None:
+        entity_id = world_model.ensure_entity("project", "Explicit Policy A11")
+        state = desired_state.create_desired_state(
+            "Explicit Policy A11 scheduled",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "scheduled",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a11-explicit-policy",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "Explicit policy A11",
+                        "start": "2030-01-01T15:00:00-08:00",
+                        "end": "2030-01-01T15:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A11",
+                desired_state_id=str(state["id"]),
+                parameters={
+                    "tool": "calendar.create",
+                    "preference_key": "calendar_autonomy_explicit",
+                },
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            agency_self_model.upsert(
+                "preference",
+                "calendar_autonomy_explicit",
+                {"behavior": "automatically handle routine calendar holds"},
+                confidence=1.0,
+                source_kind="explicit_policy",
+                source_ref="real-a11-explicit-policy-source",
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must not execute",
+                ),
+            )
+            self.assertEqual(waiting["status"], "awaiting_approval")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        inferred_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "a behavior-derived preference has persisted"
+            )
+        )
+        self.assertFalse(inferred_check["passed"])
+
+    def test_a12_evaluator_requires_complete_causal_production_path(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A12 Production Path")
+        state = desired_state.create_desired_state(
+            "A12 Production Path complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-production-path",
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            first_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "private",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "A12 private context"},
+                    },
+                    {
+                        "id": "public",
+                        "tool": "web.search",
+                        "arguments": {"query": "A12 public evidence", "num": 5},
+                        "depends_on": ["private"],
+                    },
+                    {
+                        "id": "deliberate",
+                        "tool": "agency.deliberate",
+                        "arguments": {
+                            "question": "Which A12 path should be used?",
+                            "context": "Private: ${private.message}; Public: ${public.message}",
+                        },
+                        "depends_on": ["private", "public"],
+                    },
+                    {
+                        "id": "write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A12 first path",
+                            "start": "2030-01-01T09:00:00-08:00",
+                            "end": "2030-01-01T09:30:00-08:00",
+                        },
+                        "depends_on": ["deliberate"],
+                    },
+                ],
+                summary="A12 first causal path",
+            )
+
+            barrier = threading.Barrier(2)
+
+            def worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": "path-one" if role == "evidence" else "path-two",
+                    "claims": [
+                        {
+                            "claim": f"{role} A12 claim",
+                            "confidence": 0.65,
+                            "evidence": "Reasoning from supplied context.",
+                            "source": "reasoning",
+                        }
+                    ],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            def synth(
+                q: str,
+                ctx: str,
+                outputs: list[dict],
+                disagreements: list[dict],
+            ) -> dict:
+                return {
+                    "answer": "Preserve both approaches.",
+                    "consensus": [],
+                    "disagreements": [{"issue": "A12 path choice"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.55,
+                }
+
+            def read_and_deliberate_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+                from jarvis_mrb.tool_audit import current_agency_step_id
+
+                if tool == "agency.deliberate":
+                    with patch.object(
+                        agency_deliberation,
+                        "_model_worker",
+                        worker,
+                    ), patch.object(
+                        agency_deliberation,
+                        "_model_synthesizer",
+                        synth,
+                    ):
+                        result = agency_deliberation.deliberate(
+                            str(args.get("question") or ""),
+                            context=str(args.get("context") or ""),
+                            roles=["evidence", "skeptic"],
+                        )
+                    reply = SimpleNamespace(
+                        ok=True,
+                        message=str(result["synthesis"]["answer"]),
+                    )
+                else:
+                    reply = SimpleNamespace(
+                        ok=True,
+                        message=f"{tool} real-path observation",
+                    )
+                world_model.record_tool_execution(
+                    tool,
+                    args,
+                    ok=True,
+                    message=reply.message,
+                    agency_step_id=current_agency_step_id(),
+                )
+                return reply
+
+            agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
+            agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
+            agency_plan.execute_next(first_plan["id"], read_and_deliberate_executor)
+
+            external_change_id = world_model.record_event(
+                "calendar.context_enriched",
+                "A12 Production Path external timing changed.",
+                source_kind="calendar_enriched",
+                source_ref="real-a12-production:change",
+                evidence="External calendar state changed after deliberation.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            invalidated = agency_plan.execute_next(
+                first_plan["id"],
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("stale A12 write must not run")
+                ),
+            )
+            self.assertEqual(invalidated["status"], "needs_replan")
+
+            second_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "write-replanned",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "A12 replanned write",
+                            "start": "2030-01-01T10:00:00-08:00",
+                            "end": "2030-01-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+                summary="A12 replanned path",
+            )
+            self.assertEqual(
+                second_plan["replaces_plan_id"],
+                first_plan["id"],
+            )
+            self.assertEqual(
+                second_plan["replan_cause_event_id"],
+                invalidated["invalidation_event_id"],
+            )
+            self.assertGreater(second_plan["replan_cause_event_id"], 0)
+            waiting = agency_plan.execute_next(
+                second_plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(ok=True, message="unused"),
+            )
+            step = waiting["steps"][0]
+            self.assertEqual(step["status"], "awaiting_approval")
+
+            def protected_executor(tool: str, args: dict, **kwargs: object) -> SimpleNamespace:
+                from jarvis_mrb.tool_audit import current_agency_step_id
+
+                agency_step_id = current_agency_step_id()
+                reply = SimpleNamespace(
+                    ok=True,
+                    message="Calendar accepted A12 replanned write.",
+                    data={"event_id": "a12-replanned-event"},
+                )
+                action_event_id = world_model.record_tool_execution(
+                    tool,
+                    args,
+                    ok=True,
+                    message=reply.message,
+                    agency_step_id=agency_step_id,
+                )
+                world_verification.register_execution(
+                    tool,
+                    args,
+                    reply,
+                    action_event_id=action_event_id,
+                    agency_step_id=agency_step_id,
+                )
+                return reply
+
+            approved = agency_plan.approve_step(
+                second_plan["id"],
+                step["id"],
+                protected_executor,
+            )
+            verification_id = str(approved["steps"][0]["verification_id"])
+            self.assertTrue(verification_id)
+
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=("verified", "Independent calendar read-back found the event."),
+            ):
+                verified = world_verification.check_one(verification_id, force=True)
+            self.assertEqual(verified["status"], "verified")
+
+            conn = sqlite3.connect(self.db)
+            conn.row_factory = sqlite3.Row
+            try:
+                verification_event = conn.execute(
+                    """
+                    SELECT id FROM events
+                    WHERE event_type='verification.verified'
+                      AND source_kind='jarvis_verifier'
+                    ORDER BY id DESC LIMIT 1
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(verification_event)
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                source_event_id=int(verification_event["id"]),
+                evidence="Independent verification completed the A12 desired state.",
+            )
+            completed = agency_plan.reconcile_plan(second_plan["id"])
+            self.assertEqual(completed["status"], "completed")
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(evaluation["passed"], evaluation["checks"])
+            self.assertTrue(evaluation["evidence"]["private_information_retrieval"])
+            self.assertTrue(evaluation["evidence"]["public_research"])
+            self.assertTrue(evaluation["evidence"]["parallel_analysis"])
+            self.assertTrue(evaluation["evidence"]["protected_external_action"])
+            self.assertTrue(
+                evaluation["evidence"]["protected_action_approval_boundary"]
+            )
+            self.assertTrue(evaluation["evidence"]["independent_outcome_verification"])
+            self.assertTrue(evaluation["evidence"]["replan_after_injected_change"])
+            self.assertTrue(evaluation["evidence"]["final_desired_state_satisfied"])
+            self.assertTrue(
+                evaluation["evidence"]["final_satisfaction_followed_verified_action"]
+            )
+            self.assertTrue(
+                evaluation["evidence"]["final_satisfaction_derived_from_verified_action"]
+            )
+
+            causal = next(
+                item["evidence"]
+                for item in evaluation["checks"]
+                if item["name"].startswith("external reality change caused")
+            )
+            self.assertTrue(
+                any(external_change_id in item["external_event_ids"] for item in causal)
+            )
+
+    def test_a12_disconnected_research_cannot_be_combined_with_unrelated_replan(self) -> None:
+        entity_id = world_model.ensure_entity(
+            "project",
+            "A12 Disconnected Branch Guard",
+        )
+        state = desired_state.create_desired_state(
+            "A12 Disconnected Branch Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-disconnected-branch",
+        )
+
+        barrier = threading.Barrier(2)
+
+        def worker(role: str, _question: str, _context: str) -> dict:
+            barrier.wait(timeout=2)
+            time.sleep(0.05)
+            return {
+                "conclusion": role,
+                "claims": [],
+                "risks": [],
+                "unknowns": [],
+            }
+
+        def disconnected_synth(
+            q: str,
+            ctx: str,
+            outputs: list[dict],
+            disagreements: list[dict],
+        ) -> dict:
+            return {
+                "answer": "Disconnected research synthesis.",
+                "consensus": [],
+                "disagreements": [{"issue": "disconnected branch"}],
+                "unknowns": [],
+                "recommended_next_evidence": [],
+                "confidence": 0.5,
+            }
+
+        def research_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            if tool == "agency.deliberate":
+                with patch.object(
+                    agency_deliberation,
+                    "_model_worker",
+                    worker,
+                ), patch.object(
+                    agency_deliberation,
+                    "_model_synthesizer",
+                    disconnected_synth,
+                ):
+                    result = agency_deliberation.deliberate(
+                        str(args.get("question") or ""),
+                        context=str(args.get("context") or ""),
+                        roles=["evidence", "skeptic"],
+                    )
+                reply = SimpleNamespace(
+                    ok=True,
+                    message=str(result["synthesis"]["answer"]),
+                )
+            else:
+                reply = SimpleNamespace(
+                    ok=True,
+                    message=f"{tool} disconnected research observation",
+                )
+            world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=current_agency_step_id(),
+            )
+            return reply
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted disconnected-branch final write.",
+                data={"event_id": "a12-disconnected-final"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            research_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "private",
+                        "tool": "knowledge.search",
+                        "arguments": {"query": "disconnected private context"},
+                    },
+                    {
+                        "id": "public",
+                        "tool": "web.search",
+                        "arguments": {"query": "disconnected public evidence"},
+                        "depends_on": ["private"],
+                    },
+                    {
+                        "id": "deliberate",
+                        "tool": "agency.deliberate",
+                        "arguments": {
+                            "question": "Analyze disconnected evidence",
+                            "context": "${private.message} ${public.message}",
+                        },
+                        "depends_on": ["private", "public"],
+                    },
+                ],
+            )
+            for _ in range(3):
+                agency_plan.execute_next(
+                    research_plan["id"],
+                    research_executor,
+                )
+
+            unrelated_plan = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "unrelated-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Unrelated stale path",
+                            "start": "2030-02-01T09:00:00-08:00",
+                            "end": "2030-02-01T09:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            external_change_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Disconnected branch external timing changed.",
+                source_kind="calendar_enriched",
+                source_ref="real-a12-disconnected:change",
+                evidence="This change belongs to the unrelated plan branch.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            invalidated = agency_plan.execute_next(
+                unrelated_plan["id"],
+                lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("stale unrelated write must not run")
+                ),
+            )
+            self.assertEqual(invalidated["status"], "needs_replan")
+
+            replacement = agency_plan.create_plan(
+                str(state["id"]),
+                [
+                    {
+                        "id": "replacement-write",
+                        "tool": "calendar.create",
+                        "arguments": {
+                            "summary": "Disconnected replacement",
+                            "start": "2030-02-01T10:00:00-08:00",
+                            "end": "2030-02-01T10:30:00-08:00",
+                        },
+                    }
+                ],
+            )
+            self.assertEqual(
+                replacement["replaces_plan_id"],
+                unrelated_plan["id"],
+            )
+            self.assertEqual(
+                replacement["replan_cause_event_id"],
+                invalidated["invalidation_event_id"],
+            )
+
+            waiting = agency_plan.execute_next(
+                replacement["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must await approval",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                replacement["id"],
+                waiting["steps"][0]["id"],
+                protected_executor,
+            )
+            verification_id = str(
+                approved["steps"][0]["verification_id"]
+            )
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Independent read-back verified disconnected replacement.",
+                ),
+            ):
+                verified = world_verification.check_one(
+                    verification_id,
+                    force=True,
+                )
+            self.assertEqual(verified["status"], "verified")
+
+            conn = sqlite3.connect(self.db)
+            conn.row_factory = sqlite3.Row
+            try:
+                verification_event = conn.execute(
+                    """
+                    SELECT id FROM events
+                    WHERE event_type='verification.verified'
+                      AND source_kind='jarvis_verifier'
+                      AND source_ref=?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (verification_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(verification_event)
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                source_event_id=int(verification_event["id"]),
+                evidence=(
+                    "The disconnected replacement really completed the goal, "
+                    "but its research was not on the invalidated branch."
+                ),
+            )
+            agency_plan.reconcile_plan(replacement["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+
+        self.assertFalse(evaluation["passed"])
+        self.assertTrue(evaluation["evidence"]["final_desired_state_satisfied"])
+        self.assertFalse(evaluation["evidence"]["private_information_retrieval"])
+        self.assertFalse(evaluation["evidence"]["public_research"])
+        self.assertFalse(evaluation["evidence"]["parallel_analysis"])
+        causal_check = next(
+            item for item in evaluation["checks"]
+            if item["name"].startswith(
+                "external reality change caused invalidation"
+            )
+        )
+        self.assertFalse(causal_check["passed"])
+        self.assertGreater(
+            external_change_id,
+            int(session["baseline"]["max_event_id"]),
+        )
+
+    def test_a12_unrelated_later_event_cannot_supply_final_completion_provenance(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A12 Provenance Guard")
+        state = desired_state.create_desired_state(
+            "A12 Provenance Guard complete",
+            [
+                {
+                    "kind": "belief_equals",
+                    "entity_id": entity_id,
+                    "predicate": "complete",
+                    "value": True,
+                }
+            ],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-provenance-guard",
+        )
+        plan = agency_plan.create_plan(
+            str(state["id"]),
+            [
+                {
+                    "id": "write",
+                    "tool": "calendar.create",
+                    "arguments": {
+                        "summary": "A12 provenance guard",
+                        "start": "2030-01-01T14:00:00-08:00",
+                        "end": "2030-01-01T14:30:00-08:00",
+                    },
+                }
+            ],
+        )
+
+        def protected_executor(
+            tool: str,
+            args: dict,
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            from jarvis_mrb.tool_audit import current_agency_step_id
+
+            step_id = current_agency_step_id()
+            reply = SimpleNamespace(
+                ok=True,
+                message="Calendar accepted provenance-guard action.",
+                data={"event_id": "a12-provenance-guard-event"},
+            )
+            action_event_id = world_model.record_tool_execution(
+                tool,
+                args,
+                ok=True,
+                message=reply.message,
+                agency_step_id=step_id,
+            )
+            world_verification.register_execution(
+                tool,
+                args,
+                reply,
+                action_event_id=action_event_id,
+                agency_step_id=step_id,
+            )
+            return reply
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            waiting = agency_plan.execute_next(
+                plan["id"],
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    ok=True,
+                    message="must wait",
+                ),
+            )
+            approved = agency_plan.approve_step(
+                plan["id"],
+                waiting["steps"][0]["id"],
+                protected_executor,
+            )
+            verification_id = str(approved["steps"][0]["verification_id"])
+            with patch.object(
+                world_verification,
+                "_observe",
+                return_value=(
+                    "verified",
+                    "Independent read-back verified the protected action.",
+                ),
+            ):
+                verified = world_verification.check_one(
+                    verification_id,
+                    force=True,
+                )
+            self.assertEqual(verified["status"], "verified")
+
+            unrelated_event_id = world_model.record_event(
+                "calendar.context_enriched",
+                "Unrelated later fact involving the same project.",
+                source_kind="calendar_enriched",
+                source_ref="real:a12-provenance-guard:unrelated",
+                evidence="This event is deliberately not the verification event.",
+                participants=[(entity_id, "subject", 1.0)],
+            )
+            world_model.assert_belief(
+                entity_id,
+                "complete",
+                value=True,
+                source_event_id=unrelated_event_id,
+                evidence="Completion was attributed to an unrelated later event.",
+            )
+            agency_plan.reconcile_plan(plan["id"])
+
+            evaluation = agency_real_acceptance.evaluate_session(session["id"])
+            provenance_check = next(
+                item for item in evaluation["checks"]
+                if item["name"].startswith(
+                    "final satisfaction evidence derives from"
+                )
+            )
+            self.assertFalse(provenance_check["passed"])
+            self.assertFalse(
+                evaluation["evidence"][
+                    "final_satisfaction_derived_from_verified_action"
+                ]
+            )
+            self.assertFalse(evaluation["passed"])
+
+    def test_a12_parallel_analysis_must_belong_to_its_own_agency_step(self) -> None:
+        entity_id = world_model.ensure_entity("project", "A12 Linked Deliberation")
+        state = desired_state.create_desired_state(
+            "A12 Linked Deliberation complete",
+            [{"kind": "belief_equals", "entity_id": entity_id, "predicate": "complete", "value": True}],
+            authority={"agency_enabled": True},
+            source_kind="test",
+            source_ref="real:a12-linked",
+        )
+        plan = agency_plan.create_plan(
+            state["id"],
+            [
+                {
+                    "id": "deliberate",
+                    "tool": "agency.deliberate",
+                    "arguments": {"question": "Choose path", "context": "test"},
+                }
+            ],
+        )
+
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A12",
+                desired_state_id=str(state["id"]),
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+
+            agency_deliberation.deliberate(
+                "Unrelated deliberation",
+                roles=["evidence", "skeptic"],
+                worker=lambda role, q, ctx: {
+                    "conclusion": role,
+                    "claims": [],
+                    "risks": [],
+                    "unknowns": [],
+                },
+                synthesizer=lambda q, ctx, outputs, disagreements: {
+                    "answer": "unrelated",
+                    "consensus": [],
+                    "disagreements": [{"issue": "unrelated"}],
+                    "unknowns": [],
+                    "recommended_next_evidence": [],
+                    "confidence": 0.5,
+                },
+            )
+            unrelated_eval = agency_real_acceptance.evaluate_session(session["id"])
+            parallel_check = next(
+                item for item in unrelated_eval["checks"]
+                if item["name"].startswith(
+                    "parallel deliberation consumed those reads"
+                )
+            )
+            self.assertFalse(parallel_check["passed"])
+
+            barrier = threading.Barrier(2)
+
+            def linked_worker(role: str, q: str, ctx: str) -> dict:
+                barrier.wait(timeout=2)
+                time.sleep(0.05)
+                return {
+                    "conclusion": "yes" if role == "evidence" else "no",
+                    "claims": [],
+                    "risks": [],
+                    "unknowns": [],
+                }
+
+            def executor(tool: str, args: dict, **kwargs: object):
+                result = agency_deliberation.deliberate(
+                    str(args.get("question") or ""),
+                    context=str(args.get("context") or ""),
+                    roles=["evidence", "skeptic"],
+                    worker=linked_worker,
+                    synthesizer=lambda q, ctx, outputs, disagreements: {
+                        "answer": "disagreement",
+                        "consensus": [],
+                        "disagreements": [{"issue": "linked disagreement"}],
+                        "unknowns": [],
+                        "recommended_next_evidence": [],
+                        "confidence": 0.5,
+                    },
+                )
+                return type("Reply", (), {"ok": True, "message": result["synthesis"]["answer"]})()
+
+            agency_plan.execute_next(plan["id"], executor)
+            linked_eval = agency_real_acceptance.evaluate_session(session["id"])
+            linked_parallel_check = next(
+                item for item in linked_eval["checks"]
+                if item["name"].startswith(
+                    "parallel deliberation consumed those reads"
+                )
+            )
+            self.assertFalse(linked_parallel_check["passed"])
+            self.assertFalse(linked_eval["evidence"]["parallel_analysis"])
+
+    def test_receipt_reuse_reconciles_completed_session_to_winning_evidence(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Receipt Reconciliation")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Reconcile low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"reconcile-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Reconcile high",
+                desired_state_id=state_id,
+                dedup_key="reconcile-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            agency_attention.consider(
+                kind="exception",
+                message="Reconcile high",
+                desired_state_id=state_id,
+                dedup_key="reconcile-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            winning = agency_real_acceptance.evaluate_session(session["id"])
+            self.assertTrue(winning["passed"])
+
+            context = agency_release._real_receipt_context_payload(
+                gate="A8",
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+                harness="agency-real-gate-session-v1",
+                checks=list(winning["checks"]),
+                evidence=dict(winning["evidence"]),
+                trace_ref="",
+                session_id=session["id"],
+            )
+            with agency_release._real_receipt_recording_context(context):
+                receipt = agency_release.record_real_gate_receipt(
+                    "A8",
+                    deployment_sha_value=SHA_A,
+                    environment=ENV,
+                    harness="agency-real-gate-session-v1",
+                    checks=list(winning["checks"]),
+                    evidence=dict(winning["evidence"]),
+                    session_id=session["id"],
+                )
+
+            # Simulate a later evaluator snapshot landing after the receipt was
+            # minted but before the running session was marked completed.
+            conn = sqlite3.connect(self.db)
+            try:
+                divergent = dict(winning)
+                divergent["evidence"] = {
+                    **dict(winning["evidence"]),
+                    "diagnostic_noise": "later snapshot",
+                }
+                conn.execute(
+                    """
+                    UPDATE agency_real_gate_sessions
+                    SET last_evaluation_json=?
+                    WHERE id=? AND status='running'
+                    """,
+                    (
+                        json.dumps(divergent, ensure_ascii=False, sort_keys=True),
+                        session["id"],
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            with patch.object(
+                agency_real_acceptance,
+                "evaluate_session",
+                return_value=divergent,
+            ):
+                finalized = agency_real_acceptance.finalize_session(session["id"])
+            self.assertTrue(finalized["passed"])
+            self.assertFalse(finalized["receipt_created"])
+            self.assertTrue(finalized["receipt_reused"])
+            self.assertEqual(finalized["receipt"]["id"], receipt["id"])
+
+            completed = agency_real_acceptance.get_session(session["id"])
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(
+                completed["last_evaluation"]["evidence"],
+                receipt["evidence"],
+            )
+            validation = agency_release.validate_real_gate_receipt(receipt["id"])
+            self.assertTrue(validation["valid"], validation)
+
+    def test_concurrent_finalizers_converge_on_one_immutable_receipt(self) -> None:
+        emitted: list[str] = []
+        state_id, _ = self._state_with_plan("Concurrent Attention Gate")
+        with self._patch_identity():
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Concurrent low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"concurrent-finalize-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=emitted.append,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="Concurrent finalization exception",
+                desired_state_id=state_id,
+                dedup_key="concurrent-finalize-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+            agency_attention.consider(
+                kind="exception",
+                message="Concurrent finalization exception",
+                desired_state_id=state_id,
+                dedup_key="concurrent-finalize-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=emitted.append,
+            )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(agency_real_acceptance.finalize_session, session["id"])
+                    for _ in range(2)
+                ]
+                results = [future.result() for future in futures]
+
+        self.assertTrue(all(item["passed"] for item in results))
+        receipt_ids = {item["receipt"]["id"] for item in results}
+        self.assertEqual(len(receipt_ids), 1)
+        self.assertEqual(sum(1 for item in results if item.get("receipt_created")), 1)
+        self.assertEqual(sum(1 for item in results if item.get("receipt_reused")), 1)
+        stored = agency_release.list_real_gate_receipts(
+            deployment_sha_value=SHA_A,
+            environment=ENV,
+        )
+        self.assertEqual(len([item for item in stored if item["gate"] == "A8"]), 1)
+
+    def test_a12_trace_writes_do_not_overwrite_concurrent_evidence(self) -> None:
+        session = {
+            "id": "agency-real-session:trace-race",
+            "deployment_sha": SHA_A,
+            "environment_fingerprint": ENV,
+            "desired_state_id": "desired:trace-race",
+            "started_at": "2030-01-01T00:00:00+00:00",
+        }
+        base = {
+            "session_id": session["id"],
+            "gate": "A12",
+            "passed": True,
+            "checks": [{"name": "check", "passed": True, "evidence": "one"}],
+            "evidence": {"real_services": True},
+            "manual_orchestration_events": [],
+        }
+        first_eval = {**base, "evaluated_at": "2030-01-01T00:01:00+00:00"}
+        second_eval = {**base, "evaluated_at": "2030-01-01T00:02:00+00:00"}
+
+        first_path = Path(agency_real_acceptance._write_a12_trace(session, first_eval))
+        first_bytes = first_path.read_bytes()
+        second_path = Path(agency_real_acceptance._write_a12_trace(session, second_eval))
+
+        self.assertNotEqual(first_path, second_path)
+        self.assertEqual(first_path.read_bytes(), first_bytes)
+        self.assertTrue(second_path.is_file())
+
+    def test_sha_change_mid_session_prevents_receipt(self) -> None:
+        state_id, _ = self._state_with_plan("SHA Attention Gate")
+        with self._patch_identity(SHA_A):
+            session = agency_real_acceptance.start_session(
+                "A8",
+                desired_state_id=state_id,
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            )
+            for index in range(5):
+                agency_attention.consider(
+                    kind="background",
+                    message=f"Low {index}",
+                    desired_state_id=state_id,
+                    dedup_key=f"sha-low:{index}",
+                    benefit=5,
+                    urgency=0,
+                    confidence=1.0,
+                    attention_cost=30,
+                    emitter=lambda _message: None,
+                )
+            agency_attention.consider(
+                kind="exception",
+                message="High",
+                desired_state_id=state_id,
+                dedup_key="sha-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=lambda _message: None,
+            )
+            agency_attention.consider(
+                kind="exception",
+                message="High",
+                desired_state_id=state_id,
+                dedup_key="sha-high",
+                benefit=100,
+                urgency=100,
+                confidence=1.0,
+                attention_cost=5,
+                emitter=lambda _message: None,
+            )
+
+        with self._patch_identity(SHA_B):
+            result = agency_real_acceptance.finalize_session(session["id"])
+
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["receipt_created"])
+        sha_check = next(
+            item for item in result["evaluation"]["checks"]
+            if item["name"] == "deployment SHA did not change during real test"
+        )
+        self.assertFalse(sha_check["passed"])
+        self.assertEqual(
+            agency_release.list_real_gate_receipts(
+                deployment_sha_value=SHA_A,
+                environment=ENV,
+            ),
+            [],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

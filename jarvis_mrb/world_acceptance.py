@@ -408,7 +408,14 @@ def run_synthetic_acceptance() -> dict[str, Any]:
         verification_id = world_verification.register_execution(
             "gmail.send",
             followup_args,
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={
+                    "message_id": "acceptance-apollo-followup",
+                    "email": "daniel@example.com",
+                },
+            ),
             action_event_id=action_event,
             executive_decision_id=decision_id or None,
         )

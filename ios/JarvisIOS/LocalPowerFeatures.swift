@@ -318,6 +318,13 @@ final class LocalPowerFeaturesController: ObservableObject {
         let proactiveThreshold: String
         let rollingAudioMemoryEnabled: Bool
         let localSensorContextEnabled: Bool
+        let sensorOpportunitiesEnabled: Bool
+        let weatherContextEnabled: Bool
+        let guardianEnabled: Bool
+        let missionControlEnabled: Bool
+        let meshEnabled: Bool
+        let conductorEnabled: Bool
+        let exactVoiceAppActionsEnabled: Bool
     }
 
     init(
@@ -895,7 +902,14 @@ final class LocalPowerFeaturesController: ObservableObject {
                 knownPeopleRecognitionEnabled: appModel.settings.knownPeopleRecognitionEnabled,
                 proactiveThreshold: appModel.settings.proactiveThreshold,
                 rollingAudioMemoryEnabled: appModel.settings.rollingAudioMemoryEnabled,
-                localSensorContextEnabled: appModel.settings.localSensorContextEnabled
+                localSensorContextEnabled: appModel.settings.localSensorContextEnabled,
+                sensorOpportunitiesEnabled: appModel.settings.sensorOpportunitiesEnabled,
+                weatherContextEnabled: appModel.settings.weatherContextEnabled,
+                guardianEnabled: appModel.settings.guardianEnabled,
+                missionControlEnabled: appModel.settings.missionControlEnabled,
+                meshEnabled: appModel.settings.meshEnabled,
+                conductorEnabled: appModel.settings.conductorEnabled,
+                exactVoiceAppActionsEnabled: appModel.settings.exactVoiceAppActionsEnabled
             )
         }
 
@@ -914,6 +928,23 @@ final class LocalPowerFeaturesController: ObservableObject {
             appModel.settings.localVisualHistoryEnabled = false
             appModel.settings.knownPeopleRecognitionEnabled = false
             appModel.settings.rollingAudioMemoryEnabled = false
+            appModel.settings.sensorOpportunitiesEnabled = false
+            appModel.settings.weatherContextEnabled = false
+            appModel.settings.guardianEnabled = false
+            appModel.settings.missionControlEnabled = false
+            appModel.settings.meshEnabled = false
+            appModel.settings.conductorEnabled = false
+            appModel.settings.exactVoiceAppActionsEnabled = false
+            appModel.missionControl.clearNavigationGrants()
+            // Privacy mode can be selected outside Mesh. Revoke any live
+            // Conductor grant and view even when the Mesh tab is not mounted.
+            let meshModel = appModel
+            Task { @MainActor [weak meshModel] in
+                guard let meshModel else { return }
+                await meshModel.realityMesh.stopScreen()
+                await meshModel.realityMesh.revokeConductor()
+                meshModel.realityMesh.clearSensitiveViews()
+            }
         }
     }
 
@@ -927,6 +958,13 @@ final class LocalPowerFeaturesController: ObservableObject {
         appModel.settings.proactiveThreshold = snapshot.proactiveThreshold
         appModel.settings.rollingAudioMemoryEnabled = snapshot.rollingAudioMemoryEnabled
         appModel.settings.localSensorContextEnabled = snapshot.localSensorContextEnabled
+        appModel.settings.sensorOpportunitiesEnabled = snapshot.sensorOpportunitiesEnabled
+        appModel.settings.weatherContextEnabled = snapshot.weatherContextEnabled
+        appModel.settings.guardianEnabled = snapshot.guardianEnabled
+        appModel.settings.missionControlEnabled = snapshot.missionControlEnabled
+        appModel.settings.meshEnabled = snapshot.meshEnabled
+        appModel.settings.conductorEnabled = snapshot.conductorEnabled
+        appModel.settings.exactVoiceAppActionsEnabled = snapshot.exactVoiceAppActionsEnabled
         savedModeState = nil
     }
 

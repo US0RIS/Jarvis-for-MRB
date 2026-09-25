@@ -8,6 +8,14 @@ from typing import Any
 
 from jarvis_mrb.world_model import DB_PATH, status as world_status
 
+_AGENCY_REQUIRED_TABLES = {
+    "desired_states", "desired_state_evaluations", "desired_state_watches",
+    "agency_plans", "agency_steps", "agency_runtime_state", "agency_settings", "agency_runtime_boots",
+    "agency_deliberations", "agency_deliberation_workers", "agency_attention_events",
+    "agency_capability_gaps", "agency_decision_cases", "agency_decision_branches",
+    "agency_self_model_entries", "agency_real_gate_sessions",
+    "agency_real_gate_receipts", "agency_release_validation_runs", "agency_installation_identity",
+}
 _REQUIRED_TABLES = {
     "entities", "external_ids", "aliases", "events", "event_entities", "beliefs", "commitments",
     "entity_relations", "relation_evidence", "intentions", "intention_entities", "intention_commitments",
@@ -15,6 +23,39 @@ _REQUIRED_TABLES = {
     "executive_attention", "executive_decisions", "action_verifications", "verification_observations",
     "runtime_subsystem_health", "gmail_attachment_sync_state", "world_schema_meta", "world_schema_history",
 }
+_AGENCY_REQUIRED_COLUMNS: dict[str, set[str]] = {
+    "desired_states": {"criteria_json", "authority_json", "state", "generation"},
+    "agency_plans": {"desired_state_id", "generation", "status", "relevance_hash"},
+    "agency_steps": {
+        "plan_id", "status", "risk", "requires_confirmation", "approval_digest",
+        "verification_id", "attempt_count", "started_at", "finished_at",
+    },
+    "agency_runtime_boots": {"started_at", "deployment_sha", "process_id"},
+    "agency_deliberations": {"agency_step_id", "disagreement_json", "status"},
+    "agency_capability_gaps": {
+        "desired_state_id", "capability", "observed_availability_json",
+        "proposed_tool_name", "status",
+    },
+    "agency_real_gate_sessions": {
+        "gate", "deployment_sha", "environment_fingerprint", "desired_state_id",
+        "parameters_json", "baseline_json", "session_hash", "status",
+        "last_evaluation_json", "receipt_id", "started_at", "completed_at",
+    },
+    "agency_real_gate_receipts": {
+        "gate", "deployment_sha", "environment_fingerprint", "checks_json",
+        "evidence_json", "trace_ref", "trace_sha256", "session_id",
+        "receipt_hash", "recorded_at",
+    },
+    "agency_release_validation_runs": {
+        "harness", "deployment_sha", "environment_fingerprint", "compile_ok", "regression_ok",
+        "synthetic_ok", "diagnostics_ok", "tree_clean_before", "tree_clean_after",
+        "validation_hash", "recorded_at",
+    },
+    "agency_installation_identity": {"installation_id", "created_at"},
+    "action_verifications": {"agency_step_id", "status", "verifier"},
+}
+
+
 _STRONG_PERSON_PROJECT_ROLES = {
     "sender", "recipient", "attendee", "organizer", "owner", "assignee",
     "participant", "meeting_participant", "speaker", "requester", "beneficiary",
@@ -33,6 +74,16 @@ def _existing_tables(conn: sqlite3.Connection) -> set[str]:
     return {str(row["name"]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    try:
+        return {
+            str(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+    except sqlite3.OperationalError:
+        return set()
+
+
 def _parse_time(raw: str | None) -> datetime | None:
     text = str(raw or "").strip()
     if not text:
@@ -49,7 +100,7 @@ def _parse_time(raw: str | None) -> datetime | None:
     return value.astimezone()
 
 
-def validate() -> dict[str, Any]:
+def validate(*, require_agency: bool = False) -> dict[str, Any]:
     from jarvis_mrb.runtime_health import status as runtime_status
     from jarvis_mrb.world_document_versions import status as document_status
     from jarvis_mrb.world_executive import status as executive_status
@@ -114,9 +165,245 @@ def validate() -> dict[str, Any]:
             warnings.append(f"World database journal_mode is {journal_mode}, expected WAL after migration.")
 
         tables = _existing_tables(conn)
-        missing_tables = sorted(_REQUIRED_TABLES - tables)
+        required_tables = _REQUIRED_TABLES | (_AGENCY_REQUIRED_TABLES if require_agency else set())
+        missing_tables = sorted(required_tables - tables)
         if missing_tables:
             problems.append("Missing required world tables: " + ", ".join(missing_tables))
+
+        missing_agency_columns: dict[str, list[str]] = {}
+        if require_agency:
+            for table, required_columns in _AGENCY_REQUIRED_COLUMNS.items():
+                if table not in tables:
+                    continue
+                missing = sorted(required_columns - _table_columns(conn, table))
+                if missing:
+                    missing_agency_columns[table] = missing
+            for table, missing in sorted(missing_agency_columns.items()):
+                problems.append(
+                    f"Agency table {table} is missing required columns: "
+                    + ", ".join(missing)
+                )
+
+        agency_metrics: dict[str, Any] = {
+            "invalid_desired_states": 0,
+            "invalid_plan_states": 0,
+            "invalid_step_states": 0,
+            "multiple_current_plans": 0,
+            "orphan_plans": 0,
+            "orphan_verification_links": 0,
+            "awaiting_verification_without_id": 0,
+            "approval_plan_without_step": 0,
+            "invalid_real_session_states": 0,
+            "real_sessions_without_integrity_hash": 0,
+            "completed_real_sessions_without_receipt": 0,
+            "completed_real_session_receipt_mismatch": 0,
+            "orphan_real_gate_receipts": 0,
+            "running_real_sessions_with_receipt": 0,
+            "approval_capability_wrong_state": 0,
+            "installation_identity_count_invalid": 0,
+            "terminal_verification_event_mismatch": 0,
+            "independent_terminal_verification_without_observation": 0,
+            "unsafe_agency_permission_policy": 0,
+        }
+        if (
+            require_agency
+            and _AGENCY_REQUIRED_TABLES <= tables
+            and not missing_agency_columns
+        ):
+            valid_desired = ("active", "satisfied", "blocked", "paused", "retired")
+            desired_ph = ",".join("?" for _ in valid_desired)
+            agency_metrics["invalid_desired_states"] = int(conn.execute(
+                f"SELECT COUNT(*) FROM desired_states WHERE state NOT IN ({desired_ph})",
+                valid_desired,
+            ).fetchone()[0])
+
+            valid_plans = (
+                "active", "awaiting_approval", "awaiting_verification", "needs_replan",
+                "blocked", "completed", "superseded", "retired",
+            )
+            plan_ph = ",".join("?" for _ in valid_plans)
+            agency_metrics["invalid_plan_states"] = int(conn.execute(
+                f"SELECT COUNT(*) FROM agency_plans WHERE status NOT IN ({plan_ph})",
+                valid_plans,
+            ).fetchone()[0])
+
+            valid_steps = (
+                "pending", "awaiting_approval", "executing", "executed",
+                "awaiting_verification", "verified", "skipped", "failed", "blocked",
+            )
+            step_ph = ",".join("?" for _ in valid_steps)
+            agency_metrics["invalid_step_states"] = int(conn.execute(
+                f"SELECT COUNT(*) FROM agency_steps WHERE status NOT IN ({step_ph})",
+                valid_steps,
+            ).fetchone()[0])
+
+            current_plan_states = ("active", "awaiting_approval", "awaiting_verification", "needs_replan", "blocked")
+            current_ph = ",".join("?" for _ in current_plan_states)
+            agency_metrics["multiple_current_plans"] = len(conn.execute(
+                f"""
+                SELECT desired_state_id
+                FROM agency_plans
+                WHERE status IN ({current_ph})
+                GROUP BY desired_state_id
+                HAVING COUNT(*)>1
+                """,
+                current_plan_states,
+            ).fetchall())
+            agency_metrics["orphan_plans"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_plans p
+                LEFT JOIN desired_states d ON d.id=p.desired_state_id
+                WHERE d.id IS NULL
+                """
+            ).fetchone()[0])
+            agency_metrics["orphan_verification_links"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM action_verifications v
+                LEFT JOIN agency_steps s ON s.id=v.agency_step_id
+                WHERE v.agency_step_id!='' AND s.id IS NULL
+                """
+            ).fetchone()[0])
+            agency_metrics["awaiting_verification_without_id"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_steps
+                WHERE status='awaiting_verification' AND verification_id=''
+                """
+            ).fetchone()[0])
+            agency_metrics["approval_plan_without_step"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_plans p
+                WHERE p.status='awaiting_approval'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM agency_steps s
+                    WHERE s.plan_id=p.id AND s.status='awaiting_approval'
+                  )
+                """
+            ).fetchone()[0])
+            agency_metrics["invalid_real_session_states"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE status NOT IN ('running','completed')
+                """
+            ).fetchone()[0])
+            agency_metrics["real_sessions_without_integrity_hash"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE session_hash=''
+                """
+            ).fetchone()[0])
+            agency_metrics["completed_real_sessions_without_receipt"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE status='completed' AND receipt_id=''
+                """
+            ).fetchone()[0])
+            agency_metrics["completed_real_session_receipt_mismatch"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM agency_real_gate_sessions s
+                LEFT JOIN agency_real_gate_receipts r ON r.id=s.receipt_id
+                WHERE s.status='completed'
+                  AND s.receipt_id!=''
+                  AND (
+                    r.id IS NULL
+                    OR r.session_id!=s.id
+                    OR r.gate!=s.gate
+                    OR r.deployment_sha!=s.deployment_sha
+                    OR r.environment_fingerprint!=s.environment_fingerprint
+                  )
+                """
+            ).fetchone()[0])
+            agency_metrics["orphan_real_gate_receipts"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM agency_real_gate_receipts r
+                LEFT JOIN agency_real_gate_sessions s ON s.id=r.session_id
+                WHERE r.session_id='' OR s.id IS NULL
+                """
+            ).fetchone()[0])
+            agency_metrics["running_real_sessions_with_receipt"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_real_gate_sessions
+                WHERE status='running' AND receipt_id!=''
+                """
+            ).fetchone()[0])
+            agency_metrics["approval_capability_wrong_state"] = int(conn.execute(
+                """
+                SELECT COUNT(*) FROM agency_steps
+                WHERE approval_digest!=''
+                  AND status NOT IN ('awaiting_approval','executing')
+                """
+            ).fetchone()[0])
+            identity_count = int(
+                conn.execute("SELECT COUNT(*) FROM agency_installation_identity").fetchone()[0]
+            )
+            agency_metrics["installation_identity_count_invalid"] = 0 if identity_count == 1 else 1
+            agency_metrics["terminal_verification_event_mismatch"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM action_verifications v
+                LEFT JOIN events e ON e.id=v.resolved_event_id
+                WHERE v.status IN ('verified','failed','timed_out','unverified')
+                  AND (
+                    e.id IS NULL
+                    OR e.source_kind!='jarvis_verifier'
+                    OR e.event_type!=('verification.' || v.status)
+                  )
+                """
+            ).fetchone()[0])
+            agency_metrics["independent_terminal_verification_without_observation"] = int(conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM action_verifications v
+                WHERE v.status IN ('verified','failed','timed_out')
+                  AND v.verifier NOT IN ('tool_return','return_value')
+                  AND NOT EXISTS (
+                    SELECT 1 FROM verification_observations o
+                    WHERE o.verification_id=v.id AND o.outcome=v.status
+                  )
+                """
+            ).fetchone()[0])
+            try:
+                from jarvis_mrb.permissions import _load as load_permission_policy
+                policy = dict(load_permission_policy())
+                unsafe_risks = [
+                    risk for risk in ("external_write", "destructive", "security")
+                    if str(policy.get(risk) or "") == "auto"
+                ]
+            except Exception:
+                unsafe_risks = ["permission-policy-unavailable"]
+            agency_metrics["unsafe_agency_permission_policy"] = len(unsafe_risks)
+
+            for key, label in (
+                ("invalid_desired_states", "Agency desired states with invalid lifecycle states"),
+                ("invalid_plan_states", "Agency plans with invalid lifecycle states"),
+                ("invalid_step_states", "Agency steps with invalid lifecycle states"),
+                ("multiple_current_plans", "Desired states with multiple current Agency plans"),
+                ("orphan_plans", "Agency plans without desired states"),
+                ("orphan_verification_links", "Action verifications pointing at missing Agency steps"),
+                ("awaiting_verification_without_id", "Agency steps awaiting verification without verification IDs"),
+                ("approval_plan_without_step", "Agency plans awaiting approval without an approval step"),
+                ("invalid_real_session_states", "REAL Agency sessions with invalid lifecycle states"),
+                ("real_sessions_without_integrity_hash", "REAL Agency sessions without integrity hashes"),
+                ("completed_real_sessions_without_receipt", "Completed REAL Agency sessions without receipts"),
+                ("completed_real_session_receipt_mismatch", "Completed REAL Agency sessions with mismatched receipts"),
+                ("orphan_real_gate_receipts", "REAL Agency receipts without matching sessions"),
+                ("approval_capability_wrong_state", "Agency approval capabilities attached to invalid step states"),
+                ("installation_identity_count_invalid", "Agency installation identity singleton is missing or invalid"),
+                ("terminal_verification_event_mismatch", "Terminal action verifications without matching verifier events"),
+                ("independent_terminal_verification_without_observation", "Independent terminal action verifications without matching observations"),
+                ("unsafe_agency_permission_policy", "Protected Agency risk classes configured for automatic execution or unavailable"),
+            ):
+                value = int(agency_metrics[key])
+                if value:
+                    problems.append(f"{label}: {value}")
+
+            running_with_receipt = int(agency_metrics["running_real_sessions_with_receipt"])
+            if running_with_receipt:
+                warnings.append(
+                    "REAL Agency sessions with receipts still marked running "
+                    f"(recoverable incomplete finalization): {running_with_receipt}"
+                )
 
         max_event = int(conn.execute("SELECT COALESCE(MAX(id),0) FROM events").fetchone()[0])
         linked_event = int(linker.get("last_linked_event_id") or 0)
@@ -371,6 +658,8 @@ def validate() -> dict[str, Any]:
         "schema_migrations": migrations,
         "migration_history_contiguous": migration_history == expected_history,
         "missing_required_tables": missing_tables,
+        "missing_agency_columns": missing_agency_columns,
+        "agency_required": bool(require_agency),
         "core": core,
         "linker": linker,
         "executive": executive,
@@ -404,6 +693,7 @@ def validate() -> dict[str, Any]:
         "verified_outcomes_without_evidence_events": verified_without_event,
         "pending_verifications_past_deadline": overdue_verifications,
         "unverified_outcomes": unverifiable,
+        "agency": agency_metrics,
         "attachment_backlog_remaining": bool(attachments.get("backlog_remaining")),
         "attachment_last_status": attachment_state,
         "degraded_subsystems": len(degraded_subsystems),

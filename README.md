@@ -1,10 +1,60 @@
 # Jarvis for MRB
 
-Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. It combines Ray-Ban Meta glasses, a native iPhone companion, a Windows reasoning/tool host, local language/vision/speech models, private Gmail/Calendar data, automation, audited web research, and explicit action verification into one coherent agent.
+Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. Its primary presence path is the iPhone/compatible Bluetooth microphone plus phone motion, opt-in GPS/geofences, separately opt-in Health data and public environmental sources. The optional camera-free MemoMind display is an I/O surface, not a sensor prerequisite. A Windows reasoning/tool host, local language/speech models, private Gmail/Calendar data, automation, audited web research and explicit action verification form the remaining system. Meta first-person vision and public-camera lookup remain optional capabilities.
 
 The project is not intended to be “a chatbot with lots of plugins.” The design goal is a single persistent system that can understand what the user is doing, remember durable facts and objectives, connect evidence across sources, decide what matters, act within explicit authority boundaries, and then independently verify whether consequential actions actually changed the outside world.
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
+
+## Life Fabric — reduce five years of ordinary friction
+
+**[Life Fabric](LIFE_FABRIC.md)** adds a private, user-enrolled everyday-life
+ledger with an actual iPhone **Life Fabric** workspace, timezone-aware
+readiness and dependency checks, classified completion receipts, manually
+recorded assets, six eight-step life-transition checklists, explicit
+cross-device continuation packets, a Friction Observatory for three distinct
+reported days, and bounded time-budget what-ifs. A separate
+**[five-year inconvenience catalog](LIFE_FRICTION_CATALOG.md)** maps all 17
+ordinary-life domains to implemented primitives and the external connectors
+or hardware still required. It is a source- and authorization-aware foundation,
+**not** a claim that Jarvis can already automate every scenario in the
+catalog, passively observe your habits, charge a card, or verify medical,
+financial or physical outcomes without the necessary provider access.
+Nothing is deployed on your devices merely because CI passes.
+
+## Human Extension v1 — executable first superpower slice
+
+**[Reality Lens](HUMAN_EXTENSION.md)** is the first deliberately non-chatbot
+human-extension workflow originating on `jarvis/human-extension-v1` and included in this candidate: use the existing
+iPhone Mesh named-place resolver, sense actual supported public environmental
+sources, explicitly remember a bounded source-backed observation on the
+private Jarvis PC, revisit later for a deterministic change comparison, and
+feel a short user-triggered haptic signal if a supported fresh provider value
+changed. Unknown/stale sources remain unknown; the lens does not continuously
+track the user, save raw media or authorize remote actions. This is a concrete
+**remote perception + external episodic memory + tactile feedback** loop,
+not a claim that the full human-extension roadmap is already deployed.
+The matching iPhone/backend builds still require physical-device acceptance.
+
+## Camera-free ambient autonomy — in the convergence candidate
+
+The camera-centred opportunity matcher is retired. Originating on `jarvis/memomind-prep` and included in this candidate, opt-in iPhone acoustic sound classification (foreground or active voice capture), separately timestamped phone motion and location/geofence and modelled, source-labelled outdoor temperature can match *explicit existing standing reminders* through Agency Attention. The source metadata is transient and cannot authorize tools or physical actions. Health is separately opt-in read-only context, not a diagnosis or actuating signal.
+
+Actual reversible action path: after discovering Apple Home, the user may individually preauthorize an exact light for an observed arrival, or for **two high-confidence doorbell classifications while the phone confirms home during 18:00–07:00 local time**. The foreground iPhone initiates only those enrolled HomeKit writes, then reads back the characteristic. An encrypted, locally clearable receipt separates verified success from failed/unverified actions. This is not a general autonomous device controller and is not supported in iOS background without actual device acceptance.
+
+Configuration: Physical → Ambient presence → Settings. Independently enable Proactive microphone + sensor opportunities, Motion / travel context, Sound Recognition for acoustic triggers, and optional weather/Health sources. Discover Apple Home on the Physical tab; enroll each permitted light. Geofenced home coordinates/radius must be configured. Do not interpret a sound label as proof of a visitor. The ability to use a future MemoMind HUD/audio stream still requires the actual official SDK and physical hardware.
+
+**[Jarvis Conductor v1](CONDUCTOR.md) now implements a real, bounded exact-device workstation mission.** The iPad/iPhone Mesh tab lets you choose one paired Windows/Mac host, up to three literal allowed app names and optionally a two-minute private view. A server-persisted plan returns a short-lived one-use grant in iPhone RAM; an explicit confirmation consumes it before side effects, with each step reserved ahead of OS/remote IO and followed by a different fresh running-process observation. Replays, changed targets, expired/revoked grants, missing source evidence and unknown external outcomes fail closed and never trigger blind retries. Separately opted-in **exact low-risk speech** can say "Jarvis, open Safari on my MacBook Air": this stages and consumes a fresh one-app/no-screen grant, checks running-process state and reports the outcome. This is not general remote shell, authenticated speaker identification, focus verification or unfettered physical control; setup and limits are in `CONDUCTOR.md`.
+
+**[Reality Graph](REALITY_GRAPH.md) now performs deterministic cross-provider observation correlation and model-free mission readback.** It compiles real integrated place sources and typed mission evidence into timestamped entities, source-linked route edges, freshness and derived facts. A separate default-off local mission ledger retains only bounded normalized caller-supplied observations, with authenticated create/append/snapshot/stop/delete routes and narrow voice status questions answered before Qwen. Courier/traffic provider credentials, real courier tracking, worldwide CCTV and independent provider attestation are **not yet integrated**; a client-supplied source label is not proof of authenticity. Reality Graph has no purchasing, messaging or device-control authority. See `REALITY_GRAPH.md` for setup and precise limits.
+
+**Selected next *unimplemented* milestone: [EDITH Field Ops](EDITH_FIELD_OPS.md).** Extend verified speech → real-world effect from benign workstation actions to individually authorized nonhazardous personal devices (first supported HomeKit lights), using actual OS APIs, source-specific readback, repeat limits and risk-appropriate grants; do not add fictional globally controlled infrastructure or autonomous hazardous actuation. The earlier Conductor planning spec is retained in `NEXT_BIG_UPGRADE.md` as architectural history.
+
+**[Reality Mesh](REALITY_MESH.md) now provides an initial working cross-device fabric and remote-world viewport.** The iPhone/iPad **Mesh** tab checks the actual Windows host and explicitly paired MacBook Air/Mac mini nodes over private Tailscale links. An additional default-off Windows process flag enables **actual view-only desktop snapshots** from the interactive Windows session using Pillow ImageGrab, under the same independently tapped 120-second phone consent and authenticated bearer gate; headless Session 0 cannot claim a screen. A real macOS Python node can serve fresh device status and, only after Mac startup opt-in plus a separate two-minute phone tap, view-only private screen snapshots routed through the authenticated Windows backend. Sessions expire and can be revoked; missing Mac Screen Recording permission or unavailable hardware stays unavailable. A separately disabled-by-default Mac startup flag also allows **five exact, user-tapped app launches** (Safari, Notes, Calendar, Preview, Finder) on an authenticated matching Mac, returning OS launch acknowledgement plus a distinct process observation—never arbitrary terminal execution, OS remote input or a falsely asserted foreground window. The same tab resolves a precisely named place using Apple MapKit and calls already integrated real public environmental, Caltrans, USGS, NWS and OSM source adapters, preserving regional coverage gaps (including **no implied Melbourne public-camera stream**). No uncontrolled LAN scanning, remote desktop input, OS-native file dragging, general purpose device agent, or global camera/video access is asserted. Setup, threat boundaries and Mac activation are in `REALITY_MESH.md`.
+
+**[Mission Control](MISSION_CONTROL.md) now adds a concrete persistent, outcome-oriented iPhone execution pack.** In the dedicated Missions tab (also Physical), enroll one exact timed calendar appointment as a mission; Jarvis rechecks its original Calendar event, fresh accurate GPS and a real Apple MapKit driving route, reasons about a five-minute departure buffer, and records distinct sourced receipts. Separately authorized, one-use, event/time/destination-bound Apple Maps handoff is attempted at risk; an ETA draft is strictly local. Two distinct accurate GPS observations near the uniquely resolved destination distinguish observed on-time/late arrival from merely opening directions; background suspension or missing evidence never proves attendance or a miss. A default-off mission toggle, RAM-only grant lifecycle and Privacy-mode revocation bound autonomy. The Mission Board also shows a read-only, permission-aware PC tool affordance inventory; a registered tool is not assumed online, approved for the mission or successfully executed. Other mission packs remain future work.
+
+**[Counterfactual Guardian](COUNTERFACTUAL_GUARDIAN.md) first slice now exists in source.** When independently enabled, the foreground iPhone checks up to three upcoming timed primary-Google-Calendar destinations against fresh accurate iPhone GPS and actual Apple MapKit driving routes. It alerts if travel time plus a stated five-minute buffer threatens the start time; failure to resolve a source produces an unknown status, not an invented all-clear. The user can open Apple Maps manually, enroll a one-use event/time/location-bound automatic Maps handoff, or stage a strictly local unsent ETA draft. Receipts are retained in the iPhone Keychain and distinguish handoff accepted from arrival verified. A second, separately enrolled Guardian path now watches **explicit user goals with precise deadlines** on the Windows World Executive, cross-checks active status, next actions and pending linked commitments, and offers read-only evidence review or an unsent local follow-up draft. It interrupts at most once per monitor cycle, only with a fresh foreground phone opt-in and when you are not driving/in a meeting/conversing. Watches can be individually snoozed or revoked and expire; changing a source deadline requires reenrollment. This is *not* generalized prediction, an always-on phone-background process, or authority to send messages or arbitrarily control devices.
 
 ---
 
@@ -91,9 +141,14 @@ The following have been observed working in the real deployment during the curre
 
 Deployment validation is not finished. Remaining device/runtime checks include transport failover/deduplication, authoritative-deletion edge cases, explicit snapshot privacy inspection, local-iPhone routing, room-microphone behavior, welcome-back behavior, current Ray-Ban hardware behavior, navigation/Notecard behavior, and a final representative real-world acceptance pass.
 
-### Cross-branch documentation scope — September 20, 2026 (Pacific)
+### Convergence scope — proposed merge, not observed deployed
 
-This README now catalogs the Agency 1.0 and MemoMind-prep feature branches and the longer-term physical-world roadmap; those branch capabilities are **not thereby merged into main or accepted as deployed**. See [Cross-branch capability ledger and forward roadmap](#cross-branch-capability-ledger-and-forward-roadmap) for status by feature, including public cameras, aircraft/AIS ambitions, sensor-first proactivity, remote desktops, glasses, and physical hardware.
+This README preserves the September 20 bench experiment and roadmap while
+reconciling the tested source histories on a draft PR against `main`.
+Published `main` stays at `5599b6f` until that PR is reviewed and merged.
+The September 7 Windows/iPhone observations and September 20 independent
+servo bench remain historical, configuration-specific evidence; **no new
+physical-device exercise is inferred from this source merge**.
 
 ### Physical actuation bench — September 20, 2026 (Pacific)
 
@@ -390,11 +445,11 @@ This adds a possible **physical action tool** without changing the project's fix
 
 # Cross-branch capability ledger and forward roadmap
 
-> **Living project map — updated September 20, 2026.** This section unifies the core README, the separate `jarvis/agency-1.0` and `jarvis/memomind-prep` lines of development, the bench-tested CrunchLabs actuator, and the longer-term physical-world/Jarvis “superpowers” design. **A planned capability is not an implemented capability; branch source is not merged `main`; CI is not live-provider, Windows, glasses, or physical-iPhone acceptance.** Read the statuses below before treating any example as an instruction Jarvis can perform today.
+> **Convergence review — September 24, 2026; based on September 20 historical ledger.** This section unifies the core README, the separate `jarvis/agency-1.0` and `jarvis/memomind-prep` lines of development, the bench-tested CrunchLabs actuator, and the longer-term physical-world/Jarvis “superpowers” design. **The currently published `main` remains at `5599b6f` until the draft convergence PR is reviewed and merged. The proposed merge commit contains Agency, MemoMind-prep, Conductor, Mission Control, Reality Mesh/Graph, Reality Lens and Life Fabric. CI is not live-provider, Windows, glasses, or physical-iPhone acceptance.** Read the statuses below before treating any example as an instruction Jarvis can perform today.
 
 ## Source-of-truth and status conventions
 
-**Repository branches at this checkpoint:** `main` (this README's primary baseline and the experimental motor documentation), `jarvis/agency-1.0` (draft PR #1), `jarvis/memomind-prep` (draft PR #2, based on the Agency development line), and `forgecad-integration` (separate engineering work). These branches are **not interchangeable deployments**. `main` now **describes** branch capabilities; editing its README does not merge their Python/Swift code. Avoid implying that a user with an older `main` or Agency install already has `/physical/*` routes.
+**Git ancestry verified for this convergence candidate:** `jarvis/agency-1.0` is an ancestor of `jarvis/memomind-prep`; `jarvis/human-extension-v1` is an ancestor of `jarvis/life-friction-fabric`. The convergence merge preserves both feature histories and the two main-only September 20 README commits. No existing branch is deleted. Before human approval of this PR, `main` at `5599b6f` remains the published code baseline. After a merge-commit PR merge, these candidate features move from **Branch source** to **source in main, CI verified**; none is upgraded to **Observed deployed** by CI, the draft PR, or Git history.
 
 Status terminology used here:
 
@@ -402,7 +457,8 @@ Status terminology used here:
 |---|---|
 | **Observed deployed** | A specifically described physical device, real provider, or running host was exercised; the observation applies to that configuration and date only. |
 | **Bench verified** | A small real hardware/software loop worked independently of the Jarvis deployment; not an integrated Jarvis tool. |
-| **Branch source** | Implemented in a named development branch, with source/tests or simulator coverage, but not established as deployed/accepted on the current real Windows+iPhone installation. |
+| **Branch source** | Implemented on a development branch (including this proposed merge branch until its PR is merged); source/tests or simulator coverage is not deployed-device acceptance. |
+| **Source in main (CI verified)** | Applies only after the draft convergence PR is actually merged; the code is included in `main` and the stated CI ran against the exact integration merge SHA. It is not a deployment claim. |
 | **Integration pending** | Components exist, but their cross-machine or cross-subsystem end-to-end connection has not been demonstrated. |
 | **Roadmap** | An intentional future capability, not current software behavior, device capability, provider entitlement, or delivery commitment. |
 | **Unsupported / conditional** | Depends on hardware, SDK permissions, usable third-party sources, lawful/authorized access, platform background rules, or acceptable latency/cost. |
@@ -411,23 +467,23 @@ Status terminology used here:
 
 ## Capability coverage at a glance
 
-| Domain | Existing baseline / branch source / observed proof | Forward end state and outstanding gate |
-|---|---|---|
-| Conversational Jarvis, speech, Ray-Ban Meta | Windows+iPhone core paths previously exercised; `jarvis/memomind-prep` revises personality/streaming tone and deterministic routing | Consistently natural, context-sensitive spoken dialogue; no invented senses, actions, or experience |
-| Persistent memory, goals, executive loop | Main world model/verification architecture; Agency source contains more durable desired-state machinery | Continuous observe → gap → plan → authorized act → independently verify → replan; complete REAL A1–A12 campaign |
-| Camera-free ambient perception | `jarvis/memomind-prep` source: microphone sound labels, GPS/geofence, motion, opt-in Apple Health, modelled temperature | Reliable, user-configurable interventions that do not require a camera, glasses, or screen; real foreground/background and interruption tests |
-| Physical home effects | Branch source: explicit Apple Home *light* discovery/on/off + readback; separately opted-in arrival→light behavior | Safely enlarge to eligible scenes, shades and other selected affordances; never assume device control from general “smart home” claims |
-| Public remote eyes | Branch source: Caltrans official stills, on-demand local vision, bounded expiring watches | Geographically broad **authorized public** DOT, traffic, mountain, ski, harbor, wildfire and other documented streams; accurate region-by-region availability |
-| Aircraft/movement graph | Branch source: OpenSky *regional bounding-box aircraft counts* | Track individual aircraft from permitted ADS-B/MLAT feeds, spatial-temporal history, proximity/route alerts and user-selected points of interest |
-| Ships/movement graph | No AIS adapter documented as implemented | Authorized AIS vessel feeds, locations/routes and proximity alerts integrated into the same evidence graph |
-| Incident awareness | Branch source: USGS quakes, supported US NWS alerts, modelled air/UV and mapped facilities | Add verified official fire/smoke/road closure/transport, NASA FIRMS and region-specific incident sources with freshness/uncertainty handling |
-| Cross-source diligence | Branch source: isolated exact-CIK SEC, selected EPA ECHO FRS, local OFAC SDN candidate checks | Extend only through lawful, validated court/UCC/land/registries/licensed data; keep matter authority and provenance separated |
-| Worldwide “watch this place” | Branch source: finite opt-in watches against supported official providers; location lookup not global feed coverage | User-defined regions/POIs; source discovery, expiring change watches, evidence receipts, deduplication and privacy controls worldwide where providers exist |
-| Remote computers and iPad control | Existing PC/browser actions are **not** a seamless multi-machine desktop; no validated universal window-dragging transport | iPad-primary remote workspace, authenticated remote screens, files and explicit actions across Mac/Windows; evaluate real OS/API constraints |
-| Physical robot output | **Bench verified:** MacBook USB → Nano D11 → pitch servo and local Flask `/pitch` API | Authenticated private MacBook ↔ Windows Jarvis connection, bounded actuator tool, independent feedback, then additional calibrated axes |
-| MemoMind / optional ring | Branch source: HUD bridge/simulator, Command View, semantic event mapper; existing Gen 1 Meta audio remains independent | Official physical MemoMind driver/SDK, real HUD/audio/touch/IMU, supported KiWear ring, reconnect, privacy and approval testing |
-| Local-model reliability | Branch source: deterministic dispatch and typed routines bypass Qwen on defined cases | Measure latency and failure rates; hardcode more *well-specified* actions without pretending open-ended semantics/vision are rules |
-| ForgeCAD | Separate repository/branch integration work; not proof of physical manufacturing | Jarvis-to-engineering model with typed plans, components/CAD/simulation/BOM and verified engineering results where supported |
+| Domain | Published `main` @ `5599b6f` (pre-review) | Source on proposed merge commit (status: **Branch source** until PR merged) | Next gate / end state |
+|---|---|---|---|
+| Windows + iPhone core, Gmail/Calendar, voice, world model | **Observed deployed** only for specifically documented September 7 configuration and tests | Included with existing baseline and additional automated CI | Revalidate real devices and provider authorization at exact deployed SHA |
+| Agency 1.0 persistent goals, plans, approvals, verification | Not in published `main` | Agency branch is an ancestor of the feature line; source/tests carried forward; A1–A12 REAL campaign **not complete** | Actual same-SHA Windows/iPhone REAL acceptance and release check |
+| Guardian, Counterfactual Guardian, Goal Guardian | Not in published `main` | Opt-in evidence-backed deadline/warning loops | Foreground/background and true provider/device acceptance |
+| Mission Control | Not in published `main` | iPhone appointment journey mission, Maps handoff, GPS arrival observations | Verify physical iPhone, location permissions and provider behavior; proximity is not attendance |
+| Conductor | Not in published `main` | Bounded one-use, exact selected Mac/Windows benign app-launch missions | Real paired host/phone acceptance; not general remote computer control |
+| Reality Mesh | Not in published `main` | Exact paired nodes, short private view-only screen, supported public-source observations | Real node availability and screen consent; no arbitrary machine or global camera |
+| Reality Graph | Not in published `main` | Deterministic source-qualified place/mission graph and model-free readback | Actual provider onboarding, identity verification and coverage calibration |
+| Reality Lens | Not in published `main` | Explicit saved environmental scalar snapshot and foreground tactile source-diff cue | Actual iPhone haptic + live provider verification; no background omniscience |
+| Life Fabric | Not in published `main` | Explicit deadlines, handoffs, assets, task receipts, transition templates and friction records | Real providers, user tenancy/security design and device deployment before automation claims |
+| Camera-free ambient input and enrolled HomeKit lights | Not in published `main` | Limited source and exact user-approved lights/readback source paths | Physical phone/HomeKit, mic/location consent, interruption testing |
+| Official public cameras, USGS/NWS/OpenSky counts, OSM, SEC/EPA/OFAC | Not in published `main` | Bounded documented regions and providers; no AIS/remote CCTV entitlement | Independent source/authorization review and real provider acceptance |
+| Deterministic small-model offload, MemoMind bridge | Not in published `main` | Specific model-free cases, simulated HUD and optional glasses I/O code | Benchmarks, actual MemoMind SDK/hardware, non-simulator acceptance |
+| CrunchLabs pitch-servo bench | **Bench verified** Sep 20, separately, not an integrated Jarvis tool | Main's independent bench documentation preserved in this candidate | Authenticated integration, safeguards, independent position readback |
+| Presence robotic telepresence, AIS and universal physical-world actuation | **Roadmap** | **Roadmap**, no fabricated enabled interface | Actual authorized robotics/provider hardware and measurable acceptance |
+| ForgeCAD | Separate repository, outside this convergence | Separate repository, untouched | Separate review and release process |
 
 ### Main principle: ambient first, camera optional
 
@@ -456,7 +512,7 @@ This is the desired *emergent-feeling* cinematic experience: responsive physical
 
 ## Agency 1.0: persistent executive, not a single planner call
 
-The `jarvis/agency-1.0` branch contains code and an explicit acceptance framework for durable desired states/plans and plan steps, authorized observations/actions, approval resumption, verification reconciliation, replanning, dormant wake watches, parallel evidence/skeptic/feasibility/risk workers, exception-based attention, capability-gap detection and sandboxed adapter drafting, counterfactual branch preservation, and an evidence-bearing self-model. The agent must distinguish user facts, preferences, hard policies, objectives, inferred tradeoffs, decisions, and corrections. Inferences can guide reversible options but never silently widen protected action authority.
+The Agency 1.0 history (already an ancestor of this merge candidate) contains code and an explicit acceptance framework for durable desired states/plans and plan steps, authorized observations/actions, approval resumption, verification reconciliation, replanning, dormant wake watches, parallel evidence/skeptic/feasibility/risk workers, exception-based attention, capability-gap detection and sandboxed adapter drafting, counterfactual branch preservation, and an evidence-bearing self-model. The agent must distinguish user facts, preferences, hard policies, objectives, inferred tradeoffs, decisions, and corrections. Inferences can guide reversible options but never silently widen protected action authority.
 
 **Agency 1.0 is not marked released.** Its [contract](https://github.com/US0RIS/Jarvis-for-MRB/blob/jarvis/agency-1.0/AGENCY_ACCEPTANCE.md) requires A1–A12, including REAL gates on one deployed Windows/iPhone SHA and environment: restart continuity; multiple real action/observation cycles; approvals and denials; independently verified external outcomes including failure; plan invalidation; dormant goal wake-up; genuinely parallel disagreement; deduplicated attention; enabled-only narrow tool synthesis; preserved counterfactual alternatives; preference vs authority; and the A12 “one decision” chain that needs no human intermediate orchestration. Source/tests or a synthetic acceptance pass are **insufficient**.
 
@@ -464,7 +520,7 @@ Release procedure, on the **actual deployment after all qualifying REAL receipts
 
 ## Model-free hardening and conversation
 
-On `jarvis/memomind-prep`, shared streaming/non-streaming deterministic dispatch handles defined, explicit Gmail/Calendar queries and writes, PC/browser/status/world reads, basic reminders and arithmetic/time, bounded read-only workflows, evidence-only briefings/journals, query cleanup, research-query family construction, structured meeting-action lines and simple observable-goal contracts. The user request's literal proper nouns, negations, date windows and recipients must be retained. A no-match falls back to model interpretation; hardcoded behavior must **not fabricate a recipient or infer authorization**. Existing permission gates and post-action readback continue to apply.
+In the proposed merge (originating on `jarvis/memomind-prep`), shared streaming/non-streaming deterministic dispatch handles defined, explicit Gmail/Calendar queries and writes, PC/browser/status/world reads, basic reminders and arithmetic/time, bounded read-only workflows, evidence-only briefings/journals, query cleanup, research-query family construction, structured meeting-action lines and simple observable-goal contracts. The user request's literal proper nouns, negations, date windows and recipients must be retained. A no-match falls back to model interpretation; hardcoded behavior must **not fabricate a recipient or infer authorization**. Existing permission gates and post-action readback continue to apply.
 
 The same branch revises Jarvis's conversational voice: contextually responsive, able to offer grounded engineering/design/taste judgments where appropriate, able to disagree, fewer templated preambles or compulsory “sir,” and no pretend personal experiences. This is a **style/dispatch improvement**, not permission for the model to manufacture actions or facts. Ambiguous follow-ups, unfamiliar evidence, independent research synthesis, genuinely new workflows, complex deliberation and perception still need capable models or real source adapters. The authenticated `GET /routing/status` counters cover specified planner bypasses, not a universal “Qwen-free Jarvis” percentage. See [MODEL_FREE_OPERATIONS.md](https://github.com/US0RIS/Jarvis-for-MRB/blob/jarvis/memomind-prep/MODEL_FREE_OPERATIONS.md).
 
@@ -472,7 +528,7 @@ The same branch revises Jarvis's conversational voice: contextually responsive, 
 
 ### Public cameras: from one region to “remote eyes”
 
-The implemented **branch-source** camera provider is official **Caltrans CWWP2**, with district catalogs, a bounded still-image fetch, explicit one-frame Moondream interpretation, an iPhone Physical tab, selected remote-region coordinates, and watches. It does **not** have EarthCam automation, worldwide CCTV, arbitrary IP-camera access, verified capture-time/live status, generalized multi-camera continuous video analysis, ALERTCalifornia access or arbitrary internet-camera scraping. The media provider's published image may be stale or offline even when catalog metadata lists the camera. A visible smoke classification from two distinct images is a **possible visible condition**, not independent confirmation of a wildfire.
+The implemented **candidate-merge source** camera provider is official **Caltrans CWWP2**, with district catalogs, a bounded still-image fetch, explicit one-frame Moondream interpretation, an iPhone Physical tab, selected remote-region coordinates, and watches. It does **not** have EarthCam automation, worldwide CCTV, arbitrary IP-camera access, verified capture-time/live status, generalized multi-camera continuous video analysis, ALERTCalifornia access or arbitrary internet-camera scraping. The media provider's published image may be stale or offline even when catalog metadata lists the camera. A visible smoke classification from two distinct images is a **possible visible condition**, not independent confirmation of a wildfire.
 
 Future adapters should prioritize documented official/publicly viewable and permitted sources, including, where available, government DOT/traffic, wildfire observation, ski/mountain-pass, harbor/coastal, public weather and other opt-in feeds. “Show me Melbourne,” “watch this mountain pass,” or “is that beach crowded?” should first discover a **verified usable source** for that area, return “not covered” if none exists, obtain fresh source timestamps when available, then perform narrow perception. Arbitrary CCTV, private/security cameras, LAN scanning of strangers' devices, bypassing logins, blind URL guessing, person/license-plate surveillance and source-rights violations are not substitutes for coverage.
 
@@ -2429,8 +2485,7 @@ Some properties cannot be proven by unit tests and remain real-device tests:
 - GPS/background navigation behavior;
 - iOS background execution;
 - DAT camera behavior;
-- LAN/Tailscale transition behavior;
-- experimental Nano/PITCH-servo physical travel vs. serial acknowledgement, power interruption, servo stall, and MacBook sleep/reconnect **if** the physical-actuation prototype is integrated.
+- LAN/Tailscale transition behavior.
 
 ---
 
@@ -2772,6 +2827,16 @@ Future self-improvement is plausible only if the evaluator and safety constraint
 
 ---
 
+# Deterministic routing / smaller local model
+
+The `jarvis/memomind-prep` branch now routes dozens of exact read/action patterns **without** invoking the Ollama Qwen planner. Shared streaming and non-streaming dispatch preserves existing approval gates; common calendar/Gmail/PC/browser/system/world operations, explicit structured writes, selected read-only workflows, routine briefings, daily journals, web-query cleanup, eight-family audited research plans and simple achieved-state goal contracts have deterministic paths. Nuanced open-ended language, semantic synthesis, novel workflows and model-based perception still use the appropriate model. `MODEL_FREE_OPERATIONS.md` documents the call-site inventory, default/opt-in model settings, tests and authenticated `/routing/status` telemetry.
+
+# External evidence branch addendum
+
+The `jarvis/memomind-prep` feature branch adds an **iPhone-first Physical** tab (Gen 1 Ray-Ban Meta voice compatible; MemoMind optional) and independently sourced public-world infrastructure. This includes bounded Caltrans remote camera/still watches; USGS earthquakes, NWS alerts, global modelled air data, OpenStreetMap public utilities, and regional OpenSky aircraft counts; plus an explicitly enrolled, separate local SEC/OFAC/EPA matter-diligence workbench. All watches require active enrollment and expire; camera detection is an uncertain two-distinct-frame model indication, never a verified incident. Personal watch source metadata may be mirrored into the canonical world graph; matter-specific source/claim data stays in the separate local matter and watch ledgers.
+
+**`EXTERNAL_EVIDENCE_OPERATIONS.md` is the definitive feature/deployment/provider-coverage and privacy contract for this new branch.** It distinguishes implemented official adapters from unsupported worldwide CCTV, AIS, court/UCC/corporate-registry/OSHA and licensed 911/ALERTCalifornia sources. These source additions require a *new backend and iPhone build*, are not already deployed by an old Agency 1.0 install, and have not had real provider/account/device acceptance by merely passing simulator or synthetic CI tests.
+
 # Related documentation
 
 For deeper/reference material:
@@ -2785,10 +2850,6 @@ For deeper/reference material:
 - **`JARVIS_20_PROCEDURAL_WORLDS.md`** — anti-overfitting procedural variants/world fuzzing.
 - **`ios/FRONTEND_ONLY.md`** — detailed frontend-only capability documentation and historical deployment boundaries.
 - **`ios/JarvisIOS/FeatureGuide.swift`** — in-app searchable feature/verification guide.
-- **[Agency branch: A1–A12 acceptance](https://github.com/US0RIS/Jarvis-for-MRB/blob/jarvis/agency-1.0/AGENCY_ACCEPTANCE.md)** — strict same-SHA REAL release gates and evidence rules.
-- **[MemoMind branch: preparation and camera-free runtime](https://github.com/US0RIS/Jarvis-for-MRB/blob/jarvis/memomind-prep/ios/MEMOMIND_PREPARATION.md)** — optional glasses simulator/driver contract, authorized sensors, Apple Home lights and Physical tab.
-- **[MemoMind branch: external evidence operations](https://github.com/US0RIS/Jarvis-for-MRB/blob/jarvis/memomind-prep/EXTERNAL_EVIDENCE_OPERATIONS.md)** — exact implemented providers vs unsupported global/AIS/diligence sources.
-- **[MemoMind branch: model-free routing](https://github.com/US0RIS/Jarvis-for-MRB/blob/jarvis/memomind-prep/MODEL_FREE_OPERATIONS.md)** — deterministic routing contracts, retained model roles and runtime counters.
 
 ---
 

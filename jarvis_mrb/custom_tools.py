@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import json
 import os
 import re
+import socket
+import ssl
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import httpx
 
@@ -16,6 +20,25 @@ from jarvis_mrb.tool_repair import queue_repair
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 TOOLS_DIR = APP_DIR / "custom_tools"
 OLLAMA_URL = os.environ.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+
+_MAX_URL_CHARS = 8000
+_MAX_REQUEST_BODY_BYTES = 65536
+_MAX_RESPONSE_BYTES = 1048576
+_SECRET_NAME_RE = re.compile(
+    r"(?:^|[-_])(auth|authorization|token|secret|api[-_]?key|password|passwd|credential|cookie|signature|bearer|jwt)(?:$|[-_])",
+    flags=re.IGNORECASE,
+)
+_FORBIDDEN_REQUEST_HEADERS = {
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "proxy-connection",
+    "proxy-authorization",
+    "upgrade",
+    "te",
+    "trailer",
+}
 
 
 def _safe_name(name: str) -> str:
@@ -86,7 +109,7 @@ def synthesize(
     risk: str = "read",
 ) -> dict[str, Any]:
     tool_name = _safe_name(name)
-    hosts = sorted({host.strip().lower() for host in allowed_hosts if host.strip()})
+    hosts = _normalize_allowed_hosts(allowed_hosts)
     if not hosts:
         raise ValueError("A custom API tool must declare at least one allowed HTTPS host.")
     if risk not in {"read", "external_write"}:
@@ -151,6 +174,228 @@ Return Python source only."""
     return item
 
 
+def _canonical_host(value: str) -> str:
+    raw = str(value or "").strip().rstrip(".")
+    if not raw:
+        raise ValueError("Allowed host is empty.")
+    if "://" in raw or "/" in raw or "@" in raw or "\\" in raw:
+        raise ValueError("Allowed hosts must be bare hostnames, not URLs or credentials.")
+    if any(ord(char) < 33 for char in raw):
+        raise ValueError("Allowed host contains invalid whitespace/control characters.")
+
+    literal_candidate = raw.strip("[]")
+    try:
+        literal = ipaddress.ip_address(literal_candidate)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        return str(literal)
+    if ":" in raw or "%" in raw:
+        raise ValueError("Allowed host contains an invalid port or zone identifier.")
+
+    try:
+        canonical = raw.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ValueError(f"Allowed host {raw!r} is not a valid hostname.") from exc
+    if not canonical or len(canonical) > 253:
+        raise ValueError("Allowed host is invalid.")
+    labels = canonical.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or re.fullmatch(r"[a-z0-9-]+", label) is None
+        for label in labels
+    ):
+        raise ValueError(f"Allowed host {raw!r} is not a valid DNS hostname.")
+    return canonical
+
+
+def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    candidate = str(host or "").strip().strip("[]")
+    try:
+        return ipaddress.ip_address(candidate)
+    except ValueError:
+        return None
+
+
+def _is_public_ip(address: str) -> bool:
+    try:
+        return bool(ipaddress.ip_address(str(address).split("%", 1)[0]).is_global)
+    except ValueError:
+        return False
+
+
+def _normalize_allowed_hosts(values: list[str]) -> list[str]:
+    hosts: set[str] = set()
+    for value in values:
+        host = _canonical_host(str(value))
+        literal = _literal_ip(host)
+        if literal is not None and not literal.is_global:
+            raise ValueError(
+                f"Custom tool allowed host {host!r} is not a public Internet address."
+            )
+        hosts.add(host)
+    return sorted(hosts)
+
+
+def _contains_secret_field(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _SECRET_NAME_RE.search(str(key)):
+                return True
+            if _contains_secret_field(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_contains_secret_field(item) for item in value)
+    return False
+
+
+def _resolve_public_addresses(host: str, port: int) -> list[str]:
+    literal = _literal_ip(host)
+    if literal is not None:
+        if not literal.is_global:
+            raise ValueError(
+                f"Custom API destination {host!r} is not a public Internet address."
+            )
+        return [str(literal)]
+
+    try:
+        rows = socket.getaddrinfo(
+            host,
+            int(port),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise ValueError(f"Custom API destination {host!r} could not be resolved: {exc}") from exc
+
+    addresses: list[str] = []
+    for row in rows:
+        address = str(row[4][0]).split("%", 1)[0]
+        if address not in addresses:
+            addresses.append(address)
+    if not addresses:
+        raise ValueError(f"Custom API destination {host!r} resolved to no addresses.")
+
+    blocked = [address for address in addresses if not _is_public_ip(address)]
+    if blocked:
+        raise ValueError(
+            "Custom API destination resolved to non-public address(es): "
+            + ", ".join(blocked[:8])
+        )
+    return addresses
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a prevalidated IP while verifying TLS for the allowed hostname."""
+
+    def __init__(
+        self,
+        host: str,
+        *,
+        port: int,
+        resolved_ip: str,
+        timeout: float,
+    ) -> None:
+        super().__init__(
+            host,
+            port=port,
+            timeout=timeout,
+            context=ssl.create_default_context(),
+        )
+        self._resolved_ip = str(resolved_ip)
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection(
+            (self._resolved_ip, self.port),
+            self.timeout,
+        )
+        self.sock = self._context.wrap_socket(
+            self.sock,
+            server_hostname=self.host,
+        )
+
+
+def _request_pinned_https(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: Any,
+) -> tuple[int, str, str]:
+    parsed = urlparse(url)
+    host = _canonical_host(parsed.hostname or "")
+    try:
+        port = int(parsed.port or 443)
+    except ValueError as exc:
+        raise ValueError("Custom API URL contains an invalid port.") from exc
+    if port < 1 or port > 65535:
+        raise ValueError("Custom API URL contains an invalid port.")
+
+    addresses = _resolve_public_addresses(host, port)
+    target = parsed.path or "/"
+    if parsed.query:
+        target += "?" + parsed.query
+
+    outbound_headers = dict(headers)
+    payload: bytes | str | None
+    if isinstance(body, (dict, list)):
+        encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > _MAX_REQUEST_BODY_BYTES:
+            raise ValueError("Custom API request body is too large.")
+        payload = encoded
+        if not any(key.lower() == "content-type" for key in outbound_headers):
+            outbound_headers["Content-Type"] = "application/json"
+    elif isinstance(body, str):
+        encoded = body.encode("utf-8")
+        if len(encoded) > _MAX_REQUEST_BODY_BYTES:
+            raise ValueError("Custom API request body is too large.")
+        payload = encoded
+    elif body is None:
+        payload = None
+    else:
+        raise ValueError("Custom API request body must be null, a JSON object/list, or a string.")
+
+    last_error: Exception | None = None
+    for address in addresses:
+        connection = _PinnedHTTPSConnection(
+            host,
+            port=port,
+            resolved_ip=address,
+            timeout=20.0,
+        )
+        try:
+            connection.request(
+                method,
+                target,
+                body=payload,
+                headers=outbound_headers,
+            )
+            response = connection.getresponse()
+            raw = response.read(_MAX_RESPONSE_BYTES + 1)
+            if len(raw) > _MAX_RESPONSE_BYTES:
+                raw = raw[:_MAX_RESPONSE_BYTES]
+            content_type = str(response.getheader("content-type") or "")
+            charset = "utf-8"
+            match = re.search(r"charset=([^;\s]+)", content_type, flags=re.IGNORECASE)
+            if match:
+                charset = match.group(1).strip('\"\'')
+            try:
+                text = raw.decode(charset, errors="replace")
+            except LookupError:
+                text = raw.decode("utf-8", errors="replace")
+            return int(response.status), content_type, text
+        except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+            last_error = exc
+        finally:
+            try:
+                connection.close()
+            except Exception:
+                pass
+    raise ValueError(f"Custom API request failed: {last_error}")
+
+
 def _validate_plan(plan: Any, *, hosts: list[str], risk: str) -> tuple[str, str, dict[str, str], Any]:
     if not isinstance(plan, dict):
         raise ValueError("Custom tool did not return a JSON object.")
@@ -159,10 +404,30 @@ def _validate_plan(plan: Any, *, hosts: list[str], risk: str) -> tuple[str, str,
     if method not in allowed_methods:
         raise ValueError(f"Custom tool attempted disallowed HTTP method {method}.")
     url = str(plan.get("url") or "").strip()
+    if not url or len(url) > _MAX_URL_CHARS:
+        raise ValueError("Custom tool attempted an empty or oversized URL.")
+    if any(ord(char) < 32 for char in url):
+        raise ValueError("Custom tool URL contains control characters.")
     parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or host not in hosts:
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Custom tool URLs cannot embed credentials.")
+    if parsed.fragment:
+        raise ValueError("Custom tool URLs cannot contain fragments.")
+    host = _canonical_host(parsed.hostname or "")
+    canonical_hosts = _normalize_allowed_hosts(hosts)
+    if parsed.scheme != "https" or host not in canonical_hosts:
         raise ValueError("Custom tool attempted a URL outside its allowed HTTPS hosts.")
+    try:
+        port = int(parsed.port or 443)
+    except ValueError as exc:
+        raise ValueError("Custom tool URL contains an invalid port.") from exc
+    if port < 1 or port > 65535:
+        raise ValueError("Custom tool URL contains an invalid port.")
+
+    for key, _value in parse_qsl(parsed.query, keep_blank_values=True):
+        if _SECRET_NAME_RE.search(str(key)):
+            raise ValueError("Custom tool URLs cannot embed authentication secrets.")
+
     headers_raw = plan.get("headers") or {}
     if not isinstance(headers_raw, dict):
         raise ValueError("Custom tool headers must be an object.")
@@ -173,10 +438,30 @@ def _validate_plan(plan: Any, *, hosts: list[str], risk: str) -> tuple[str, str,
         if not k or len(k) > 120 or len(v) > 1000:
             continue
         lower = k.lower()
-        if lower in {"authorization", "x-api-key", "api-key", "cookie", "set-cookie"}:
+        if "\r" in k or "\n" in k or "\r" in v or "\n" in v:
+            raise ValueError("Custom tool headers cannot contain CR/LF characters.")
+        if lower in _FORBIDDEN_REQUEST_HEADERS:
+            raise ValueError(f"Custom tool cannot override protected HTTP header {k!r}.")
+        if _SECRET_NAME_RE.search(k):
             raise ValueError("Custom tool adapters cannot embed authentication secrets.")
         headers[k] = v
-    return method, url, headers, plan.get("body")
+
+    body = plan.get("body")
+    if _contains_secret_field(body):
+        raise ValueError("Custom tool request bodies cannot embed authentication secrets.")
+    if body is not None and not isinstance(body, (dict, list, str)):
+        raise ValueError("Custom tool request body has an unsupported type.")
+    try:
+        encoded_body = (
+            json.dumps(body, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            if not isinstance(body, str)
+            else body.encode("utf-8")
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Custom tool request body is not serializable.") from exc
+    if len(encoded_body) > _MAX_REQUEST_BODY_BYTES:
+        raise ValueError("Custom API request body is too large.")
+    return method, url, headers, body
 
 
 def run(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -195,7 +480,7 @@ def run(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         queue_repair(tool_name, "Adapter did not emit a valid JSON request plan.")
         raise ValueError("Custom tool did not emit a valid request plan. A repair proposal has been requested.") from exc
 
-    hosts = [str(value).lower() for value in item.get("allowed_hosts") or []]
+    hosts = [str(value) for value in item.get("allowed_hosts") or []]
     risk = str(item.get("risk") or "read")
     try:
         method, url, headers, body = _validate_plan(plan, hosts=hosts, risk=risk)
@@ -203,29 +488,32 @@ def run(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         queue_repair(tool_name, str(exc))
         raise
     try:
-        with httpx.Client(timeout=httpx.Timeout(20.0, connect=3.0), follow_redirects=False) as client:
-            response = client.request(method, url, headers=headers, json=body if isinstance(body, (dict, list)) else None, content=body if isinstance(body, str) else None)
-    except httpx.HTTPError as exc:
-        # Network failures are usually transient, so do not rewrite an adapter for
-        # a timeout/DNS outage. Structural HTTP failures below may warrant repair.
-        raise ValueError(f"Custom API request failed: {exc}") from exc
+        status_code, content_type, response_text = _request_pinned_https(
+            method,
+            url,
+            headers,
+            body,
+        )
+    except ValueError:
+        # DNS/network/TLS failures are usually transient and must not cause Jarvis
+        # to rewrite a structurally valid adapter automatically.
+        raise
 
-    if response.status_code in {400, 404, 405, 410, 415, 422}:
+    if status_code in {400, 404, 405, 410, 415, 422}:
         queue_repair(
             tool_name,
-            f"API returned HTTP {response.status_code}. Response excerpt: {response.text[:1200]}",
+            f"API returned HTTP {status_code}. Response excerpt: {response_text[:1200]}",
         )
 
-    content_type = response.headers.get("content-type", "")
     if "json" in content_type.lower():
         try:
-            payload: Any = response.json()
+            payload: Any = json.loads(response_text)
         except ValueError:
-            payload = response.text[:12000]
+            payload = response_text[:12000]
     else:
-        payload = response.text[:12000]
+        payload = response_text[:12000]
     return {
-        "status_code": response.status_code,
+        "status_code": status_code,
         "content_type": content_type,
         "body": payload,
     }

@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import jarvis_mrb.tool_audit as tool_audit
 import jarvis_mrb.world_executive as world_executive
@@ -75,6 +76,196 @@ class WorldVerificationTests(unittest.TestCase):
             message="tool execution receipt",
         )
 
+    def test_legacy_verification_schema_migrates_before_identity_triggers(self) -> None:
+        legacy_db = self.base / "legacy_verification.sqlite3"
+        conn = sqlite3.connect(legacy_db)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE action_verifications (
+                    id TEXT PRIMARY KEY,
+                    action_event_id INTEGER NOT NULL UNIQUE,
+                    executive_decision_id TEXT NOT NULL DEFAULT '',
+                    tool TEXT NOT NULL,
+                    arguments_json TEXT NOT NULL,
+                    verifier TEXT NOT NULL,
+                    expected_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    next_check_at TEXT,
+                    deadline_at TEXT,
+                    last_checked_at TEXT,
+                    last_evidence TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    resolved_event_id INTEGER
+                );
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        world_verification.DB_PATH = legacy_db
+        try:
+            status = world_verification.status()
+            self.assertTrue(status["installed"])
+            conn = sqlite3.connect(legacy_db)
+            try:
+                columns = {
+                    str(row[1])
+                    for row in conn.execute(
+                        "PRAGMA table_info(action_verifications)"
+                    ).fetchall()
+                }
+                triggers = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='trigger'"
+                    ).fetchall()
+                }
+            finally:
+                conn.close()
+        finally:
+            world_verification.DB_PATH = self.db
+
+        self.assertIn("agency_step_id", columns)
+        self.assertIn("action_verifications_immutable_identity", triggers)
+        self.assertIn("action_verifications_resolved_event_once", triggers)
+        self.assertIn("verification_observations_before_terminal_only", triggers)
+
+    def test_verification_observations_are_append_only(self) -> None:
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "append-only-message", "email": "daniel@example.com"},
+            ),
+            action_event_id=self._action_event(),
+        )
+        world_verification._record_observation(
+            verification_id,
+            outcome="verified",
+            evidence="Independent observation.",
+        )
+        row = self._rows(
+            "SELECT id FROM verification_observations WHERE verification_id=?",
+            (verification_id,),
+        )[0]
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE verification_observations SET outcome='failed' WHERE id=?",
+                    (int(row["id"]),),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "DELETE FROM verification_observations WHERE id=?",
+                    (int(row["id"]),),
+                )
+        finally:
+            conn.close()
+
+    def test_action_verification_identity_and_terminal_event_are_immutable(self) -> None:
+        action_event_id = self._action_event()
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "immutable-message", "email": "daniel@example.com"},
+            ),
+            action_event_id=action_event_id,
+            agency_step_id="agency-step:immutable",
+        )
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE action_verifications SET agency_step_id='agency-step:other' WHERE id=?",
+                    (verification_id,),
+                )
+            conn.rollback()
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE action_verifications SET expected_json='{}' WHERE id=?",
+                    (verification_id,),
+                )
+            conn.rollback()
+        finally:
+            conn.close()
+
+        with patch.object(
+            world_verification,
+            "_observe",
+            return_value=("verified", "Independent immutable-message readback."),
+        ):
+            result = world_verification.check_one(verification_id, force=True)
+        self.assertEqual(result["status"], "verified")
+
+        row = self._rows(
+            "SELECT resolved_event_id FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        resolved_event_id = int(row["resolved_event_id"])
+        self.assertGreater(resolved_event_id, 0)
+
+        conn = sqlite3.connect(self.db)
+        try:
+            with self.assertRaises(sqlite3.DatabaseError):
+                conn.execute(
+                    "UPDATE action_verifications SET resolved_event_id=? WHERE id=?",
+                    (action_event_id, verification_id),
+                )
+        finally:
+            conn.close()
+
+    def test_terminal_verification_rejects_late_observation_append(self) -> None:
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "terminal-message", "email": "daniel@example.com"},
+            ),
+            action_event_id=self._action_event(),
+        )
+        with patch.object(
+            world_verification,
+            "_observe",
+            return_value=("verified", "Independent terminal-message readback."),
+        ):
+            result = world_verification.check_one(verification_id, force=True)
+        self.assertEqual(result["status"], "verified")
+
+        with self.assertRaises(sqlite3.DatabaseError):
+            world_verification._record_observation(
+                verification_id,
+                outcome="verified",
+                evidence="Late duplicate observation must be rejected.",
+            )
+
     def test_read_tool_return_value_closes_immediately(self) -> None:
         action_event = self._action_event(tool="knowledge.search", ok=True)
         verification_id = world_verification.register_execution(
@@ -87,13 +278,149 @@ class WorldVerificationTests(unittest.TestCase):
         self.assertEqual(str(row["status"]), "verified")
         self.assertEqual(str(row["verifier"]), "return_value")
 
+    def test_gmail_verification_prefers_exact_provider_message_id(self) -> None:
+        action_event = self._action_event()
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={
+                    "message_id": "gmail-message-123",
+                    "email": "daniel@example.com",
+                },
+            ),
+            action_event_id=action_event,
+        )
+        row = self._rows(
+            "SELECT expected_json FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        expected = json.loads(str(row["expected_json"]))
+        self.assertEqual(expected["message_id"], "gmail-message-123")
+
+        with patch(
+            "jarvis_mrb.tools.google.query_emails",
+            return_value=SimpleNamespace(
+                ok=True,
+                message="Found one sent message.",
+                data={"emails": [{"id": "gmail-message-123"}]},
+            ),
+        ):
+            status, evidence = world_verification._gmail_observation(expected)
+
+        self.assertEqual(status, "verified")
+        self.assertIn("gmail-message-123", evidence)
+
+    def test_calendar_verification_prefers_exact_provider_event_id(self) -> None:
+        action_event = world_model.record_tool_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            ok=True,
+            message="calendar execution receipt",
+        )
+        verification_id = world_verification.register_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            SimpleNamespace(
+                ok=True,
+                message="Created calendar event 'Apollo signing'.",
+                data={"event_id": "calendar-event-456"},
+            ),
+            action_event_id=action_event,
+        )
+        row = self._rows(
+            "SELECT expected_json FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        expected = json.loads(str(row["expected_json"]))
+        self.assertEqual(expected["event_id"], "calendar-event-456")
+
+        with patch(
+            "jarvis_mrb.tools.google.query_calendar_events",
+            return_value=SimpleNamespace(
+                ok=True,
+                message="Found event.",
+                data={"events": [{"id": "calendar-event-456"}]},
+            ),
+        ):
+            status, evidence = world_verification._calendar_observation(expected)
+
+        self.assertEqual(status, "verified")
+        self.assertIn("calendar-event-456", evidence)
+
+    def test_gmail_success_without_provider_id_is_unverified(self) -> None:
+        verification_id = world_verification.register_execution(
+            "gmail.send",
+            {
+                "recipient": "daniel@example.com",
+                "subject": "Apollo",
+                "body": "Please send the schedules.",
+            },
+            SimpleNamespace(ok=True, message="Provider accepted send.", data={}),
+            action_event_id=self._action_event(),
+        )
+        row = self._rows(
+            "SELECT status,verifier,last_evidence FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        self.assertEqual(str(row["status"]), "unverified")
+        self.assertEqual(str(row["verifier"]), "no_independent_verifier")
+        self.assertIn("no stable message ID", str(row["last_evidence"]))
+
+    def test_calendar_success_without_provider_id_is_unverified(self) -> None:
+        action_event = world_model.record_tool_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            ok=True,
+            message="provider accepted calendar create",
+        )
+        verification_id = world_verification.register_execution(
+            "calendar.create",
+            {
+                "summary": "Apollo signing",
+                "start": "2030-01-01T09:00:00-08:00",
+                "end": "2030-01-01T09:30:00-08:00",
+            },
+            SimpleNamespace(ok=True, message="Provider accepted create.", data={}),
+            action_event_id=action_event,
+        )
+        row = self._rows(
+            "SELECT status,verifier,last_evidence FROM action_verifications WHERE id=?",
+            (verification_id,),
+        )[0]
+        self.assertEqual(str(row["status"]), "unverified")
+        self.assertEqual(str(row["verifier"]), "no_independent_verifier")
+        self.assertIn("no stable event ID", str(row["last_evidence"]))
+
     def test_external_write_is_not_verified_by_tool_success_alone(self) -> None:
         _, decision_id = self._goal_and_decision()
         action_event = self._action_event()
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=action_event,
             executive_decision_id=decision_id,
         )
@@ -112,7 +439,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -146,7 +477,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -170,7 +505,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -199,7 +538,11 @@ class WorldVerificationTests(unittest.TestCase):
         verification_id = world_verification.register_execution(
             "gmail.send",
             {"recipient": "daniel@example.com", "subject": "Apollo", "body": "Please send the schedules."},
-            SimpleNamespace(ok=True, message="Sent email to daniel@example.com."),
+            SimpleNamespace(
+                ok=True,
+                message="Sent email to daniel@example.com.",
+                data={"message_id": "gmail-test-message", "email": "daniel@example.com"},
+            ),
             action_event_id=self._action_event(),
             executive_decision_id=decision_id,
         )
@@ -244,6 +587,25 @@ class WorldVerificationTests(unittest.TestCase):
         self.assertEqual(str(row["status"]), "failed")
         self.assertEqual(str(row["verifier"]), "tool_return")
         self.assertIn("Tool returned failure", str(row["last_evidence"]))
+
+    def test_audited_tool_receipt_persists_agency_step_correlation(self) -> None:
+        step_id = "agency-step:receipt-correlation-test"
+        with tool_audit.agency_step_context(step_id):
+            tool_audit._record(
+                "knowledge.search",
+                {"query": "Apollo"},
+                SimpleNamespace(ok=True, message="Found evidence."),
+            )
+
+        row = self._rows(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='action.tool' AND source_kind='jarvis_tool'
+            ORDER BY id DESC LIMIT 1
+            """
+        )[0]
+        payload = json.loads(str(row["payload_json"]))
+        self.assertEqual(payload["agency_step_id"], step_id)
 
     def test_temporary_state_verifier_uses_storage_normalized_key(self) -> None:
         normalized = tool_audit._verification_args(

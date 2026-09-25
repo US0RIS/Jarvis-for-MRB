@@ -79,6 +79,9 @@ TOOL_RISK: dict[str, Risk] = {
     "knowledge.refresh": "read",
     "knowledge.search": "read",
     "spatial.find": "read",
+    "chronos.trace": "read",
+    "chronos.state_at": "read",
+    "chronos.changes": "read",
     "briefing.generate": "read",
     "workflow.run": "local_write",
     "sandbox.status": "read",
@@ -90,6 +93,17 @@ TOOL_RISK: dict[str, Risk] = {
     "custom.enable": "security",
     "custom.repairs": "read",
     "custom.apply_repair": "security",
+    "agency.status": "read",
+    "agency.deliberate": "read",
+    "agency.counterfactual.create": "local_write",
+    "agency.counterfactual.compare": "read",
+    "agency.counterfactual.select": "local_write",
+    "agency.enable": "security",
+    "agency.monitor": "local_write",
+    "agency.disable": "local_write",
+    "agency.activate_goal": "security",
+    "agency.pause_goal": "local_write",
+    "permissions.set": "security",
 }
 
 

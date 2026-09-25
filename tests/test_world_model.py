@@ -364,6 +364,65 @@ class WorldModelTestCase(unittest.TestCase):
         self.assertIn("Project Apollo", context)
         self.assertIn("Send revised Project Apollo disclosure schedules", context)
 
+    def test_commitment_resolution_event_tracks_current_resolution_and_clears_on_reopen(self) -> None:
+        created_event = world_model.record_event(
+            "commitment.waiting_updated",
+            "Waiting item pending: Send Apollo schedules",
+            source_kind="iphone_waiting",
+            source_ref="waiting-resolution-test",
+            evidence="Pending Waiting-On snapshot.",
+        )
+        commitment_id = world_model.upsert_commitment(
+            "waiting:resolution-test",
+            owner_name="Daniel Reed",
+            action="Send Apollo schedules",
+            status="pending",
+            source_event_id=created_event,
+        )
+
+        resolved_event = world_model.record_event(
+            "commitment.waiting_updated",
+            "Waiting item resolved: Send Apollo schedules",
+            source_kind="iphone_waiting",
+            source_ref="waiting-resolution-test",
+            evidence="Resolved Waiting-On snapshot.",
+        )
+        world_model.upsert_commitment(
+            commitment_id,
+            owner_name="Daniel Reed",
+            action="Send Apollo schedules",
+            status="resolved",
+            source_event_id=resolved_event,
+        )
+        rows = self._query(
+            "SELECT status,resolution_event_id FROM commitments WHERE id=?",
+            (commitment_id,),
+        )
+        self.assertEqual(rows[0]["status"], "resolved")
+        self.assertEqual(int(rows[0]["resolution_event_id"]), resolved_event)
+
+        reopened_event = world_model.record_event(
+            "commitment.waiting_updated",
+            "Waiting item pending again: Send Apollo schedules",
+            source_kind="iphone_waiting",
+            source_ref="waiting-resolution-test",
+            evidence="Item was reopened.",
+        )
+        world_model.upsert_commitment(
+            commitment_id,
+            owner_name="Daniel Reed",
+            action="Send Apollo schedules",
+            status="pending",
+            source_event_id=reopened_event,
+        )
+        reopened = self._query(
+            "SELECT status,resolution_event_id FROM commitments WHERE id=?",
+            (commitment_id,),
+        )[0]
+        self.assertEqual(reopened["status"], "pending")
+        self.assertIsNone(reopened["resolution_event_id"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

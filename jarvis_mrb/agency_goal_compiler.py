@@ -1,0 +1,599 @@
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+from typing import Any, Callable
+
+import httpx
+
+from jarvis_mrb.planner_model import QUALITY_MODEL
+import jarvis_mrb.world_model as world_model
+
+
+DEFAULT_OBSERVATION_SOURCE_KINDS = [
+    "jarvis_verifier",
+    "calendar_enriched",
+    "gmail_attachment",
+    "rayban_camera",
+    "meeting_notes",
+    "expense_tracker",
+    "iphone_inventory",
+    "iphone_waiting",
+    "iphone_reminders",
+    "iphone_encounter",
+]
+
+_ACHIEVED_TERMS = {
+    "signed", "executed", "approved", "accepted", "submitted", "sent",
+    "booked", "reserved", "purchased", "delivered", "received", "completed",
+    "finished", "resolved", "closed", "paid", "confirmed", "filed",
+    "launched", "deployed",
+}
+
+_GENERIC_SUBJECT_TOKENS = {
+    "agreement", "application", "booking", "commitment", "contract", "deal",
+    "document", "email", "file", "form", "goal", "item", "message", "order",
+    "project", "request", "reservation", "task", "thing", "transaction",
+}
+
+_COMPLETION_WORDS = {
+    "sign": "signed",
+    "signed": "signed",
+    "execute": "executed",
+    "executed": "executed",
+    "approve": "approved",
+    "approved": "approved",
+    "accept": "accepted",
+    "accepted": "accepted",
+    "submit": "submitted",
+    "submitted": "submitted",
+    "send": "sent",
+    "sent": "sent",
+    "book": "booked",
+    "booked": "booked",
+    "reserve": "reserved",
+    "reserved": "reserved",
+    "purchase": "purchased",
+    "purchased": "purchased",
+    "buy": "purchased",
+    "deliver": "delivered",
+    "delivered": "delivered",
+    "receive": "received",
+    "received": "received",
+    "complete": "completed",
+    "completed": "completed",
+    "finish": "finished",
+    "finished": "finished",
+    "resolve": "resolved",
+    "resolved": "resolved",
+    "close": "closed",
+    "closed": "closed",
+    "pay": "paid",
+    "paid": "paid",
+    "confirm": "confirmed",
+    "confirmed": "confirmed",
+    "file": "filed",
+    "filed": "filed",
+    "launch": "launched",
+    "launched": "launched",
+    "deploy": "deployed",
+    "deployed": "deployed",
+}
+
+
+def _extract_json(text: str) -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            value = json.loads(raw[start : end + 1])
+            return value if isinstance(value, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+
+def _max_event_id() -> int:
+    conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
+    try:
+        row = conn.execute("SELECT COALESCE(MAX(id),0) FROM events").fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def _intention_context(intention_id: str) -> dict[str, Any]:
+    from jarvis_mrb.world_executive import active_intentions
+
+    for item in active_intentions(limit=30):
+        if str(item.get("id") or "") == str(intention_id):
+            return item
+    return {}
+
+
+def _model_compile(prompt: str) -> dict[str, Any]:
+    from jarvis_mrb.agent import OLLAMA_URL
+
+    system = """Compile an explicit personal goal into a conservative OBSERVABLE success contract.
+Return JSON only:
+{
+  "confidence": 0.0,
+  "criteria": [
+    {
+      "kind":"event_match",
+      "terms_all":["specific subject","completion-state word"],
+      "terms_none":["negated/unfinished phrase"],
+      "event_types":[],
+      "source_kinds":[]
+    }
+    OR
+    {
+      "kind":"commitment_status",
+      "commitment_id":"an EXACT supplied commitment id",
+      "status":"resolved"
+    }
+  ],
+  "explanation":"short explanation of what future observation proves success"
+}
+
+Rules:
+- This contract determines when an autonomous agent STOPS. False positives are worse than delayed completion.
+- Criteria are ANDed. Include only conditions that are genuinely necessary to establish success.
+- event_match must describe evidence of an ACHIEVED state, never merely an intention, plan, reminder, request, deadline, or discussion.
+- event_match terms_all must contain a specific subject anchor and an achieved-state term such as signed, booked, delivered, received, approved, paid, filed, deployed, completed, or confirmed.
+- Put common negations / incomplete formulations in terms_none, for example "not signed", "unsigned", "needs signature", "pending".
+- Leave event_types/source_kinds empty unless the supplied context justifies narrowing them.
+- commitment_status may use ONLY an exact commitment id supplied in context.
+- Do not invent entity IDs, commitment IDs, tools, sources, or facts.
+- If the goal cannot be converted into reliable observable evidence from this context, return confidence below 0.70 and criteria=[].
+"""
+    payload = {
+        "model": QUALITY_MODEL,
+        "stream": False,
+        "think": False,
+        "format": "json",
+        "keep_alive": "0",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt[:12000]},
+        ],
+        "options": {"temperature": 0},
+    }
+    with httpx.Client(timeout=httpx.Timeout(120.0, connect=2.0)) as client:
+        response = client.post(f"{OLLAMA_URL.rstrip('/')}/api/chat", json=payload)
+        response.raise_for_status()
+        data = response.json()
+    parsed = _extract_json(str((data.get("message") or {}).get("content") or ""))
+    if not parsed:
+        raise ValueError("Goal-contract model returned invalid JSON.")
+    return parsed
+
+
+def _completion_term(title: str) -> str:
+    """Fallback only when the goal itself names an achieved state.
+
+    The model compiler may infer a defensible future observation contract for an
+    imperative such as "book dinner". The deterministic fallback may not silently
+    invent what evidence "booked" would look like.
+    """
+    words = re.findall(r"[a-zA-Z]+", str(title or "").lower())
+    for word in words:
+        if word in _ACHIEVED_TERMS:
+            return word
+    return ""
+
+
+def _fallback_anchor(title: str, intention: dict[str, Any]) -> str:
+    entity_names = [
+        " ".join(str(item.get("name") or "").split())
+        for item in (intention.get("entities") or [])
+        if str(item.get("role") or "") == "project" and str(item.get("name") or "").strip()
+    ]
+    if entity_names:
+        return entity_names[0]
+
+    candidates = re.findall(
+        r"(?:[A-Z][A-Za-z0-9'_-]+(?:\s+[A-Z][A-Za-z0-9'_-]+)*)",
+        str(title or ""),
+    )
+    leading = {"get", "have", "make", "ensure", "finish", "complete", "confirm", "send", "book", "buy"}
+    for candidate in candidates:
+        words = candidate.strip().split()
+        while len(words) > 1 and words[0].lower() in leading:
+            words.pop(0)
+        cleaned = " ".join(words).strip()
+        if len(cleaned) >= 4:
+            return cleaned
+    return ""
+
+
+def _required_negations(completion: str) -> list[str]:
+    clean = str(completion or "").strip().lower()
+    result = [
+        f"not {clean}" if clean else "",
+        "pending",
+        "not complete",
+        "not completed",
+        "awaiting",
+    ]
+    special = {
+        "signed": ["unsigned", "needs signature", "needs signing", "to be signed", "awaiting signature"],
+        "approved": ["unapproved", "needs approval", "awaiting approval", "not approved"],
+        "accepted": ["not accepted", "awaiting acceptance", "needs acceptance"],
+        "submitted": ["not submitted", "needs submission", "awaiting submission"],
+        "sent": ["not sent", "draft", "queued to send", "needs sending"],
+        "booked": ["not booked", "needs booking", "to book", "awaiting booking"],
+        "reserved": ["not reserved", "needs reservation", "awaiting reservation"],
+        "purchased": ["not purchased", "needs purchase", "awaiting purchase"],
+        "delivered": ["not delivered", "out for delivery", "awaiting delivery"],
+        "received": ["not received", "awaiting receipt", "in transit"],
+        "completed": ["incomplete", "not completed", "needs completion", "in progress"],
+        "finished": ["unfinished", "not finished", "in progress"],
+        "resolved": ["unresolved", "not resolved", "pending resolution"],
+        "closed": ["not closed", "still open", "pending closure"],
+        "paid": ["unpaid", "not paid", "payment pending"],
+        "confirmed": ["unconfirmed", "not confirmed", "awaiting confirmation"],
+        "filed": ["not filed", "needs filing", "awaiting filing"],
+        "launched": ["not launched", "prelaunch", "awaiting launch"],
+        "deployed": ["not deployed", "deployment pending", "awaiting deployment"],
+        "executed": ["not executed", "awaiting execution", "needs execution"],
+    }
+    result.extend(special.get(clean, []))
+    return list(dict.fromkeys(item for item in result if item))
+
+
+def _fallback_contract(title: str, intention: dict[str, Any]) -> dict[str, Any] | None:
+    completion = _completion_term(title)
+    if not completion:
+        return None
+    anchor = _fallback_anchor(title, intention)
+    if not anchor:
+        return None
+
+    negations = _required_negations(completion)
+
+    return {
+        "confidence": 0.76,
+        "criteria": [
+            {
+                "kind": "event_match",
+                "terms_all": [anchor, completion],
+                "terms_none": list(dict.fromkeys(negations)),
+                "event_types": [],
+                "source_kinds": [],
+            }
+        ],
+        "explanation": f"Fallback contract requires a future event explicitly showing {anchor} is {completion}.",
+        "compiler": "deterministic_fallback",
+    }
+
+
+def _grounding_context(desired_state_id: str, intention: dict[str, Any]) -> str:
+    pieces: list[str] = []
+    conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
+    try:
+        row = conn.execute(
+            "SELECT title FROM desired_states WHERE id=?",
+            (str(desired_state_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is not None:
+        pieces.append(str(row[0] or ""))
+    pieces.extend(
+        [
+            str(intention.get("title") or ""),
+            str(intention.get("next_action") or ""),
+        ]
+    )
+    for item in intention.get("entities") or []:
+        if isinstance(item, dict):
+            pieces.append(str(item.get("name") or ""))
+    for item in intention.get("commitments") or []:
+        if isinstance(item, dict):
+            pieces.append(str(item.get("action") or ""))
+            pieces.append(str(item.get("owner") or ""))
+    return " ".join(" ".join(piece.split()) for piece in pieces if piece).lower()
+
+
+def _grounded_subject_anchor(term: str, context: str) -> bool:
+    clean = " ".join(str(term or "").lower().split())
+    if not clean:
+        return False
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9][a-z0-9'_-]*", clean)
+        if len(token) >= 3
+    ]
+    if not tokens:
+        return False
+    context_tokens = set(
+        re.findall(r"[a-z0-9][a-z0-9'_-]*", str(context or "").lower())
+    )
+    if not all(token in context_tokens for token in tokens):
+        return False
+    specific = [token for token in tokens if token not in _GENERIC_SUBJECT_TOKENS]
+    return bool(specific)
+
+
+def _validate_compiled(
+    desired_state_id: str,
+    raw: dict[str, Any],
+    intention: dict[str, Any],
+) -> tuple[list[dict[str, Any]], float, str]:
+    try:
+        confidence = max(0.0, min(float(raw.get("confidence") or 0.0), 1.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    criteria = raw.get("criteria")
+    if not isinstance(criteria, list) or not criteria:
+        raise ValueError("No observable success criteria were produced.")
+    if confidence < 0.70:
+        raise ValueError(f"Observable success contract confidence is too low ({confidence:.2f}).")
+
+    allowed_commitments = {
+        str(item.get("id") or "")
+        for item in (intention.get("commitments") or [])
+        if str(item.get("id") or "")
+    }
+    min_event_id = _max_event_id()
+    grounding_context = _grounding_context(desired_state_id, intention)
+    clean: list[dict[str, Any]] = []
+    for criterion in criteria[:8]:
+        if not isinstance(criterion, dict):
+            raise ValueError("Compiled criterion is not an object.")
+        kind = str(criterion.get("kind") or "")
+        if kind == "commitment_status":
+            commitment_id = str(criterion.get("commitment_id") or "")
+            if commitment_id not in allowed_commitments:
+                raise ValueError(f"Compiler referenced unknown commitment {commitment_id!r}.")
+            conn = sqlite3.connect(world_model.DB_PATH, timeout=10.0)
+            try:
+                row = conn.execute(
+                    "SELECT status,resolution_event_id FROM commitments WHERE id=?",
+                    (commitment_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row is None:
+                raise ValueError(f"Compiler referenced missing commitment {commitment_id!r}.")
+            if str(row[0] or "").lower() != "pending":
+                raise ValueError(
+                    f"Compiler referenced commitment {commitment_id!r} that is already {str(row[0] or 'resolved')}; "
+                    "a newly activated goal requires future completion evidence."
+                )
+            clean.append(
+                {
+                    "kind": "commitment_status",
+                    "commitment_id": commitment_id,
+                    "status": "resolved",
+                    "min_resolution_event_id": min_event_id,
+                }
+            )
+            continue
+        if kind != "event_match":
+            raise ValueError(f"Compiler requested unsupported success criterion {kind!r}.")
+
+        terms_all = [" ".join(str(item).split()) for item in (criterion.get("terms_all") or []) if str(item).strip()]
+        terms_none = [" ".join(str(item).split()) for item in (criterion.get("terms_none") or []) if str(item).strip()]
+        if len(terms_all) < 2:
+            raise ValueError("event_match requires at least a subject anchor and completion term.")
+
+        completion_terms = set(_COMPLETION_WORDS.values())
+        exact_completions = [
+            term.lower()
+            for term in terms_all
+            if term.lower() in completion_terms
+        ]
+        if not exact_completions:
+            raise ValueError(
+                "event_match requires the achieved-state completion term as its own exact terms_all item."
+            )
+        completion = exact_completions[0]
+
+        lowered_all = [term.lower() for term in terms_all]
+        forbidden_completion_phrases = set(_required_negations(completion))
+        completion_word = re.escape(completion)
+        if any(
+            term in forbidden_completion_phrases
+            or (
+                re.search(rf"\\b{completion_word}\\b", term) is not None
+                and re.search(
+                    r"\\b(not|never|awaiting|pending|needs?|need|to be)\\b",
+                    term,
+                ) is not None
+            )
+            for term in lowered_all
+            if term != completion
+        ):
+            raise ValueError("event_match contains negated or incomplete completion language in terms_all.")
+
+        subject_terms = [
+            term
+            for term in terms_all
+            if term.lower() not in completion_terms
+        ]
+        if not subject_terms:
+            raise ValueError("event_match lacks a specific subject anchor.")
+        grounded_subjects = [
+            term
+            for term in subject_terms
+            if _grounded_subject_anchor(term, grounding_context)
+        ]
+        if not grounded_subjects:
+            raise ValueError(
+                "event_match subject anchor is not specifically grounded in the goal/intention context."
+            )
+
+        terms_none = list(
+            dict.fromkeys(
+                terms_none + _required_negations(completion)
+            )
+        )
+
+        requested_sources = [
+            str(item).strip()
+            for item in (criterion.get("source_kinds") or [])[:12]
+            if str(item).strip()
+        ]
+        disallowed_sources = [
+            source for source in requested_sources
+            if source not in DEFAULT_OBSERVATION_SOURCE_KINDS
+        ]
+        if disallowed_sources:
+            raise ValueError(
+                "event_match requested non-observation source kinds: "
+                + ", ".join(disallowed_sources)
+            )
+
+        clean.append(
+            {
+                "kind": "event_match",
+                "terms_all": terms_all[:8],
+                "terms_none": terms_none[:12],
+                "event_types": [str(item) for item in (criterion.get("event_types") or [])[:12] if str(item).strip()],
+                "source_kinds": requested_sources or list(DEFAULT_OBSERVATION_SOURCE_KINDS),
+                "min_event_id": min_event_id,
+            }
+        )
+
+    explanation = " ".join(str(raw.get("explanation") or "").split())[:3000]
+    return clean, confidence, explanation
+
+
+def compile_observable_contract(
+    desired_state_id: str,
+    *,
+    compiler: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    from jarvis_mrb.desired_state import (
+        get_desired_state,
+        replace_criteria,
+        set_state,
+        update_authority,
+    )
+
+    state = get_desired_state(str(desired_state_id))
+    if state is None:
+        raise ValueError(f"Unknown desired state {desired_state_id!r}.")
+    intention_id = str(state.get("intention_id") or "")
+    intention = _intention_context(intention_id) if intention_id else {}
+    prompt = (
+        f"Goal: {state.get('title')}\n"
+        f"Intention: {json.dumps(intention, ensure_ascii=False, sort_keys=True)}\n"
+        "Compile only the minimum future observable evidence that proves this goal has actually been achieved."
+    )
+
+    raw: dict[str, Any] | None = None
+    model_error = ""
+    if compiler is not None:
+        # Explicitly injected compilers remain authoritative for acceptance,
+        # reproducible tests, and operator-selected model behaviors.
+        raw = compiler(prompt)
+    else:
+        # For goals ALREADY phrased as achieved observable states (e.g. "get
+        # Project Apollo signed"), use the existing validated deterministic
+        # contract. Do not ask an 8B model to re-infer the same evidence logic.
+        # Imperatives without an explicit achieved state still need semantic
+        # interpretation and must not be converted to invented proof criteria.
+        candidate = _fallback_contract(str(state.get("title") or ""), intention)
+        if candidate is not None:
+            try:
+                _validate_compiled(str(desired_state_id), candidate, intention)
+            except ValueError:
+                candidate = None
+        if candidate is not None:
+            raw = candidate
+        else:
+            try:
+                raw = _model_compile(prompt)
+            except Exception as exc:
+                model_error = str(exc)
+                raw = _fallback_contract(str(state.get("title") or ""), intention)
+
+    if not raw:
+        reason = "Jarvis could not derive an observable success contract for this goal."
+        if model_error:
+            reason += f" Model compiler failed: {model_error[:500]}"
+        set_state(str(desired_state_id), "blocked", reason=reason)
+        update_authority(
+            str(desired_state_id),
+            {
+                "agency_enabled": False,
+                "contract_compiled": False,
+                "contract_error": reason,
+            },
+        )
+        raise ValueError(reason)
+
+    try:
+        criteria, confidence, explanation = _validate_compiled(
+            str(desired_state_id),
+            raw,
+            intention,
+        )
+    except ValueError as exc:
+        reason = f"Observable success contract rejected: {exc}"
+        set_state(str(desired_state_id), "blocked", reason=reason)
+        update_authority(
+            str(desired_state_id),
+            {
+                "agency_enabled": False,
+                "contract_compiled": False,
+                "contract_error": reason,
+            },
+        )
+        raise
+
+    updated = replace_criteria(str(desired_state_id), criteria)
+    updated = update_authority(
+        str(desired_state_id),
+        {
+            "contract_compiled": True,
+            "contract_confidence": confidence,
+            "contract_explanation": explanation,
+            "contract_compiled_at_event_id": _max_event_id(),
+        },
+    )
+    return updated
+
+
+def is_circular_legacy_contract(state: dict[str, Any]) -> bool:
+    authority = dict(state.get("authority") or {})
+    if str(authority.get("origin") or "") != "legacy_goal":
+        return False
+    criteria = list(state.get("criteria") or [])
+    if len(criteria) != 1 or not isinstance(criteria[0], dict):
+        return False
+    criterion = criteria[0]
+    return (
+        str(criterion.get("kind") or "") == "belief_in"
+        and str(criterion.get("predicate") or "") == "status"
+        and {"completed", "done", "resolved"} <= set(str(item) for item in (criterion.get("values") or []))
+    )
+
+
+def ensure_observable_contract(
+    desired_state_id: str,
+    *,
+    compiler: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    from jarvis_mrb.desired_state import get_desired_state
+
+    state = get_desired_state(str(desired_state_id))
+    if state is None:
+        raise ValueError(f"Unknown desired state {desired_state_id!r}.")
+    authority = dict(state.get("authority") or {})
+    if bool(authority.get("contract_compiled")):
+        return state
+    if not is_circular_legacy_contract(state):
+        return state
+    return compile_observable_contract(str(desired_state_id), compiler=compiler)

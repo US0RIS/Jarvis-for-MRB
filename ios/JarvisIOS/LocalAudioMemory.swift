@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SoundAnalysis
+import UIKit
 
 struct LocalSpeechSnippet: Identifiable, Equatable {
     let id = UUID()
@@ -159,6 +160,91 @@ struct LocalSoundEvent: Equatable {
     let timestamp: Date
 }
 
+/// Opt-in, foreground-only *sound-class* perception when Jarvis is not in a
+/// voice/meeting session. It never transcribes conversation, writes PCM, or
+/// opens a second tap while SpeechRecognizer owns the microphone. SoundAnalysis
+/// receives short PCM buffers in memory and exports only a label/confidence.
+@MainActor
+final class AmbientSoundCapture: ObservableObject {
+    static let shared = AmbientSoundCapture()
+
+    @Published private(set) var status = "Off"
+    @Published private(set) var isCapturing = false
+
+    private let engine = AVAudioEngine()
+    private var tapInstalled = false
+    private var lastAttempt = Date.distantPast
+    private var permissionGranted: Bool?
+    private var captureGeneration = 0
+    private var isStarting = false
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.stop() }
+        }
+    }
+
+    func refresh(enabled: Bool, audioRouteManager: AudioRouteManager, preferBluetooth: Bool) async {
+        guard enabled else {
+            stop()
+            status = "Off"
+            return
+        }
+        if isCapturing || isStarting { return }
+        // Avoid repeated permission prompts/session restarts on a denied or
+        // temporarily unavailable microphone.
+        let retryDelay = permissionGranted == true ? 2.0 : 20.0
+        guard Date().timeIntervalSince(lastAttempt) >= retryDelay else { return }
+        lastAttempt = Date()
+        isStarting = true
+        defer { isStarting = false }
+        let generation = captureGeneration
+        if permissionGranted == nil {
+            permissionGranted = await AVAudioApplication.requestRecordPermission()
+        }
+        guard generation == captureGeneration else { return }
+        guard permissionGranted == true else {
+            status = "Microphone permission unavailable"
+            return
+        }
+        do {
+            try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
+            let input = engine.inputNode
+            let format = input.inputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else {
+                status = "Selected microphone not ready"
+                return
+            }
+            // A nil tap format accommodates Bluetooth HFP renegotiation.
+            LocalSoundClassifier.shared.resetStream()
+            input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
+                LocalSoundClassifier.shared.analyze(buffer, at: when.sampleTime)
+            }
+            tapInstalled = true
+            engine.prepare()
+            try engine.start()
+            isCapturing = true
+            status = "Foreground sound classification"
+        } catch {
+            stop()
+            status = "Ambient microphone unavailable"
+        }
+    }
+
+    func stop() {
+        captureGeneration += 1
+        if engine.isRunning { engine.stop() }
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        isCapturing = false
+    }
+}
+
 final class LocalSoundClassifier: NSObject, SNResultsObserving {
     static let shared = LocalSoundClassifier()
 
@@ -171,6 +257,22 @@ final class LocalSoundClassifier: NSObject, SNResultsObserving {
     private var latest: LocalSoundEvent?
 
     private override init() { super.init() }
+
+    /// Each new audio engine/tap has its own sample-time origin. A reused
+    /// SNAudioStreamAnalyzer must not receive positions from two clocks.
+    func resetStream() {
+        lock.lock()
+        latest = nil
+        lock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.analyzer?.removeAllRequests()
+            self.analyzer = nil
+            self.request = nil
+            self.configuredSampleRate = 0
+            self.configuredChannels = 0
+        }
+    }
 
     func analyze(_ buffer: AVAudioPCMBuffer, at framePosition: AVAudioFramePosition) {
         guard UserDefaults.standard.object(forKey: "jarvis.soundRecognitionEnabled") as? Bool ?? false,

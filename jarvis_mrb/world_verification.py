@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -73,6 +74,7 @@ def _connect() -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             action_event_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
             executive_decision_id TEXT NOT NULL DEFAULT '',
+            agency_step_id TEXT NOT NULL DEFAULT '',
             tool TEXT NOT NULL,
             arguments_json TEXT NOT NULL,
             verifier TEXT NOT NULL,
@@ -103,10 +105,78 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_verification_observations_verification
             ON verification_observations(verification_id,id DESC);
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_update
+        BEFORE UPDATE ON verification_observations
+        BEGIN
+            SELECT RAISE(ABORT, 'Verification observations are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_immutable_delete
+        BEFORE DELETE ON verification_observations
+        BEGIN
+            SELECT RAISE(ABORT, 'Verification observations are append-only');
+        END;
+        """
+    )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(action_verifications)").fetchall()}
+    if "agency_step_id" not in columns:
+        conn.execute("ALTER TABLE action_verifications ADD COLUMN agency_step_id TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_action_verifications_agency_step "
+        "ON action_verifications(agency_step_id,status,updated_at DESC)"
+    )
+    # Create triggers only after legacy installations have acquired every
+    # referenced column. Fresh databases already have the columns above.
+    conn.executescript(
+        """
+        CREATE TRIGGER IF NOT EXISTS action_verifications_immutable_identity
+        BEFORE UPDATE ON action_verifications
+        WHEN NEW.id IS NOT OLD.id
+          OR NEW.action_event_id IS NOT OLD.action_event_id
+          OR NEW.executive_decision_id IS NOT OLD.executive_decision_id
+          OR NEW.agency_step_id IS NOT OLD.agency_step_id
+          OR NEW.tool IS NOT OLD.tool
+          OR NEW.arguments_json IS NOT OLD.arguments_json
+          OR NEW.verifier IS NOT OLD.verifier
+          OR NEW.expected_json IS NOT OLD.expected_json
+          OR NEW.created_at IS NOT OLD.created_at
+        BEGIN
+            SELECT RAISE(ABORT, 'Action verification identity and expected outcome are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS action_verifications_resolved_event_once
+        BEFORE UPDATE ON action_verifications
+        WHEN OLD.resolved_event_id IS NOT NULL
+          AND NEW.resolved_event_id IS NOT OLD.resolved_event_id
+        BEGIN
+            SELECT RAISE(ABORT, 'Action verification terminal event cannot be relinked');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS verification_observations_before_terminal_only
+        BEFORE INSERT ON verification_observations
+        WHEN COALESCE(
+            (SELECT status FROM action_verifications WHERE id=NEW.verification_id),
+            ''
+        ) IN ('verified','failed','timed_out','unverified','superseded')
+        BEGIN
+            SELECT RAISE(ABORT, 'Cannot append observations to a terminal action verification');
+        END;
         """
     )
     conn.commit()
     return conn
+
+
+@contextmanager
+def _connection():
+    """Transaction context that also closes SQLite handles on every platform."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _reply_data(reply: Any) -> dict[str, Any]:
@@ -152,38 +222,55 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
         }
 
     if tool == "gmail.send":
-        # AgentReply currently may not preserve GoogleResult.data. The causal Gmail
-        # search boundary prevents an earlier message to the same recipient/subject
-        # from falsely verifying this send; exact message ID wins when available.
+        message_id = str(data.get("message_id") or "").strip()
         expected = {
-            "message_id": str(data.get("message_id") or ""),
+            "message_id": message_id,
             "recipient": str(data.get("email") or args.get("recipient") or "").strip().lower(),
             "subject": str(args.get("subject") or "").strip(),
             "not_before_unix": int((now - timedelta(seconds=10)).timestamp()),
         }
+        if not message_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": expected,
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Gmail accepted the send but returned no stable message ID; fuzzy recipient/subject matching is not accepted as proof.",
+            }
         return {
             "verifier": "gmail_sent_message",
             "expected": expected,
             "status": "pending",
             "next_check_at": (now + timedelta(seconds=5)).isoformat(),
             "deadline_at": (now + timedelta(minutes=10)).isoformat(),
-            "evidence": "Gmail send API accepted the message; waiting for causally bounded Sent Mail read-back.",
+            "evidence": f"Gmail accepted message {message_id}; waiting for exact-ID Sent Mail read-back.",
         }
 
     if tool == "calendar.create":
+        event_id = str(data.get("event_id") or "").strip()
         expected = {
-            "event_id": str(data.get("event_id") or ""),
+            "event_id": event_id,
             "summary": str(args.get("summary") or "").strip(),
             "start": str(args.get("start") or "").strip(),
             "end": str(args.get("end") or "").strip(),
         }
+        if not event_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": expected,
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Calendar accepted the create request but returned no stable event ID; title/time matching is not accepted as proof.",
+            }
         return {
             "verifier": "calendar_event_exists",
             "expected": expected,
             "status": "pending",
             "next_check_at": (now + timedelta(seconds=5)).isoformat(),
             "deadline_at": (now + timedelta(minutes=10)).isoformat(),
-            "evidence": "Calendar create API accepted the event; waiting for independent calendar read-back.",
+            "evidence": f"Calendar accepted event {event_id}; waiting for exact-ID calendar read-back.",
         }
 
     if tool in {"pc.launch_app", "smart.open"}:
@@ -234,6 +321,60 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
             "next_check_at": (now + timedelta(seconds=2)).isoformat(),
             "deadline_at": (now + timedelta(minutes=2)).isoformat(),
             "evidence": "Browser close request completed; waiting for matching tab to disappear.",
+        }
+
+    if tool == "agency.counterfactual.create":
+        case_id = str(data.get("id") or "").strip()
+        branches = data.get("branches") if isinstance(data.get("branches"), list) else []
+        if not case_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": {"tool": tool},
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Counterfactual creation returned success without a stable case identifier.",
+            }
+        return {
+            "verifier": "counterfactual_case_persisted",
+            "expected": {
+                "case_id": case_id,
+                "branch_count": len(branches),
+            },
+            "status": "pending",
+            "next_check_at": now.isoformat(),
+            "deadline_at": (now + timedelta(minutes=1)).isoformat(),
+            "evidence": f"Counterfactual case {case_id} was created; waiting for independent ledger read-back.",
+        }
+
+    if tool == "agency.counterfactual.select":
+        case_id = str(data.get("id") or "").strip()
+        selected_branch_id = str(data.get("selected_branch_id") or "").strip()
+        change_conditions = (
+            list(data.get("change_conditions") or [])
+            if isinstance(data.get("change_conditions"), list)
+            else []
+        )
+        if not case_id or not selected_branch_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": {"tool": tool},
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Counterfactual selection returned success without stable case/branch identity.",
+            }
+        return {
+            "verifier": "counterfactual_selection_persisted",
+            "expected": {
+                "case_id": case_id,
+                "selected_branch_id": selected_branch_id,
+                "change_conditions": change_conditions,
+            },
+            "status": "pending",
+            "next_check_at": now.isoformat(),
+            "deadline_at": (now + timedelta(minutes=1)).isoformat(),
+            "evidence": f"Counterfactual selection for {case_id} was written; waiting for independent ledger read-back.",
         }
 
     if tool == "state.update":
@@ -302,7 +443,7 @@ def _decision_context(decision_id: str) -> tuple[str, list[str]]:
     if not decision_id:
         return ("", [])
     try:
-        with _connect() as conn:
+        with _connection() as conn:
             row = conn.execute(
                 "SELECT intention_id FROM executive_decisions WHERE id=?",
                 (decision_id,),
@@ -327,6 +468,45 @@ def _decision_context(decision_id: str) -> tuple[str, list[str]]:
         return ("", [])
 
 
+def _agency_context(agency_step_id: str) -> tuple[str, str, list[str]]:
+    if not agency_step_id:
+        return ("", "", [])
+    try:
+        with _connection() as conn:
+            row = conn.execute(
+                """
+                SELECT p.desired_state_id,d.title,d.intention_id
+                FROM agency_steps s
+                JOIN agency_plans p ON p.id=s.plan_id
+                LEFT JOIN desired_states d ON d.id=p.desired_state_id
+                WHERE s.id=?
+                """,
+                (str(agency_step_id),),
+            ).fetchone()
+            if row is None:
+                return ("", "", [])
+            desired_state_id = str(row["desired_state_id"] or "")
+            title = str(row["title"] or "")
+            intention_id = str(row["intention_id"] or "")
+            projects: list[str] = []
+            if intention_id:
+                project_rows = conn.execute(
+                    """
+                    SELECT e.canonical_name
+                    FROM intention_entities ie
+                    JOIN entities e ON e.id=ie.entity_id
+                    WHERE ie.intention_id=? AND ie.role='project'
+                    ORDER BY ie.confidence DESC
+                    LIMIT 5
+                    """,
+                    (intention_id,),
+                ).fetchall()
+                projects = [str(item["canonical_name"]) for item in project_rows]
+            return (desired_state_id, title, projects)
+    except sqlite3.OperationalError:
+        return ("", "", [])
+
+
 def _record_world_transition(
     verification_id: str,
     *,
@@ -335,11 +515,17 @@ def _record_world_transition(
     evidence: str,
     action_event_id: int,
     executive_decision_id: str,
+    agency_step_id: str = "",
 ) -> int | None:
     try:
         from jarvis_mrb.world_model import record_event
 
         objective, projects = _decision_context(executive_decision_id)
+        desired_state_id, agency_title, agency_projects = _agency_context(agency_step_id)
+        if not objective and agency_title:
+            objective = agency_title
+        if not projects and agency_projects:
+            projects = agency_projects
         context = f" for {objective}" if objective else ""
         project_text = f" ({', '.join(projects)})" if projects else ""
         event_id = record_event(
@@ -351,6 +537,8 @@ def _record_world_transition(
                 "verification_id": verification_id,
                 "action_event_id": int(action_event_id),
                 "executive_decision_id": executive_decision_id,
+                "agency_step_id": str(agency_step_id or ""),
+                "desired_state_id": desired_state_id,
                 "tool": tool,
                 "status": status,
                 "objective": objective,
@@ -377,6 +565,7 @@ def register_execution(
     *,
     action_event_id: int,
     executive_decision_id: str = "",
+    agency_step_id: str = "",
 ) -> str:
     plan = _plan(str(tool), dict(args or {}), reply)
     verification_id = f"verification:{uuid.uuid4()}"
@@ -385,7 +574,7 @@ def register_execution(
     status = str(plan["status"])
     evidence = str(plan.get("evidence") or "")[:3000]
 
-    with _connect() as conn:
+    with _connection() as conn:
         if executive_decision_id:
             conn.execute(
                 """
@@ -399,15 +588,16 @@ def register_execution(
         conn.execute(
             """
             INSERT INTO action_verifications(
-                id,action_event_id,executive_decision_id,tool,arguments_json,verifier,expected_json,
+                id,action_event_id,executive_decision_id,agency_step_id,tool,arguments_json,verifier,expected_json,
                 status,attempts,next_check_at,deadline_at,last_checked_at,last_evidence,last_error,
                 created_at,updated_at,resolved_event_id
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
             """,
             (
                 verification_id,
                 int(action_event_id),
                 str(executive_decision_id or ""),
+                str(agency_step_id or ""),
                 str(tool),
                 json.dumps(safe_args, ensure_ascii=False, sort_keys=True),
                 str(plan["verifier"]),
@@ -432,9 +622,10 @@ def register_execution(
         evidence=evidence,
         action_event_id=int(action_event_id),
         executive_decision_id=str(executive_decision_id or ""),
+        agency_step_id=str(agency_step_id or ""),
     )
-    if event_id is not None:
-        with _connect() as conn:
+    if event_id is not None and status in _TERMINAL:
+        with _connection() as conn:
             conn.execute(
                 "UPDATE action_verifications SET resolved_event_id=? WHERE id=?",
                 (event_id, verification_id),
@@ -470,13 +661,11 @@ def _gmail_observation(expected: dict[str, Any]) -> tuple[str, str]:
     if not result.ok:
         raise RuntimeError(result.message)
     emails = list((result.data or {}).get("emails") or [])
-    if message_id:
-        if any(str(item.get("id") or "") == message_id for item in emails if isinstance(item, dict)):
-            return ("verified", f"Sent Mail contains Gmail message {message_id} inside the causal verification window.")
-        return ("pending", f"Gmail message {message_id} is not visible in the causally bounded Sent Mail query yet.")
-    if emails:
-        return ("verified", "Sent Mail contains a recipient/subject match created after this action was attempted.")
-    return ("pending", "No causally valid Sent Mail match is visible yet.")
+    if not message_id:
+        return ("pending", "No stable Gmail message ID is available; fuzzy Sent Mail matching is not accepted as verification.")
+    if any(str(item.get("id") or "") == message_id for item in emails if isinstance(item, dict)):
+        return ("verified", f"Sent Mail contains Gmail message {message_id} inside the causal verification window.")
+    return ("pending", f"Gmail message {message_id} is not visible in the causally bounded Sent Mail query yet.")
 
 
 def _calendar_observation(expected: dict[str, Any]) -> tuple[str, str]:
@@ -501,19 +690,11 @@ def _calendar_observation(expected: dict[str, Any]) -> tuple[str, str]:
     if not result.ok:
         raise RuntimeError(result.message)
     events = list((result.data or {}).get("events") or [])
-    if event_id and any(str(item.get("id") or "") == event_id for item in events if isinstance(item, dict)):
+    if not event_id:
+        return ("pending", "No stable Calendar event ID is available; title/time matching is not accepted as verification.")
+    if any(str(item.get("id") or "") == event_id for item in events if isinstance(item, dict)):
         return ("verified", f"Calendar read-back contains event {event_id}.")
-    for item in events:
-        if not isinstance(item, dict):
-            continue
-        if summary and str(item.get("summary") or "").strip() != summary:
-            continue
-        if start and str(item.get("start") or "").strip() != start:
-            continue
-        if end and str(item.get("end") or "").strip() != end:
-            continue
-        return ("verified", "Calendar read-back contains the created event with matching title/start/end.")
-    return ("pending", "Created calendar event is not independently visible yet.")
+    return ("pending", f"Calendar event {event_id} is not independently visible yet.")
 
 
 def _app_running(name: str) -> tuple[bool, str]:
@@ -568,6 +749,52 @@ def _observe(verifier: str, expected: dict[str, Any]) -> tuple[str, str]:
     if verifier == "browser_tab_absent":
         present, evidence = _tab_present(str(expected.get("query") or ""))
         return ("pending" if present else "verified", evidence)
+    if verifier == "counterfactual_case_persisted":
+        from jarvis_mrb.agency_counterfactual import get_case
+
+        case_id = str(expected.get("case_id") or "")
+        item = get_case(case_id)
+        expected_count = int(expected.get("branch_count") or 0)
+        actual_count = len(item.get("branches") or []) if isinstance(item, dict) else 0
+        matches = bool(
+            item
+            and str(item.get("id") or "") == case_id
+            and actual_count == expected_count
+            and actual_count >= 2
+        )
+        return (
+            "verified" if matches else "pending",
+            (
+                f"Counterfactual ledger read-back found case {case_id} with "
+                f"{actual_count} branch(es); expected {expected_count}."
+            ),
+        )
+    if verifier == "counterfactual_selection_persisted":
+        from jarvis_mrb.agency_counterfactual import get_case
+
+        case_id = str(expected.get("case_id") or "")
+        selected_branch_id = str(expected.get("selected_branch_id") or "")
+        expected_conditions = list(expected.get("change_conditions") or [])
+        item = get_case(case_id)
+        actual_conditions = (
+            list(item.get("change_conditions") or [])
+            if isinstance(item, dict)
+            else []
+        )
+        matches = bool(
+            item
+            and str(item.get("status") or "") == "selected"
+            and str(item.get("selected_branch_id") or "") == selected_branch_id
+            and actual_conditions == expected_conditions
+        )
+        return (
+            "verified" if matches else "pending",
+            (
+                f"Counterfactual ledger read-back for {case_id}: "
+                f"selected_branch_id={str((item or {}).get('selected_branch_id') or '')!r}; "
+                f"reopen_conditions={len(actual_conditions)}."
+            ),
+        )
     if verifier == "persistent_state_value":
         from jarvis_mrb.environment_state import get_state
 
@@ -615,7 +842,7 @@ def _record_observation(
     evidence: str,
     error: str = "",
 ) -> None:
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             "INSERT INTO verification_observations(verification_id,observed_at,outcome,evidence,error) VALUES(?,?,?,?,?)",
             (verification_id, _now(), outcome, evidence[:3000], error[:2000]),
@@ -633,8 +860,9 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
         evidence=evidence,
         action_event_id=int(row["action_event_id"]),
         executive_decision_id=str(row["executive_decision_id"] or ""),
+        agency_step_id=str(row["agency_step_id"] or ""),
     )
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             UPDATE action_verifications
@@ -650,13 +878,15 @@ def _transition(row: sqlite3.Row, status: str, evidence: str, *, error: str = ""
         "status": status,
         "tool": str(row["tool"]),
         "evidence": evidence[:1500],
+        "resolved_event_id": int(event_id or 0),
         "executive_decision_id": str(row["executive_decision_id"] or ""),
+        "agency_step_id": str(row["agency_step_id"] or ""),
     }
 
 
 def _mark_pending(row: sqlite3.Row, evidence: str, *, error: str = "") -> dict[str, Any]:
     now = _now()
-    with _connect() as conn:
+    with _connection() as conn:
         conn.execute(
             """
             UPDATE action_verifications
@@ -685,7 +915,7 @@ def _mark_pending(row: sqlite3.Row, evidence: str, *, error: str = "") -> dict[s
 
 
 def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | None:
-    with _connect() as conn:
+    with _connection() as conn:
         row = conn.execute("SELECT * FROM action_verifications WHERE id=?", (verification_id,)).fetchone()
     if row is None:
         return None
@@ -746,7 +976,7 @@ def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | 
 def check_due(limit: int = 20, *, force: bool = False) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 100))
     now = _now()
-    with _connect() as conn:
+    with _connection() as conn:
         if force:
             rows = conn.execute(
                 "SELECT id FROM action_verifications WHERE status='pending' ORDER BY created_at LIMIT ?",
@@ -778,7 +1008,7 @@ def check_due(limit: int = 20, *, force: bool = False) -> list[dict[str, Any]]:
 
 def pending_for_intention(intention_id: str, limit: int = 12) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit), 50))
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             """
             SELECT v.*
@@ -835,7 +1065,7 @@ def _is_verification_query(query: str) -> bool:
 def context_for_query(query: str, limit: int = 6) -> str:
     if not _is_verification_query(query):
         return ""
-    with _connect() as conn:
+    with _connection() as conn:
         rows = conn.execute(
             "SELECT * FROM action_verifications ORDER BY created_at DESC LIMIT ?",
             (max(1, min(int(limit), 20)),),
@@ -852,7 +1082,8 @@ def context_for_query(query: str, limit: int = 6) -> str:
 
 
 def status() -> dict[str, Any]:
-    with _connect() as conn:
+    conn = _connect()
+    try:
         counts = {
             str(row["status"]): int(row["count"])
             for row in conn.execute(
@@ -862,6 +1093,8 @@ def status() -> dict[str, Any]:
         row = conn.execute(
             "SELECT updated_at FROM action_verifications ORDER BY updated_at DESC LIMIT 1"
         ).fetchone()
+    finally:
+        conn.close()
     return {
         "installed": True,
         "tool_receipt_is_outcome": False,

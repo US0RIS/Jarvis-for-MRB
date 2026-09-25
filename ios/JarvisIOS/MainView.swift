@@ -32,6 +32,13 @@ struct MainView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     NavigationLink {
+                        LifeFabricView()
+                    } label: {
+                        Image(systemName: "checklist.checked")
+                    }
+                    .accessibilityLabel("Life Fabric")
+
+                    NavigationLink {
                         FrontendOperationsView()
                     } label: {
                         Image(systemName: "gauge.with.dots.needle.67percent")
@@ -419,6 +426,7 @@ final class MeetingCaptureController: ObservableObject {
 
     func start(title: String = "") async {
         guard !isActive, !isStopping else { return }
+        AmbientSoundCapture.shared.stop()
         status = "Starting…"
         do {
             try await recognizer.requestPermissions()

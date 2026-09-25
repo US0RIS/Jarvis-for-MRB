@@ -209,6 +209,23 @@ class LifeWhatIfRequest(BaseModel):
     daily_free_minutes: int
 
 
+class WorldArmorCreateRequest(BaseModel):
+    label: str
+    latitude: float
+    longitude: float
+    radius_km: float = 30.0
+    lifetime_hours: int = 24
+
+
+class WorldArmorIdRequest(BaseModel):
+    investigation_id: str
+
+
+class WorldArmorReplayRequest(BaseModel):
+    investigation_id: str
+    as_known_at: str | None = None
+
+
 class RealityLensRequest(BaseModel):
     latitude: float
     longitude: float
@@ -678,6 +695,105 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+def _armor_error(exc: Exception) -> None:
+    from jarvis_mrb.world_armor_phase1 import ArmorDisabled
+    if isinstance(exc, ArmorDisabled):
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+    if isinstance(exc, KeyError):
+        raise HTTPException(status_code=404, detail=str(exc)[:200]) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    raise exc
+
+
+@app.get("/world-armor/v1/capabilities")
+def world_armor_capabilities(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import capabilities
+    return capabilities()
+
+
+@app.post("/world-armor/v1/investigations")
+def world_armor_create(
+    request: WorldArmorCreateRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import create_investigation
+    try:
+        return create_investigation(
+            request.label, request.latitude, request.longitude,
+            radius_km=request.radius_km, lifetime_hours=request.lifetime_hours,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.get("/world-armor/v1/investigations")
+def world_armor_list(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import list_investigations
+    try:
+        return list_investigations()
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/observe")
+def world_armor_observe(
+    request: WorldArmorIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import observe_once
+    try:
+        return observe_once(request.investigation_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/replay")
+def world_armor_replay(
+    request: WorldArmorReplayRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import replay
+    try:
+        return replay(request.investigation_id, as_known_at=request.as_known_at)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/forget")
+def world_armor_forget(
+    request: WorldArmorIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_phase1 import forget
+    try:
+        return forget(request.investigation_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
 
 
 @app.post("/conductor/workstation/plan")

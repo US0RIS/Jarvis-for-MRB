@@ -330,16 +330,29 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
                 continue
             if datetime.fromisoformat(event_time) > received + timedelta(seconds=30):
                 continue
+            qlat, qlon = q.get("latitude"), q.get("longitude")
+            has_epicenter = (
+                type(qlat) in (int, float) and type(qlon) in (int, float)
+                and math.isfinite(qlat) and math.isfinite(qlon)
+                and -90 <= qlat <= 90 and -180 <= qlon <= 180
+            )
+            geo = ({"latitude": round(float(qlat), 5),
+                    "longitude": round(float(qlon), 5)}
+                   if has_epicenter else {})
             collected.append({
                 "provider": "usgs_earthquakes", "provider_key": key[:70],
                 "kind": "reported_earthquake", "observed_at": event_time,
                 "published_at": None, "lineage": "usgs_primary_event",
-                "geometry_basis": "within_queried_radius_exact_epicenter_not_in_adapter",
+                "geometry_basis": (
+                    "usgs_primary_reported_epicenter" if has_epicenter else
+                    "within_queried_radius_epicenter_unknown"
+                ),
                 "values": {
                     "magnitude": round(float(mag), 1),
                     "place": str(q.get("place") or "")[:160],
                     "reviewed": bool(q.get("reviewed")),
                     "source_url": str(q.get("source_url") or "")[:300],
+                    **geo,
                 },
             })
             count += 1

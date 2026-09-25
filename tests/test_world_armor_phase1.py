@@ -254,7 +254,9 @@ class WorldArmorKernelTests(TestCase):
 
     def test_one_shot_runs_only_existing_two_bounded_adapters(self):
         key=self.new()
-        with patch("jarvis_mrb.physical_conditions.physical_conditions",
+        with patch.object(armor, "_clock",
+                          return_value=NOW+timedelta(minutes=5)), \
+             patch("jarvis_mrb.physical_conditions.physical_conditions",
                    return_value=conditions()) as p, \
              patch("jarvis_mrb.public_incidents.regional_earthquakes",
                    return_value=quakes()) as q:
@@ -263,15 +265,15 @@ class WorldArmorKernelTests(TestCase):
         q.assert_called_once_with(34.12,-118.16,radius_km=30.0,
                                   hours=24,minimum_magnitude=2.5)
         self.assertEqual(receipt["mode"],"real_adapter")
-        # Real adapter receive time is the actual wall clock; do not replay
-        # it against the older frozen fixture clock used by the other tests.
-        self.assertEqual(armor.replay(key,db_path=self.db)["mode"],
-                         "real_adapter_only")
+        # A controlled clock keeps this test valid after the fixture date.
+        self.assertEqual(self.replay(key)["mode"],"real_adapter_only")
         self.assertEqual(receipt["new_observations"],3)
 
     def test_one_provider_exception_does_not_hide_other_sources(self):
         key=self.new()
-        with patch("jarvis_mrb.physical_conditions.physical_conditions",
+        with patch.object(armor, "_clock",
+                          return_value=NOW+timedelta(minutes=5)), \
+             patch("jarvis_mrb.physical_conditions.physical_conditions",
                    side_effect=RuntimeError("provider failed")), \
              patch("jarvis_mrb.public_incidents.regional_earthquakes",
                    return_value=quakes()):

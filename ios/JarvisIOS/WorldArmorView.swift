@@ -527,22 +527,22 @@ struct WorldArmorView: View {
         defer { busy = false }
         do {
             capabilities = try await client.worldArmorCapabilities()
+            // Listing and forgetting retained regions remains available after
+            // collection is disabled; no new provider request is issued here.
+            investigations = try await client.worldArmorInvestigations().investigations
+            if !investigations.contains(where: { $0.id == selectedID }) {
+                selectedID = nil
+                replayResult = nil
+                changes = nil
+            }
             if capabilities?.enabled == true {
-                let snapshot = try await client.worldArmorInvestigations()
-                investigations = snapshot.investigations
-                if !investigations.contains(where: { $0.id == selectedID }) {
-                    selectedID = nil
-                    replayResult = nil
-                    changes = nil
-                }
                 status = "Source registry integrated, not proof that live "
                     + "feeds or your installed devices have been checked."
             } else {
-                investigations = []
                 replayResult = nil
                 changes = nil
-                status = "Backend is OFF. Existing records are not "
-                    + "automatically collected or exposed here."
+                status = "Backend OFF: collection and replay disabled. "
+                    + "Previously saved locations remain visible for deletion."
             }
         } catch {
             capabilities = nil

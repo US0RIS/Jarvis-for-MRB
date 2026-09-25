@@ -61,8 +61,11 @@ def correlate(
     end = _instant(end_at, "end_at")
     if not start < end or end > instant or end - start > timedelta(hours=_MAX_HOURS):
         raise ValueError("Require a past, positive observation window <=72 hours.")
-    cutoff = _instant(as_known_at, "as_known_at") if as_known_at is not None else instant
-    if cutoff > instant:
+    explicit_cutoff = as_known_at is not None
+    requested_cutoff = (
+        _instant(as_known_at, "as_known_at") if explicit_cutoff else instant
+    )
+    if requested_cutoff > instant:
         raise ValueError("as_known_at cannot be in the future.")
     if source_ids is None:
         chosen = list(_PROVIDERS)
@@ -75,9 +78,17 @@ def correlate(
     else:
         raise ValueError("Choose one to three distinct registered source IDs.")
     report = replay(
-        investigation_id, as_known_at=cutoff.isoformat(),
+        investigation_id, as_known_at=requested_cutoff.isoformat(),
         db_path=db_path, now=instant,
     )
+    if explicit_cutoff:
+        cutoff=requested_cutoff
+    else:
+        moments=report.get("sample_timeline") or []
+        cutoff=(
+            max(datetime.fromisoformat(x["received_at"]) for x in moments)
+            if moments else end
+        )
     region = report["investigation"]
     # The operator can narrow (never expand) the enrollment's radius. The
     # center itself is immutable; no arbitrary target/location may be joined.

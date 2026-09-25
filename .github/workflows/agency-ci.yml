@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - jarvis/agency-1.0
+      - jarvis/situation-evidence-unification
   pull_request:
     branches:
       - main

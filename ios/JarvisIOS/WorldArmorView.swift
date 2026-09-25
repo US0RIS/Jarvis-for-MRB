@@ -61,6 +61,8 @@ struct ArmorCoverage: Decodable {
         case checkedAt = "checked_at"
         case reportedCount = "reported_count"
         case adapterMode = "adapter_mode"
+        case sampleCoverageStatus = "sample_coverage_status"
+        case sampleCoverageCheckedAt = "sample_coverage_checked_at"
     }
 }
 
@@ -108,6 +110,8 @@ struct ArmorObservation: Decodable, Identifiable {
     let lineage: String
     let geometryBasis: String
     let adapterMode: String?
+    let sampleCoverageStatus: String?
+    let sampleCoverageCheckedAt: String?
     let values: ArmorValues
     enum CodingKeys: String, CodingKey {
         case id, source, kind, revision, lineage, values
@@ -246,10 +250,12 @@ struct ArmorCorrelationReport: Decodable {
             case spatialBasis = "spatial_basis"
         }
     }
+    let queryID: String
     let observationWindow: Window
     let queryRegion: Region
     let spatiallyIndeterminateObservations: [ArmorObservation]
     let timedObservations: [ArmorObservation]
+    let degradedObservations: [ArmorObservation]
     let receiptTimeOnlyObservations: [ArmorObservation]
     let candidateLinks: [Link]
     let sourceCoverage: [String: Coverage]
@@ -257,10 +263,12 @@ struct ArmorCorrelationReport: Decodable {
     let qualifier: String
     enum CodingKeys: String, CodingKey {
         case mode, qualifier
+        case queryID = "query_id"
         case observationWindow = "observation_window"
         case queryRegion = "query_region"
         case spatiallyIndeterminateObservations = "spatially_indeterminate_observations"
         case timedObservations = "timed_observations"
+        case degradedObservations = "degraded_observations"
         case receiptTimeOnlyObservations = "receipt_time_only_observations"
         case candidateLinks = "candidate_links"
         case sourceCoverage = "source_coverage"
@@ -300,17 +308,21 @@ struct ArmorEvidenceGraph: Decodable {
             case prohibitedConclusion = "prohibited_conclusion"
         }
     }
+    let queryID: String
     let nodes: [ArmorObservation]
     let edges: [Edge]
     let hypotheses: [Hypothesis]
     let unavailableOrUncheckedSources: [String]
     let receiptTimeOnlyCount: Int
+    let degradedObservationCount: Int
     let spatiallyIndeterminateCount: Int
     let qualifier: String
     enum CodingKeys: String, CodingKey {
         case nodes, edges, hypotheses, qualifier
+        case queryID = "query_id"
         case unavailableOrUncheckedSources = "unavailable_or_unchecked_sources"
         case receiptTimeOnlyCount = "receipt_time_only_count"
+        case degradedObservationCount = "degraded_observation_count"
         case spatiallyIndeterminateCount = "spatially_indeterminate_count"
     }
 }
@@ -672,6 +684,9 @@ struct WorldArmorView: View {
                      + "\(report.queryRegion.longitude.formatted()) "
                      + "• \(report.queryRegion.radiusKM.formatted()) km query radius")
                     .font(.subheadline.weight(.medium))
+                Text("Query: " + report.queryID)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
                 Text("Observed-time window: "
                      + report.observationWindow.start + " → "
                      + report.observationWindow.end)
@@ -711,6 +726,12 @@ struct WorldArmorView: View {
                     .padding(8)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
                 }
+                if !report.degradedObservations.isEmpty {
+                    Text("\(report.degradedObservations.count) retained source "
+                         + "record(s) are visible but excluded from correlation "
+                         + "because their producing sample was not status=ok.")
+                        .font(.caption)
+                }
                 if !report.receiptTimeOnlyObservations.isEmpty {
                     Divider()
                     Text("Received-only • source event times unavailable")
@@ -747,6 +768,14 @@ struct WorldArmorView: View {
                      + "\(graph.edges.count) typed edge(s) • "
                      + "\(graph.hypotheses.count) unverified hypothesis candidate(s)")
                     .font(.subheadline.weight(.medium))
+                Text("Query: " + graph.queryID)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                if graph.degradedObservationCount > 0 {
+                    Text("\(graph.degradedObservationCount) degraded observation(s) "
+                         + "remain inspectable but cannot support a hypothesis.")
+                        .font(.caption)
+                }
                 if !graph.unavailableOrUncheckedSources.isEmpty {
                     Text("Unavailable/unchecked: "
                          + graph.unavailableOrUncheckedSources.joined(separator: ", "))
@@ -871,6 +900,10 @@ struct WorldArmorView: View {
                         Text("Source observation: "
                              + (row.observedAt ?? "unknown")
                              + " • Jarvis received " + row.receivedAt)
+                            .font(.caption2)
+                        Text("Producing-sample coverage: "
+                             + (row.sampleCoverageStatus ?? "unknown")
+                             + (row.sampleCoverageCheckedAt.map { " • checked " + $0 } ?? ""))
                             .font(.caption2)
                         Text(row.geometryBasis)
                             .font(.caption2)

@@ -111,3 +111,24 @@ glasses demo — combat mechanics dropped, the underlying UX patterns kept)
   for its own workflows; extend the same mechanism to general tasks so
   work started on phone can resume on PC (or vice versa) without manual
   handoff.
+
+## Severe weather / physical safety (from an El Niño discussion with Gemini)
+
+- **Ingest NWS Impact-Based Warnings (IBW) feeds.** NWS Flash Flood
+  Warnings carry explicit damage tags (`CONSIDERABLE` or `CATASTROPHIC`).
+  Parse these tags in the adapter payload to instantly escalate alerting
+  priority instead of treating every flash flood warning the same
+  regardless of severity.
+
+- **Ingest California Geological Survey (CGS) and USGS slope data.** Map
+  the immediate neighborhood's slope steepness and landslide-susceptibility
+  zones. If an observation node sits in a high-susceptibility zone, halve
+  the rainfall-rate alert threshold there rather than applying one
+  blanket threshold everywhere.
+
+- **Local failover alerting.** Push local notifications via a physical
+  buzzer, a local-network webhook, or loud sound output on a home machine
+  when `CRITICAL` conditions are reached, so the alert still lands even
+  if cellular networks or the power grid go down during a severe storm —
+  the phone-push path alone isn't enough for the exact scenario it's
+  meant to cover.

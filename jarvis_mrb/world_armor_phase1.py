@@ -487,11 +487,13 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
             "reported_count": row["observation_count"],
             "scope": row["scope"], "adapter_mode": row["adapter_mode"],
         }
+    sample_modes = {row["id"]: row["adapter_mode"] for row in samples}
     visible: dict[tuple[str,str], dict[str, Any]] = {}
     revision_history: list[dict[str, Any]] = []
     for row in obs:
         entry = {
             "id":row["id"],"source":row["provider"],
+            "adapter_mode":sample_modes.get(row["sample_id"], "unknown"),
             "provider_key":row["provider_key"],"kind":row["kind"],
             "observed_at":row["observed_at"],"published_at":row["published_at"],
             "received_at":row["received_at"],"revision":row["revision"],

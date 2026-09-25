@@ -25,7 +25,7 @@ Nothing is deployed on your devices merely because CI passes.
 ## Human Extension v1 — executable first superpower slice
 
 **[Reality Lens](HUMAN_EXTENSION.md)** is the first deliberately non-chatbot
-human-extension workflow on `jarvis/human-extension-v1`: use the existing
+human-extension workflow originating on `jarvis/human-extension-v1` and included in this candidate: use the existing
 iPhone Mesh named-place resolver, sense actual supported public environmental
 sources, explicitly remember a bounded source-backed observation on the
 private Jarvis PC, revisit later for a deterministic change comparison, and
@@ -36,9 +36,9 @@ track the user, save raw media or authorize remote actions. This is a concrete
 not a claim that the full human-extension roadmap is already deployed.
 The matching iPhone/backend builds still require physical-device acceptance.
 
-## Camera-free ambient autonomy — active development branch
+## Camera-free ambient autonomy — in the convergence candidate
 
-The camera-centred opportunity matcher is retired. On `jarvis/memomind-prep`, opt-in iPhone acoustic sound classification (foreground or active voice capture), separately timestamped phone motion and location/geofence and modelled, source-labelled outdoor temperature can match *explicit existing standing reminders* through Agency Attention. The source metadata is transient and cannot authorize tools or physical actions. Health is separately opt-in read-only context, not a diagnosis or actuating signal.
+The camera-centred opportunity matcher is retired. Originating on `jarvis/memomind-prep` and included in this candidate, opt-in iPhone acoustic sound classification (foreground or active voice capture), separately timestamped phone motion and location/geofence and modelled, source-labelled outdoor temperature can match *explicit existing standing reminders* through Agency Attention. The source metadata is transient and cannot authorize tools or physical actions. Health is separately opt-in read-only context, not a diagnosis or actuating signal.
 
 Actual reversible action path: after discovering Apple Home, the user may individually preauthorize an exact light for an observed arrival, or for **two high-confidence doorbell classifications while the phone confirms home during 18:00–07:00 local time**. The foreground iPhone initiates only those enrolled HomeKit writes, then reads back the characteristic. An encrypted, locally clearable receipt separates verified success from failed/unverified actions. This is not a general autonomous device controller and is not supported in iOS background without actual device acceptance.
 
@@ -348,7 +348,7 @@ The project treats DAT availability as an external platform dependency and does 
 
 ## Mac/Xcode
 
-A Mac with current Xcode is required to build/sign/install the iPhone companion and its Live Activity extension.
+A Mac with current Xcode is required to build/sign/install the iPhone companion and its Live Activity extension. Separately, a MacBook Air has been used as a USB-connected experimental physical-actuation host; this does not make the Mac a replacement for the Windows reasoning/tool host.
 
 ---
 

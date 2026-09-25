@@ -74,8 +74,22 @@ def regional_earthquakes(
             url = str(props.get("url") or "")
             if not url.startswith("https://earthquake.usgs.gov/"):
                 url = _DOCS
+            # USGS GeoJSON geometry is [longitude, latitude, depth_km].
+            # A missing or invalid geometry remains unknown; the query center
+            # is never substituted for an earthquake's epicenter.
+            coords = ((item.get("geometry") or {}).get("coordinates")
+                      if isinstance(item.get("geometry"), dict) else None)
+            epicenter_lat: float | None = None
+            epicenter_lon: float | None = None
+            if (isinstance(coords, list) and len(coords) >= 2
+                    and all(type(v) in (int, float) and math.isfinite(v)
+                            for v in coords[:2])
+                    and -90 <= coords[1] <= 90 and -180 <= coords[0] <= 180):
+                epicenter_lon = round(float(coords[0]), 5)
+                epicenter_lat = round(float(coords[1]), 5)
             events.append({
                 "id": identifier, "magnitude": round(float(magnitude), 1),
+                "latitude": epicenter_lat, "longitude": epicenter_lon,
                 "place": str(props.get("place") or "unspecified location")[:160],
                 "occurred_at": moment.isoformat(), "source_url": url,
                 "reviewed": props.get("status") == "reviewed",

@@ -548,6 +548,8 @@ Future adapters should prioritize documented official/publicly viewable and perm
 
 Cameras should serve an explicit question or watch. They should not become the whole architecture or an excuse to make MemoMind depend on camera hardware.
 
+**Boundary decision (September 2026):** the provider-expansion roadmap above — additional state DOT camera feeds, ALERTWildfire, harbor/coastal webcams, and similar — stays limited to official, publicly accessible camera catalogs the operator has rights to view, following the same allowlisted-host, cached-catalog, single-still shape as the Caltrans adapter. A proposal to instead stream arbitrary or private RTSP/CCTV feeds, perform cross-camera person or vehicle tracking, or otherwise build toward general surveillance capability was considered and explicitly declined. That is not a scope difference from the paragraph above; it is the same "no arbitrary CCTV, no person/license-plate surveillance" line already stated there, restated here because it was directly proposed and rejected rather than just never attempted.
+
 ### Aircraft, ships and places: the movement graph
 
 The desired graph correlates **publicly observable moving entities** with source, time, confidence, geography and explicit user-selected regions:

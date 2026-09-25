@@ -901,6 +901,7 @@ struct WorldArmorView: View {
                 replayResult = nil
                 changes = nil
                 correlations = nil
+                evidenceGraph = nil
                 sampleTimes = []
             }
             if capabilities?.enabled == true {
@@ -910,6 +911,7 @@ struct WorldArmorView: View {
                 replayResult = nil
                 changes = nil
                 correlations = nil
+                evidenceGraph = nil
                 sampleTimes = []
                 status = "Backend OFF: collection and replay disabled. "
                     + "Previously saved locations remain visible for deletion."
@@ -944,6 +946,7 @@ struct WorldArmorView: View {
             replayResult = nil
             changes = nil
             correlations = nil
+            evidenceGraph = nil
             sampleTimes = []
             asKnownAt = ""
             status = "Created an expiring region. No provider checked yet."
@@ -966,6 +969,7 @@ struct WorldArmorView: View {
             asKnownAt = ""
             changes = nil
             correlations = nil
+            evidenceGraph = nil
             status = "Received \(receipt.newObservations) new source records "
                 + "at " + receipt.receivedAt + ". Read coverage before "
                 + "drawing conclusions."
@@ -983,6 +987,8 @@ struct WorldArmorView: View {
             replayResult = try await client.worldArmorReplay(
                 selectedID, asKnownAt: cutoff.isEmpty ? nil : cutoff
             )
+            correlations = nil
+            evidenceGraph = nil
             if cutoff.isEmpty {
                 sampleTimes = replayResult?.sampleTimeline ?? []
             }
@@ -1053,6 +1059,7 @@ struct WorldArmorView: View {
             replayResult = nil
             changes = nil
             correlations = nil
+            evidenceGraph = nil
             sampleTimes = []
             investigations = try await client.worldArmorInvestigations().investigations
             self.selectedID = nil

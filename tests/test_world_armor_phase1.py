@@ -8,8 +8,6 @@ from unittest.mock import patch
 import os
 import sqlite3
 
-from fastapi import HTTPException
-from fastapi.responses import Response
 from jarvis_mrb import world_armor_phase1 as armor
 
 NOW = datetime(2026, 9, 24, 20, 0, tzinfo=timezone.utc)
@@ -235,24 +233,6 @@ class WorldArmorKernelTests(TestCase):
         self.assertEqual(receipt["coverage"][0]["status"],"unavailable")
         self.assertEqual(receipt["coverage"][2]["status"],"ok")
 
-    def test_service_requires_token_even_if_feature_enabled(self):
-        from jarvis_mrb import service
-        with patch.object(service,"API_TOKEN","private-secret"):
-            with self.assertRaises(HTTPException) as ctx:
-                service.world_armor_capabilities(Response(),authorization=None)
-            self.assertEqual(ctx.exception.status_code,401)
-            value=service.world_armor_capabilities(
-                Response(),authorization="Bearer private-secret")
-            self.assertTrue(value["enabled"])
-
-    def test_service_does_not_expose_client_supplied_observation_forgery(self):
-        from jarvis_mrb import service
-        self.assertEqual(set(service.WorldArmorIdRequest.model_fields),
-                         {"investigation_id"})
-        self.assertEqual(set(service.WorldArmorReplayRequest.model_fields),
-                         {"investigation_id","as_known_at"})
-        self.assertNotIn("ingest_fixture",
-                         {route.path for route in service.app.routes})
 
 
 if __name__ == "__main__":

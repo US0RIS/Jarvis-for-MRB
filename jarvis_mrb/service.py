@@ -825,6 +825,27 @@ def world_armor_correlate(
         _armor_error(exc)
 
 
+@app.post("/world-armor/v1/hypotheses/query")
+def world_armor_hypotheses(
+    request: WorldArmorCorrelationRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_hypotheses import build_evidence_graph
+    try:
+        return build_evidence_graph(
+            request.investigation_id,
+            start_at=request.start_at, end_at=request.end_at,
+            as_known_at=request.as_known_at,
+            source_ids=request.source_ids,
+            query_radius_km=request.query_radius_km,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
 @app.post("/world-armor/v1/forget")
 def world_armor_forget(
     request: WorldArmorIdRequest,

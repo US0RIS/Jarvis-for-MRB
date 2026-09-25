@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -79,7 +80,7 @@ class WorldArmorKernelTests(TestCase):
         self.assertEqual(rows[0]["id"],key)
         self.assertEqual(rows[0]["sample_count"],0)
         self.assertEqual(self.replay(key)["mode"],"no_samples")
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con:
             self.assertEqual(con.execute("select count(*) from coverage").fetchone()[0],0)
 
     def test_reject_invalid_region_and_labels_and_ttl(self):
@@ -252,7 +253,7 @@ class WorldArmorKernelTests(TestCase):
         rows=armor.list_investigations(db_path=self.db,
                  now=NOW+timedelta(hours=2))["investigations"]
         self.assertEqual(rows,[])
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con:
             self.assertEqual(con.execute("select count(*) from observations").fetchone()[0],0)
 
     def test_invalid_replay_time_and_identifier_fail_closed(self):

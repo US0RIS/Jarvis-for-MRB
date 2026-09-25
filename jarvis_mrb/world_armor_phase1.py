@@ -515,6 +515,10 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
                          "latitude":item["latitude"],"longitude":item["longitude"],
                          "radius_km":item["radius_km"],"expires_at":item["expires_at"]},
         "as_known_at":cutoff, "samples_retained":len(samples),
+        "sample_timeline":[
+            {"id":row["id"],"received_at":row["received_at"],
+             "adapter_mode":row["adapter_mode"]} for row in samples
+        ],
         "observation_count":len(observations),"observations":observations,
         "revisions":revision_history[:1200],"coverage":last_cover,
         "coverage_complete_for_integrated_sources":available,

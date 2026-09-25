@@ -493,6 +493,18 @@ struct WorldArmorView: View {
                         .buttonStyle(.bordered)
                 }
                 .disabled(busy || capabilities?.enabled != true)
+                if !sampleTimes.isEmpty {
+                    Menu("Rewind to a retained receipt") {
+                        Button("Latest saved evidence") { asKnownAt = "" }
+                        ForEach(sampleTimes) { item in
+                            Button(item.receivedAt + " • " + item.adapterMode) {
+                                asKnownAt = item.receivedAt
+                                Task { await replay() }
+                            }
+                        }
+                    }
+                    .disabled(busy || capabilities?.enabled != true)
+                }
                 TextField("Optional as-known-at ISO time (UTC or offset)", text: $asKnownAt)
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.never)
@@ -512,6 +524,109 @@ struct WorldArmorView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // The MapKit center is a user-enrolled query scope, NOT an event location.
+    // These queries never fetch providers, enroll watches or operate machines.
+    private var temporalQueryPanel: some View {
+        GroupBox("4 · Investigate retained evidence across time") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Compare source-observed times in this selected region. "
+                     + "The current providers do not report exact shared "
+                     + "event footprints, so matches are temporal candidates only.")
+                    .font(.caption)
+                Picker("Observation window", selection: $correlationWindowHours) {
+                    ForEach([6, 24, 72], id: \.self) { hours in
+                        Text("Previous \(hours) hours").tag(hours)
+                    }
+                }
+                .pickerStyle(.segmented)
+                DatePicker(
+                    "Window ends",
+                    selection: $correlationEnd,
+                    in: ...Date(),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                Button(busy ? "Querying…" : "Correlate saved sources") {
+                    Task { await correlateSavedEvidence() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || capabilities?.enabled != true)
+                Text("Read-only query; observation and receipt timestamps "
+                     + "remain distinct. No new sensor checks occur.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func correlationPanel(_ report: ArmorCorrelationReport) -> some View {
+        GroupBox("Temporal relationship candidates • not causal findings") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Region \(report.queryRegion.latitude.formatted()), "
+                     + "\(report.queryRegion.longitude.formatted()) "
+                     + "• \(report.queryRegion.radiusKM.formatted()) km query radius")
+                    .font(.subheadline.weight(.medium))
+                Text("Observed-time window: "
+                     + report.observationWindow.start + " → "
+                     + report.observationWindow.end)
+                    .font(.caption)
+                Text(report.mode + " • \(report.timedObservations.count) timestamped "
+                     + "source records; \(report.receiptTimeOnlyObservations.count) "
+                     + "receipt-only records")
+                    .font(.caption)
+                ForEach(report.sourceCoverage.keys.sorted(), id: \.self) { source in
+                    if let coverage = report.sourceCoverage[source] {
+                        Text(source + " • " + coverage.status + " • " + coverage.scope)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                Text("Event-time coincidence candidates: "
+                     + "\(report.candidateLinks.count)")
+                    .font(.headline)
+                if report.candidateLinks.isEmpty {
+                    Text("No eligible independent-source event-time pairs "
+                         + "in these retained samples. Not an all-clear.")
+                        .font(.caption)
+                }
+                ForEach(report.candidateLinks) { link in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(link.firstSource + " ↔ " + link.secondSource)
+                            .font(.subheadline.weight(.medium))
+                        Text("\(link.separationSeconds) seconds apart in reported "
+                             + "source time")
+                        Text(link.firstSourceTime + " → " + link.secondSourceTime)
+                            .font(.caption2)
+                        Text(link.note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9))
+                }
+                if !report.receiptTimeOnlyObservations.isEmpty {
+                    Divider()
+                    Text("Received-only • source event times unavailable")
+                        .font(.headline)
+                    ForEach(report.receiptTimeOnlyObservations.prefix(25)) { row in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(row.source + " • " + row.values.brief)
+                            Text("Jarvis received: " + row.receivedAt
+                                 + " • source event time UNKNOWN")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Text(report.qualifier)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -702,6 +817,31 @@ struct WorldArmorView: View {
                 + "No inference of causation or absence."
         } catch {
             status = "Comparison blocked: " + error.localizedDescription
+        }
+    }
+
+    private func correlateSavedEvidence() async {
+        guard let selectedID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let end = correlationEnd
+            let start = end.addingTimeInterval(
+                -Double(correlationWindowHours) * 3_600
+            )
+            let formatter = ISO8601DateFormatter()
+            let cutoff = asKnownAt.trimmingCharacters(in: .whitespacesAndNewlines)
+            correlations = try await client.worldArmorCorrelate(
+                selectedID,
+                startAt: formatter.string(from: start),
+                endAt: formatter.string(from: end),
+                asKnownAt: cutoff.isEmpty ? nil : cutoff
+            )
+            status = "Read-only historical correlation complete. "
+                + "Inspect source time, scope and unknown coverage."
+        } catch {
+            correlations = nil
+            status = "Correlation unavailable: " + error.localizedDescription
         }
     }
 

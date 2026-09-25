@@ -155,6 +155,49 @@ class WorldArmorKernelTests(TestCase):
         self.assertEqual(quake_after["revision"],2)
         self.assertEqual(after["observations"][0]["received_at"],NOW.isoformat())
 
+    def test_source_revision_reversion_is_new_evidence_not_old_duplicate(self):
+        key=self.new()
+        self.ingest(key,time=NOW)
+        self.ingest(key,quake=quakes(mag=3.3),
+                    time=NOW+timedelta(minutes=10))
+        self.ingest(key,quake=quakes(mag=3.1),
+                    time=NOW+timedelta(minutes=20))
+        current=self.replay(key)
+        quake=next(x for x in current["observations"]
+                   if x["source"]=="usgs_earthquakes")
+        self.assertEqual(quake["values"]["magnitude"],3.1)
+        self.assertEqual(quake["revision"],3)
+        self.assertEqual(len(current["revisions"]),2)
+        older=self.replay(
+            key,at=(NOW+timedelta(minutes=15)).isoformat())
+        self.assertEqual(next(x for x in older["observations"]
+                        if x["source"]=="usgs_earthquakes")["revision"],2)
+
+    def test_malformed_success_body_is_unavailable_not_a_zero_observation(self):
+        key=self.new()
+        bad=conditions()
+        bad["weather_alerts"]["alerts"]="invalid"
+        q=quakes()
+        q["events"]=None
+        self.ingest(key,air=bad,quake=q)
+        view=self.replay(key)
+        self.assertEqual(view["coverage"]["nws_point_alerts"]["status"],"unavailable")
+        self.assertEqual(view["coverage"]["usgs_earthquakes"]["status"],"unavailable")
+        self.assertFalse(view["coverage_complete_for_integrated_sources"])
+
+    def test_future_dated_air_and_earthquake_not_presented_as_current(self):
+        key=self.new()
+        future=NOW+timedelta(hours=2)
+        bad=conditions(model=future)
+        q=quakes(events=[{
+            "id":"future-usgs","magnitude":3.2,
+            "occurred_at":future.isoformat()}])
+        self.ingest(key,air=bad,quake=q)
+        view=self.replay(key)
+        self.assertEqual({x["source"] for x in view["observations"]},
+                         {"nws_point_alerts"})
+        self.assertFalse(view["coverage_complete_for_integrated_sources"])
+
     def test_duplicate_capture_is_idempotent_for_observations_not_for_collection(self):
         key=self.new()
         self.ingest(key,time=NOW)

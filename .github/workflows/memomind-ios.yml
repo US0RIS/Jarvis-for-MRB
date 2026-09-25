@@ -101,3 +101,24 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/jarvis-derived-data" \
             CODE_SIGNING_ALLOWED=NO build
+
+  full-world-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APPDATA: ${{ runner.temp }}/jarvis-isolated-world
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install portable backend dependencies (Windows-only pycaw/comtypes excluded)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install psutil Pillow fastapi uvicorn httpx dateparser tzdata google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib pypdf openpyxl
+          python3 -m pip install -e . --no-deps
+          mkdir -p "$APPDATA"
+      - name: Full repository unittest discovery
+        run: python3 -m unittest discover -s tests -v
+      - name: Isolated world acceptance check
+        run: python3 -m jarvis_mrb.world_acceptance_check
+      - name: Isolated CI world diagnostics (not a deployed host)
+        run: python3 -m jarvis_mrb.world_check

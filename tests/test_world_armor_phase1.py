@@ -329,7 +329,7 @@ class WorldArmorKernelTests(TestCase):
     def test_changes_never_turn_provider_outage_into_world_event(self):
         key=self.new()
         self.ingest(key,time=NOW)
-        self.ingest(key,air=conditions(aqi=77,nws_status="unavailable"),
+        self.ingest(key,air=conditions(aqi=44,nws_status="unavailable"),
                     quake=quakes(status="unavailable"),
                     time=NOW+timedelta(minutes=15))
         changed=armor.compare_recent(key,db_path=self.db,

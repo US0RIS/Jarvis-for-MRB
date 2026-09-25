@@ -1035,11 +1035,12 @@ struct JarvisAPIClient {
     }
 
     func worldArmorCorrelate(_ id: String, startAt: String, endAt: String,
-                            asKnownAt: String?) async throws -> ArmorCorrelationReport {
+                            asKnownAt: String?, radiusKM: Double) async throws -> ArmorCorrelationReport {
         var payload: [String: Any] = [
             "investigation_id": id,
             "start_at": startAt,
-            "end_at": endAt
+            "end_at": endAt,
+            "query_radius_km": radiusKM
         ]
         if let asKnownAt { payload["as_known_at"] = asKnownAt }
         let (data, response) = try await postData(

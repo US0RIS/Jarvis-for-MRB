@@ -93,6 +93,10 @@ def correlate(
                 break
             if earlier["source"] == later["source"]:
                 continue
+            # Synthetic fixture data must never corroborate real-adapter data.
+            if (earlier.get("adapter_mode") != later.get("adapter_mode")
+                    or earlier.get("adapter_mode") not in {"real_adapter", "fixture"}):
+                continue
             if earlier["lineage"] == later["lineage"]:
                 continue
             candidates.append({
@@ -104,6 +108,7 @@ def correlate(
                 "first_source_time": earlier["observed_at"],
                 "second_source_time": later["observed_at"],
                 "separation_seconds": int(delta.total_seconds()),
+                "adapter_mode": earlier["adapter_mode"],
                 "spatial_basis": "same_enrolled_query_region_only",
                 "physical_colocation_verified": False,
                 "causation_verified": False,

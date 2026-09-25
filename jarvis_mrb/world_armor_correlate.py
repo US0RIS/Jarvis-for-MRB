@@ -8,7 +8,8 @@ cross-source pair below is a TEMPORAL coincidence inside an investigation's
 sampling scope, NEVER proven co-location, common cause or independent truth.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+import math
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +30,20 @@ def _instant(raw: str, field: str) -> datetime:
     return datetime.fromisoformat(normalized)
 
 
+def _km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    rlat = math.radians(lat_b - lat_a)
+    rlon = math.radians(lon_b - lon_a)
+    value = (math.sin(rlat / 2) ** 2
+             + math.cos(math.radians(lat_a)) * math.cos(math.radians(lat_b))
+             * math.sin(rlon / 2) ** 2)
+    return 6371.0088 * 2 * math.asin(min(1.0, math.sqrt(max(0.0, value))))
+
+
 def correlate(
     investigation_id: str, *, start_at: str, end_at: str,
     as_known_at: str | None = None,
     source_ids: list[str] | None = None,
+    query_radius_km: float | None = None,
     db_path: Path | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -66,17 +77,48 @@ def correlate(
         db_path=db_path, now=instant,
     )
     region = report["investigation"]
-    # replay already verifies the exact owner-selected investigation/expiry.
+    # The operator can narrow (never expand) the enrollment's radius. The
+    # center itself is immutable; no arbitrary target/location may be joined.
+    if query_radius_km is None:
+        radius = region["radius_km"]
+    else:
+        if (type(query_radius_km) not in (int, float)
+                or not math.isfinite(query_radius_km)
+                or not 1 <= query_radius_km <= region["radius_km"]):
+            raise ValueError("Query radius must be finite and within the enrolled region.")
+        radius = round(float(query_radius_km), 2)
     selected = [x for x in report["observations"]
                 if x["source"] in chosen][:_MAX_RECORDS]
+    spatial_indeterminate: list[dict[str, Any]] = []
+    spatially_eligible: list[dict[str, Any]] = []
+    for obs in selected:
+        if obs["source"] != "usgs_earthquakes":
+            # NWS status is for a point; AQI is a coarse model at that
+            # selected point. Neither asserts full-radius coverage.
+            spatially_eligible.append(obs)
+            continue
+        values = obs.get("values") or {}
+        lat, lon = values.get("latitude"), values.get("longitude")
+        if (type(lat) in (int, float) and type(lon) in (int, float)
+                and math.isfinite(lat) and math.isfinite(lon)
+                and -90 <= lat <= 90 and -180 <= lon <= 180):
+            if _km(region["latitude"], region["longitude"], lat, lon) <= radius:
+                spatially_eligible.append(obs)
+        elif radius == region["radius_km"]:
+            # Historical USGS reports returned by the bounded adapter are
+            # known to have been listed for its query radius, but do not
+            # acquire invented epicenter coordinates.
+            spatially_eligible.append(obs)
+        else:
+            spatial_indeterminate.append(obs)
     timed = [
-        x for x in selected
+        x for x in spatially_eligible
         if x["observed_at"] is not None
         and start <= datetime.fromisoformat(x["observed_at"]) <= end
     ]
     timed.sort(key=lambda x: (x["observed_at"], x["source"], x["id"]))
     receipt_only = [
-        x for x in selected
+        x for x in spatially_eligible
         if x["observed_at"] is None
         and start <= datetime.fromisoformat(x["received_at"]) <= end
     ]
@@ -109,7 +151,14 @@ def correlate(
                 "second_source_time": later["observed_at"],
                 "separation_seconds": int(delta.total_seconds()),
                 "adapter_mode": earlier["adapter_mode"],
-                "spatial_basis": "same_enrolled_query_region_only",
+                "spatial_basis": (
+                    "publisher_epicenter_within_selected_query_radius; "
+                    "model_at_query_point_is_coarse"
+                    if any(x["source"] == "usgs_earthquakes"
+                           and x.get("geometry_basis") == "usgs_primary_reported_epicenter"
+                           for x in (earlier, later))
+                    else "same_enrolled_query_region_only"
+                ),
                 "physical_colocation_verified": False,
                 "causation_verified": False,
                 "note": (
@@ -139,7 +188,8 @@ def correlate(
         "query_region": {
             "latitude": region["latitude"],
             "longitude": region["longitude"],
-            "radius_km": region["radius_km"],
+            "enrolled_radius_km": region["radius_km"],
+            "radius_km": radius,
             "geometry_basis": (
                 "operator_selected_query_scope_not_verified_event_footprints"
             ),
@@ -147,6 +197,7 @@ def correlate(
         "source_ids": chosen,
         "timed_observations": timed,
         "receipt_time_only_observations": receipt_only,
+        "spatially_indeterminate_observations": spatial_indeterminate[:60],
         "candidate_links": candidates,
         "candidate_links_truncated": len(candidates) >= _MAX_PAIRS,
         "source_coverage": coverage,
@@ -160,8 +211,10 @@ def correlate(
         "qualifier": (
             "Historical retained source reports, not a live query. "
             "NWS items without source event timestamps are receipt-only. "
-            "USGS event epicentres and alert footprints are not available in "
-            "the current normalized adapter; no exact spatial join is possible. "
+            "USGS epicenters, where reported and valid, may filter the "
+            "selected radius; missing coordinates remain unknown for a "
+            "narrower radius. NWS alert footprints and model-grid geometry "
+            "are not available; no exact event-to-event spatial join. "
             "Temporal coincidence is not causation or an all-clear."
         ),
     }

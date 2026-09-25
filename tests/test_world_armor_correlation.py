@@ -107,6 +107,33 @@ class WorldArmorCorrelationTests(TestCase):
         self.assertEqual(r["query_region"]["latitude"], 34.12)
         self.assertEqual(r["hypotheses_proven"], 0)
 
+    def test_query_plan_is_canonical_reproducible_and_scope_sensitive(self):
+        self.collect()
+        first=self.query(query_radius_km=10)
+        same=self.query(query_radius_km=10)
+        narrower=self.query(query_radius_km=5)
+        source_only=self.query(query_radius_km=10,
+                               source_ids=["usgs_earthquakes"])
+        self.assertEqual(first["query_id"],same["query_id"])
+        self.assertEqual(first["query_plan"],same["query_plan"])
+        self.assertNotEqual(first["query_id"],narrower["query_id"])
+        self.assertNotEqual(first["query_id"],source_only["query_id"])
+        self.assertEqual(first["query_plan"]["pair_window_seconds"],3600)
+        self.assertEqual(first["query_plan"]["query_radius_km"],10.0)
+
+    def test_stale_sample_remains_visible_but_cannot_corroborate(self):
+        self.collect(air=conditions(status="stale"))
+        report=self.query()
+        self.assertEqual(len(report["timed_observations"]),2)
+        self.assertEqual(len(report["degraded_observations"]),1)
+        self.assertEqual(report["degraded_observations"][0]["source"],
+                         "openmeteo_model")
+        self.assertEqual(
+            report["degraded_observations"][0]["sample_coverage_status"],
+            "stale",
+        )
+        self.assertEqual(report["candidate_links"],[])
+
     def test_nws_receipt_is_not_promoted_to_source_event_time(self):
         self.collect()
         r = self.query(source_ids=["nws_point_alerts", "usgs_earthquakes"])

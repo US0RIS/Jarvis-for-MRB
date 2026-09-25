@@ -5,6 +5,7 @@ on:
     branches:
       - jarvis/agency-1.0
       - jarvis/situation-evidence-unification
+      - jarvis/world-armor-phase1-kernel
   pull_request:
     branches:
       - main

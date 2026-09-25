@@ -1034,6 +1034,21 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorChangeReport.self, from: data)
     }
 
+    func worldArmorCorrelate(_ id: String, startAt: String, endAt: String,
+                            asKnownAt: String?) async throws -> ArmorCorrelationReport {
+        var payload: [String: Any] = [
+            "investigation_id": id,
+            "start_at": startAt,
+            "end_at": endAt
+        ]
+        if let asKnownAt { payload["as_known_at"] = asKnownAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v1/correlate", body: payload
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCorrelationReport.self, from: data)
+    }
+
     func worldArmorForget(_ id: String) async throws -> ArmorForgetReceipt {
         let (data, response) = try await postData(
             path: "world-armor/v1/forget", body: ["investigation_id": id]

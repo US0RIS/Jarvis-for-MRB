@@ -837,6 +837,78 @@ struct ArmorCorrelationReport: Decodable {
     }
 }
 
+struct ArmorCrossRegionReport: Decodable {
+    struct Area: Decodable {
+        let investigationID: String
+        let region: ArmorCorrelationReport.Region
+        let asKnownAt: String
+        let mode: String
+        enum CodingKeys: String, CodingKey {
+            case region, mode
+            case investigationID = "investigation_id"
+            case asKnownAt = "as_known_at"
+        }
+    }
+    struct Coverage: Decodable {
+        let primary: String
+        let secondary: String
+    }
+    struct ModelContrast: Decodable, Identifiable {
+        let modelTime: String
+        let primaryModelledUSAQI: Double
+        let secondaryModelledUSAQI: Double
+        let differenceSecondaryMinusPrimary: Double
+        let qualifier: String
+        var id: String { modelTime }
+        enum CodingKeys: String, CodingKey {
+            case qualifier
+            case modelTime = "model_time"
+            case primaryModelledUSAQI = "primary_modelled_us_aqi"
+            case secondaryModelledUSAQI = "secondary_modelled_us_aqi"
+            case differenceSecondaryMinusPrimary = "difference_secondary_minus_primary"
+        }
+    }
+    struct SharedEvent: Decodable, Identifiable {
+        let providerKey: String
+        let primaryMagnitude: Double?
+        let secondaryMagnitude: Double?
+        let revisionOrReceiptDisagreement: Bool
+        let independentConfirmations: Int
+        let qualifier: String
+        var id: String { providerKey }
+        enum CodingKeys: String, CodingKey {
+            case qualifier
+            case providerKey = "provider_key"
+            case primaryMagnitude = "primary_magnitude"
+            case secondaryMagnitude = "secondary_magnitude"
+            case revisionOrReceiptDisagreement = "revision_or_receipt_disagreement"
+            case independentConfirmations = "independent_confirmations"
+        }
+    }
+    let queryID: String
+    let primary: Area
+    let secondary: Area
+    let sourceCoverage: [String: Coverage]
+    let centerSeparationKM: Double
+    let enrolledRegionsOverlapGeometrically: Bool
+    let modelledAQIComparisons: [ModelContrast]
+    let sharedUSGSSourceEvents: [SharedEvent]
+    let comparisonEligible: Bool
+    let comparisonBlockReason: String?
+    let qualifier: String
+    enum CodingKeys: String, CodingKey {
+        case primary, secondary, qualifier
+        case queryID = "query_id"
+        case sourceCoverage = "source_coverage"
+        case centerSeparationKM = "center_separation_km"
+        case enrolledRegionsOverlapGeometrically = "enrolled_regions_overlap_geometrically"
+        case modelledAQIComparisons = "modelled_aqi_comparisons"
+        case sharedUSGSSourceEvents = "shared_usgs_source_events"
+        case comparisonEligible = "comparison_eligible"
+        case comparisonBlockReason = "comparison_block_reason"
+    }
+}
+
 struct ArmorEvidenceGraph: Decodable {
     struct Edge: Decodable, Identifiable {
         let id: String
@@ -1277,6 +1349,8 @@ struct WorldArmorView: View {
     @State private var changes: ArmorChangeReport?
     @State private var correlations: ArmorCorrelationReport?
     @State private var evidenceGraph: ArmorEvidenceGraph?
+    @State private var crossRegionReport: ArmorCrossRegionReport?
+    @State private var secondRegionID = ""
     @State private var sampleTimes: [ArmorSampleMoment] = []
     @State private var correlationWindowHours = 6
     @State private var correlationQueryRadiusKM = 30.0
@@ -1316,6 +1390,8 @@ struct WorldArmorView: View {
                     publicCameraWorkbench
                     if let changes { changePanel(changes) }
                     temporalQueryPanel
+                    crossRegionQueryPanel
+                    if let crossRegionReport { crossRegionPanel(crossRegionReport) }
                     if let correlations { correlationPanel(correlations) }
                     if let evidenceGraph { hypothesisPanel(evidenceGraph) }
                     if let replayResult { replayPanel(replayResult) }
@@ -1347,6 +1423,7 @@ struct WorldArmorView: View {
                 changes = nil
                 correlations = nil
                 evidenceGraph = nil
+                crossRegionReport = nil
                 sampleTimes = []
                 platformEvidence = []
                 platformNotices = []
@@ -1458,6 +1535,8 @@ struct WorldArmorView: View {
                 ForEach(investigations) { entry in
                     Button {
                         selectedID = entry.id
+                        crossRegionReport = nil
+                        if secondRegionID == entry.id { secondRegionID = "" }
                         correlationQueryRadiusKM = entry.radiusKM
                         asKnownAt = ""
                         replayResult = nil
@@ -3122,6 +3201,7 @@ struct WorldArmorView: View {
                 changes = nil
                 correlations = nil
                 evidenceGraph = nil
+                crossRegionReport = nil
                 sampleTimes = []
                 notices = []
                 unreadNotices = 0
@@ -3136,6 +3216,7 @@ struct WorldArmorView: View {
                 changes = nil
                 correlations = nil
                 evidenceGraph = nil
+                crossRegionReport = nil
                 sampleTimes = []
                 status = "Backend OFF: collection and replay disabled. "
                     + "Previously saved locations remain visible for deletion."

@@ -8,6 +8,7 @@ Life Fabric mutations, or contact an external provider. An absent adapter is
 UNKNOWN, never a finding that the real-world risk/obligation does not exist.
 """
 
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -66,7 +67,7 @@ def _guardian_rows() -> tuple[list[dict[str, Any]], str]:
     if not Path(DB_PATH).is_file():
         return [], "no_enrolled_data"
     try:
-        with _readonly(Path(DB_PATH)) as conn:
+        with closing(_readonly(Path(DB_PATH))) as conn:
             rows = conn.execute(
                 """SELECT id,intention_id,goal_title,deadline_at,status,last_signal,
                           last_checked_at,snoozed_until
@@ -86,7 +87,7 @@ def _life_rows() -> tuple[list[dict[str, Any]], str]:
     if not path.is_file():
         return [], "no_enrolled_data"
     try:
-        with _readonly(path) as conn:
+        with closing(_readonly(path)) as conn:
             rows = conn.execute(
                 """SELECT id,domain,title,data_json,deadline_at
                    FROM records WHERE kind='task' AND retired_at IS NULL
@@ -122,7 +123,7 @@ def _lens_rows(place_key: str) -> tuple[list[dict[str, Any]], str]:
     if not path.is_file():
         return [], "no_enrolled_data"
     try:
-        with _readonly(path) as conn:
+        with closing(_readonly(path)) as conn:
             rows = conn.execute(
                 """SELECT id,place_label,captured_at,metrics_json
                    FROM snapshots WHERE place_key=?

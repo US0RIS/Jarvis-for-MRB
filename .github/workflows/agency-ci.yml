@@ -6,6 +6,7 @@ on:
       - jarvis/agency-1.0
       - jarvis/situation-evidence-unification
       - jarvis/world-armor-phase1-kernel
+      - jarvis/world-armor-correlation-workbench
   pull_request:
     branches:
       - main

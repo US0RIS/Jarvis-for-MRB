@@ -15,8 +15,10 @@ sample existing USGS earthquake / NWS point-alert / modelled AQI adapters,
 retain source-qualified normalized observations and independent coverage
 statuses, replay the data received as of a selected time, inspect revisions,
 and forget records. It has **no** universal global feeds, standing watches,
-camera recording, distributed workers, trading, actuation, iPhone map, or
-device-deployment claim. The larger design below remains a roadmap.
+camera recording, distributed workers, trading, actuation, or
+device-deployment claim. A new iPhone/iPad World Armor workbench provides
+explicit region entry, selected-region MapKit preview, one-shot Observe,
+source coverage, two-sample Compare, Replay and Forget; none runs passively. The larger design below remains a roadmap.
 
 ## World Armor — proposed planetary-scale extension
 

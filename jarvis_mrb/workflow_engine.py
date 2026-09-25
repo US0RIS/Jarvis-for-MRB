@@ -26,6 +26,7 @@ _ALLOWED_NODE_TOOLS = {
     "expense.capture", "expense.list", "expense.export", "fact.check", "journal.generate",
     "state.get", "state.update", "state.temp_set", "state.temp_clear",
     "knowledge.search", "spatial.find", "agency.deliberate", "custom.run",
+    "background.list",
 }
 
 
@@ -88,10 +89,62 @@ def _enabled_custom_tool_catalog() -> list[dict[str, Any]]:
     return result[:50]
 
 
+_EXPLICIT_READ_WORKFLOW_SOURCES: dict[str, tuple[str, dict[str, Any]]] = {
+    "calendar": ("calendar.list", {"days": 7, "limit": 8}),
+    "schedule": ("calendar.list", {"days": 7, "limit": 8}),
+    "inbox": ("gmail.query", {"query": "in:inbox", "limit": 5}),
+    "email": ("gmail.query", {"query": "in:inbox", "limit": 5}),
+    "unread email": ("gmail.query", {"query": "is:unread in:inbox", "limit": 5}),
+    "unread emails": ("gmail.query", {"query": "is:unread in:inbox", "limit": 5}),
+    "background tasks": ("background.list", {"limit": 5}),
+    "pc resources": ("system.resources", {}),
+    "browser tabs": ("browser.list_tabs", {}),
+    "calendar conflicts": ("calendar.conflicts", {"days": 7}),
+}
+
+
+def _deterministic_read_workflow(goal: str) -> dict[str, Any] | None:
+    """Only explicitly named, independent read sources; no guessed writes/DAG."""
+    lowered = " ".join(goal.strip().lower().rstrip("?.!").split())
+    m = re.fullmatch(
+        r"(?:check|show|read|look at) (?:my )?(.+?) (?:and|and then) (?:my )?(.+)",
+        lowered,
+    )
+    if not m:
+        return None
+    names = [m.group(1).strip(), m.group(2).strip()]
+    if names[0] not in _EXPLICIT_READ_WORKFLOW_SOURCES or names[1] not in _EXPLICIT_READ_WORKFLOW_SOURCES:
+        return None
+    seen: set[str] = set()
+    nodes = []
+    for name in names:
+        tool, args = _EXPLICIT_READ_WORKFLOW_SOURCES[name]
+        key = tool + json.dumps(args, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        nodes.append({
+            "id": "n" + str(len(nodes) + 1),
+            "tool": tool,
+            "arguments": dict(args),
+            "depends_on": [],
+        })
+    if len(nodes) < 2:
+        return None
+    return {
+        "summary": "Independent, explicitly requested read-only lookups.",
+        "nodes": nodes, "missing_capability": None,
+    }
+
+
 def plan_workflow(goal: str) -> dict[str, Any]:
     text = goal.strip()
     if not text:
         raise ValueError("Workflow goal is empty.")
+    simple = _deterministic_read_workflow(text)
+    if simple is not None:
+        _validate_plan(simple)
+        return simple
     tools = ", ".join(sorted(_ALLOWED_NODE_TOOLS))
     custom_catalog = _enabled_custom_tool_catalog()
     custom_text = json.dumps(custom_catalog, ensure_ascii=False, sort_keys=True)

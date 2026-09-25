@@ -1,0 +1,126 @@
+name: MemoMind iOS bridge
+
+on:
+  push:
+    branches:
+      - jarvis/memomind-prep
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/memomind-ios.yml"
+
+concurrency:
+  group: memomind-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  command-view-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python modules
+        run: python -m compileall -q jarvis_mrb tests
+      - name: Verify read-only command view
+        run: python -m unittest discover -s tests -p "test_agency_command_view.py" -v
+      - name: Verify standalone phone and Gen 1 Meta UI routing
+        run: python -m unittest discover -s tests -p "test_standalone_physical_ui.py" -v
+      - name: Verify deterministic model-free planner bypass
+        run: python -m unittest discover -s tests -p "test_deterministic_dispatch.py" -v
+      - name: Verify conversational voice and non-compulsory Jarvis address
+        run: python -m unittest discover -s tests -p "test_conversational_personality.py" -v
+      - name: Install provider HTTP client for isolated tests
+        run: python -m pip install httpx
+      - name: Verify camera-free sensor opportunities and physical authority boundaries
+        run: python -m unittest discover -s tests -p "test_sensor_opportunities.py" -v
+      - name: Verify iPhone microphone/GPS/privacy and enrolled HomeKit actuator wiring
+        run: python -m unittest discover -s tests -p "test_sensor_frontend_wiring.py" -v
+      - name: Verify Counterfactual Guardian evidence, exact grants and non-sending authority
+        run: python -m unittest discover -s tests -p "test_counterfactual_guardian.py" -v
+      - name: Verify explicit objective anticipation, deadline evidence and live consent
+        run: python -m unittest discover -s tests -p "test_guardian_objectives.py" -v
+      - name: Verify Mission Control outcomes, exact grants and real tool-policy inventory
+        run: python -m unittest discover -s tests -p "test_mission_control.py" -v
+      - name: Verify Reality Mesh Mac protocol, private screen consent and node/coverage fabric
+        run: python -m unittest discover -s tests -p "test_reality_mesh.py" -v
+      - name: Verify Windows screen opt-in, transient capture and revocation
+        run: python -m unittest discover -s tests -p "test_mesh_windows_screen.py" -v
+      - name: Verify Windows exact app actions, startup grant, policy and readback
+        run: python -m unittest discover -s tests -p "test_mesh_windows_apps.py" -v
+      - name: Verify private hardware acceptance CLI and no-output screen bytes
+        run: python -m unittest discover -s tests -p "test_mesh_acceptance_check.py" -v
+      - name: Verify Conductor one-use workstation mission execution and independent post-action evidence
+        run: python -m unittest discover -s tests -p "test_conductor.py" -v
+      - name: Verify deterministic Reality Graph and model-offload boundaries
+        run: python -m unittest discover -s tests -p "test_reality_graph.py" -v
+      - name: Verify durable opt-in Reality Graph missions and no-model answers
+        run: python -m unittest discover -s tests -p "test_reality_graph_missions.py" -v
+      - name: Verify explicit structured meeting actions and semantic fallback
+        run: python -m unittest discover -s tests -p "test_explicit_meeting_actions.py" -v
+      - name: Verify model-free research, briefs and safe read-only workflows
+        run: python -m unittest discover -s tests -p "test_model_free_subsystems.py" -v
+      - name: Verify research receipt invariants after deterministic query planning
+        run: python -m unittest discover -s tests -p "test_search_integrity.py" -v
+      - name: Verify Agency completion contract safeguards after deterministic first pass
+        run: python -m unittest discover -s tests -p "test_agency_goal_compiler.py" -v
+      - name: Verify weather and air-quality source handling
+        run: python -m unittest discover -s tests -p "test_physical_conditions.py" -v
+      - name: Verify multisource situational briefing
+        run: python -m unittest discover -s tests -p "test_physical_awareness.py" -v
+      - name: Verify official earthquake source
+        run: python -m unittest discover -s tests -p "test_public_incidents.py" -v
+      - name: Verify aggregated regional airspace
+        run: python -m unittest discover -s tests -p "test_public_airspace.py" -v
+      - name: Verify external watch persistence and matter isolation
+        run: python -m unittest discover -s tests -p "test_external_watches.py" -v
+      - name: Verify SEC source facts and matter diligence
+        run: python -m unittest discover -s tests -p "test_public_diligence.py" -v
+      - name: Verify exact EPA ECHO facility evidence
+        run: python -m unittest discover -s tests -p "test_public_epa.py" -v
+      - name: Verify local OFAC candidate screening
+        run: python -m unittest discover -s tests -p "test_ofac_screen.py" -v
+      - name: Verify worldwide public resource boundaries
+        run: python -m unittest discover -s tests -p "test_public_facilities.py" -v
+      - name: Verify official camera provider boundaries
+        run: python -m unittest discover -s tests -p "test_public_camera_catalog.py" -v
+      - name: Verify opt-in official camera vision boundary
+        run: python -m unittest discover -s tests -p "test_public_camera_vision.py" -v
+
+  ios-build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Jarvis iPhone simulator app
+        run: |
+          xcodebuild \
+            -project ios/JarvisIOS.xcodeproj \
+            -scheme JarvisIOS \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/jarvis-derived-data" \
+            CODE_SIGNING_ALLOWED=NO build
+
+  full-world-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APPDATA: /tmp/jarvis-isolated-world-ci
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install portable backend dependencies (Windows-only pycaw/comtypes excluded)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install psutil Pillow fastapi uvicorn httpx dateparser tzdata google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib pypdf openpyxl
+          python3 -m pip install -e . --no-deps
+          mkdir -p "$APPDATA"
+      - name: Full repository unittest discovery
+        run: python3 -m unittest discover -s tests -v
+      - name: Isolated world acceptance check
+        run: python3 -m jarvis_mrb.world_acceptance_check
+      - name: Initialize isolated CI world (never user deployment)
+        run: python3 -m jarvis_mrb.world_prepare --no-backup
+      - name: Isolated CI world diagnostics (not a deployed host)
+        run: python3 -m jarvis_mrb.world_check

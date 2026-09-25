@@ -419,6 +419,7 @@ final class MeetingCaptureController: ObservableObject {
 
     func start(title: String = "") async {
         guard !isActive, !isStopping else { return }
+        AmbientSoundCapture.shared.stop()
         status = "Starting…"
         do {
             try await recognizer.requestPermissions()

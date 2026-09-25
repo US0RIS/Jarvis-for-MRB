@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import HealthKit
 import UIKit
@@ -114,6 +115,12 @@ final class PersistentPresenceController: ObservableObject {
     @Published private(set) var lastProactiveMessage = ""
 
     let healthContext = HealthContextManager()
+    private weak var frontend: FrontendIntelligenceController?
+    private var lastHomeStateObservedAt = Date.distantPast
+    private var lastKnownHomeState: Bool?
+    private var lastObservedAmbientSoundAt = Date.distantPast
+    private var pendingDoorbellAt: Date?
+    private var pendingDoorbellConfidence = 0.0
 
     private unowned let appModel: JarvisAppModel
     private let companion: CompanionConnection
@@ -148,7 +155,10 @@ final class PersistentPresenceController: ObservableObject {
         appModel.geofenceManager.onHomeStateChanged = { [weak self] isHome in
             Task { @MainActor in
                 guard let self else { return }
+                let genuineArrival = self.lastKnownHomeState == false && isHome
+                self.lastKnownHomeState = isHome
                 self.locationLabel = isHome ? "home" : "away"
+                self.lastHomeStateObservedAt = Date()
                 if self.appModel.settings.geofencedProfilesEnabled {
                     self.profileLabel = isHome ? "home" : "mobile"
                 }
@@ -156,9 +166,125 @@ final class PersistentPresenceController: ObservableObject {
                     _ = try? await self.client.event("home_departure")
                 }
                 await self.sendEnvironmentState()
+                if genuineArrival,
+                   UIApplication.shared.applicationState == .active,
+                   self.appModel.settings.sensorOpportunitiesEnabled,
+                   self.appModel.settings.localSensorContextEnabled,
+                   self.appModel.settings.geofencedProfilesEnabled,
+                   self.hasFreshHomeFix() {
+                    // Strictly enrolled light IDs and HomeKit readback live in
+                    // HomeEnvironmentController. The model cannot expand scope.
+                    let outcomes = await self.appModel.homeEnvironment.runPreapprovedArrivalActions()
+                    self.reportLocalIntervention(outcomes)
+                }
             }
         }
     }
+
+    func attach(frontend: FrontendIntelligenceController) {
+        self.frontend = frontend
+    }
+
+    private func hasFreshHomeFix() -> Bool {
+        guard let sensors = frontend?.sensors,
+              let observed = sensors.lastLocationAt,
+              Date().timeIntervalSince(observed) <= 120,
+              let coordinate = sensors.coordinate,
+              appModel.settings.homeLatitude != 0 || appModel.settings.homeLongitude != 0 else {
+            return false
+        }
+        let home = CLLocation(latitude: appModel.settings.homeLatitude,
+                              longitude: appModel.settings.homeLongitude)
+        let phone = CLLocation(latitude: coordinate.latitude,
+                               longitude: coordinate.longitude)
+        return phone.distance(from: home) <= max(50, appModel.settings.homeRadius)
+    }
+
+    /// The acoustic intervention path is independent of the companion socket,
+    /// the camera, the LLM and the glasses HUD. Two distinct on-device
+    /// classifications, a current home-position fix, and a per-device grant
+    /// must all agree before the reversible light action is even attempted.
+    func clearAmbientOpportunityEvidence() {
+        pendingDoorbellAt = nil
+    }
+
+    func observeAmbientSound() async {
+        guard appModel.settings.sensorOpportunitiesEnabled,
+              appModel.settings.soundRecognitionEnabled,
+              appModel.settings.localSensorContextEnabled,
+              appModel.settings.geofencedProfilesEnabled,
+              UIApplication.shared.applicationState == .active,
+              !conversationActive,
+              !frontendMeetingActive,
+              (!appModel.speechRecognizer.isActive
+                  || (appModel.handsFreeEnabled
+                      && appModel.voiceStatus == "Listening for “Jarvis”…")),
+              appModel.voiceStatus != "Speaking offline…",
+              let frontend,
+              let observed = frontend.sensors.lastLocationAt,
+              Date().timeIntervalSince(observed) <= 120,
+              lastKnownHomeState == true, locationLabel == "home",
+              appModel.settings.homeLatitude != 0 || appModel.settings.homeLongitude != 0,
+              let coordinate = frontend.sensors.coordinate else {
+            pendingDoorbellAt = nil
+            return
+        }
+        guard frontend.sensors.activity != "Driving" else {
+            pendingDoorbellAt = nil
+            return
+        }
+        let configured = CLLocation(latitude: appModel.settings.homeLatitude,
+                                    longitude: appModel.settings.homeLongitude)
+        let current = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        guard current.distance(from: configured) <= max(50, appModel.settings.homeRadius) else {
+            pendingDoorbellAt = nil
+            return
+        }
+        guard let sound = LocalSoundClassifier.shared.latestEvent(maxAge: 5),
+              sound.timestamp > lastObservedAmbientSoundAt else { return }
+        lastObservedAmbientSoundAt = sound.timestamp
+        let id = sound.identifier.lowercased().replacingOccurrences(of: "-", with: "_")
+        guard id == "doorbell" || id == "door_bell", sound.confidence >= 0.90 else {
+            if let previous = pendingDoorbellAt,
+               sound.timestamp.timeIntervalSince(previous) > 10 {
+                pendingDoorbellAt = nil
+            }
+            return
+        }
+        guard let previous = pendingDoorbellAt,
+              sound.timestamp.timeIntervalSince(previous) >= 0.5,
+              sound.timestamp.timeIntervalSince(previous) <= 10 else {
+            pendingDoorbellAt = sound.timestamp
+            pendingDoorbellConfidence = sound.confidence
+            return
+        }
+        let confidence = min(sound.confidence, pendingDoorbellConfidence)
+        pendingDoorbellAt = nil
+        let outcomes = await appModel.homeEnvironment.runPreapprovedDoorbellActions(
+            confidence: confidence
+        )
+        reportLocalIntervention(outcomes)
+    }
+
+    private func reportLocalIntervention(_ outcomes: [String]) {
+        guard !outcomes.isEmpty else { return }
+        let text = outcomes.joined(separator: " ")
+        lastProactiveMessage = text
+        let verified = outcomes.allSatisfy { $0.hasPrefix("Verified in Apple Home:") }
+        // This is an *actual local readback*, not a fabricated cloud-agent
+        // completion. Optional HUD display never approves another action.
+        appModel.memoMind.presentProactiveAlert(
+            text, severity: verified ? "info" : "warning"
+        )
+        if appModel.settings.ambientCuesEnabled {
+            cuePlayer.play(
+                verified ? "task_complete" : "error",
+                preferBluetooth: appModel.settings.preferBluetoothAudio
+            )
+        }
+    }
+
+    private var frontendMeetingActive: Bool { frontend?.isMeetingActive ?? false }
 
     private var client: JarvisAPIClient {
         JarvisAPIClient(
@@ -410,6 +536,76 @@ final class PersistentPresenceController: ObservableObject {
         environment["preferences"] = preferenceState
         environment["devices"] = deviceState
 
+        // The MemoMind interface needs no camera. Independently opted-in
+        // microphone classifications, motion and GPS/geofence metadata reuse
+        // the already authenticated companion link, with no raw audio, image,
+        // transcript or biometric measurements in this transient snapshot.
+        var opportunity: [String: Any] = [
+            "source_id": appModel.settings.conversationSessionID,
+            "enabled": appModel.settings.sensorOpportunitiesEnabled
+        ]
+        if appModel.settings.sensorOpportunitiesEnabled {
+            let formatter = ISO8601DateFormatter()
+            let now = Date()
+            opportunity["observed_at"] = formatter.string(from: now)
+            opportunity["weather_opt_in"] = appModel.settings.weatherContextEnabled
+                && appModel.settings.localSensorContextEnabled
+            opportunity["audio"] = ["conversation_active": conversationActive]
+
+            if appModel.settings.localSensorContextEnabled, let sensors = frontend?.sensors {
+                if let observed = sensors.lastMotionAt, now.timeIntervalSince(observed) <= 90 {
+                    var motion: [String: Any] = ["activity": sensors.activity.lowercased()]
+                    if let speed = sensors.speedMPS, speed.isFinite, speed >= 0 {
+                        motion["speed_mps"] = speed
+                    }
+                    motion["observed_at"] = formatter.string(from: observed)
+                    opportunity["motion"] = motion
+                }
+                var location: [String: Any] = [:]
+                if let coordinates = sensors.coordinate,
+                   let observed = sensors.lastLocationAt,
+                   now.timeIntervalSince(observed) <= 120,
+                   coordinates.latitude.isFinite, coordinates.longitude.isFinite {
+                    // ~100-m resolution suffices for contextual opportunities.
+                    location["latitude"] = (coordinates.latitude * 1_000).rounded() / 1_000
+                    location["longitude"] = (coordinates.longitude * 1_000).rounded() / 1_000
+                    location["observed_at"] = formatter.string(from: observed)
+                }
+                if appModel.settings.geofencedProfilesEnabled,
+                   lastHomeStateObservedAt != .distantPast,
+                   let fix = sensors.lastLocationAt,
+                   now.timeIntervalSince(fix) <= 120,
+                   locationLabel == "home" || locationLabel == "away" {
+                    // The latest valid location fix refreshes a stable geofence
+                    // state without requiring another arrival callback.
+                    location["home_state"] = locationLabel
+                    location["home_observed_at"] = formatter.string(from: fix)
+                }
+                if !location.isEmpty { opportunity["location"] = location }
+            }
+            if appModel.settings.soundRecognitionEnabled,
+               let sound = LocalSoundClassifier.shared.latestEvent(maxAge: 8) {
+                opportunity["sound"] = [
+                    "identifier": sound.identifier,
+                    "confidence": sound.confidence,
+                    "observed_at": formatter.string(from: sound.timestamp)
+                ]
+            }
+        }
+        environment["sensor_snapshot"] = opportunity
+        environment["guardian_snapshot"] = [
+            "source_id": appModel.settings.conversationSessionID,
+            "enabled": appModel.settings.guardianEnabled
+                && UIApplication.shared.applicationState == .active,
+            "busy": conversationActive || frontend?.isMeetingActive == true
+                || !appModel.settings.localSensorContextEnabled
+                || frontend?.sensors.lastMotionAt.map {
+                    Date().timeIntervalSince($0) > 90
+                } != false
+                || frontend?.sensors.activity == "Driving",
+            "observed_at": ISO8601DateFormatter().string(from: Date())
+        ]
+
         do {
             try await companion.sendEnvironment(environment)
         } catch {
@@ -480,6 +676,10 @@ final class PersistentPresenceController: ObservableObject {
 
         case "proactive_alert", "background_complete", "background_failed", "meeting_complete":
             guard !message.isEmpty else { return }
+            appModel.memoMind.presentProactiveAlert(
+                message,
+                severity: String(describing: event["severity"] ?? "info")
+            )
             lastProactiveMessage = message
             if appModel.settings.proactiveAnnouncements {
                 pendingAnnouncements.append((message, cue))
@@ -528,21 +728,16 @@ final class PersistentPresenceController: ObservableObject {
     private func speakProactive(_ text: String) async {
         let trimmed = Self.collapseRepeatedSir(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !trimmed.isEmpty else { return }
-        let spoken = trimmed.range(of: "sir", options: [.caseInsensitive, .diacriticInsensitive]) != nil
-            ? trimmed
-            : "Sir, " + trimmed.prefix(1).lowercased() + String(trimmed.dropFirst())
-        let normalizedSpoken = Self.collapseRepeatedSir(spoken)
-
         do {
-            let audio = try await client.synthesizeSpeech(normalizedSpoken)
+            let audio = try await client.synthesizeSpeech(trimmed)
             try await appModel.speechSynthesizer.speakRemoteAudio(
                 audio,
-                text: normalizedSpoken,
+                text: trimmed,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         } catch {
             await appModel.speechSynthesizer.speak(
-                normalizedSpoken,
+                trimmed,
                 preferBluetooth: appModel.settings.preferBluetoothAudio
             )
         }

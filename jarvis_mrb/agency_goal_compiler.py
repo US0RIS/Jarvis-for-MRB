@@ -495,13 +495,29 @@ def compile_observable_contract(
     raw: dict[str, Any] | None = None
     model_error = ""
     if compiler is not None:
+        # Explicitly injected compilers remain authoritative for acceptance,
+        # reproducible tests, and operator-selected model behaviors.
         raw = compiler(prompt)
     else:
-        try:
-            raw = _model_compile(prompt)
-        except Exception as exc:
-            model_error = str(exc)
-            raw = _fallback_contract(str(state.get("title") or ""), intention)
+        # For goals ALREADY phrased as achieved observable states (e.g. "get
+        # Project Apollo signed"), use the existing validated deterministic
+        # contract. Do not ask an 8B model to re-infer the same evidence logic.
+        # Imperatives without an explicit achieved state still need semantic
+        # interpretation and must not be converted to invented proof criteria.
+        candidate = _fallback_contract(str(state.get("title") or ""), intention)
+        if candidate is not None:
+            try:
+                _validate_compiled(str(desired_state_id), candidate, intention)
+            except ValueError:
+                candidate = None
+        if candidate is not None:
+            raw = candidate
+        else:
+            try:
+                raw = _model_compile(prompt)
+            except Exception as exc:
+                model_error = str(exc)
+                raw = _fallback_contract(str(state.get("title") or ""), intention)
 
     if not raw:
         reason = "Jarvis could not derive an observable success contract for this goal."

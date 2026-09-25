@@ -23,6 +23,7 @@ class ProactiveAgencyLoopTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
+                "guardian_objectives",
                 "action_verification",
                 "desired_state_evaluation",
                 "agency_runtime",
@@ -123,6 +124,8 @@ class ProactiveAgencyLoopTests(unittest.TestCase):
             [
                 "proactive_calendar",
                 "proactive_urgent_mail",
+                "sensor_weather",
+                "guardian_objectives",
                 "action_verification",
                 "desired_state_evaluation",
                 "agency_runtime",

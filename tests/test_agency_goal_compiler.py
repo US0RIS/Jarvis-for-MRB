@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import jarvis_mrb.agency_goal_compiler as agency_goal_compiler
 import jarvis_mrb.agency_runtime as agency_runtime
@@ -202,6 +203,18 @@ class AgencyGoalCompilerTests(unittest.TestCase):
         self.assertEqual(state["state"], "blocked")
         self.assertFalse(state["authority"]["agency_enabled"])
         self.assertIn("non-observation source", state["blocked_reason"])
+
+    def test_explicit_achieved_state_compiles_without_any_qwen_call(self) -> None:
+        _, state_id = self._legacy_state("Have Project Apollo signed")
+        with patch.object(
+            agency_goal_compiler,
+            "_model_compile",
+            side_effect=AssertionError("Qwen must not compile an explicit achieved state"),
+        ):
+            compiled = agency_goal_compiler.compile_observable_contract(state_id)
+        self.assertTrue(compiled["authority"]["contract_compiled"])
+        self.assertEqual(compiled["criteria"][0]["terms_all"], ["Project Apollo", "signed"])
+        self.assertNotIn("jarvis_agency", compiled["criteria"][0]["source_kinds"])
 
     def test_deterministic_fallback_requires_achieved_state_language(self) -> None:
         self.assertIsNone(

@@ -32,6 +32,13 @@ struct MainView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     NavigationLink {
+                        WorldArmorView()
+                    } label: {
+                        Image(systemName: "globe.americas.fill")
+                    }
+                    .accessibilityLabel("World Armor")
+
+                    NavigationLink {
                         LifeFabricView()
                     } label: {
                         Image(systemName: "checklist.checked")

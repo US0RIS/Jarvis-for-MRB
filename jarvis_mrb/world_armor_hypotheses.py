@@ -6,6 +6,7 @@ Hypotheses are derived labels over retained observations. They are not facts,
 predictions, accusations, causal conclusions, action grants, or model output.
 """
 
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -73,14 +74,28 @@ def build_evidence_graph(
     }
     nodes=[_node(item) for item in replayed["observations"]
            if item["id"] in eligible_ids]
-    nodes.sort(key=lambda x:(x["received_at"],x["source"],x["id"]))
+    node_ids={item["id"] for item in nodes}
+    history={item["id"]:item for item in replayed.get("observation_history", [])}
+    window_start=datetime.fromisoformat(joined["observation_window"]["start"])
+    window_end=datetime.fromisoformat(joined["observation_window"]["end"])
+
+    def in_requested_time(item: dict[str, Any]) -> bool:
+        raw=item.get("observed_at") or item.get("received_at")
+        return bool(raw and window_start <= datetime.fromisoformat(raw) <= window_end)
 
     edges: list[dict[str, Any]]=[]
     for revision in replayed["revisions"]:
-        # Every emitted edge must be traversable inside this bounded graph.
-        if (revision["new_id"] not in eligible_ids
-                or revision["supersedes_id"] not in eligible_ids):
+        if revision["new_id"] not in eligible_ids:
             continue
+        older=history.get(revision["supersedes_id"])
+        if older is None or not in_requested_time(older):
+            continue
+        if older["id"] not in node_ids:
+            prior=_node(older)
+            prior["graph_role"]="source_revision_context"
+            nodes.append(prior)
+            node_ids.add(older["id"])
+        # Every emitted edge is now traversable inside this bounded graph.
         edges.append({
             "id":_stable_id("edge","revision",
                             revision["supersedes_id"],revision["new_id"]),
@@ -146,6 +161,7 @@ def build_evidence_graph(
             ],
             "prohibited_conclusion":"No causal, wrongdoing, safety, identity, or action conclusion.",
         })
+    nodes.sort(key=lambda x:(x["received_at"],x["source"],x["id"]))
     edges=edges[:_MAX_EDGES]
     unavailable=[
         source for source,state in joined["source_coverage"].items()

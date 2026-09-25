@@ -132,3 +132,138 @@ glasses demo — combat mechanics dropped, the underlying UX patterns kept)
   if cellular networks or the power grid go down during a severe storm —
   the phone-push path alone isn't enough for the exact scenario it's
   meant to cover.
+
+## Physical/sensor world providers (more integrations in the Caltrans-adapter shape)
+
+Same pattern as the existing Caltrans CWWP2 camera provider throughout:
+official/public source, allowlisted host, cached catalog, bounded fetch,
+explicit "possible condition" framing rather than a certainty claim.
+
+- **More state DOT camera feeds** (WSDOT, TxDOT, NYSDOT, etc.) — the
+  README already names this as the obvious next step.
+- **ALERTWildfire public camera network** — wildfire-observation cameras,
+  same "possible visible condition, not a confirmed incident" framing
+  already used for smoke classification.
+- **Harbor/coastal webcams** from NOAA/port authorities, for "is that
+  beach crowded / is the pass open" queries the README already names.
+- **NOAA/NDBC marine buoy data** — wave height, wind, water temp near a
+  coordinate. Same shape as the existing USGS/OpenSky adapters: public,
+  read-only, timestamped, no fabricated coverage claims.
+- **PurpleAir / AirNow air-quality sensors** — a real local AQI reading
+  instead of the existing modelled/global air-data estimate.
+- **GTFS-realtime public transit feeds** — bounded and official, and
+  directly useful for Situation Evidence's meeting-prebrief logic
+  ("your train is delayed 12 minutes").
+- **FAA NOTAMs** — same risk profile as the existing OpenSky
+  aircraft-count adapter, one step further (why airspace near you is
+  active, not just a count).
+- **Smart plugs/switches via HomeKit** — lowest-risk actuation, same
+  authorization/grant/readback model already specified for the planned
+  HomeKit lights in EDITH Field Ops.
+- **A second CrunchLabs-style bench sensor node** — not a camera, a
+  small authenticated physical sensor (temperature, door-open, humidity)
+  reporting into the world model as another observation source,
+  extending the pattern the pitch-servo bench already proved out.
+
+Explicitly not in this list, on purpose: thermostats/locks/garage doors
+(real safety/security stakes), any private or third-party CCTV, anything
+framed as "global" coverage, or actuation without a fresh per-action
+grant. See the CCTV boundary-decision note in the README for why.
+
+## Security hardening (defensive, not offensive)
+
+- **Speaker verification for Conductor actions.** Conductor already gates
+  real-world effects (opening apps on a paired Mac/Windows host) behind a
+  one-use grant, explicit confirmation, and process readback — solid
+  mechanics for "was this action authorized and did it actually happen."
+  But nothing verifies *whose voice* triggered it; the README already
+  names "authenticated speaker identification" as a current gap. Since
+  Conductor is the one subsystem with real physical/device-level effect,
+  and the one place a voice alone (a recording, a video playing in the
+  room, someone else in the house) can currently cause a real side
+  effect, closing this gap is higher-leverage than most net-new
+  features — it hardens something that already ships.
+- **Voice/device-confirmed guardrail before any Jarvis-initiated
+  purchase or payment.** Not autonomous trading or spending — the
+  opposite: an explicit, non-bypassable confirmation step specifically
+  for any action that moves money, on top of the existing authority
+  framework.
+- **Breach/exposure monitoring for your own enrolled accounts.** Poll a
+  service like HaveIBeenPwned's API for your own emails and alert on new
+  breaches — a legitimate personal-security use of a public API, distinct
+  from OSINT on other people.
+- **Stale OAuth/grant audit.** Periodically list what's actually
+  authorized against your Google/HomeKit/etc. accounts and flag grants
+  unused for N months — turns the project's own authority-boundary
+  philosophy into something that audits itself, not just other actors.
+- **Post-action audit log.** After any Conductor action or Guardian
+  alert, auto-generate a short after-action entry (what triggered it,
+  what Jarvis did, verified outcome) into the world model, making the
+  existing action-verification trail queryable instead of implicit.
+- **Unknown-tracker alerts.** Passively note nearby BLE beacons that
+  persist across your movement (the same pattern as Apple's own
+  AirTag-stalking alerts), using only broadcast data your phone already
+  legally receives — no interception of anyone else's traffic.
+- **Your own home-network security posture.** Flag new devices joining
+  *your own* Wi-Fi/LAN. Deliberately scoped to your own network only —
+  see the discussion in this doc's history for why scanning others'
+  networks or intercepting others' traffic is out of scope entirely, not
+  just unimplemented.
+
+## Life admin & memory (batch 2)
+
+- **Spending-anomaly detection against your own history.** Not market
+  arbitrage — flag a charge that's meaningfully out of pattern versus
+  your own past spend. Purely defensive, uses data already ingested via
+  `expense_tracker.py`.
+- **Contract/lease clause extraction.** `pypdf` and `knowledge_index.py`
+  already exist; parse uploaded contracts/leases for renewal deadlines
+  and auto-renewal clauses, feeding directly into Life Fabric deadlines
+  instead of requiring a manual re-read later.
+- **Vehicle maintenance tracking** tied to mileage/date, surfaced through
+  the same Life Fabric checklist mechanism as the rest of the friction
+  catalog.
+- **Package/delivery correlation.** Match shipping-notification emails
+  against a door/geofence event to know a package actually arrived, not
+  just that a courier claims it did — stays inside "your own email plus
+  your own geofence," no new data source required.
+- **Ambient "remember this" voice capture** that auto-tags into the
+  right world-model entity (person/project) instead of an
+  undifferentiated notes pile — makes `memory.py` actually useful
+  hands-free, e.g. while driving.
+- **Self-hosted backup/failover for your own services.** Ordinary DevOps
+  redundancy for infrastructure you actually own — no "evade
+  detection/takedown" framing needed, unlike the rejected version of
+  this idea.
+
+## More scope (round 3)
+
+- **Meeting document freshness check.** Before a meeting brief goes out,
+  cross-check the attached deck/doc against `world_document_versions.py`
+  and flag if it changed since you last reviewed it — so the prebrief
+  can say "this deck was updated 40 minutes ago" instead of silently
+  handing you a stale version.
+- **Trip timeline fusion.** Pull flight/hotel confirmation emails into a
+  single trip timeline, correlate against weather/wildfire/camera
+  coverage at the destination using the existing external-evidence
+  adapters, and generate a day-of departure checklist automatically.
+- **General action-receipt capture.** Extend the existing
+  calendar/Conductor verification pattern to other digital actions —
+  online reservations, form submissions — so "did this actually happen"
+  has a consistent answer across more than just the two subsystems that
+  currently check.
+- **Evening wind-down summary.** Correlate end-of-day calendar, open
+  Life Fabric tasks, and (opt-in) health data into a short evening
+  summary and tomorrow's prep — the inverse of the pre-meeting brief,
+  aimed at reducing morning friction instead of walking into a meeting
+  blind.
+- **Opt-in family safety beacon.** During a user-declared emergency
+  window only (not always-on), let enrolled family members' own devices
+  report a simple "safe / need help" status to each other — consent-based
+  and bounded to a declared window, explicitly not passive location
+  tracking of anyone.
+- **Unified "ask everything I know" search with source/freshness
+  disclosure.** A direct query mode over email, documents, meeting notes,
+  and the world model that always states where an answer came from and
+  how stale it is, rather than presenting fused evidence as a single
+  unsourced fact.

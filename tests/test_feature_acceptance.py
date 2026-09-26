@@ -82,6 +82,23 @@ class FeatureAcceptanceIOSSourceTests(unittest.TestCase):
         self.assertIn("func acceptancePreviewBatch", self.api)
         self.assertIn("func syntheticAcceptance", self.api)
 
+    def test_negative_control_canaries_are_present(self):
+        self.assertIn("Impossible iPhone route expectation", self.guide)
+        self.assertIn("Impossible backend route expectation", self.guide)
+        self.assertIn("Deliberately unreachable endpoint", self.guide)
+        self.assertIn("Nonexistent Groq model rejection", self.guide)
+        self.assertIn("__jarvis_pack_that_must_not_exist__", self.guide)
+        self.assertIn('"warp.drive"', self.guide)
+        self.assertIn("127.0.0.1:1/__jarvis_negative_control__", self.guide)
+        self.assertIn("jarvis-negative-control-model-that-must-not-exist", self.guide)
+
+    def test_negative_controls_invert_success_semantics(self):
+        self.assertIn("actualPack == impossiblePack ? .fail : .expectedFail", self.guide)
+        self.assertIn("row.family == impossibleFamily ? .fail : .expectedFail", self.guide)
+        self.assertIn("state: unexpectedlyHealthy ? .fail : .expectedFail", self.guide)
+        self.assertIn("state: wronglyAccepted ? .fail : .expectedFail", self.guide)
+        self.assertIn('case expectedFail = "EXPECTED FAIL"', self.guide)
+
 
 if __name__ == "__main__":
     unittest.main()

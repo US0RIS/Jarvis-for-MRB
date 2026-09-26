@@ -26,11 +26,15 @@ import threading
 import time
 from typing import Any
 import ipaddress
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 VERSION = 1
 MAX_SCREEN_BYTES = 4_000_000
 MAX_SESSION_SECONDS = 300
 MAX_REQUEST_BYTES = 2048
+MAX_WORLD_BYTES = 8_000_000
+OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
 _EXACT_APPS = ("Safari", "Notes", "Calendar", "Preview", "Finder")
 
 
@@ -45,7 +49,8 @@ def iso(now: datetime) -> str:
 class NodeState:
     def __init__(self, *, token: str, device_id: str, label: str,
                  allow_screen: bool = False,
-                 allow_app_launch: bool = False) -> None:
+                 allow_app_launch: bool = False,
+                 allow_world_observer: bool = False) -> None:
         if len(token) < 32:
             raise ValueError("Node bearer token must be at least 32 random characters.")
         if not device_id or not device_id.replace("-", "").replace("_", "").isalnum():
@@ -55,7 +60,9 @@ class NodeState:
         self.label = label[:100]
         self.allow_screen = bool(allow_screen)
         self.allow_app_launch = bool(allow_app_launch)
+        self.allow_world_observer = bool(allow_world_observer)
         self.last_app_request_at = 0.0
+        self.last_world_request_at = 0.0
         self.session_expiry: datetime | None = None
         self.lock = threading.RLock()
 
@@ -76,6 +83,17 @@ class NodeState:
     def end(self) -> None:
         with self.lock:
             self.session_expiry = None
+
+    def authorize_world_observation(self) -> None:
+        if not self.allow_world_observer:
+            raise PermissionError(
+                "Mac was not started with read-only world-observer consent."
+            )
+        with self.lock:
+            now = time.monotonic()
+            if now - self.last_world_request_at < 1.0:
+                raise RuntimeError("Mac world-observer request rate limited.")
+            self.last_world_request_at = now
 
     def authorize_exact_app(self, name: str) -> None:
         if name not in _EXACT_APPS:
@@ -183,6 +201,85 @@ def _capture_screen() -> tuple[str, bytes]:
         return "image/png", png.read_bytes()
 
 
+
+def _movement_bbox(latitude: float, longitude: float,
+                   radius_km: float) -> dict[str, float]:
+    if not all(
+        isinstance(x, (int, float)) and not isinstance(x, bool)
+        for x in (latitude, longitude, radius_km)
+    ):
+        raise ValueError("Numeric OpenSky region required.")
+    lat, lon, radius = float(latitude), float(longitude), float(radius_km)
+    if (not -90 <= lat <= 90 or not -180 <= lon <= 180
+            or not 0 < radius <= 20_000):
+        raise ValueError("OpenSky region outside allowed world geometry.")
+    import math
+    if radius >= 20_000:
+        return {"lamin": -90.0, "lomin": -180.0,
+                "lamax": 90.0, "lomax": 180.0}
+    dlat = min(90.0, radius / 111.32)
+    denom = 111.32 * max(0.01, abs(math.cos(math.radians(lat))))
+    dlon = min(180.0, radius / denom)
+    return {
+        "lamin": max(-90.0, lat - dlat),
+        "lomin": max(-180.0, lon - dlon),
+        "lamax": min(90.0, lat + dlat),
+        "lomax": min(180.0, lon + dlon),
+    }
+
+
+def _validate_world_task(payload: dict[str, Any]) -> None:
+    if set(payload) - {"kind", "latitude", "longitude", "radius_km"}:
+        raise ValueError("Unregistered world-observer field.")
+    if payload.get("kind") != "opensky_region":
+        raise ValueError("This Mac observer currently supports OpenSky regions only.")
+    _movement_bbox(
+        payload.get("latitude"), payload.get("longitude"),
+        payload.get("radius_km"),
+    )
+
+
+def _observe_public_world(payload: dict[str, Any]) -> dict[str, Any]:
+    """One fixed-provider read-only fetch. No arbitrary URL/RPC/network target."""
+    _validate_world_task(payload)
+    box = _movement_bbox(
+        payload.get("latitude"), payload.get("longitude"),
+        payload.get("radius_km"),
+    )
+    query = urlencode({**box, "extended": 1})
+    request = Request(
+        OPENSKY_STATES_URL + "?" + query,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "JarvisMeshNode/1 (read-only OpenSky observer)",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=12) as response:
+            if response.status != 200:
+                raise RuntimeError("OpenSky provider rejected worker request.")
+            body = response.read(MAX_WORLD_BYTES + 1)
+    except Exception as exc:
+        raise RuntimeError("OpenSky worker request unavailable.") from exc
+    if len(body) > MAX_WORLD_BYTES:
+        raise RuntimeError("OpenSky worker response exceeds transfer budget.")
+    try:
+        result = json.loads(body)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise RuntimeError("OpenSky worker returned invalid JSON.") from exc
+    if (not isinstance(result, dict)
+            or not isinstance(result.get("states"), (list, type(None)))
+            or not isinstance(result.get("time"), (int, float))):
+        raise RuntimeError("OpenSky worker response has unsupported schema.")
+    return {
+        "status": "ok",
+        "provider": "opensky",
+        "worker_observed_at": iso(utcnow()),
+        "provider_payload": result,
+        "source": "OpenSky fetched by explicitly opted-in private Mac worker",
+    }
+
 def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
     class NodeHandler(BaseHTTPRequestHandler):
         server_version = "JarvisMeshNode/1"
@@ -228,6 +325,10 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                     "remote_input": "not_implemented",
                     "clipboard": "not_implemented",
                     "file_transfer": "not_implemented",
+                    "world_observer": (
+                        "opensky_region_read_only"
+                        if state.allow_world_observer else "disabled"
+                    ),
                 },
                 "screen_session_active": state.active(),
                 "host": platform.node()[:100],
@@ -270,7 +371,9 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             if not self._authorized():
                 return
-            if self.path not in {"/v1/session", "/v1/app/open"}:
+            if self.path not in {
+                "/v1/session", "/v1/app/open", "/v1/world/observe"
+            }:
                 self._json(404, {"status": "not_found"})
                 return
             try:
@@ -280,6 +383,14 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("JSON object required.")
+                if self.path == "/v1/world/observe":
+                    _validate_world_task(payload)
+                    state.authorize_world_observation()
+                    result = _observe_public_world(payload)
+                    self._json(200, {
+                        **result, "device_id": state.device_id,
+                    })
+                    return
                 if self.path == "/v1/app/open":
                     name = payload.get("app_name")
                     if not isinstance(name, str):
@@ -299,7 +410,7 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
             except PermissionError:
                 self._json(403, {"status": "mac_startup_opt_in_required"})
             except RuntimeError:
-                self._json(503, {"status": "exact_app_action_unavailable_or_rate_limited"})
+                self._json(503, {"status": "opted_in_node_operation_unavailable_or_rate_limited"})
 
         def do_DELETE(self) -> None:
             if not self._authorized():
@@ -333,18 +444,24 @@ def main() -> None:
                         help="Explicitly allow 15–300s phone-initiated screenshot sessions")
     parser.add_argument("--allow-app-launch", action="store_true",
                         help="Separately enable five fixed Mac app names by explicit phone tap")
+    parser.add_argument("--allow-world-observer", action="store_true",
+                        help="Enable fixed read-only OpenSky region observations for World Armor")
     args = parser.parse_args()
     token = os.environ.get("JARVIS_MESH_NODE_TOKEN", "")
     if not 1 <= args.port <= 65535:
         parser.error("Invalid TCP port")
-    state = NodeState(token=token, device_id=args.device_id, label=args.label,
-                      allow_screen=args.allow_screen,
-                      allow_app_launch=args.allow_app_launch)
+    state = NodeState(
+        token=token, device_id=args.device_id, label=args.label,
+        allow_screen=args.allow_screen,
+        allow_app_launch=args.allow_app_launch,
+        allow_world_observer=args.allow_world_observer,
+    )
     host = _bind_address(args.bind)
     server = ThreadingHTTPServer((host, args.port), handler_for(state))
     print(f"Jarvis Mac node {state.device_id}: listening on {host}:{args.port}; "
           f"screen opt-in: {state.allow_screen}; exact app launch opt-in: "
-          f"{state.allow_app_launch}; Mac OS permissions still apply.",
+          f"{state.allow_app_launch}; world observer opt-in: "
+          f"{state.allow_world_observer}; Mac OS permissions still apply.",
           flush=True)
     server.serve_forever()
 

@@ -20,9 +20,36 @@ class MovementServiceTests(TestCase):
             "/world-armor/v3/movement/collect",
             "/world-armor/v3/movement/nearby",
             "/world-armor/v3/movement/track",
+            "/world-armor/v4/workers",
         }
         self.assertTrue(expected.issubset(routes))
         self.assertNotIn("/world-armor/v3/movement/run-due", routes)
+        self.assertNotIn("/world-armor/v4/run-due", routes)
+
+    def test_worker_topology_is_authenticated_read_only(self):
+        with patch.object(service, "API_TOKEN", "secret"), patch(
+            "jarvis_mrb.world_armor_distributed.available_workers",
+            return_value={
+                "workers": [{"id": "windows", "status": "online",
+                             "capabilities": ["local_all_movement_adapters"]}],
+                "network_discovery": False, "controller": "windows",
+                "credential_delegation": False,
+                "remote_arbitrary_rpc": False,
+            },
+        ) as workers:
+            with self.assertRaises(HTTPException) as denied:
+                service.world_armor_distributed_workers(
+                    Response(), authorization=None,
+                )
+            self.assertEqual(denied.exception.status_code, 401)
+            response = Response()
+            result = service.world_armor_distributed_workers(
+                response, authorization="Bearer secret",
+            )
+        self.assertEqual(result["workers"][0]["id"], "windows")
+        self.assertEqual(workers.call_count, 1)
+        self.assertEqual(response.headers["Cache-Control"],
+                         "private, no-store")
 
     def test_movement_enrollment_requires_private_token(self):
         request = service.WorldArmorMovementEnrollRequest(
@@ -65,12 +92,14 @@ class MovementServiceTests(TestCase):
             "worldArmorMovementNearby(",
             "worldArmorMovementTransition(",
             "worldArmorMovementForget(",
+            "worldArmorDistributedWorkers(",
         ):
             self.assertIn(token, view)
         for path in (
             "world-armor/v3/movement-sources",
             "world-armor/v3/movement/collect",
             "world-armor/v3/movement/nearby",
+            "world-armor/v4/workers",
         ):
             self.assertIn(path, client)
 

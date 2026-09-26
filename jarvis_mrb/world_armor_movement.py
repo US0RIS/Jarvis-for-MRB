@@ -118,6 +118,7 @@ def _schema(con: sqlite3.Connection) -> None:
       category TEXT,
       position_source TEXT,
       digest TEXT NOT NULL,
+      worker_id TEXT NOT NULL DEFAULT 'windows',
       UNIQUE(source_id,digest)
     );
     CREATE INDEX IF NOT EXISTS ix_movement_entity_seq
@@ -133,11 +134,32 @@ def _schema(con: sqlite3.Connection) -> None:
       provider_status TEXT NOT NULL,
       entities_seen INTEGER NOT NULL,
       new_observations INTEGER NOT NULL,
-      error_type TEXT
+      error_type TEXT,
+      worker_id TEXT NOT NULL DEFAULT 'windows'
     );
     CREATE INDEX IF NOT EXISTS ix_movement_checks_source
       ON movement_checks(source_id,seq);
     """)
+    observation_fields = {
+        row["name"] for row in con.execute(
+            "PRAGMA table_info(movement_observations)"
+        )
+    }
+    if "worker_id" not in observation_fields:
+        con.execute(
+            "ALTER TABLE movement_observations "
+            "ADD COLUMN worker_id TEXT NOT NULL DEFAULT 'windows'"
+        )
+    check_fields = {
+        row["name"] for row in con.execute(
+            "PRAGMA table_info(movement_checks)"
+        )
+    }
+    if "worker_id" not in check_fields:
+        con.execute(
+            "ALTER TABLE movement_checks "
+            "ADD COLUMN worker_id TEXT NOT NULL DEFAULT 'windows'"
+        )
 
 
 def _connect(path: Path, *, create: bool = False) -> sqlite3.Connection:
@@ -376,23 +398,45 @@ def _still_authorized(con: sqlite3.Connection, source: dict[str, Any],
     )
 
 
-def _collect_provider(source: dict[str, Any]) -> dict[str, Any]:
+def _collect_provider(
+    source: dict[str, Any], worker_id: str = "windows",
+) -> dict[str, Any]:
     from jarvis_mrb.public_movement import (
-        aisstream_position_burst, opensky_state_vectors,
+        aisstream_position_burst, normalize_opensky_payload,
+        opensky_state_vectors,
     )
-    if source["kind"] == "opensky_global":
-        return opensky_state_vectors(global_scope=True)
-    if source["kind"] == "opensky_region":
-        return opensky_state_vectors(
-            latitude=source["latitude"], longitude=source["longitude"],
-            radius_km=source["radius_km"],
+    if worker_id == "windows":
+        if source["kind"] == "opensky_global":
+            return opensky_state_vectors(global_scope=True)
+        if source["kind"] == "opensky_region":
+            return opensky_state_vectors(
+                latitude=source["latitude"], longitude=source["longitude"],
+                radius_km=source["radius_km"],
+            )
+        if source["kind"] == "aisstream_region":
+            return aisstream_position_burst(
+                latitude=source["latitude"], longitude=source["longitude"],
+                radius_km=source["radius_km"],
+            )
+        raise ValueError("Unsupported movement adapter.")
+    if worker_id not in ("macbook", "macmini"):
+        raise ValueError("Choose Windows or an exact paired Mac worker.")
+    if source["kind"] != "opensky_region":
+        raise ValueError(
+            "Paired Mac observers currently accept only regional OpenSky work."
         )
-    if source["kind"] == "aisstream_region":
-        return aisstream_position_burst(
-            latitude=source["latitude"], longitude=source["longitude"],
-            radius_km=source["radius_km"],
-        )
-    raise ValueError("Unsupported movement adapter.")
+    from jarvis_mrb.reality_mesh import world_observe
+    receipt = world_observe(worker_id, {
+        "kind": "opensky_region",
+        "latitude": source["latitude"],
+        "longitude": source["longitude"],
+        "radius_km": source["radius_km"],
+    })
+    return normalize_opensky_payload(
+        receipt["provider_payload"],
+        checked_at=receipt["worker_observed_at"],
+        global_scope=False, authenticated=False,
+    )
 
 
 def _digest(source_id: str, entity: dict[str, Any]) -> str:
@@ -429,12 +473,41 @@ def _prune(con: sqlite3.Connection, source: dict[str, Any],
 
 
 def collect_source(source_id: str, *, db_path: Path | None = None,
-                   scheduled: bool = False,
+                   scheduled: bool = False, worker_id: str = "windows",
                    now: datetime | None = None) -> dict[str, Any]:
     start = _instant(now)
     path = _dbpath(db_path)
+    if worker_id not in ("windows", "macbook", "macmini"):
+        raise ValueError("Unknown World Armor movement worker.")
     source = _lease(source_id, path=path, now=start, scheduled=scheduled)
-    result = _collect_provider(source)
+    try:
+        result = _collect_provider(source, worker_id=worker_id)
+    except Exception:
+        failed = _instant() if now is None else _instant(now)
+        with closing(_connect(path, create=True)) as con, con:
+            con.execute("BEGIN IMMEDIATE")
+            current = con.execute(
+                "SELECT state,lease_token FROM movement_sources WHERE id=?",
+                (source_id,),
+            ).fetchone()
+            if (current and current["state"] == "active"
+                    and current["lease_token"] == source["lease"]):
+                con.execute(
+                    "UPDATE movement_sources SET lease_token=NULL,"
+                    "lease_until=NULL,last_checked_at=?,last_outcome=?,"
+                    "check_count=check_count+1 WHERE id=?",
+                    (failed.isoformat(), "worker_or_provider_error", source_id),
+                )
+                con.execute(
+                    "INSERT INTO movement_checks"
+                    "(source_id,checked_at,provider_status,entities_seen,"
+                    "new_observations,error_type,worker_id)"
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (source_id, failed.isoformat(), "unavailable", 0, 0,
+                     "worker_or_provider_error", worker_id),
+                )
+                _prune(con, source, failed)
+        raise
     finish = _instant() if now is None else _instant(now)
     provider_status = str(result.get("status") or "unavailable")
     entities = result.get("entities")
@@ -517,8 +590,8 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
                    (id,source_id,entity_id,entity_type,observed_at,provider_time,
                     received_at,latitude,longitude,altitude_m,velocity_mps,
                     heading_deg,vertical_rate_mps,on_ground,source_name,category,
-                    position_source,digest)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    position_source,digest,worker_id)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     uuid4().hex, source_id, entity_id, entity_type, observed_at,
                     str(entity.get("provider_time") or "") or None,
@@ -529,7 +602,7 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
                     str(entity.get("source") or source["kind"])[:80],
                     str(category)[:80] if category is not None else None,
                     str(position_source)[:80] if position_source is not None else None,
-                    digest,
+                    digest, worker_id,
                 ),
             )
             inserted += 1
@@ -541,11 +614,11 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
         con.execute(
             "INSERT INTO movement_checks"
             "(source_id,checked_at,provider_status,entities_seen,"
-            "new_observations,error_type) VALUES(?,?,?,?,?,?)",
+            "new_observations,error_type,worker_id) VALUES(?,?,?,?,?,?,?)",
             (
                 source_id, finish.isoformat(), provider_status, len(entities),
                 inserted, None if provider_status in ("ok", "partial", "stale")
-                else provider_status,
+                else provider_status, worker_id,
             ),
         )
         _prune(con, source, finish)
@@ -558,6 +631,7 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
         "provider_checked_at": result.get("checked_at"),
         "provider_observed_at": result.get("source_observed_at"),
         "provider_note": result.get("source_note"),
+        "worker_id": worker_id,
         "person_identity_inference": False,
     }
 

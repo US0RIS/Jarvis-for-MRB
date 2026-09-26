@@ -1152,6 +1152,13 @@ struct JarvisAPIClient {
         return report
     }
 
+    func worldArmorDistributedWorkers() async throws -> ArmorDistributedWorkers {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v4/workers"
+        )
+        return try JSONDecoder().decode(ArmorDistributedWorkers.self, from: data)
+    }
+
     func worldArmorMovementSources(
         offset: Int = 0
     ) async throws -> ArmorMovementSourcePage {

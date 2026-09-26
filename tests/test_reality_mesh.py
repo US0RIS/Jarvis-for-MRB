@@ -5,6 +5,7 @@ from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
 import runpy
+import time
 from threading import Thread
 import unittest
 from unittest.mock import patch
@@ -154,6 +155,67 @@ class MacNodeProtocolTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 launch("Terminal")
+
+    def test_world_observer_requires_separate_startup_opt_in_and_fixed_task(self):
+        health = json.loads(self.request("/v1/health")[2])
+        self.assertEqual(health["capabilities"]["world_observer"], "disabled")
+        with self.assertRaises(HTTPError) as denied:
+            self.request(
+                "/v1/world/observe", method="POST",
+                payload={"kind": "opensky_region", "latitude": 34.05,
+                         "longitude": -118.25, "radius_km": 30},
+            )
+        self.assertEqual(denied.exception.code, 403)
+
+        self.state.allow_world_observer = True
+        module = self.http.RequestHandlerClass.do_POST.__globals__
+        called = []
+        module["_observe_public_world"] = lambda payload: (
+            called.append(payload) or {
+                "status": "ok", "provider": "opensky",
+                "worker_observed_at": datetime.now(timezone.utc).isoformat(),
+                "provider_payload": {"time": 1, "states": []},
+                "source": "test fixed provider",
+            }
+        )
+        health = json.loads(self.request("/v1/health")[2])
+        self.assertEqual(
+            health["capabilities"]["world_observer"],
+            "opensky_region_read_only",
+        )
+        status, _, raw = self.request(
+            "/v1/world/observe", method="POST",
+            payload={"kind": "opensky_region", "latitude": 34.05,
+                     "longitude": -118.25, "radius_km": 30},
+        )
+        self.assertEqual(status, 200)
+        receipt = json.loads(raw)
+        self.assertEqual(receipt["provider"], "opensky")
+        self.assertEqual(receipt["device_id"], "macbook")
+        self.assertEqual(len(called), 1)
+
+    def test_world_observer_rejects_arbitrary_url_and_unknown_tasks_before_io(self):
+        self.state.allow_world_observer = True
+        module = self.http.RequestHandlerClass.do_POST.__globals__
+        observed = []
+        module["_observe_public_world"] = lambda payload: observed.append(payload)
+        for payload in (
+            {"kind": "arbitrary_http", "url": "https://example.com"},
+            {"kind": "opensky_region", "latitude": 34.0,
+             "longitude": -118.2, "radius_km": 20,
+             "url": "https://example.com"},
+            {"kind": "shell", "command": "whoami"},
+        ):
+            # The route delegates typed validation to the fixed helper. Put
+            # back the real helper just for rejection so this test verifies
+            # network target/task scope rather than the mock above.
+            real = runpy.run_path(str(MAC), run_name="mesh_world_validate")
+            module["_observe_public_world"] = real["_observe_public_world"]
+            with self.assertRaises(HTTPError) as denied:
+                self.request("/v1/world/observe", method="POST",
+                             payload=payload)
+            self.assertEqual(denied.exception.code, 422)
+        self.assertEqual(observed, [])
 
     def test_duration_and_unknown_endpoints_fail_closed(self):
         for duration in (-1, 0, True, 301, "120"):
@@ -308,6 +370,55 @@ class MeshCoordinatorTests(unittest.TestCase):
                 mesh.frame("macbook")
             with self.assertRaises(ValueError):
                 mesh._request("macbook", "POST", "/v1/execute")
+
+    def test_controller_routes_only_typed_world_task_to_matching_live_mac(self):
+        module = runpy.run_path(str(MAC), run_name="mesh_world_controller")
+        state = module["NodeState"](
+            token="b" * 48, device_id="macbook", label="MacBook",
+            allow_world_observer=True,
+        )
+        handler = module["handler_for"](state)
+        handler.do_POST.__globals__["_observe_public_world"] = lambda payload: {
+            "status": "ok", "provider": "opensky",
+            "worker_observed_at": datetime.now(timezone.utc).isoformat(),
+            "provider_payload": {"time": time.time(), "states": []},
+            "source": "fixed OpenSky fixture",
+        }
+        host = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = Thread(target=host.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(host.server_close)
+        self.addCleanup(host.shutdown)
+        with patch.dict("os.environ", {
+            "JARVIS_MESH_MACBOOK_URL":
+                "http://127.0.0.1:" + str(host.server_port),
+            "JARVIS_MESH_MACBOOK_TOKEN": "b" * 48,
+        }), patch.object(mesh, "probe", return_value={
+            "id": "macbook", "status": "online",
+            "capabilities": {
+                "world_observer": "opensky_region_read_only"
+            },
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        }):
+            receipt = mesh.world_observe("macbook", {
+                "kind": "opensky_region", "latitude": 34.05,
+                "longitude": -118.25, "radius_km": 50,
+            })
+            self.assertEqual(receipt["provider"], "opensky")
+            self.assertEqual(receipt["device_id"], "macbook")
+            for bad in (
+                {"kind": "opensky_global"},
+                {"kind": "opensky_region", "latitude": 34,
+                 "longitude": -118, "radius_km": 50,
+                 "url": "https://example.com"},
+            ):
+                with self.assertRaises(ValueError):
+                    mesh.world_observe("macbook", bad)
+            with self.assertRaises(ValueError):
+                mesh.world_observe("windows", {
+                    "kind": "opensky_region", "latitude": 34,
+                    "longitude": -118, "radius_km": 10,
+                })
 
     def test_public_sensor_coverage_never_asserts_live_or_global_camera(self):
         manifest = mesh.public_sources()

@@ -173,7 +173,8 @@ class MovementGraphTests(unittest.TestCase):
 
     def test_stop_during_network_blocks_inflight_save(self):
         source = self.enroll_air()
-        def revoke(_source):
+        def revoke(_source, worker_id="windows"):
+            self.assertEqual(worker_id, "windows")
             movement.transition_source(
                 source["id"], "stop", db_path=self.db,
             )
@@ -188,6 +189,85 @@ class MovementGraphTests(unittest.TestCase):
             movement.track("icao24:abc123", db_path=self.db)["observations"],
             [],
         )
+
+    def test_remote_mac_opensky_worker_normalizes_on_controller_and_records_worker(self):
+        import time
+        source = self.enroll_air()
+        now_epoch = self.now.timestamp()
+        provider_payload = {
+            "time": now_epoch,
+            "states": [[
+                "abc123", "TEST1", None, now_epoch, now_epoch,
+                -118.25, 34.05, 3000.0, False, 200.0, 90.0,
+                0.0, None, None, False, False, 0, 4,
+            ]],
+        }
+        with patch(
+            "jarvis_mrb.reality_mesh.world_observe",
+            return_value={
+                "status": "ok", "provider": "opensky",
+                "worker_observed_at": self.now.isoformat(),
+                "provider_payload": provider_payload,
+                "device_id": "macbook",
+            },
+        ) as worker:
+            result = movement.collect_source(
+                source["id"], db_path=self.db, now=self.now,
+                worker_id="macbook",
+            )
+        self.assertEqual(result["worker_id"], "macbook")
+        self.assertEqual(result["observations_saved"], 1)
+        worker.assert_called_once()
+        history = movement.track("icao24:abc123", db_path=self.db)
+        self.assertEqual(history["observations"][0]["worker_id"], "macbook")
+
+    def test_remote_worker_error_releases_lease_but_does_not_widen_source_authority(self):
+        source = self.enroll_air()
+        with patch(
+            "jarvis_mrb.reality_mesh.world_observe",
+            side_effect=RuntimeError("worker offline"),
+        ):
+            with self.assertRaises(RuntimeError):
+                movement.collect_source(
+                    source["id"], db_path=self.db, now=self.now,
+                    worker_id="macbook",
+                )
+        current = movement.get_source(source["id"], db_path=self.db)
+        self.assertEqual(current["check_count"], 1)
+        self.assertEqual(current["last_outcome"], "worker_or_provider_error")
+        # A failed Mac request does not grant permission to switch provider,
+        # global scope, AIS, or arbitrary RPC.
+        with self.assertRaises(ValueError):
+            movement.collect_source(
+                source["id"], db_path=self.db,
+                now=self.now + timedelta(seconds=1),
+                worker_id="unknown-node",
+            )
+
+    def test_remote_mac_is_not_allowed_for_global_opensky_or_ais(self):
+        global_source = movement.enroll_source(
+            label="Global", kind="opensky_global",
+            grant_class="api_contract", terms_reference="terms",
+            authorized_automated_access=False, cadence_seconds=0,
+            db_path=self.db, now=self.now,
+        )
+        with self.assertRaises(ValueError):
+            movement.collect_source(
+                global_source["id"], db_path=self.db,
+                now=self.now, worker_id="macbook",
+            )
+        ais = movement.enroll_source(
+            label="Port", kind="aisstream_region",
+            grant_class="api_contract", terms_reference="terms",
+            authorized_automated_access=False, cadence_seconds=0,
+            latitude=33.74, longitude=-118.25, radius_km=30,
+            db_path=self.db, now=self.now,
+        )
+        with self.assertRaises(ValueError):
+            movement.collect_source(
+                ais["id"], db_path=self.db, now=self.now,
+                worker_id="macmini",
+            )
 
     def test_provider_floor_applies_to_manual_collection(self):
         source = self.enroll_air(

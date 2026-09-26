@@ -172,6 +172,19 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 ON samples(investigation_id,received_at);
             """
         )
+        # Backward-compatible upgrade for operator-created early watch stores:
+        # CREATE TABLE IF NOT EXISTS does not add newly introduced fields.
+        watch_fields = {row["name"] for row in
+                        con.execute("PRAGMA table_info(watches)")}
+        if "last_change_state" not in watch_fields:
+            con.execute("ALTER TABLE watches ADD COLUMN last_change_state TEXT")
+        receipt_fields = {row["name"] for row in
+                          con.execute("PRAGMA table_info(watch_receipts)")}
+        if "change_state" not in receipt_fields:
+            con.execute(
+                "ALTER TABLE watch_receipts ADD COLUMN change_state TEXT "
+                "NOT NULL DEFAULT 'not_evaluated'"
+            )
     return con
 
 

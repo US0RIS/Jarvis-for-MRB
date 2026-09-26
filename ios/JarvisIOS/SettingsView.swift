@@ -111,8 +111,13 @@ struct SettingsView: View {
                     HStack {
                         Text("Credential")
                         Spacer()
-                        Text(settings.groqKeyConfigured ? "Configured ••••••••" : "Not configured")
-                            .foregroundStyle(settings.groqKeyConfigured ? .secondary : .orange)
+                        if settings.groqKeyConfigured {
+                            Text("Configured ••••••••")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not configured")
+                                .foregroundStyle(.orange)
+                        }
                     }
 
                     SecureField(

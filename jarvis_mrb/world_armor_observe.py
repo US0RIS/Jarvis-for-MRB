@@ -134,8 +134,10 @@ def observe_source(source_id: str, *, db_path: Path | None = None,
                    scheduled: bool = False, worker_id: str = "windows",
                    now: datetime | None = None) -> dict[str, Any]:
     """Lease-fenced camera observation on Windows or one exact paired Mac."""
-    if worker_id not in ("windows", "macbook", "macmini"):
-        raise ValueError("Camera worker must be Windows or an exact paired Mac.")
+    if worker_id != "windows":
+        from jarvis_mrb.reality_mesh import observer_ids
+        if worker_id not in observer_ids():
+            raise ValueError("Camera worker must be explicitly registered.")
     start = _instant(now)
     path = _dbpath(db_path)
     row = _acquire_lease(source_id, path=path, now=start, scheduled=scheduled)

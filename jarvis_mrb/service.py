@@ -1999,6 +1999,7 @@ def world_armor_camera_discover(
     request: WorldArmorPublicCameraSearchRequest,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
@@ -2007,6 +2008,7 @@ def world_armor_camera_discover(
         return discover_public_cameras_global(
             request.latitude, request.longitude,
             radius_km=request.radius_km, limit=request.limit,
+            windy_api_key=x_jarvis_windy_key,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
@@ -2034,6 +2036,7 @@ def world_armor_camera_inspect(
     request: WorldArmorCameraInspectRequest,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
@@ -2042,6 +2045,7 @@ def world_armor_camera_inspect(
         return inspect_camera(
             request.investigation_id, camera_ref=request.camera_ref,
             public_url=request.public_url, condition=request.condition,
+            windy_api_key=x_jarvis_windy_key,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
@@ -3038,12 +3042,17 @@ def public_airspace_region(
 def nearby_physical_awareness(
     request: PhysicalConditionsRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """On-demand multisource briefing; no background surveillance."""
     _check_auth(authorization)
     from jarvis_mrb.physical_awareness import physical_awareness
     try:
-        return physical_awareness(request.latitude, request.longitude)
+        return physical_awareness(
+            request.latitude,
+            request.longitude,
+            windy_api_key=x_jarvis_windy_key,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -3052,11 +3061,17 @@ def nearby_physical_awareness(
 def analyze_public_camera_still(
     request: OfficialCameraAnalysisRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """Explicit one-still vision pass for a catalog-verified public camera ID."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_vision import analyze_official_still
+    from jarvis_mrb.public_camera_vision import analyze_official_still, analyze_public_camera
     try:
+        if request.camera_id.startswith("windy-"):
+            return analyze_public_camera(
+                camera_ref=request.camera_id,
+                windy_api_key=x_jarvis_windy_key,
+            )
         return analyze_official_still(request.camera_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -3102,14 +3117,18 @@ def nearby_physical_conditions(
 def nearby_public_cameras(
     request: NearbyPublicCameraRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """Opt-in public provider lookup. POST avoids putting coordinates in URL access logs."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_catalog import discover_public_cameras
+    from jarvis_mrb.public_camera_catalog import discover_combined_public_cameras
     try:
-        return discover_public_cameras(
-            request.latitude, request.longitude,
-            radius_km=request.radius_km, limit=request.limit,
+        return discover_combined_public_cameras(
+            request.latitude,
+            request.longitude,
+            radius_km=request.radius_km,
+            limit=request.limit,
+            windy_api_key=x_jarvis_windy_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

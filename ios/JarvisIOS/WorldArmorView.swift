@@ -38,6 +38,9 @@ struct ArmorWatch: Decodable, Identifiable {
     let lastCheckedAt: String?
     let lastOutcome: String?
     let lastChangeState: String?
+    let attentionKind: String?
+    let attentionThreshold: Double?
+    let attentionCooldownMinutes: Int?
     let notificationsEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -52,8 +55,53 @@ struct ArmorWatch: Decodable, Identifiable {
         case lastCheckedAt = "last_checked_at"
         case lastOutcome = "last_outcome"
         case lastChangeState = "last_change_state"
+        case attentionKind = "attention_kind"
+        case attentionThreshold = "attention_threshold"
+        case attentionCooldownMinutes = "attention_cooldown_minutes"
         case notificationsEnabled = "notifications_enabled"
     }
+}
+
+struct ArmorNotice: Decodable, Identifiable {
+    let id: String
+    let watchID: String
+    let investigationID: String
+    let sampleID: String
+    let source: String
+    let kind: String
+    let sourceKey: String
+    let observedAt: String?
+    let receivedAt: String
+    let createdAt: String
+    let summary: String
+    let observationID: String?
+    let readAt: String?
+    enum CodingKeys: String, CodingKey {
+        case id, source, kind, summary
+        case watchID = "watch_id"
+        case investigationID = "investigation_id"
+        case sampleID = "sample_id"
+        case sourceKey = "source_key"
+        case observedAt = "observed_at"
+        case receivedAt = "received_at"
+        case createdAt = "created_at"
+        case observationID = "observation_id"
+        case readAt = "read_at"
+    }
+}
+
+struct ArmorNoticeList: Decodable {
+    let notices: [ArmorNotice]
+    let unreadCount: Int
+    let delivery: String
+    enum CodingKeys: String, CodingKey {
+        case notices, delivery
+        case unreadCount = "unread_count"
+    }
+}
+
+struct ArmorNoticeForgetReceipt: Decodable {
+    let deleted: Int
 }
 
 struct ArmorWatchForgetReceipt: Decodable {
@@ -423,6 +471,17 @@ struct WorldArmorView: View {
     @State private var watchInterval = 60
     @State private var watchChecks = 6
     @State private var watchLifetime = 6
+    @State private var attentionKind = "off"
+    @State private var attentionAQI = 100.0
+    @State private var attentionMagnitude = 4.0
+    @State private var attentionCooldown = 60
+    @State private var notices: [ArmorNotice] = []
+    @State private var unreadNotices = 0
+    @State private var hasNoticeBaseline = false
+    @State private var seenNoticeIDs: Set<String> = []
+    @State private var showAttentionBanner = false
+    @State private var attentionBannerText = ""
+    @State private var foregroundAttentionOptIn = false
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -464,6 +523,7 @@ struct WorldArmorView: View {
                     selectedRegion(selected)
                     actions
                     standingWatches
+                    attentionInbox
                     if let changes { changePanel(changes) }
                     temporalQueryPanel
                     if let correlations { correlationPanel(correlations) }
@@ -476,6 +536,12 @@ struct WorldArmorView: View {
         .navigationTitle("World Armor")
         .navigationBarTitleDisplayMode(.inline)
         .task { await refresh() }
+        .task(id: selectedID) { await pollAttentionInbox() }
+        .alert("World Armor attention", isPresented: $showAttentionBanner) {
+            Button("View inbox") { showAttentionBanner = false }
+        } message: {
+            Text(attentionBannerText)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 replayResult = nil
@@ -483,6 +549,11 @@ struct WorldArmorView: View {
                 correlations = nil
                 evidenceGraph = nil
                 sampleTimes = []
+                notices = []
+                unreadNotices = 0
+                seenNoticeIDs = []
+                hasNoticeBaseline = false
+                showAttentionBanner = false
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
         }

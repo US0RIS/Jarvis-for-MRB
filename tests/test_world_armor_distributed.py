@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from jarvis_mrb import world_armor_distributed as distributed
 from jarvis_mrb import world_armor_movement as movement
+from jarvis_mrb import world_armor_platform as platform
 
 
 class DistributedObserverTests(unittest.TestCase):
@@ -110,6 +111,65 @@ class DistributedObserverTests(unittest.TestCase):
         self.assertEqual(assignment[global_air["id"]], "windows")
         self.assertEqual(assignment[ais["id"]], "windows")
         self.assertTrue(all(scheduled for _, _, scheduled in calls))
+        self.assertFalse(result["remote_action_authority"])
+
+    def test_due_cameras_round_robin_across_camera_capable_macs(self):
+        sources = [
+            platform.enroll_source(
+                label=f"Camera {i}", kind="public_https",
+                locator=f"https://camera{i}.example/current.jpg",
+                grant_class="public_publisher",
+                terms_reference="Operator-reviewed publisher terms",
+                authorized_automated_access=True,
+                automated_min_interval_seconds=0,
+                cadence_seconds=60, retention_days=2,
+                scene_goal="visible heavy rain on the roadway",
+                db_path=self.db, now=self.now,
+            )
+            for i in range(2)
+        ]
+        calls = []
+
+        def fake_observe(source_id, *, db_path, scheduled, worker_id, now):
+            calls.append((source_id, worker_id, scheduled))
+            with platform.closing(
+                platform._connect(db_path, create=True)
+            ) as con, con:
+                con.execute(
+                    "UPDATE source_grants SET next_due_at=?,"
+                    "last_checked_at=?,check_count=check_count+1 "
+                    "WHERE id=?",
+                    ("9999-12-31T00:00:00+00:00",
+                     now.isoformat(), source_id),
+                )
+            return {
+                "source_id": source_id, "status": "ok",
+                "worker_id": worker_id,
+            }
+
+        with patch.object(distributed, "available_workers", return_value={
+            "workers": [
+                {"id": "windows",
+                 "capabilities": ["local_all_camera_adapters"]},
+                {"id": "macbook",
+                 "capabilities": ["camera_source_analysis_read_only"]},
+                {"id": "macmini",
+                 "capabilities": ["camera_source_analysis_read_only"]},
+            ]
+        }), patch(
+            "jarvis_mrb.world_armor_observe.observe_source",
+            side_effect=fake_observe,
+        ):
+            result = distributed.run_camera_due(
+                db_path=self.db, limit=10, now=self.now,
+            )
+        assignment = {source: worker for source, worker, _ in calls}
+        self.assertEqual(
+            {assignment[source["id"]] for source in sources},
+            {"macbook", "macmini"},
+        )
+        self.assertTrue(all(scheduled for _, _, scheduled in calls))
+        self.assertFalse(result["raw_camera_frames_persisted"])
         self.assertFalse(result["remote_action_authority"])
 
     def test_remote_failure_does_not_retry_on_a_different_worker_same_tick(self):

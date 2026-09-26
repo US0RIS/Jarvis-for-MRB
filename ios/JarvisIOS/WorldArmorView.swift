@@ -252,6 +252,31 @@ struct ArmorPlatformPlan: Decodable {
     }
 }
 
+struct ArmorDistributedWorker: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let capabilities: [String]
+    let observedAt: String?
+    enum CodingKeys: String, CodingKey {
+        case id, status, capabilities
+        case observedAt = "observed_at"
+    }
+}
+
+struct ArmorDistributedWorkers: Decodable {
+    let workers: [ArmorDistributedWorker]
+    let networkDiscovery: Bool
+    let controller: String
+    let credentialDelegation: Bool
+    let remoteArbitraryRPC: Bool
+    enum CodingKeys: String, CodingKey {
+        case workers, controller
+        case networkDiscovery = "network_discovery"
+        case credentialDelegation = "credential_delegation"
+        case remoteArbitraryRPC = "remote_arbitrary_rpc"
+    }
+}
+
 struct ArmorMovementSource: Decodable, Identifiable {
     let id: String
     let label: String
@@ -857,6 +882,7 @@ struct WorldArmorView: View {
     @State private var movementEntities: [ArmorMovementEntity] = []
     @State private var movementEntityType = ""
     @State private var movementStatus = "No movement source queried."
+    @State private var distributedWorkers: [ArmorDistributedWorker] = []
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -1369,6 +1395,27 @@ struct WorldArmorView: View {
     private var movementConsole: some View {
         GroupBox("World Armor v3 · planetary movement graph") {
             VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Text("Observation workers · \(distributedWorkers.count)")
+                        .font(.headline)
+                    Button("Refresh workers") {
+                        Task { await refreshDistributedWorkers() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                }
+                ForEach(distributedWorkers) { worker in
+                    Text(worker.id + " · " + worker.status + " · "
+                         + worker.capabilities.joined(separator: ", "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Workers only fetch fixed read-only provider data; the "
+                     + "Windows controller owns grants, cadence, normalization "
+                     + "and evidence. Opening this app does not start the "
+                     + "distributed runner.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Text("Public aircraft and vessel state becomes typed movement "
                      + "evidence: entity → position → heading/speed → source "
                      + "time → bounded local history. Transport identifiers "
@@ -2297,6 +2344,9 @@ struct WorldArmorView: View {
                 movementNextOffset = movement.nextOffset
                 movementTotal = movement.total
             }
+            if let fabric = try? await client.worldArmorDistributedWorkers() {
+                distributedWorkers = fabric.workers
+            }
             if let current = selectedID {
                 let response = try? await client.worldArmorNotices(
                     investigationID: current
@@ -2400,6 +2450,21 @@ struct WorldArmorView: View {
             await refreshNotices(alertOnNew: false)
         } catch {
             status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
+    private func refreshDistributedWorkers() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let fabric = try await client.worldArmorDistributedWorkers()
+            distributedWorkers = fabric.workers
+            movementStatus = "Worker fabric refreshed; no provider job dispatched."
+        } catch {
+            distributedWorkers = []
+            movementStatus = "Worker fabric unavailable: "
+                + error.localizedDescription
         }
     }
 

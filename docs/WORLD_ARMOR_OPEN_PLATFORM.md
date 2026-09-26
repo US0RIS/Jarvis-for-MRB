@@ -62,7 +62,10 @@ true cross-source physical event correlation are separate acceptance work.
 
 Each exact source has:
 
-- `kind`: `caltrans`, `windy` or `public_https`;
+- `kind`: `caltrans`, `windy`, `public_https` or separately
+  selected `public_http`. HTTP uses unencrypted port 80 only with an
+  explicit source grant; DNS/IP destination controls still apply, but
+  TLS authenticity/confidentiality does not exist for that feed;
 - `locator`: one exact catalog ID or directly vetted public HTTPS media
   URL; URLs with credentials/token-like parameters are not accepted in
   this version; no private IP, localhost or redirects;

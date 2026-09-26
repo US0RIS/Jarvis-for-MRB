@@ -262,6 +262,29 @@ class WorldArmorCameraReceiptIdRequest(BaseModel):
     receipt_id: str
 
 
+class WorldArmorMovementEnrollRequest(BaseModel):
+    label: str
+    kind: str
+    grant_class: str
+    terms_reference: str
+    authorized_automated_access: bool = False
+    provider_min_interval_seconds: int = 0
+    cadence_seconds: int = 0
+    retention_days: int = 7
+    latitude: float | None = None
+    longitude: float | None = None
+    radius_km: float | None = None
+
+
+class WorldArmorMovementIDRequest(BaseModel):
+    source_id: str
+
+
+class WorldArmorMovementActionRequest(BaseModel):
+    source_id: str
+    action: str
+
+
 class WorldArmorSourceEnrollRequest(BaseModel):
     label: str
     kind: str
@@ -1078,6 +1101,125 @@ def _world_armor_platform_error(exc: Exception) -> None:
     if isinstance(exc, RuntimeError):
         raise HTTPException(status_code=503, detail=str(exc)[:240]) from exc
     raise exc
+
+
+@app.post("/world-armor/v3/movement-sources")
+def world_armor_movement_enroll(
+    request: WorldArmorMovementEnrollRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import enroll_source
+    try:
+        return enroll_source(**request.model_dump())
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v3/movement-sources")
+def world_armor_movement_sources(
+    response: Response,
+    offset: int = 0,
+    page_size: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import list_sources
+    try:
+        return list_sources(offset=offset, page_size=page_size)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v3/movement-sources/transition")
+def world_armor_movement_transition(
+    request: WorldArmorMovementActionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import transition_source
+    try:
+        return transition_source(request.source_id, request.action)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v3/movement-sources/forget")
+def world_armor_movement_forget(
+    request: WorldArmorMovementIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import forget_source
+    try:
+        return forget_source(request.source_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v3/movement/collect")
+def world_armor_movement_collect(
+    request: WorldArmorMovementIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import collect_source
+    try:
+        return collect_source(request.source_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v3/movement/nearby")
+def world_armor_movement_nearby(
+    response: Response,
+    latitude: float,
+    longitude: float,
+    radius_km: float = 50,
+    entity_type: str | None = None,
+    after_seq: int = 0,
+    page_size: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import nearby
+    try:
+        return nearby(
+            latitude, longitude, radius_km=radius_km,
+            entity_type=entity_type, after_seq=after_seq,
+            page_size=page_size,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v3/movement/track")
+def world_armor_movement_track(
+    response: Response,
+    entity_id: str,
+    after_seq: int = 0,
+    page_size: int = 200,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_movement import track
+    try:
+        return track(
+            entity_id, after_seq=after_seq, page_size=page_size,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
 
 
 @app.post("/world-armor/v2/source-grants")

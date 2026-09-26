@@ -241,6 +241,29 @@ class WorldArmorKernelTests(TestCase):
             for row in changes["source_record_changes"]
         ))
 
+    def test_invalid_source_rows_cannot_look_like_complete_coverage(self):
+        key = self.new()
+        valid_alert = conditions()["weather_alerts"]["alerts"][0]
+        valid_quake = quakes()["events"][0]
+        receipt = self.ingest(
+            key,
+            air=conditions(alerts=[
+                valid_alert, {"event": "Undated unidentifiable item"},
+            ]),
+            quake=quakes(events=[
+                valid_quake,
+                {"id": "us-bad", "magnitude": 3.3,
+                 "occurred_at": "not an instant"},
+            ]),
+        )
+        coverage = {item["provider"]: item for item in receipt["coverage"]}
+        self.assertEqual(coverage["nws_point_alerts"]["status"], "partial")
+        self.assertEqual(coverage["usgs_earthquakes"]["status"], "partial")
+        self.assertEqual(coverage["nws_point_alerts"]["count"], 1)
+        self.assertEqual(coverage["usgs_earthquakes"]["count"], 1)
+        self.assertFalse(receipt["all_sources_available"])
+        self.assertEqual(self.replay(key)["observation_count"], 3)
+
     def test_legacy_values_only_digests_do_not_fabricate_revisions(self):
         key = self.new()
         self.ingest(key)

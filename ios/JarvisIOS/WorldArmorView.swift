@@ -818,6 +818,10 @@ struct WorldArmorView: View {
                 correlations = nil
                 evidenceGraph = nil
                 sampleTimes = []
+                platformEvidence = []
+                platformNotices = []
+                platformActiveID = nil
+                platformCombinedSummary = ""
                 notices = []
                 unreadNotices = 0
                 seenNoticeIDs = []
@@ -2044,6 +2048,245 @@ struct WorldArmorView: View {
             await refreshNotices(alertOnNew: false)
         } catch {
             status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
+    private func refreshPlatformSources() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Source register refreshed. No camera fetched."
+        } catch {
+            platformStatus = "Source register unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func loadMorePlatformSources() async {
+        guard !busy, let cursor = platformNextOffset else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorPlatformSources(
+                offset: cursor
+            )
+            platformSources.append(contentsOf: page.sources)
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Loaded \(platformSources.count) of "
+                + "\(platformTotal) enrolled sources."
+        } catch {
+            platformStatus = "Source pagination unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func enrollPlatformSource() async {
+        guard !busy else { return }
+        guard let retention = Int(platformRetentionDays),
+              retention >= 1 else {
+            platformStatus = "Enter positive derived-evidence retention days."
+            return
+        }
+        guard let publisherMinimum = Int(platformMinInterval),
+              publisherMinimum >= 0 else {
+            platformStatus = "Enter the source's permitted minimum interval."
+            return
+        }
+        let cadence: Int
+        if platformAutomated {
+            guard let entered = Int(platformCadence),
+                  entered >= max(publisherMinimum, 1) else {
+                platformStatus = "Polling cadence must meet source permissions."
+                return
+            }
+            cadence = entered
+        } else {
+            cadence = 0
+        }
+        let latText = platformLatitude.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let lonText = platformLongitude.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if latText.isEmpty != lonText.isEmpty {
+            platformStatus = "Provide both camera coordinates or neither."
+            return
+        }
+        let lat = latText.isEmpty ? nil : Double(latText)
+        let lon = lonText.isEmpty ? nil : Double(lonText)
+        if !latText.isEmpty && (lat == nil || lon == nil) {
+            platformStatus = "Camera coordinates must be numeric."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let enrolled = try await client.worldArmorPlatformEnroll(
+                label: platformLabel, kind: platformKind,
+                locator: platformLocator,
+                grantClass: platformGrantClass,
+                termsReference: platformTerms,
+                automated: platformAutomated,
+                sourceMinIntervalSeconds: publisherMinimum,
+                cadenceSeconds: cadence,
+                retentionDays: retention, goal: platformGoal,
+                latitude: lat, longitude: lon
+            )
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Source " + enrolled.id
+                + " enrolled with exact declared rights. Host runner "
+                + "requires explicit start; no camera was fetched."
+        } catch {
+            platformStatus = "Source enrollment blocked: "
+                + error.localizedDescription
+        }
+    }
+
+    private func planPlatformSources() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let preflight = try await client.worldArmorPlatformPlan()
+            platformStatus = "\(preflight.available) eligible sources; "
+                + "\(preflight.automated) explicitly permitted for scheduled "
+                + "checks. Suggested host batch "
+                + "\(preflight.proposedHostConcurrency). Permissions not "
+                + "independently verified; remote workers unavailable."
+        } catch {
+            platformStatus = "Source plan unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func observePlatformSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await client.worldArmorPlatformObserve(id)
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformNextOffset = page.nextOffset
+            platformTotal = page.total
+            let records = try await client.worldArmorPlatformEvidence(
+                sourceID: id
+            )
+            platformActiveID = id
+            platformEvidence = records.observations
+            platformNotices = try await client.worldArmorPlatformNotices(
+                sourceID: id
+            ).notices
+            platformStatus = "Source check: " + receipt.status
+                + "; model calls \(receipt.modelCalls ?? 0). "
+                + "Identical published images skip redundant model passes."
+        } catch {
+            platformStatus = "Source observation unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func readPlatformEvidence(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorPlatformEvidence(
+                sourceID: id
+            )
+            platformActiveID = id
+            platformEvidence = page.observations
+            platformNotices = try await client.worldArmorPlatformNotices(
+                sourceID: id
+            ).notices
+            platformStatus = "Loaded derived evidence, not publisher footage. "
+                + "Source capture times remain unverified."
+        } catch {
+            platformStatus = "Evidence unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func changePlatformSource(
+        _ id: String, action: String
+    ) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let item = try await client.worldArmorPlatformTransition(
+                id, action: action
+            )
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Source " + item.label + " is " + item.state
+                + ". Leased observations cannot save after stop/pause."
+        } catch {
+            platformStatus = "Source transition unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func forgetPlatformSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await client.worldArmorPlatformForget(id)
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            if platformActiveID == id {
+                platformActiveID = nil
+                platformEvidence = []
+                platformNotices = []
+            }
+            platformStatus = receipt.deleted > 0
+                ? "Source and all its local text/hash evidence forgotten."
+                : "Selected source was already absent."
+        } catch {
+            platformStatus = "Forget source unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func inspectCombinedPlatformEvidence(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let data = try await client.worldArmorCombinedCameraEvidence(
+                investigationID: id
+            )
+            let cameras = (data["camera_observations"]
+                           as? [[String: Any]]) ?? []
+            let environmental = (data["environmental_observations"]
+                                 as? [[String: Any]]) ?? []
+            let unlocated = (data["enrolled_camera_location_unknown_source_ids"]
+                             as? [String]) ?? []
+            platformCombinedSummary =
+                "\(cameras.count) camera receipts near the selected "
+                + "region's camera points and \(environmental.count) "
+                + "environmental source observations; "
+                + "\(unlocated.count) camera sources have unknown geography. "
+                + "These are CO-DISPLAYED, not correlated by fabricated "
+                + "camera capture times or verified view cones."
+        } catch {
+            platformCombinedSummary =
+                "Combined evidence unavailable: " + error.localizedDescription
         }
     }
 

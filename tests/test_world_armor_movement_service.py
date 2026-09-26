@@ -99,7 +99,7 @@ class MovementServiceTests(TestCase):
             "world-armor/v3/movement-sources",
             "world-armor/v3/movement/collect",
             "world-armor/v3/movement/nearby",
-            "world-armor/v4/workers",
+            "world-armor/v6/workers",
         ):
             self.assertIn(path, client)
 

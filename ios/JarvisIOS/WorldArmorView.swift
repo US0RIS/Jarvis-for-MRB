@@ -126,6 +126,132 @@ struct ArmorCameraReceiptList: Decodable {
     }
 }
 
+struct ArmorPlatformSource: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let kind: String
+    let sourceDisplay: String
+    let sceneGoal: String
+    let grantClass: String
+    let termsReference: String
+    let state: String
+    let cadenceSeconds: Int
+    let checkCount: Int
+    let sampleBudget: Int?
+    let consentExpiresAt: String?
+    let lastCheckedAt: String?
+    let lastOutcome: String?
+    let authorizedAutomatedAccess: Bool
+    let retentionDays: Int
+    let permissionVerifiedByJarvis: Bool
+    enum CodingKeys: String, CodingKey {
+        case id, label, kind, state
+        case sourceDisplay = "source_display"
+        case sceneGoal = "scene_goal"
+        case grantClass = "grant_class"
+        case termsReference = "terms_reference"
+        case cadenceSeconds = "cadence_seconds"
+        case checkCount = "check_count"
+        case sampleBudget = "sample_budget"
+        case consentExpiresAt = "consent_expires_at"
+        case lastCheckedAt = "last_checked_at"
+        case lastOutcome = "last_outcome"
+        case authorizedAutomatedAccess = "authorized_automated_access"
+        case retentionDays = "retention_days"
+        case permissionVerifiedByJarvis = "permission_verified_by_jarvis"
+    }
+}
+
+struct ArmorPlatformSourcePage: Decodable {
+    let sources: [ArmorPlatformSource]
+    let nextOffset: Int?
+    let total: Int
+    enum CodingKeys: String, CodingKey {
+        case sources, total
+        case nextOffset = "next_offset"
+    }
+}
+
+struct ArmorPlatformObservation: Decodable, Identifiable {
+    let id: String
+    let seq: Int
+    let sourceID: String
+    let description: String
+    let conditionStatus: String?
+    let sceneGoal: String
+    let sourceCaptureAt: String?
+    let receivedAt: String
+    let changeKind: String
+    enum CodingKeys: String, CodingKey {
+        case id, seq, description
+        case sourceID = "source_id"
+        case conditionStatus = "condition_status"
+        case sceneGoal = "scene_goal"
+        case sourceCaptureAt = "source_capture_at"
+        case receivedAt = "received_at"
+        case changeKind = "change_kind"
+    }
+}
+
+struct ArmorPlatformEvidencePage: Decodable {
+    let observations: [ArmorPlatformObservation]
+    let nextAfterSeq: Int?
+    enum CodingKeys: String, CodingKey {
+        case observations
+        case nextAfterSeq = "next_after_seq"
+    }
+}
+
+struct ArmorPlatformNotice: Decodable, Identifiable {
+    let id: String
+    let sourceID: String
+    let summary: String
+    let createdAt: String
+    enum CodingKeys: String, CodingKey {
+        case id, summary
+        case sourceID = "source_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct ArmorPlatformNoticesPage: Decodable {
+    let notices: [ArmorPlatformNotice]
+}
+
+struct ArmorPlatformCheck: Decodable {
+    let status: String
+    let sourceID: String
+    let modelCalls: Int?
+    let changeKind: String?
+    let noticeCreated: Bool?
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sourceID = "source_id"
+        case modelCalls = "model_calls"
+        case changeKind = "change_kind"
+        case noticeCreated = "notice_created"
+    }
+}
+
+struct ArmorPlatformForget: Decodable {
+    let deleted: Int
+}
+
+struct ArmorPlatformPlan: Decodable {
+    let available: Int
+    let automated: Int
+    let proposedHostConcurrency: Int
+    let providerEntitlementIndependentlyVerified: Bool
+    let remoteDistributedWorkers: Bool
+    enum CodingKeys: String, CodingKey {
+        case available, automated
+        case proposedHostConcurrency = "proposed_host_concurrency"
+        case providerEntitlementIndependentlyVerified =
+             "provider_entitlement_independently_verified"
+        case remoteDistributedWorkers = "remote_distributed_workers"
+    }
+}
+
 struct ArmorWatch: Decodable, Identifiable {
     let id: String
     let investigationID: String

@@ -45,7 +45,7 @@ def regional_earthquakes(
                     "endtime": checked.strftime("%Y-%m-%dT%H:%M:%S"),
                     "minmagnitude": minimum_magnitude,
                     "orderby": "time",
-                    "limit": 50,
+                    "limit": 51,  # one extra source row detects an incomplete 50-item result
                 },
                 headers={"Accept": "application/geo+json", "User-Agent": "JarvisForMRB/0.13 (public incident information)"},
             ) as response:
@@ -58,6 +58,7 @@ def regional_earthquakes(
         data = __import__("json").loads(body)
         if not isinstance(data, dict) or not isinstance(data.get("features"), list):
             raise ValueError("USGS earthquake response has unexpected shape.")
+        source_limit_reached = len(data["features"]) > 50
         events = []
         for item in data["features"][:50]:
             props = item.get("properties") if isinstance(item, dict) else None
@@ -95,7 +96,10 @@ def regional_earthquakes(
                 "reviewed": props.get("status") == "reviewed",
             })
         return {
-            "status": "ok", "events": events,
+            "status": "partial" if source_limit_reached else "ok",
+            "events": events,
+            "source_limit_reached": source_limit_reached,
+            "source_result_limit": 50,
             "checked_at": checked.isoformat(), "source_url": _DOCS,
             "source_note": (
                 "USGS earthquake detections only, subject to magnitude threshold, "

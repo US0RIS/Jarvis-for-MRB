@@ -75,6 +75,48 @@ class PublicCameraGlobalTests(unittest.TestCase):
                 media._public_address("public-camera.example"), "8.8.8.8"
             )
 
+    def test_one_selected_html_page_yields_candidates_without_following_media(self):
+        page = "<html><head><meta property='og:image' " \
+               "content='/preview.jpg'></head><body>" \
+               "<img class='webcam' src='https://cdn.public-camera.example/" \
+               "snapshot.png'><iframe src='/hidden-player'></iframe>" \
+               "<script src='/secret.js'></script></body></html>"
+        with patch.object(
+            media, "_get", return_value=(page.encode(), "text/html"),
+        ) as provider:
+            found = media.discover_public_page_media(
+                "https://public-camera.example/camera"
+            )
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(found["status"], "candidates_found")
+        self.assertEqual(len(found["candidates"]), 2)
+        self.assertTrue(found["candidates"][0]["same_origin"])
+        self.assertFalse(found["candidates"][1]["same_origin"])
+        self.assertTrue(all(
+            "secret" not in item["url"] and "hidden-player" not in item["url"]
+            for item in found["candidates"]
+        ))
+        self.assertTrue(all(
+            x["needs_explicit_selection"] for x in found["candidates"]
+        ))
+
+    def test_public_webpage_discovery_never_fetches_credential_links(self):
+        page = (
+            '<img class="webcam" src="/live.jpg?token=secret"/>'
+            '<img class="webcam" src="http://127.0.0.1/secret.jpg"/>'
+            '<img class="webcam" src="/public.jpg"/>'
+        )
+        with patch.object(
+            media, "_get", return_value=(page.encode(), "text/html"),
+        ):
+            response = media.discover_public_page_media(
+                "https://public-camera.example/portal"
+            )
+        self.assertEqual(
+            [x["url"] for x in response["candidates"]],
+            ["https://public-camera.example/public.jpg"],
+        )
+
     def test_mjpeg_extracts_one_frame_and_does_not_store_media(self):
         from PIL import Image
         from io import BytesIO

@@ -2148,7 +2148,7 @@ struct JarvisAPIClient {
                 var resolvedBase = ""
                 let cognition = Self.cognitionRequest(text)
                 let cloudEnabled = UserDefaults.standard.object(forKey: "jarvis.cloudCognitionEnabled") as? Bool ?? false
-                if cloudEnabled || cognition.mode == "cloud" {
+                if cloudEnabled && cognition.mode != "local" {
                     do {
                         let prepared = try await cloudCognitionPrepare(cognition.text, mode: cognition.mode)
                         if prepared.tier == "cloud",

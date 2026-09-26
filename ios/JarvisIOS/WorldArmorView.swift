@@ -1518,7 +1518,10 @@ struct WorldArmorView: View {
                 }
                 Toggle(
                     "Local notifications for warning/urgent World Armor events",
-                    isOn: $appModel.settings.worldArmorLiveAlertsEnabled
+                    isOn: Binding(
+                        get: { appModel.settings.worldArmorLiveAlertsEnabled },
+                        set: { appModel.settings.worldArmorLiveAlertsEnabled = $0 }
+                    )
                 )
                 Text("The durable journal replays missed events after reconnect. "
                      + "Local notifications require iOS permission and an active "

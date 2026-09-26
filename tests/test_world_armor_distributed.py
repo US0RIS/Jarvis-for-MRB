@@ -91,11 +91,11 @@ class DistributedObserverTests(unittest.TestCase):
 
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_movement_adapters"]},
-                {"id": "macbook",
+                {"id": "macbook", "status": "online",
                  "capabilities": ["opensky_region_read_only"]},
-                {"id": "macmini",
+                {"id": "macmini", "status": "online",
                  "capabilities": ["opensky_region_read_only"]},
             ]
         }), patch.object(distributed, "collect_source",
@@ -243,11 +243,11 @@ class DistributedObserverTests(unittest.TestCase):
 
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_camera_adapters"]},
-                {"id": "macbook",
+                {"id": "macbook", "status": "online",
                  "capabilities": ["camera_source_analysis_read_only"]},
-                {"id": "macmini",
+                {"id": "macmini", "status": "online",
                  "capabilities": ["camera_source_analysis_read_only"]},
             ]
         }), patch(
@@ -274,9 +274,9 @@ class DistributedObserverTests(unittest.TestCase):
             raise RuntimeError("worker unavailable")
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_movement_adapters"]},
-                {"id": "macbook",
+                {"id": "macbook", "status": "online",
                  "capabilities": ["opensky_region_read_only"]},
             ]
         }), patch.object(distributed, "collect_source", side_effect=fail):
@@ -296,7 +296,7 @@ class DistributedObserverTests(unittest.TestCase):
                     "worker_id": kwargs["worker_id"]}
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_movement_adapters"]},
             ]
         }), patch.object(distributed, "collect_source",

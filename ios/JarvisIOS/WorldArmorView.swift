@@ -1641,6 +1641,103 @@ struct WorldArmorView: View {
         }
     }
 
+    private func discoverRegionCameras() async {
+        guard let region = selected, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.worldArmorDiscoverCameras(
+                latitude: region.latitude, longitude: region.longitude,
+                radiusKM: region.radiusKM
+            )
+            guard selectedID == region.id else { return }
+            publicCameras = result.cameras
+            cameraProviders = result.providerStatuses
+            cameraStatus = "Found \(publicCameras.count) directory cameras. "
+                + "Incomplete catalogs do not mean no cameras exist."
+        } catch {
+            cameraStatus = "Camera discovery unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func inspectSelectedPublicCamera() async {
+        guard let regionID = selectedID, !busy else { return }
+        let direct = publicCameraURL.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let reference = direct.isEmpty ? selectedCameraRef : ""
+        guard !reference.isEmpty || !direct.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.worldArmorInspectCamera(
+                investigationID: regionID,
+                cameraRef: reference, publicURL: direct,
+                condition: cameraCondition
+            )
+            guard selectedID == regionID else { return }
+            let history = try await client.worldArmorCameraReceipts(
+                investigationID: regionID
+            )
+            cameraReceipts = history.cameraReceipts
+            cameraStatus = "One published frame inspected at "
+                + result.retrievedAt + ". Capture time unverified. "
+                + "No raw image retained."
+        } catch {
+            cameraStatus = "Public frame not retained: "
+                + error.localizedDescription
+        }
+    }
+
+    private func enrollExactCameraWatch() async {
+        guard !busy else { return }
+        let direct = publicCameraURL.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        var config: [String: Any] = ["condition": cameraCondition]
+        if !direct.isEmpty {
+            config["public_url"] = direct
+        } else if selectedCameraRef.hasPrefix("caltrans-") {
+            config["camera_id"] = selectedCameraRef
+        } else if selectedCameraRef.hasPrefix("windy-") {
+            config["camera_ref"] = selectedCameraRef
+        } else {
+            cameraStatus = "Select a camera or exact public media URL."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let created = try await client.createExternalWatch(
+                kind: "camera", label: "World Armor public camera",
+                config: config, seconds: 1800, scope: "personal",
+                expiresHours: 3
+            )
+            cameraWatch = created
+            cameraStatus = "Separate exact camera watch enrolled for "
+                + "3 hours; host must run. Its history does not "
+                + "automatically enter this World Armor region."
+        } catch {
+            cameraStatus = "Camera watch enrollment blocked: "
+                + error.localizedDescription
+        }
+    }
+
+    private func stopExactCameraWatch(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.stopExternalWatch(id, scope: "personal")
+            cameraWatch = nil
+            cameraStatus = "Exact external camera watch stopped."
+        } catch {
+            cameraStatus = "Camera watch stop failed: "
+                + error.localizedDescription
+        }
+    }
+
     private func refreshWatches() async {
         guard !busy else { return }
         busy = true

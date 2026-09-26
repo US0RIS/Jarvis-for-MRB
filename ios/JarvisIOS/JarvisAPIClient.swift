@@ -1031,6 +1031,14 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorWatch.self, from: data)
     }
 
+    func worldArmorWatchForget(_ id: String) async throws -> ArmorWatchForgetReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/watches/forget", body: ["watch_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorWatchForgetReceipt.self, from: data)
+    }
+
     func worldArmorWatchTransition(
         _ id: String, action: String
     ) async throws -> ArmorWatch {

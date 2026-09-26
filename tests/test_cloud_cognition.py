@@ -12,6 +12,7 @@ from jarvis_mrb.cloud_cognition import (
     prepare_cloud_task,
     redact_secrets,
     route_cognition,
+    server_cloud_reason,
     validate_proposal,
 )
 
@@ -161,6 +162,24 @@ class ProviderAbstractionTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(GroqProvider().available())
 
+    def test_timeout_outage_rate_limit_and_malformed_fail_gracefully(self):
+        for failure in (
+            RuntimeError("Groq unavailable."),
+            RuntimeError("Groq rate limited."),
+            RuntimeError("Cloud reasoning failed safely: timeout"),
+            ValueError("malformed structured output"),
+        ):
+            with self.subTest(failure=str(failure)), \
+                 patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}, clear=True), \
+                 patch.object(GroqProvider, "reason", side_effect=failure):
+                decision, proposal, metadata = server_cloud_reason(
+                    "Debug this difficult root cause and architecture tradeoff.",
+                    force="cloud",
+                )
+                self.assertEqual(decision.tier, "cloud")
+                self.assertIsNone(proposal)
+                self.assertIn("fallback", metadata)
+
     def test_mock_alternative_provider_matches_contract(self):
         class MockProvider:
             name = "mock"
@@ -205,6 +224,10 @@ class IOSCredentialSourceTests(unittest.TestCase):
     def test_api_key_is_not_written_to_userdefaults(self):
         self.assertNotIn('defaults.set(groq', self.settings.lower())
         self.assertNotIn('setvalue(groq', self.api.lower())
+
+    def test_global_cloud_disable_stops_normal_cloud_calls(self):
+        self.assertIn('if cloudEnabled && cognition.mode != "local"', self.api)
+        self.assertNotIn('if cloudEnabled || cognition.mode == "cloud"', self.api)
 
     def test_disabling_cloud_does_not_delete_key(self):
         enable_line = '@Published var cloudCognitionEnabled'

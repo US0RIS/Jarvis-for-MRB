@@ -218,7 +218,13 @@ def capabilities() -> dict[str, Any]:
              "coverage": "bounded_mag_threshold_not_all_hazards"},
         ],
         "camera_collection": False, "aircraft_collection": False,
-        "ais_collection": False, "scheduled_watches": False,
+        "ais_collection": False,
+        "scheduled_watches": (os.getenv("JARVIS_WORLD_ARMOR_WATCHES_ENABLED") == "1"
+                              and _enabled()),
+        "watch_runner_auto_started": False,
+        "watch_runner": "explicit_separate_local_process",
+        "watch_interval_minutes_min": 30,
+        "watch_checks_max": 12,
         "remote_workers": False, "actuation": False, "model_calls": 0,
         "store": "separate_local_expiring_sqlite",
     }

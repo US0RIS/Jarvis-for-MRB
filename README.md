@@ -59,6 +59,25 @@ an emergency safety system, a live source acceptance or an autonomous
 external action path. New code is a stacked draft on the watches branch,
 not deployed to the operator's machines.
 
+## World Armor public cameras — wider-world media slice (stacked draft)
+
+**[Public camera runbook](docs/WORLD_ARMOR_PUBLIC_CAMERAS.md)** adds an
+optional keyed Windy Webcams v3 **global** directory alongside existing
+California Caltrans highway cameras, a user-tapped public HTTPS
+JPEG/PNG/WebP/MJPEG or bounded unencrypted HLS MPEG-TS media reader,
+and one-page HTML media-link selection without JavaScript or guessed
+private camera URLs. Direct media is fetched through a public-IP-pinned,
+certificate-verified connection and normalized as one in-memory frame.
+The separately enabled World Armor camera sidecar retains only
+source-qualified text/hash receipts (no video archive or assumed capture
+time); existing exact External Watches accept these public media targets
+on the separately enrolled host runner. The native workbench discovers,
+previews, inspects, retains, watches and forgets selected cameras.
+Windy requires your own account/API key and provider terms; some
+cameras are not downloadable streams. Do not confuse this draft source
+code or synthetic CI with live authorized worldwide deployment or
+source-timed World Armor camera correlation.
+
 ## World Armor — proposed planetary-scale extension
 
 **[Full design specification](docs/WORLD_ARMOR_SPEC.md)** for the Planetary Event

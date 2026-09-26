@@ -117,12 +117,27 @@ def _validate(scope: str, kind: str, config: dict[str, Any], cadence_seconds: in
         raise ValueError("A watch must expire in 1–168 hours.")
     if kind == "camera":
         camera_id = str(config.get("camera_id") or "")
-        if not _CAMERA.fullmatch(camera_id):
-            raise ValueError("Camera must be selected from the official catalog.")
+        camera_ref = str(config.get("camera_ref") or "")
+        public_url = str(config.get("public_url") or "")
+        if sum(bool(x) for x in (camera_id, camera_ref, public_url)) != 1:
+            raise ValueError("Select one official ID, Windy ID or public HTTPS URL.")
         condition = str(config.get("condition") or "")
         if condition not in {"", "smoke_visible", "road_congestion"}:
             raise ValueError("Unsupported public camera watch condition.")
-        return {"camera_id": camera_id, "condition": condition}
+        if camera_id:
+            if not _CAMERA.fullmatch(camera_id):
+                raise ValueError("Invalid official Caltrans camera ID.")
+            return {"camera_id": camera_id, "condition": condition}
+        if camera_ref:
+            from jarvis_mrb.public_camera_windy import _ID as windy_id
+            if not windy_id.fullmatch(camera_ref):
+                raise ValueError("Invalid Windy camera ID.")
+            if not __import__("os").getenv("JARVIS_WINDY_WEBCAMS_API_KEY"):
+                raise ValueError("Windy Webcams API key not configured.")
+            return {"camera_ref": camera_ref, "condition": condition}
+        from jarvis_mrb.public_camera_media import validate_public_camera_url
+        validate_public_camera_url(public_url)
+        return {"public_url": public_url, "condition": condition}
     if kind == "sec_filings":
         from jarvis_mrb.public_diligence import normalize_cik
         return {"cik": normalize_cik(str(config.get("cik") or ""))}
@@ -233,9 +248,11 @@ def _fetch(row: dict[str, Any]) -> dict[str, Any]:
     kind = row["kind"]
     cfg = row["config"]
     if kind == "camera":
-        from jarvis_mrb.public_camera_vision import analyze_official_still
-        result = analyze_official_still(
-            cfg["camera_id"], condition=cfg.get("condition", "")
+        from jarvis_mrb.public_camera_vision import analyze_public_camera
+        result = analyze_public_camera(
+            camera_ref=cfg.get("camera_id") or cfg.get("camera_ref") or "",
+            public_url=cfg.get("public_url") or "",
+            condition=cfg.get("condition", ""),
         )
         return {
             "status": "ok", "summary": result["camera_name"] + ": " + result["description"],
@@ -397,7 +414,15 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
             """SELECT last_digest,last_image_hash,camera_positive_streak,camera_alert_armed
                FROM watches WHERE id=? AND scope=?""", (watch_id, scope)
         ).fetchone()
-        if previous is None:
+        # Consent must still hold AFTER public HTTP/model IO. A stop during
+        # a slow remote response cannot leave a new receipt or attention cue.
+        authorization = conn.execute(
+            "SELECT enabled,expires_at FROM watches WHERE id=? AND scope=?",
+            (watch_id, scope),
+        ).fetchone()
+        if (previous is None or authorization is None
+                or not authorization["enabled"]
+                or authorization["expires_at"] <= checked_at):
             return {"status": "stopped_or_expired", "watch_id": watch_id}
         old_hash = str(previous["last_image_hash"] or "")
         streak = int(previous["camera_positive_streak"] or 0)

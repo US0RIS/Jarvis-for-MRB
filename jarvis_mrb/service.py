@@ -243,6 +243,33 @@ class WorldArmorWatchIdRequest(BaseModel):
 class WorldArmorNoticeIdRequest(BaseModel):
     notice_id: str
 
+
+class WorldArmorPublicCameraSearchRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_km: float = 30
+    limit: int = 30
+
+
+class WorldArmorCameraInspectRequest(BaseModel):
+    investigation_id: str
+    camera_ref: str = ""
+    public_url: str = ""
+    condition: str = ""
+
+
+class WorldArmorCameraReceiptIdRequest(BaseModel):
+    receipt_id: str
+
+
+class WorldArmorPublicPageRequest(BaseModel):
+    public_url: str
+
+
+class WorldArmorImportCameraWatchRequest(BaseModel):
+    investigation_id: str
+    watch_id: str
+
 class WorldArmorCorrelationRequest(BaseModel):
     investigation_id: str
     start_at: str
@@ -1008,6 +1035,111 @@ def world_armor_notice_forget(
     from jarvis_mrb.world_armor_attention import forget_notice
     try:
         return forget_notice(request.notice_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/page-media")
+def world_armor_camera_page_media(
+    request: WorldArmorPublicPageRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import _authorize_camera
+    from jarvis_mrb.public_camera_media import discover_public_page_media
+    try:
+        _authorize_camera()
+        return discover_public_page_media(request.public_url)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/discover")
+def world_armor_camera_discover(
+    request: WorldArmorPublicCameraSearchRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import discover_public_cameras_global
+    try:
+        return discover_public_cameras_global(
+            request.latitude, request.longitude,
+            radius_km=request.radius_km, limit=request.limit,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/import-watch")
+def world_armor_camera_import_watch(
+    request: WorldArmorImportCameraWatchRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import import_external_camera_watch
+    try:
+        return import_external_camera_watch(
+            request.investigation_id, request.watch_id,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/inspect")
+def world_armor_camera_inspect(
+    request: WorldArmorCameraInspectRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import inspect_camera
+    try:
+        return inspect_camera(
+            request.investigation_id, camera_ref=request.camera_ref,
+            public_url=request.public_url, condition=request.condition,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Public camera source or local vision service unavailable.",
+        ) from exc
+
+
+@app.get("/world-armor/v1/cameras/receipts")
+def world_armor_camera_receipts(
+    response: Response,
+    investigation_id: str,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import list_camera_receipts
+    try:
+        return list_camera_receipts(investigation_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/forget")
+def world_armor_camera_forget(
+    request: WorldArmorCameraReceiptIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import forget_camera_receipt
+    try:
+        return forget_camera_receipt(request.receipt_id)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
 

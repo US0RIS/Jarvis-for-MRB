@@ -1008,6 +1008,64 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorCreated.self, from: data)
     }
 
+    func worldArmorDiscoverCameras(
+        latitude: Double, longitude: Double,
+        radiusKM: Double, limit: Int = 30
+    ) async throws -> ArmorPublicCameraDiscovery {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/cameras/discover",
+            body: ["latitude": latitude, "longitude": longitude,
+                   "radius_km": radiusKM, "limit": limit]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPublicCameraDiscovery.self, from: data)
+    }
+
+    func worldArmorInspectCamera(
+        investigationID: String, cameraRef: String = "",
+        publicURL: String = "", condition: String = ""
+    ) async throws -> ArmorCameraReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/cameras/inspect",
+            body: [
+                "investigation_id": investigationID,
+                "camera_ref": cameraRef, "public_url": publicURL,
+                "condition": condition
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCameraReceipt.self, from: data)
+    }
+
+    func worldArmorCameraReceipts(
+        investigationID: String
+    ) async throws -> ArmorCameraReceiptList {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent(
+            "world-armor/v1/cameras/receipts"
+        ), var parts = URLComponents(
+            url: url, resolvingAgainstBaseURL: false
+        ) else { throw JarvisAPIError.badURL }
+        parts.queryItems = [
+            URLQueryItem(name: "investigation_id", value: investigationID)
+        ]
+        guard let endpoint = parts.url else { throw JarvisAPIError.badURL }
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 10
+        addAuthorization(to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCameraReceiptList.self, from: data)
+    }
+
+    func worldArmorForgetCameraReceipt(_ id: String) async throws -> ArmorForgetReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/cameras/forget", body: ["receipt_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorForgetReceipt.self, from: data)
+    }
+
     func worldArmorWatches() async throws -> ArmorWatchList {
         let (data, response) = try await get(
             path: "world-armor/v1/watches", timeout: 10

@@ -14,6 +14,9 @@ struct SettingsView: View {
     @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
     @State private var isSwitchingPlanner = false
+    @State private var groqDraftKey = ""
+    @State private var groqStatus = "Not checked"
+    @State private var testingGroq = false
 
     private let fastPlannerModel = "qwen3:8b"
     private let qualityPlannerModel = "qwen3.8:27b"
@@ -85,6 +88,82 @@ struct SettingsView: View {
                          ? "Routine voice turns stay on 8B. Hard reasoning is routed to 27B, then 8B is rewarmed for the next conversational turn. Thinking remains disabled."
                          : "Manual mode pins the selected planner model. Thinking remains disabled.")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Cloud Intelligence / Groq") {
+                    Toggle("Enable cloud cognition", isOn: $settings.cloudCognitionEnabled)
+                        .disabled(!settings.groqKeyConfigured)
+
+                    Picker("Routing", selection: $settings.cognitionMode) {
+                        Text("Automatic").tag("auto")
+                        Text("Force local").tag("local")
+                        Text("Force cloud").tag("cloud")
+                    }
+
+                    HStack {
+                        Text("Model")
+                        Spacer()
+                        Text("GPT-OSS 120B")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Credential")
+                        Spacer()
+                        if settings.groqKeyConfigured {
+                            Text("Configured ••••••••")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not configured")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    SecureField(
+                        settings.groqKeyConfigured ? "Paste replacement API key" : "Paste Groq API key",
+                        text: $groqDraftKey
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    HStack {
+                        Button(settings.groqKeyConfigured ? "Replace Key" : "Save Key") {
+                            settings.saveGroqAPIKey(groqDraftKey)
+                            groqDraftKey = ""
+                            groqStatus = settings.groqKeyConfigured ? "Key saved in Apple Keychain." : "No key stored."
+                        }
+                        .disabled(groqDraftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Test Connection") {
+                            Task { await testGroqConnection() }
+                        }
+                        .disabled(!settings.groqKeyConfigured || testingGroq)
+                    }
+
+                    if settings.groqKeyConfigured {
+                        Button("Delete Key", role: .destructive) {
+                            settings.deleteGroqAPIKey()
+                            groqDraftKey = ""
+                            groqStatus = "Key deleted; cloud cognition disabled."
+                        }
+                    }
+
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        if testingGroq { ProgressView().controlSize(.small) }
+                        Text(groqStatus)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+
+                    Text("Automatic routing keeps deterministic functions first and ordinary conversation on local Qwen. Jarvis escalates difficult, ambiguous, conflicting-evidence, long-context, repeatedly failed, or materially consequential reasoning to Groq when stronger reasoning is useful. The API key stays in this device's Apple Keychain; it is sent only to Groq. Jarvis sends a minimized, secret-redacted context package and treats the cloud response as an untrusted proposal that still passes through existing backend authorization and verification.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Per-request override: start a request with “local:” or “cloud:”. Developer routing details remain available from the authenticated cloud-cognition status endpoint.")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
@@ -411,6 +490,19 @@ struct SettingsView: View {
             useFastPlanner = previousFastValue
             plannerModelStatus = "Model switch failed: \(error.localizedDescription)"
         }
+    }
+
+    private func testGroqConnection() async {
+        guard let key = settings.groqAPIKeyForRequest() else {
+            groqStatus = "not configured"
+            return
+        }
+        testingGroq = true
+        defer { testingGroq = false }
+        let status = await client.testGroqConnection(apiKey: key)
+        groqStatus = status.state == "available"
+            ? "Available"
+            : "\(status.state): \(status.detail)"
     }
 
     private func checkNeuralVoice() async {

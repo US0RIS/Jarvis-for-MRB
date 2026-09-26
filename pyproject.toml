@@ -50,6 +50,7 @@ jarvis-20 = "jarvis_mrb.jarvis20_cli:main"
 jarvis-agency-acceptance = "jarvis_mrb.agency_acceptance_check:main"
 jarvis-agency-release-check = "jarvis_mrb.agency_release_check:main"
 jarvis-agency-real-gate = "jarvis_mrb.agency_real_acceptance_check:main"
+jarvis-cognition-benchmark = "jarvis_mrb.cognitive_benchmark:main"
 
 [tool.setuptools.packages.find]
 include = ["jarvis_mrb*"]

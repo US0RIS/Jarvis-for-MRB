@@ -1213,8 +1213,34 @@ def handle_natural_language(
     fast = _fast_path(text)
     if fast is not None:
         return _respectful(fast)
+
+    # Optional server-side cloud cognition. The normal iPhone path keeps the
+    # credential in Keychain and uses /cloud-cognition/prepare + /resolve;
+    # GROQ_API_KEY exists for trusted server/developer deployments.
+    try:
+        from jarvis_mrb.cloud_cognition import server_cloud_reason
+        cloud_decision, cloud_proposal, _cloud_meta = server_cloud_reason(text, history)
+    except Exception:
+        cloud_decision, cloud_proposal = None, None
+    if cloud_decision is not None and cloud_decision.tier == "cloud" and cloud_proposal is not None:
+        if cloud_proposal.tool:
+            return _respectful(execute_tool(cloud_proposal.tool, cloud_proposal.arguments))
+        return _respectful(AgentReply(True, cloud_proposal.response or "I'm listening."))
+
     plan, error = _ollama_plan(text, history=history)
     if plan is None:
+        # A local-model parse/timeout failure is itself an escalation signal.
+        try:
+            from jarvis_mrb.cloud_cognition import server_cloud_reason
+            _, fallback_proposal, _ = server_cloud_reason(
+                text, history, force="cloud", prior_local_failures=2
+            )
+        except Exception:
+            fallback_proposal = None
+        if fallback_proposal is not None:
+            if fallback_proposal.tool:
+                return _respectful(execute_tool(fallback_proposal.tool, fallback_proposal.arguments))
+            return _respectful(AgentReply(True, fallback_proposal.response or error))
         return _respectful(AgentReply(False, error))
     tool = plan.get("tool")
     args = plan.get("arguments") or {}

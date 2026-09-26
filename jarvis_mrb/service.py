@@ -3042,12 +3042,17 @@ def public_airspace_region(
 def nearby_physical_awareness(
     request: PhysicalConditionsRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """On-demand multisource briefing; no background surveillance."""
     _check_auth(authorization)
     from jarvis_mrb.physical_awareness import physical_awareness
     try:
-        return physical_awareness(request.latitude, request.longitude)
+        return physical_awareness(
+            request.latitude,
+            request.longitude,
+            windy_api_key=x_jarvis_windy_key,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -3116,53 +3121,15 @@ def nearby_public_cameras(
 ) -> dict[str, Any]:
     """Opt-in public provider lookup. POST avoids putting coordinates in URL access logs."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_catalog import discover_public_cameras, _km
-    from jarvis_mrb.public_camera_windy import discover_windy_cameras
+    from jarvis_mrb.public_camera_catalog import discover_combined_public_cameras
     try:
-        cal = discover_public_cameras(
-            request.latitude, request.longitude,
-            radius_km=min(request.radius_km, 50), limit=request.limit,
-        )
-        windy = discover_windy_cameras(
-            request.latitude, request.longitude,
-            radius_km=min(max(request.radius_km, 1), 250),
+        return discover_combined_public_cameras(
+            request.latitude,
+            request.longitude,
+            radius_km=request.radius_km,
             limit=request.limit,
-            api_key=x_jarvis_windy_key,
+            windy_api_key=x_jarvis_windy_key,
         )
-        combined = list(cal.get("cameras") or []) + list(windy.get("cameras") or [])
-        combined.sort(key=lambda item: (
-            _km(
-                request.latitude, request.longitude,
-                float(item["latitude"]), float(item["longitude"])
-            ),
-            str(item.get("id") or ""),
-        ))
-        sources = []
-        if cal.get("status") not in {"unsupported_region"}:
-            sources.append("Caltrans")
-        if windy.get("status") != "not_configured":
-            sources.append("Windy Webcams")
-        status = "ok" if combined else (
-            "not_configured"
-            if windy.get("status") == "not_configured" and cal.get("status") == "unsupported_region"
-            else cal.get("status") or windy.get("status") or "unavailable"
-        )
-        return {
-            "status": status,
-            "coverage": " + ".join(sources) if sources else "No configured public camera directory for this area",
-            "cameras": combined[:request.limit],
-            "source_url": (
-                "https://api.windy.com/webcams/docs"
-                if windy.get("status") != "not_configured"
-                else str(cal.get("source_url") or "")
-            ),
-            "source_note": (
-                "Camera directories are incomplete. A listed record does not prove a current usable frame, verified capture time, or viewing footprint. "
-                + ("Windy worldwide directory enabled from the iPhone credential." if x_jarvis_windy_key else
-                   "Windy worldwide directory requires a key in Jarvis Settings or on the backend.")
-            ),
-            "coordinates_stored": False,
-        }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

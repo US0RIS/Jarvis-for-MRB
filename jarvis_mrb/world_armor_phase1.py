@@ -132,6 +132,7 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 lease_until TEXT,
                 last_checked_at TEXT,
                 last_outcome TEXT,
+                last_change_state TEXT,
                 CHECK(interval_minutes BETWEEN 30 AND 360),
                 CHECK(max_checks BETWEEN 1 AND 12)
             );
@@ -142,6 +143,7 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 sample_id TEXT NOT NULL REFERENCES samples(id) ON DELETE CASCADE,
                 collected_at TEXT NOT NULL,
                 outcome TEXT NOT NULL,
+                change_state TEXT NOT NULL,
                 PRIMARY KEY(watch_id,sample_id)
             );
             CREATE TABLE IF NOT EXISTS observations (

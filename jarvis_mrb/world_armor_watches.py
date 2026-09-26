@@ -49,6 +49,14 @@ def _refresh(con: sqlite3.Connection, instant: datetime) -> None:
         "WHERE state IN ('active','paused') AND expires_at<=?",
         (instant.isoformat(),),
     )
+    con.execute(
+        "UPDATE watches SET state='exhausted',lease_token=NULL,lease_until=NULL "
+        "WHERE state IN ('active','paused') AND expires_at>? "
+        "AND (check_count>=max_checks OR investigation_id IN "
+        "(SELECT id FROM investigations WHERE sample_count>=20)) "
+        "AND (lease_token IS NULL OR lease_until<=?)",
+        (instant.isoformat(), instant.isoformat()),
+    )
 
 
 def _present(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
@@ -248,7 +256,8 @@ def _finish(db_path: Path, claim: dict[str, Any], *,
             "SELECT * FROM watches WHERE id=?", (claim["id"],)
         ).fetchone()
         if row is None or row["lease_token"] != claim["lease"]:
-            return {"watch_id": claim["id"],
+            return {"watch_id": claim["id"], "checked": True,
+                    "sample_saved": False,
                     "outcome": "revoked_or_superseded_no_watch_completion"}
         if sample_id is not None:
             con.execute(
@@ -268,7 +277,9 @@ def _finish(db_path: Path, claim: dict[str, Any], *,
         updated = con.execute(
             "SELECT * FROM watches WHERE id=?", (claim["id"],)
         ).fetchone()
-    return {**_present(updated), "outcome": outcome, "sample_id": sample_id}
+    return {**_present(updated), "checked": True,
+            "sample_saved": sample_id is not None,
+            "outcome": outcome, "sample_id": sample_id}
 
 
 def run_due_once(*, db_path: Path | None = None,

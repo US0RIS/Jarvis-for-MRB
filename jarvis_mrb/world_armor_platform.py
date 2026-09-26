@@ -435,7 +435,17 @@ def plan(*, db_path: Path | None = None, source_ids: list[str] | None = None,
         raise ValueError("Host concurrency must be positive.")
     path = _dbpath(db_path)
     if not path.exists():
-        return {"sources": [], "available": 0, "unknown_coverage": True}
+        return {
+            "schema": "world_armor.source_plan.v1",
+            "sources": [], "available": 0, "automated": 0,
+            "proposed_host_concurrency": max_concurrent,
+            "max_source_count": None,
+            "provider_entitlement_independently_verified": False,
+            "remote_distributed_workers": False,
+            "camera_coverage": "no enrolled sources",
+            "unknown_coverage": True, "model_calls_for_unchanged_image": 0,
+            "external_actions": 0,
+        }
     with closing(_connect(path)) as con:
         rows = con.execute("SELECT * FROM source_grants ORDER BY created_at").fetchall()
     chosen = set(_id(x) for x in source_ids) if source_ids is not None else None

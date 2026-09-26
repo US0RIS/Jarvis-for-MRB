@@ -1968,7 +1968,10 @@ struct WorldArmorView: View {
                 }
                 Toggle(
                     "Notifications for warning/urgent World Armor events",
-                    isOn: $appModel.settings.worldArmorLiveAlertsEnabled
+                    isOn: Binding(
+                        get: { appModel.settings.worldArmorLiveAlertsEnabled },
+                        set: { appModel.settings.worldArmorLiveAlertsEnabled = $0 }
+                    )
                 )
                 Text("The durable journal replays missed events after reconnect. "
                      + "When APNs credentials and this signed app's push entitlement "

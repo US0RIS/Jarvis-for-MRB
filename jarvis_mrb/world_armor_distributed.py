@@ -11,6 +11,7 @@ authority.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -356,6 +357,90 @@ def _pooled_ais(
     return outcomes, bool(pooled.get("pooled_connection"))
 
 
+def _movement_job(
+    source_id: str, *, path: Path, worker: str,
+    now: datetime | None,
+) -> tuple[dict[str, Any], bool]:
+    try:
+        result = collect_source(
+            source_id, db_path=path, scheduled=True,
+            worker_id=worker, now=now,
+        )
+        return result, result.get("status") not in {
+            "unavailable", "not_collected"
+        }
+    except (ValueError, KeyError, RuntimeError) as exc:
+        return ({
+            "source_id": source_id, "status": "not_collected",
+            "worker_id": worker, "error_type": type(exc).__name__,
+            "fallback_attempted": False,
+        }, False)
+
+
+def _camera_job(
+    source_id: str, *, path: Path, worker: str,
+    now: datetime | None,
+) -> tuple[dict[str, Any], bool]:
+    from jarvis_mrb import world_armor_observe as camera_runner
+    try:
+        result = camera_runner.observe_source(
+            source_id, db_path=path, scheduled=True,
+            worker_id=worker, now=now,
+        )
+        return result, result.get("status") == "ok"
+    except (ValueError, KeyError, RuntimeError) as exc:
+        return ({
+            "source_id": source_id, "status": "not_collected",
+            "worker_id": worker, "error_type": type(exc).__name__,
+            "fallback_attempted": False,
+        }, False)
+
+
+def _run_assigned_jobs(
+    jobs: list[tuple[str, str]], *, path: Path,
+    now: datetime | None, instant: datetime,
+    workers: list[dict[str, Any]], camera: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Run remote jobs concurrently by assigned capacity; serialize Windows."""
+    execute = _camera_job if camera else _movement_job
+    outcomes: dict[str, dict[str, Any]] = {}
+    remote = [(sid, worker) for sid, worker in jobs if worker != "windows"]
+    local = [(sid, worker) for sid, worker in jobs if worker == "windows"]
+
+    # Assignments were already capped by each worker's advertised capacity.
+    if remote:
+        with ThreadPoolExecutor(max_workers=len(remote)) as pool:
+            future_map = {
+                pool.submit(
+                    execute, sid, path=path, worker=worker, now=now
+                ): (sid, worker)
+                for sid, worker in remote
+            }
+            # Windows work remains serialized while remote I/O/model work runs.
+            for sid, worker in local:
+                result, success = execute(
+                    sid, path=path, worker=worker, now=now
+                )
+                outcomes[sid] = result
+            for future in as_completed(future_map):
+                sid, worker = future_map[future]
+                result, success = future.result()
+                outcomes[sid] = result
+                _record_worker_result(
+                    path, worker, success=success, now=instant
+                )
+                _mark_in_memory(
+                    workers, worker, success=success, now=instant
+                )
+    else:
+        for sid, worker in local:
+            result, _ = execute(
+                sid, path=path, worker=worker, now=now
+            )
+            outcomes[sid] = result
+    return outcomes
+
+
 def run_due(*, db_path: Path | None = None, limit: int = 8,
             now: datetime | None = None) -> dict[str, Any]:
     """One capability/load-aware movement dispatch pass."""
@@ -390,6 +475,7 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
     )
     outcomes_by_id.update(pooled_ais)
 
+    movement_jobs: list[tuple[str, str]] = []
     for row in rows:
         source_id = str(row["id"])
         if row["kind"] == "aisstream_region":
@@ -397,33 +483,11 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
         worker = _movement_worker(
             row["kind"], workers, assignments, instant
         )
-        try:
-            result = collect_source(
-                source_id, db_path=path, scheduled=True,
-                worker_id=worker, now=now,
-            )
-            outcomes_by_id[source_id] = result
-            success = result.get("status") not in {
-                "unavailable", "not_collected"
-            }
-            _record_worker_result(
-                path, worker, success=success, now=instant
-            )
-            _mark_in_memory(
-                workers, worker, success=success, now=instant
-            )
-        except (ValueError, KeyError, RuntimeError) as exc:
-            _record_worker_result(
-                path, worker, success=False, now=instant
-            )
-            _mark_in_memory(
-                workers, worker, success=False, now=instant
-            )
-            outcomes_by_id[source_id] = {
-                "source_id": source_id, "status": "not_collected",
-                "worker_id": worker, "error_type": type(exc).__name__,
-                "fallback_attempted": False,
-            }
+        movement_jobs.append((source_id, worker))
+    outcomes_by_id.update(_run_assigned_jobs(
+        movement_jobs, path=path, now=now, instant=instant,
+        workers=workers, camera=False,
+    ))
     outcomes = [
         outcomes_by_id[str(row["id"])]
         for row in rows if str(row["id"]) in outcomes_by_id
@@ -452,7 +516,6 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
 def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
                    now: datetime | None = None) -> dict[str, Any]:
     """One capability/load-aware camera pass over enrolled source grants."""
-    from jarvis_mrb import world_armor_observe as camera_runner
     from jarvis_mrb import world_armor_platform as platform
 
     platform._require_enabled()
@@ -481,36 +544,20 @@ def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
     fabric = available_workers(db_path=path)
     workers = fabric["workers"]
     assignments: dict[str, int] = {}
-    outcomes = []
+    camera_jobs: list[tuple[str, str]] = []
     for row in rows:
         worker = _camera_worker(
             row["kind"], workers, assignments, instant
         )
-        try:
-            result = camera_runner.observe_source(
-                row["id"], db_path=path, scheduled=True,
-                worker_id=worker, now=now,
-            )
-            outcomes.append(result)
-            success = result.get("status") == "ok"
-            _record_worker_result(
-                path, worker, success=success, now=instant
-            )
-            _mark_in_memory(
-                workers, worker, success=success, now=instant
-            )
-        except (ValueError, KeyError, RuntimeError) as exc:
-            _record_worker_result(
-                path, worker, success=False, now=instant
-            )
-            _mark_in_memory(
-                workers, worker, success=False, now=instant
-            )
-            outcomes.append({
-                "source_id": row["id"], "status": "not_collected",
-                "worker_id": worker, "error_type": type(exc).__name__,
-                "fallback_attempted": False,
-            })
+        camera_jobs.append((str(row["id"]), worker))
+    outcomes_by_id = _run_assigned_jobs(
+        camera_jobs, path=path, now=now, instant=instant,
+        workers=workers, camera=True,
+    )
+    outcomes = [
+        outcomes_by_id[str(row["id"])]
+        for row in rows if str(row["id"]) in outcomes_by_id
+    ]
     with closing(platform._connect(path, create=True)) as con:
         remaining = con.execute(
             "SELECT count(*) FROM source_grants WHERE state='active' "

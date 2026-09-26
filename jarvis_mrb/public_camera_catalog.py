@@ -209,3 +209,89 @@ def discover_public_cameras(
         ),
         "coordinates_stored": False,
     }
+
+
+def discover_combined_public_cameras(
+    latitude: float,
+    longitude: float,
+    *,
+    radius_km: float = 10.0,
+    limit: int = 8,
+    windy_api_key: str | None = None,
+) -> dict[str, Any]:
+    """Combine the worldwide Windy directory with Caltrans where applicable.
+
+    This preserves the existing portable Physical-tab response shape while
+    making the optional Windy credential usable from the iPhone. Directory
+    presence is never treated as proof that a current frame works.
+    """
+    if not 0.1 <= float(radius_km) <= 250:
+        raise ValueError("radius_km must be between 0.1 and 250")
+    if not 1 <= int(limit) <= 100:
+        raise ValueError("limit must be between 1 and 100")
+
+    cal = discover_public_cameras(
+        latitude,
+        longitude,
+        radius_km=min(float(radius_km), 50.0),
+        limit=min(int(limit), 20),
+    )
+
+    from jarvis_mrb.public_camera_windy import discover_windy_cameras
+    windy = discover_windy_cameras(
+        latitude,
+        longitude,
+        radius_km=max(1.0, min(float(radius_km), 250.0)),
+        limit=int(limit),
+        api_key=windy_api_key,
+    )
+
+    combined = list(cal.get("cameras") or []) + list(windy.get("cameras") or [])
+    combined.sort(
+        key=lambda item: (
+            _km(
+                latitude,
+                longitude,
+                float(item["latitude"]),
+                float(item["longitude"]),
+            ),
+            str(item.get("id") or ""),
+        )
+    )
+
+    providers: list[str] = []
+    if cal.get("status") != "unsupported_region":
+        providers.append("Caltrans")
+    if windy.get("status") != "not_configured":
+        providers.append("Windy Webcams")
+
+    if combined:
+        status = "partial" if (
+            cal.get("status") in {"partial", "unavailable"}
+            or windy.get("status") in {"partial", "unavailable"}
+        ) else "ok"
+    elif windy.get("status") == "not_configured" and cal.get("status") == "unsupported_region":
+        status = "not_configured"
+    else:
+        status = str(cal.get("status") or windy.get("status") or "unavailable")
+
+    note_parts = [
+        "Camera directories are incomplete. A listed record does not prove a current usable frame, verified capture time, or viewing footprint."
+    ]
+    if windy.get("status") == "not_configured":
+        note_parts.append("Add a Windy Webcams API key in Jarvis Settings for worldwide directory coverage.")
+    elif windy.get("status") in {"partial", "unavailable"}:
+        note_parts.append("Windy directory coverage is currently partial or unavailable.")
+
+    return {
+        "status": status,
+        "coverage": " + ".join(providers) if providers else "No configured public camera directory for this area",
+        "cameras": combined[:int(limit)],
+        "source_url": (
+            "https://api.windy.com/webcams/docs"
+            if windy.get("status") != "not_configured"
+            else str(cal.get("source_url") or "")
+        ),
+        "source_note": " ".join(note_parts),
+        "coordinates_stored": False,
+    }

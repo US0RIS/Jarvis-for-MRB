@@ -419,8 +419,9 @@ def _collect_provider(
                 radius_km=source["radius_km"],
             )
         raise ValueError("Unsupported movement adapter.")
-    if worker_id not in ("macbook", "macmini"):
-        raise ValueError("Choose Windows or an exact paired Mac worker.")
+    from jarvis_mrb.reality_mesh import observer_ids
+    if worker_id not in observer_ids():
+        raise ValueError("Choose Windows or an explicitly registered observer.")
     if source["kind"] != "opensky_region":
         raise ValueError(
             "Paired Mac observers currently accept only regional OpenSky work."
@@ -477,8 +478,10 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
                    now: datetime | None = None) -> dict[str, Any]:
     start = _instant(now)
     path = _dbpath(db_path)
-    if worker_id not in ("windows", "macbook", "macmini"):
-        raise ValueError("Unknown World Armor movement worker.")
+    if worker_id != "windows":
+        from jarvis_mrb.reality_mesh import observer_ids
+        if worker_id not in observer_ids():
+            raise ValueError("Unknown World Armor movement worker.")
     source = _lease(source_id, path=path, now=start, scheduled=scheduled)
     try:
         result = _collect_provider(source, worker_id=worker_id)

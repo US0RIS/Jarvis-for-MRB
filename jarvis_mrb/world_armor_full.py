@@ -155,6 +155,21 @@ def full_status(*, db_path: Path | None = None) -> dict[str, Any]:
         workers = available_workers().get("workers") or []
     except Exception:
         workers = []
+    try:
+        from jarvis_mrb.world_armor_push import status as push_status
+        push = push_status()
+    except Exception as exc:
+        push = {"enabled": False, "error": type(exc).__name__}
+    try:
+        from jarvis_mrb.world_armor_watchdog import status as watchdog_status
+        watchdog = watchdog_status()
+    except Exception as exc:
+        watchdog = {
+            "watchdog_seen": False,
+            "watchdog_running": False,
+            "child_running": False,
+            "error": type(exc).__name__,
+        }
     grants = 0
     pending = 0
     if path.exists():
@@ -178,6 +193,8 @@ def full_status(*, db_path: Path | None = None) -> dict[str, Any]:
         },
         "live_fabric": live,
         "registered_workers": len(workers),
+        "push_transport": push,
+        "watchdog": watchdog,
         "active_presence_grants": grants,
         "pending_presence_receipts": pending,
         "source_authority_expansion": False,

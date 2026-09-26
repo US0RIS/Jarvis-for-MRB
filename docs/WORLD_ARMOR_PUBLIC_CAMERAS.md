@@ -25,8 +25,12 @@ license, or promise that every webcam website can be programmatically read.
    *single user-enrolled exact target*, not an IP scanner or a
    global automatic catalog. A landing page/JavaScript player, signed
    cookie, login, private RTSP feed, DRM HLS, WebRTC, SRT and fMP4
-   are NOT automatically supported. A public webpage is not proof
-   that its underlying feed is available for automated reuse.
+   are NOT automatically supported. A bounded **single-page HTML
+   discovery** step can list literal public image/HLS links (including
+   provider thumbnails) from the exact page the operator supplies,
+   without running scripts, following iframes or fetching media. The
+   operator explicitly selects a candidate before analysis; a player
+   page or thumbnail is not proof of live-feed access.
 4. **One-frame local vision:** the already configured Ollama vision
    model describes a single bounded frame or returns an optional typed
    `smoke_visible`/`road_congestion` classification. It does
@@ -98,6 +102,11 @@ license, or promise that every webcam website can be programmatically read.
 Under the existing private bearer gate, all with
 `Cache-Control: private, no-store`:
 
+- `POST /world-armor/v1/cameras/page-media` with
+  `{"public_url":"<one public HTTPS page URL>"}` returns up to
+  15 literal media candidates without opening any media, scripts,
+  embedded players or arbitrary URLs. Each candidate requires an
+  explicit operator selection before fetching a frame.
 - `POST /world-armor/v1/cameras/discover` with finite
   `latitude`, `longitude`, `radius_km` (1–250) and
   `limit` (1–100). Includes separate provider statuses.

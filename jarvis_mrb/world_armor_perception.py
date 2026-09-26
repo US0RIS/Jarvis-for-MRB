@@ -56,11 +56,13 @@ def acquire_source(kind: str, locator: str) -> dict[str, Any]:
         # Windy source URL must never persist a signed short-lived preview.
         media["source_display"] = "Windy Webcams catalog " + locator
         return media
-    if kind == "public_https":
-        media = snapshot_public_media(locator)
+    if kind in ("public_https", "public_http"):
+        media = snapshot_public_media(
+            locator, allow_http=(kind == "public_http")
+        )
         media.update(camera_ref=media["source_id"],
                      camera_name=media["source_display"],
-                     provider="operator_selected_public_https")
+                     provider="operator_selected_public_media")
         return media
     raise ValueError("Unknown public-camera provider.")
 

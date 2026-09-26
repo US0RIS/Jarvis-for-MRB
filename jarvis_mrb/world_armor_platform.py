@@ -22,7 +22,7 @@ from jarvis_mrb import world_model
 from jarvis_mrb.public_camera_media import validate_public_camera_url
 from jarvis_mrb.world_armor_perception import validate_scene_goal
 
-_KINDS = ("caltrans", "windy", "public_https")
+_KINDS = ("caltrans", "windy", "public_https", "public_http")
 _STATES = ("active", "paused", "stopped")
 _GRANTS = ("public_publisher", "api_contract", "owned_or_authorized")
 _LEASE = timedelta(minutes=3)
@@ -106,7 +106,7 @@ def _connect(path: Path, *, create: bool = False) -> sqlite3.Connection:
           alert_armed INTEGER NOT NULL DEFAULT 1,
           lease_token TEXT,
           lease_until TEXT,
-          CHECK(kind IN ('caltrans','windy','public_https')),
+          CHECK(kind IN ('caltrans','windy','public_https','public_http')),
           CHECK(state IN ('active','paused','stopped')),
           CHECK(cadence_seconds>=0 AND automated_min_interval_seconds>=0),
           CHECK(sample_budget IS NULL OR sample_budget>0),
@@ -245,8 +245,12 @@ def enroll_source(*, label: str, kind: str, locator: str,
             raise ValueError("Consent expiry must be an aware ISO date.") from exc
         if expiry <= moment.isoformat():
             raise ValueError("Cannot enroll an already expired grant.")
-    if kind == "public_https":
-        loc = validate_public_camera_url(locator)
+    if kind in ("public_https", "public_http"):
+        loc = validate_public_camera_url(
+            locator, allow_http=(kind == "public_http")
+        )
+        if ((kind == "public_http") != locator.startswith("http://")):
+            raise ValueError("Choose exact HTTP or HTTPS adapter for this URL.")
         display = loc.display
     elif kind == "caltrans":
         from jarvis_mrb.public_camera_vision import _ID
@@ -261,7 +265,7 @@ def enroll_source(*, label: str, kind: str, locator: str,
             raise ValueError("Windy API key not configured on this host.")
         display = "Windy Webcams " + locator
     lat, lon = _valid_coordinates(latitude, longitude)
-    if kind == "public_https" and lat is not None:
+    if kind in ("public_https", "public_http") and lat is not None:
         spatial_basis = "operator_reported_camera_point_not_verified_view_cone"
     elif lat is not None:
         spatial_basis = "operator_reported_catalog_camera_point_not_verified"

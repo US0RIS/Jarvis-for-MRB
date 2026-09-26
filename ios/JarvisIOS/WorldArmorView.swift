@@ -252,6 +252,106 @@ struct ArmorPlatformPlan: Decodable {
     }
 }
 
+struct ArmorMovementSource: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let kind: String
+    let grantClass: String
+    let termsReference: String
+    let authorizedAutomatedAccess: Bool
+    let providerMinIntervalSeconds: Int
+    let cadenceSeconds: Int
+    let retentionDays: Int
+    let state: String
+    let latitude: Double?
+    let longitude: Double?
+    let radiusKM: Double?
+    let globalScope: Bool
+    let checkCount: Int
+    let lastCheckedAt: String?
+    let lastOutcome: String?
+    enum CodingKeys: String, CodingKey {
+        case id, label, kind, state, latitude, longitude
+        case grantClass = "grant_class"
+        case termsReference = "terms_reference"
+        case authorizedAutomatedAccess = "authorized_automated_access"
+        case providerMinIntervalSeconds = "provider_min_interval_seconds"
+        case cadenceSeconds = "cadence_seconds"
+        case retentionDays = "retention_days"
+        case radiusKM = "radius_km"
+        case globalScope = "global_scope"
+        case checkCount = "check_count"
+        case lastCheckedAt = "last_checked_at"
+        case lastOutcome = "last_outcome"
+    }
+}
+
+struct ArmorMovementSourcePage: Decodable {
+    let sources: [ArmorMovementSource]
+    let nextOffset: Int?
+    let total: Int
+    enum CodingKeys: String, CodingKey {
+        case sources, total
+        case nextOffset = "next_offset"
+    }
+}
+
+struct ArmorMovementEntity: Decodable, Identifiable {
+    let seq: Int
+    let entityID: String
+    let entityType: String
+    let observedAt: String
+    let providerTime: String?
+    let latitude: Double
+    let longitude: Double
+    let altitudeM: Double?
+    let velocityMPS: Double?
+    let headingDeg: Double?
+    let sourceName: String
+    let lastName: String?
+    let lastCallsign: String?
+    let distanceKM: Double?
+    var id: String { entityID }
+    enum CodingKeys: String, CodingKey {
+        case seq, latitude, longitude
+        case entityID = "entity_id"
+        case entityType = "entity_type"
+        case observedAt = "observed_at"
+        case providerTime = "provider_time"
+        case altitudeM = "altitude_m"
+        case velocityMPS = "velocity_mps"
+        case headingDeg = "heading_deg"
+        case sourceName = "source_name"
+        case lastName = "last_name"
+        case lastCallsign = "last_callsign"
+        case distanceKM = "distance_km"
+    }
+}
+
+struct ArmorMovementNearbyPage: Decodable {
+    let entities: [ArmorMovementEntity]
+    let nextAfterSeq: Int?
+    enum CodingKeys: String, CodingKey {
+        case entities
+        case nextAfterSeq = "next_after_seq"
+    }
+}
+
+struct ArmorMovementCollectReceipt: Decodable {
+    let status: String
+    let sourceID: String
+    let entitiesSeen: Int?
+    let observationsSaved: Int?
+    let providerNote: String?
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sourceID = "source_id"
+        case entitiesSeen = "entities_seen"
+        case observationsSaved = "observations_saved"
+        case providerNote = "provider_note"
+    }
+}
+
 struct ArmorWatch: Decodable, Identifiable {
     let id: String
     let investigationID: String
@@ -740,6 +840,23 @@ struct WorldArmorView: View {
     @State private var platformNotices: [ArmorPlatformNotice] = []
     @State private var platformCombinedSummary = ""
     @State private var platformStatus = "No source registry check performed."
+    @State private var movementSources: [ArmorMovementSource] = []
+    @State private var movementTotal = 0
+    @State private var movementNextOffset: Int?
+    @State private var movementKind = "opensky_region"
+    @State private var movementLabel = "Public movement region"
+    @State private var movementTerms = ""
+    @State private var movementGrantClass = "public_publisher"
+    @State private var movementAutomated = false
+    @State private var movementCadence = "60"
+    @State private var movementMinInterval = "0"
+    @State private var movementRetention = "7"
+    @State private var movementLatitude = "34.0500"
+    @State private var movementLongitude = "-118.2500"
+    @State private var movementRadius = "80"
+    @State private var movementEntities: [ArmorMovementEntity] = []
+    @State private var movementEntityType = ""
+    @State private var movementStatus = "No movement source queried."
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -776,6 +893,7 @@ struct WorldArmorView: View {
             VStack(alignment: .leading, spacing: 15) {
                 heading
                 sourceConsole
+                movementConsole
                 enrollment
                 saved
                 if let selected {
@@ -1979,6 +2097,11 @@ struct WorldArmorView: View {
                 platformSources = page.sources
                 platformNextOffset = page.nextOffset
                 platformTotal = page.total
+            }
+            if let movement = try? await client.worldArmorMovementSources() {
+                movementSources = movement.sources
+                movementNextOffset = movement.nextOffset
+                movementTotal = movement.total
             }
             if let current = selectedID {
                 let response = try? await client.worldArmorNotices(

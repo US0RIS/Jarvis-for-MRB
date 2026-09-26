@@ -238,6 +238,51 @@ class PublicCameraGlobalTests(unittest.TestCase):
                 )
             analyze.assert_not_called()
 
+    def test_exact_personal_camera_watch_import_has_no_new_provider_fetch(self):
+        watch = {"id": "watch-one", "kind": "camera", "label": "Public road",
+                 "config": {"camera_id": "caltrans-d7-196"}}
+        prior = {
+            "status": "ok", "checked_at": NOW.isoformat(),
+            "payload": self._evidence(
+                camera="caltrans-d7-196", image="1"*64,
+            ),
+        }
+        with patch("jarvis_mrb.external_watches.get_watch",
+                   return_value=watch) as selected, \
+             patch("jarvis_mrb.external_watches.watch_history",
+                   return_value=[prior]) as history, \
+             patch("jarvis_mrb.public_camera_vision.analyze_public_camera",
+                   side_effect=AssertionError("camera fetched")):
+            imported = cameras.import_external_camera_watch(
+                self.region, "watch-one", db_path=self.db, now=NOW,
+            )
+        selected.assert_called_once_with("watch-one", "personal")
+        history.assert_called_once_with("watch-one", "personal", limit=1)
+        self.assertEqual(imported["imported_watch_id"], "watch-one")
+        self.assertEqual(imported["image_sha256"], "1"*64)
+        self.assertIsNone(imported["capture_time"])
+        self.assertEqual(imported["spatial_basis"],
+                         "operator_associated_region_camera_location_unknown")
+        self.assertEqual(cameras.list_camera_receipts(
+            self.region, db_path=self.db, now=NOW,
+        )["camera_receipts"][0]["id"], imported["id"])
+
+    def test_external_watch_import_rejects_non_camera_or_unobserved_source(self):
+        with patch("jarvis_mrb.external_watches.get_watch",
+                   return_value={"kind": "airspace_region"}):
+            with self.assertRaises(ValueError):
+                cameras.import_external_camera_watch(
+                    self.region, "watch-one", db_path=self.db, now=NOW,
+                )
+        with patch("jarvis_mrb.external_watches.get_watch",
+                   return_value={"id": "watch-one", "kind": "camera"}), \
+             patch("jarvis_mrb.external_watches.watch_history",
+                   return_value=[]):
+            with self.assertRaises(ValueError):
+                cameras.import_external_camera_watch(
+                    self.region, "watch-one", db_path=self.db, now=NOW,
+                )
+
     def test_collection_flag_blocks_fetch_and_expired_region_blocks_storage(self):
         with patch.dict(os.environ, {
             "JARVIS_WORLD_ARMOR_CAMERAS_ENABLED": "0",

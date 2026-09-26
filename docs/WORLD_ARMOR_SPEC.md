@@ -707,9 +707,11 @@ Only after license/policy reviews: airspace as permitted, historical/licensed ma
 
 Exit: at least one additional domain yields demonstrably useful **cross-domain** correlation without personally identifying tracking or overstated coverage.
 
-### Phase 5 — interfaces to retained ideas
+### Phase 5 — full-scope World Armor interfaces
 
-Reality Browser (navigable immersive timeline), Presence (authorized physical embodiment), Causal Debugger (stronger mechanism testing), Synthetic Senses and Parallel Existence may each become separate scoped projects **only by an explicit operator decision**. They are **on hold**, not implicitly part of Phase 1.
+Reality Browser (navigable immersive timeline), Presence (authorized physical embodiment), Causal Debugger (stronger mechanism testing), Synthetic Senses and Parallel Existence remain part of the **full World Armor target**. They are later layers because they depend on the evidence, live-fabric and authority infrastructure from Phases 1–4; deferral is a sequencing decision, not a removal of scope.
+
+Each interface still receives its own implementation and acceptance gates. Presence may act only through separately authorized actuators; Reality Browser must preserve source/time/coverage uncertainty; Causal Debugger must distinguish mechanisms from correlations; Synthetic Senses must identify derived/modelled signals; Parallel Existence may distribute analysis but cannot manufacture source authority or physical completion.
 
 ### Economic extension
 

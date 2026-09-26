@@ -107,6 +107,29 @@ class CloudContextTests(unittest.TestCase):
         self.assertIn("Relevant ordinary fact", compiled.prompt)
         self.assertGreaterEqual(compiled.classifications["local_only"], 1)
 
+    def test_explicit_sensitive_context_is_local_by_default(self):
+        compiled = compile_cloud_context(
+            "Analyze the architecture",
+            [
+                {"role": "user", "content": "[sensitive] architecture note with private detail"},
+                {"role": "assistant", "content": "Architecture has three tiers."},
+            ],
+        )
+        self.assertNotIn("private detail", compiled.prompt)
+        self.assertGreaterEqual(compiled.classifications["sensitive"], 1)
+
+    def test_older_nearby_but_irrelevant_context_is_minimized_out(self):
+        compiled = compile_cloud_context(
+            "Debug the database race condition",
+            [
+                {"role": "user", "content": "My unrelated vacation itinerary has a hotel reservation."},
+                {"role": "assistant", "content": "The database transaction can deadlock under concurrency."},
+                {"role": "user", "content": "Which locking order fixes the database race condition?"},
+            ],
+        )
+        self.assertNotIn("vacation itinerary", compiled.prompt)
+        self.assertIn("database", compiled.prompt)
+
     def test_irrelevant_old_history_is_not_uploaded(self):
         history = [
             {"role": "user", "content": f"irrelevant old item {i}"}

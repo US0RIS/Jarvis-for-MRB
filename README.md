@@ -6,7 +6,27 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
-## World Armor v8 — full-scope suit (stacked implementation candidate)
+## World Armor — merge status (2026-09-26)
+
+The thirteen stacked World Armor draft PRs (#7–#21) plus the reconciled
+two-region comparison (#11, originally stacked on a stale correlation-workbench
+commit, rebased onto the full-scope tip before merge) are now merged into
+`main` as individual merge commits, each CI-verified (Linux
+`python3 -m unittest discover -s tests -v`, isolated `world_acceptance_check`
+and `world_check`, iOS simulator build; Windows full regression on a separate
+workflow) at its pre-merge head, and the whole set re-verified together after
+merge. Per the spec's own acceptance contract (`docs/WORLD_ARMOR_SPEC.md`
+§18), **none of this is "Observed deployed."** Phase 1 cannot claim that
+until gates W0–W8 plus the relevant W10/W12–W16 pass on the actual installed
+Windows/iPhone configuration with real permitted providers, and W9/W11 are
+additionally required before Phase 3 can claim it. Real APNs signing and
+device delivery, a live HomeKit grant/dispatch/readback cycle, an actual
+Windows watchdog restart exercise, and current OpenSky/NWS/USGS entitlement
+checks against their live terms all remain open, explicitly un-simulated
+device/provider acceptance work. A green CI run is source-in-main evidence,
+not a device acceptance gate.
+
+## World Armor v8 — full-scope suit
 
 **[Full-scope runbook](docs/WORLD_ARMOR_FULL_SCOPE.md).** The
 `jarvis/world-armor-full-scope` branch completes the software-side Phase-5
@@ -36,24 +56,26 @@ public-camera path already accepts explicitly enrolled public JPEG/PNG/WebP,
 MJPEG and bounded unencrypted HLS media plus one-page literal media discovery;
 there is no global camera-count ceiling.
 
-This remains an **implementation candidate, not an observed-deployed claim**.
+This is now merged into `main` and CI-verified at the merge SHA; it remains
+an **implementation candidate, not an observed-deployed claim**.
 Real APNs credentials/signing, physical iPhone notification delivery, actual
 authorized providers, long-run Windows/watchdog recovery, paired workers and
 the selected HomeKit accessory still require environment-specific acceptance
-on the exact branch SHA.
+on the exact merge SHA.
 
-## World Armor two-region comparison — stacked proposal
+## World Armor two-region comparison
 
-Stacked on `jarvis/world-armor-full-scope` as `jarvis/world-armor-cross-region`,
-Jarvis can compare **two explicitly enrolled regions** using their saved
-evidence, a common source-time window, modelled US AQI at the identical
-provider-model time, and exact shared USGS event IDs. The iPad view has an
-explicit second-place selector. This is a read-only historical query; no new
-camera, worldwide tracking feed, standing watch or automatic
-physical/economic action. Shared USGS IDs count as **one source**, not two
-independent confirmations; source gaps are not an all-clear.
-[Exact controls and limitations](docs/WORLD_ARMOR_PHASE1.md). This branch is
-not merged to `main` or observed deployed.
+Merged into `main` from `jarvis/world-armor-cross-region` (originally stacked
+on a stale `world-armor-correlation-workbench` commit and rebased onto the
+full-scope tip before merge), Jarvis can compare **two explicitly enrolled
+regions** using their saved evidence, a common source-time window, modelled
+US AQI at the identical provider-model time, and exact shared USGS event IDs.
+The iPad view has an explicit second-place selector. This is a read-only
+historical query; no new camera, worldwide tracking feed, standing watch or
+automatic physical/economic action. Shared USGS IDs count as **one source**,
+not two independent confirmations; source gaps are not an all-clear.
+[Exact controls and limitations](docs/WORLD_ARMOR_PHASE1.md). This is
+CI-verified in `main`, not observed deployed.
 
 ## World Armor Phase 1 — limited executable evidence kernel
 
@@ -80,7 +102,7 @@ evidence while leaving the degraded observation inspectable. A cross-source matc
 within a bounded inquiry region*, not exact physical co-location or
 causation. The larger design below remains a roadmap.
 
-## World Armor Phase 3A — bounded local standing watches (stacked draft)
+## World Armor Phase 3A — bounded local standing watches
 
 **[Standing-watch runbook](docs/WORLD_ARMOR_WATCHES.md)** adds an actual,
 separately opted-in, explicitly started Windows-host collection runner and a
@@ -92,9 +114,9 @@ The runner uses **only the existing bounded modelled AQI, NWS and USGS
 adapters**. Enrolling a watch does not start the runner. It has no automatic
 installation/startup, notifications, predicate alerts, third-party actions,
 camera feed collection, or worker network. CI success is not physical-device
-or live-source acceptance; PR #12 remains draft and stacked on PR #9.
+or live-source acceptance; this merged into `main` from draft PR #12.
 
-## World Armor Phase 3B — opt-in evidence attention inbox (stacked draft)
+## World Armor Phase 3B — opt-in evidence attention inbox
 
 **[Attention runbook](docs/WORLD_ARMOR_ATTENTION.md)** implements four
 typed per-watch attention rules (off by default, modelled AQI upward
@@ -105,10 +127,10 @@ inbox receipts. The native iPhone/iPad view supports rule enrollment,
 notice read/forget and explicitly opted-in **foreground-only in-app banners**
 while the view is open. This is NOT APNs, closed-app notification delivery,
 an emergency safety system, a live source acceptance or an autonomous
-external action path. New code is a stacked draft on the watches branch,
-not deployed to the operator's machines.
+external action path. This merged into `main` from a draft stacked on the
+watches branch; it is CI-verified, not deployed to the operator's machines.
 
-## World Armor v7 — persistent live fabric (stacked draft)
+## World Armor v7 — persistent live fabric
 
 **[Live fabric runbook](docs/WORLD_ARMOR_LIVE_FABRIC.md).**
 An explicitly enabled controller supervisor can now keep already-authorized
@@ -125,7 +147,7 @@ expand rights, identify/track people, or gain action authority. The stacked v8
 branch adds durable APNs transport and the original five full-scope interfaces;
 v7 itself remains the evidence/live-fabric foundation.
 
-## World Armor v6 — worker orchestration + pooled transport (stacked draft)
+## World Armor v6 — worker orchestration + pooled transport
 
 **[Orchestration runbook](docs/WORLD_ARMOR_ORCHESTRATION.md).**
 World Armor observers are no longer structurally limited to the MacBook Air
@@ -144,7 +166,7 @@ controller. The private `/world-armor/v6/workers` topology and native
 iPhone/iPad console expose worker capacity/load/cooldown state without granting
 remote action authority.
 
-## World Armor v5 — distributed camera workers (stacked draft)
+## World Armor v5 — distributed camera workers
 
 **[Distributed camera worker runbook](docs/WORLD_ARMOR_DISTRIBUTED_CAMERAS.md).**
 The existing private Reality Mesh now also supports typed, rights-scoped
@@ -166,7 +188,7 @@ persistence. This expands the observation fabric without adding private-camera
 access, network scanning, person identification/tracking, arbitrary commands
 or action authority.
 
-## World Armor v4 — distributed public-world observers (stacked draft)
+## World Armor v4 — distributed public-world observers
 
 **[Distributed observer runbook](docs/WORLD_ARMOR_DISTRIBUTED.md).**
 The Windows controller can now dispatch **regional OpenSky read-only fetches**
@@ -187,7 +209,7 @@ cluster: provider-global OpenSky, AISStream, camera vision, raw video,
 arbitrary remote RPC, general Mac network access and automatic failover are
 not delegated in this increment.
 
-## World Armor v2 — open observation platform (stacked draft)
+## World Armor v2 — open observation platform
 
 **[Source access, collector, evidence and host setup](docs/WORLD_ARMOR_OPEN_PLATFORM.md).**
 An explicitly enabled durable camera-source registry replaces fixed source
@@ -205,7 +227,7 @@ webcams, generic remote Mac workers, RTSP/WebRTC/DRM, raw footage archives
 or closed-app push are operational. The later v4 stack adds one exact
 OpenSky regional read-only Mac worker capability without widening v2 source rights.
 
-## World Armor public cameras — wider-world media slice (stacked draft)
+## World Armor public cameras — wider-world media slice
 
 **[Public camera runbook](docs/WORLD_ARMOR_PUBLIC_CAMERAS.md)** adds an
 optional keyed Windy Webcams v3 **global** directory alongside existing
@@ -220,23 +242,24 @@ time); existing exact External Watches accept these public media targets
 on the separately enrolled host runner. The native workbench discovers,
 previews, inspects, retains, watches and forgets selected cameras.
 Windy requires your own account/API key and provider terms; some
-cameras are not downloadable streams. Do not confuse this draft source
+cameras are not downloadable streams. Do not confuse this merged source
 code or synthetic CI with live authorized worldwide deployment or
 source-timed World Armor camera correlation.
 
-## World Armor — proposed planetary-scale extension
+## World Armor — planetary-scale specification
 
 **[Full design specification](docs/WORLD_ARMOR_SPEC.md)** defines the Planetary
 Event Fabric and Distributed Agency: source-qualified infrastructure OSINT,
 spatial/temporal correlation, uncertainty-aware investigations, explicit
 watches and tightly scoped computation across authorized paired devices. The
-specification began as design-only work; the stacked World Armor branches now
-implement the evidence kernel, watches/attention, open camera platform,
-movement graph, distributed observers, worker orchestration, persistent live
-fabric and the v8 full-scope interfaces. This source history still does **not**
-by itself prove live provider entitlement, APNs/device delivery, a worldwide
-camera inventory, RF deployment, arbitrary robotics or any other
-environment-specific physical acceptance.
+specification began as design-only work; the World Armor branches, now merged
+into `main`, implement the evidence kernel, watches/attention, open camera
+platform, movement graph, distributed observers, worker orchestration,
+persistent live fabric, the v8 full-scope interfaces and the two-region
+comparison. This source history still does **not** by itself prove live
+provider entitlement, APNs/device delivery, a worldwide camera inventory, RF
+deployment, arbitrary robotics or any other environment-specific physical
+acceptance.
 
 ## Meeting prebrief convergence — read-only source-qualified evidence
 

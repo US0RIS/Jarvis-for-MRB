@@ -157,10 +157,22 @@ def _record(con: sqlite3.Connection, key: str, now: datetime) -> dict[str, Any]:
     return dict(row)
 
 
-def _digest(value: dict[str, Any]) -> str:
+def _digest(observation: dict[str, Any]) -> str:
+    """Fingerprint the whole normalized source assertion, not only values.
+
+    A publisher correction to occurrence time, geometry provenance or kind
+    must create a traversable revision even if its display values are equal.
+    Adapter mode is intentionally sample provenance, not source identity.
+    """
+    assertion = {
+        field: observation[field] for field in (
+            "kind", "observed_at", "published_at", "lineage",
+            "geometry_basis", "values",
+        )
+    }
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                   allow_nan=False).encode("utf-8")
+        json.dumps(assertion, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False, allow_nan=False).encode("utf-8")
     ).hexdigest()
 
 
@@ -286,6 +298,7 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     })
 
     alert_status = str(alerts.get("status") or "unavailable")
+    alert_truncated = isinstance(alerts.get("alerts"), list) and len(alerts["alerts"]) > 15
     if alert_status == "ok" and not isinstance(alerts.get("alerts"), list):
         alert_status = "unavailable"
     count = 0
@@ -308,14 +321,16 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "nws_point_alerts",
-        "status": alert_status if alert_status in {"ok","unavailable","unsupported_region"}
-                  else "unavailable",
+        "status": ("partial" if alert_status == "ok" and alert_truncated else
+                   alert_status if alert_status in {"ok","unavailable","unsupported_region"}
+                   else "unavailable"),
         "checked_at": _timestamp(alerts.get("checked_at"))
                       or _timestamp(conditions.get("checked_at")) or checked,
         "count": count, "scope": "NWS supported point only; not all-hazards",
     })
 
     quake_status = str(quake.get("status") or "unavailable")
+    quake_truncated = isinstance(quake.get("events"), list) and len(quake["events"]) > 50
     if quake_status == "ok" and not isinstance(quake.get("events"), list):
         quake_status = "unavailable"
     count = 0
@@ -358,7 +373,8 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "usgs_earthquakes",
-        "status": quake_status if quake_status in {"ok","unavailable"} else "unavailable",
+        "status": ("partial" if quake_status == "ok" and quake_truncated else
+                   quake_status if quake_status in {"ok","unavailable"} else "unavailable"),
         "checked_at": _timestamp(quake.get("checked_at")) or checked,
         "count": count, "scope": "USGS within selected radius / last 24h / M>=2.5; not all incidents",
     })
@@ -394,7 +410,7 @@ def _capture(investigation_id: str, conditions: dict[str, Any],
             raise ValueError("Normalized observation budget exceeded.")
         count = 0
         for o in collected:
-            digest = _digest(o["values"])
+            digest = _digest(o)
             prior = con.execute(
                 "SELECT id,revision,digest FROM observations "
                 "WHERE investigation_id=? AND provider=? AND provider_key=? "
@@ -588,6 +604,20 @@ def compare_recent(investigation_id: str, *, db_path: Path | None = None,
     if len(samples)<2 or samples[0]["received_at"]==samples[1]["received_at"]:
         return empty
     latest, previous = samples[0], samples[1]
+    if latest["adapter_mode"] != previous["adapter_mode"]:
+        return {
+            **empty,
+            "comparison": "incompatible_adapter_modes",
+            "previous_received_at": previous["received_at"],
+            "latest_received_at": latest["received_at"],
+            "previous_mode": previous["adapter_mode"],
+            "latest_mode": latest["adapter_mode"],
+            "qualifier": (
+                "Fixture and real-adapter samples must not be compared as "
+                "a real-world change. Each receipt remains available for "
+                "source-qualified replay."
+            ),
+        }
     before = replay(investigation_id, as_known_at=previous["received_at"],
                     db_path=path, now=instant)
     after = replay(investigation_id, as_known_at=latest["received_at"],

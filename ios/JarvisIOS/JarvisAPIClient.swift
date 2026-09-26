@@ -985,6 +985,63 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(RealityGraphPlaceResponse.self, from: data)
     }
 
+    func worldArmorCapabilities() async throws -> ArmorCapabilities {
+        let (data, response) = try await get(path: "world-armor/v1/capabilities", timeout: 10)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCapabilities.self, from: data)
+    }
+
+    func worldArmorInvestigations() async throws -> ArmorInvestigationList {
+        let (data, response) = try await get(path: "world-armor/v1/investigations", timeout: 10)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorInvestigationList.self, from: data)
+    }
+
+    func worldArmorCreate(label: String, latitude: Double,
+                          longitude: Double, radiusKM: Double) async throws -> ArmorCreated {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/investigations",
+            body: ["label": label, "latitude": latitude, "longitude": longitude,
+                   "radius_km": radiusKM, "lifetime_hours": 24]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCreated.self, from: data)
+    }
+
+    func worldArmorObserve(_ id: String) async throws -> ArmorSampleReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/observe", body: ["investigation_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorSampleReceipt.self, from: data)
+    }
+
+    func worldArmorReplay(_ id: String, asKnownAt: String?) async throws -> ArmorReplay {
+        var body: [String: Any] = ["investigation_id": id]
+        if let asKnownAt { body["as_known_at"] = asKnownAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v1/replay", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorReplay.self, from: data)
+    }
+
+    func worldArmorChanges(_ id: String) async throws -> ArmorChangeReport {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/changes", body: ["investigation_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorChangeReport.self, from: data)
+    }
+
+    func worldArmorForget(_ id: String) async throws -> ArmorForgetReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/forget", body: ["investigation_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorForgetReceipt.self, from: data)
+    }
+
     func lifeForget(id: String, version: Int) async throws -> LifeFabricDeleteReceipt {
         let (data, response) = try await postData(
             path: "life/records/forget",

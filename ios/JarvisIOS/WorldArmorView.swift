@@ -274,11 +274,17 @@ struct ArmorLiveEvent: Decodable, Identifiable {
 struct ArmorLiveEventsPage: Decodable {
     let events: [ArmorLiveEvent]
     let nextSeq: Int
+    let oldestSeq: Int?
+    let latestSeq: Int?
+    let replayGap: Bool?
     let truncated: Bool
     let retentionDays: Int
     enum CodingKeys: String, CodingKey {
         case events, truncated
         case nextSeq = "next_seq"
+        case oldestSeq = "oldest_seq"
+        case latestSeq = "latest_seq"
+        case replayGap = "replay_gap"
         case retentionDays = "retention_days"
     }
 }
@@ -2524,7 +2530,7 @@ struct WorldArmorView: View {
                 if let page = try? await client.worldArmorLiveEvents(
                     afterSeq: max(0, live.latestSeq - 25), limit: 25
                 ) {
-                    liveEvents = page.events.reversed()
+                    liveEvents = Array(page.events.reversed())
                 }
             }
             if let current = selectedID {
@@ -2581,7 +2587,7 @@ struct WorldArmorView: View {
             let page = try await client.worldArmorLiveEvents(
                 afterSeq: max(0, live.latestSeq - 25), limit: 25
             )
-            liveEvents = page.events.reversed()
+            liveEvents = Array(page.events.reversed())
         } catch {
             status = "Live fabric unavailable: " + error.localizedDescription
         }
@@ -2600,7 +2606,7 @@ struct WorldArmorView: View {
                 let page = try await client.worldArmorLiveEvents(
                     afterSeq: max(0, live.latestSeq - 25), limit: 25
                 )
-                liveEvents = page.events.reversed()
+                liveEvents = Array(page.events.reversed())
             }
         } catch {
             status = "Could not change live supervisor: " + error.localizedDescription

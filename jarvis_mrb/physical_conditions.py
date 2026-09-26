@@ -124,12 +124,14 @@ def _official_alerts(data: Any, checked_at: str) -> dict[str, Any]:
             "expires": str(props.get("expires") or ""),
             "sender": str(props.get("senderName") or "National Weather Service")[:120],
         })
-        if len(alerts) == 15:
+        if len(alerts) == 16:
             break
     return {
-        "status": "ok",
+        "status": "partial" if len(alerts) > 15 else "ok",
         "coverage": "NWS point-specific alerts only",
-        "alerts": alerts,
+        "alerts": alerts[:15],
+        "source_limit_reached": len(alerts) > 15,
+        "source_result_limit": 15,
         "checked_at": checked_at,
         "source_url": ALERT_DOCS,
         "source_note": (

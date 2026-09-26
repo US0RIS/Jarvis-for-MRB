@@ -629,12 +629,6 @@ final class PersistentPresenceController: ObservableObject {
         thresholdRank(severity) >= thresholdRank(appModel.settings.proactiveThreshold)
     }
 
-    private func worldArmorEventSeq(_ event: [String: Any]) -> Int? {
-        if let value = event["seq"] as? Int { return value }
-        if let value = event["seq"] as? NSNumber { return value.intValue }
-        return nil
-    }
-
     private func rememberWorldArmorSeq(_ seq: Int) {
         let defaults = UserDefaults.standard
         let prior = defaults.integer(forKey: worldArmorLiveSeqKey)
@@ -651,19 +645,13 @@ final class PersistentPresenceController: ObservableObject {
             guard let response = try? await client.worldArmorLiveEvents(
                 afterSeq: cursor, limit: 100
             ) else { return }
-            let rows = response["events"] as? [[String: Any]] ?? []
-            for row in rows {
-                if let seq = worldArmorEventSeq(row), seq <= cursor { continue }
+            for row in response.events {
+                if row.seq <= cursor { continue }
                 await handleWorldArmorEvent(row, replayed: true)
-                if let seq = worldArmorEventSeq(row) {
-                    cursor = max(cursor, seq)
-                    rememberWorldArmorSeq(cursor)
-                }
+                cursor = max(cursor, row.seq)
+                rememberWorldArmorSeq(cursor)
             }
-            let truncated = (response["truncated"] as? Bool)
-                ?? (response["truncated"] as? NSNumber)?.boolValue
-                ?? false
-            if !truncated || rows.isEmpty { return }
+            if !response.truncated || response.events.isEmpty { return }
         }
     }
 
@@ -694,18 +682,14 @@ final class PersistentPresenceController: ObservableObject {
     }
 
     private func handleWorldArmorEvent(
-        _ worldEvent: [String: Any], replayed: Bool
+        _ worldEvent: ArmorLiveEvent, replayed: Bool
     ) async {
-        guard let seq = worldArmorEventSeq(worldEvent) else { return }
         let prior = UserDefaults.standard.integer(forKey: worldArmorLiveSeqKey)
-        if !replayed && seq <= prior { return }
-        rememberWorldArmorSeq(seq)
+        if !replayed && worldEvent.seq <= prior { return }
+        rememberWorldArmorSeq(worldEvent.seq)
 
-        let priority = String(describing: worldEvent["priority"] ?? "info")
-            .lowercased()
-        let message = Self.collapseRepeatedSir(
-            String(describing: worldEvent["summary"] ?? "")
-        )
+        let priority = worldEvent.priority.lowercased()
+        let message = Self.collapseRepeatedSir(worldEvent.summary)
         guard priority == "warning" || priority == "urgent",
               !message.isEmpty else { return }
 
@@ -741,7 +725,11 @@ final class PersistentPresenceController: ObservableObject {
         }
 
         if type == "world_armor_event" {
-            if let worldEvent = event["event"] as? [String: Any] {
+            if let raw = event["event"] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: raw),
+               let worldEvent = try? JSONDecoder().decode(
+                   ArmorLiveEvent.self, from: data
+               ) {
                 await handleWorldArmorEvent(worldEvent, replayed: false)
             }
             return

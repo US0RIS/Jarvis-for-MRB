@@ -15,12 +15,14 @@ import ipaddress
 import json
 import os
 import platform
+import re
 from urllib.parse import urlsplit
 from typing import Any
 
 import httpx
 
-_IDS = ("macbook", "macmini")
+_IDS = ("macbook", "macmini")  # interactive workstation IDs
+_WORKER_ID = re.compile(r"^[a-z][a-z0-9_-]{0,47}$")
 _MAX_BODY = 4_000_000
 _MAX_JSON = 32_768
 _MAX_WORLD_JSON = 8_500_000
@@ -34,10 +36,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def observer_ids() -> tuple[str, ...]:
+    """Exact configured observer IDs; no network discovery or wildcard hosts."""
+    raw = str(os.environ.get("JARVIS_MESH_WORLD_WORKER_IDS", "")).strip()
+    values = list(_IDS)
+    if raw:
+        for item in raw.split(","):
+            worker = item.strip().lower()
+            if not _WORKER_ID.fullmatch(worker):
+                raise ValueError("World worker IDs must use lowercase letters, digits, - or _.")
+            if worker not in values:
+                values.append(worker)
+    return tuple(values)
+
+
 def _config(node_id: str) -> tuple[str, str] | None:
-    if node_id not in _IDS:
-        raise ValueError("Only explicitly configured MacBook and Mac mini nodes are supported.")
-    prefix = "JARVIS_MESH_" + node_id.upper()
+    if node_id not in observer_ids():
+        raise ValueError("Node is not in the explicit Reality Mesh observer registry.")
+    prefix = "JARVIS_MESH_" + node_id.upper().replace("-", "_")
     base = str(os.environ.get(prefix + "_URL", "")).strip().rstrip("/")
     token = str(os.environ.get(prefix + "_TOKEN", "")).strip()
     if not base or not token:
@@ -127,9 +143,15 @@ def _request(node_id: str, method: str, path: str, *,
 
 
 def probe(node_id: str) -> dict[str, Any]:
+    prefix = "JARVIS_MESH_" + node_id.upper().replace("-", "_")
+    default_label = (
+        "MacBook Air" if node_id == "macbook"
+        else "Mac mini" if node_id == "macmini"
+        else node_id
+    )
     record = {
         "id": node_id,
-        "label": "MacBook Air" if node_id == "macbook" else "Mac mini",
+        "label": str(os.environ.get(prefix + "_LABEL", default_label))[:100],
         "status": "unconfigured" if _config(node_id) is None else "unavailable",
         "checked_at": _now(),
         "platform": "macos",
@@ -193,8 +215,9 @@ def nodes() -> dict[str, Any]:
     except Exception:
         windows["foreground_app"] = ""
         windows["context_observed_at"] = None
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(probe, _IDS))
+    registered = observer_ids()
+    with ThreadPoolExecutor(max_workers=max(1, min(8, len(registered)))) as pool:
+        results = list(pool.map(probe, registered))
     return {
         "checked_at": checked,
         "automatic_network_scanning": False,
@@ -205,8 +228,8 @@ def nodes() -> dict[str, Any]:
 
 def world_observe(node_id: str, task: dict[str, Any]) -> dict[str, Any]:
     """Run one typed read-only public-world task on an explicitly paired Mac."""
-    if node_id not in _IDS:
-        raise ValueError("Distributed world observer must be an exact paired Mac.")
+    if node_id not in observer_ids():
+        raise ValueError("Distributed world observer must be explicitly registered.")
     if not isinstance(task, dict):
         raise ValueError("World observer task must be a typed object.")
     kind = task.get("kind")

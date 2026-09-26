@@ -1681,6 +1681,25 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorCorrelationReport.self, from: data)
     }
 
+    func worldArmorCompareRegions(
+        primaryID: String, secondaryID: String,
+        startAt: String, endAt: String,
+        asKnownAt: String?
+    ) async throws -> ArmorCrossRegionReport {
+        var payload: [String: Any] = [
+            "primary_id": primaryID,
+            "secondary_id": secondaryID,
+            "start_at": startAt,
+            "end_at": endAt
+        ]
+        if let asKnownAt { payload["as_known_at"] = asKnownAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v1/regions/compare", body: payload
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCrossRegionReport.self, from: data)
+    }
+
     func worldArmorHypotheses(_ id: String, startAt: String, endAt: String,
                              asKnownAt: String?, radiusKM: Double) async throws -> ArmorEvidenceGraph {
         var payload: [String: Any] = [

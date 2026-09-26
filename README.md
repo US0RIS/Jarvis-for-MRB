@@ -42,6 +42,19 @@ authorized providers, long-run Windows/watchdog recovery, paired workers and
 the selected HomeKit accessory still require environment-specific acceptance
 on the exact branch SHA.
 
+## World Armor two-region comparison — stacked proposal
+
+Stacked on `jarvis/world-armor-full-scope` as `jarvis/world-armor-cross-region`,
+Jarvis can compare **two explicitly enrolled regions** using their saved
+evidence, a common source-time window, modelled US AQI at the identical
+provider-model time, and exact shared USGS event IDs. The iPad view has an
+explicit second-place selector. This is a read-only historical query; no new
+camera, worldwide tracking feed, standing watch or automatic
+physical/economic action. Shared USGS IDs count as **one source**, not two
+independent confirmations; source gaps are not an all-clear.
+[Exact controls and limitations](docs/WORLD_ARMOR_PHASE1.md). This branch is
+not merged to `main` or observed deployed.
+
 ## World Armor Phase 1 — limited executable evidence kernel
 
 **[Phase 1 runbook](docs/WORLD_ARMOR_PHASE1.md)** implements a default-off,

@@ -112,6 +112,38 @@ No free-form model prompt or user-written accusation is accepted by this
 endpoint, and there is no path from a hypothesis to Agency, Conductor, trading,
 messaging, device control or any other action.
 
+### Two-region comparison — stacked cross-region branch
+
+On `jarvis/world-armor-cross-region` the backend adds
+`POST /world-armor/v1/regions/compare` (private bearer-authenticated):
+`{"primary_id":"<ID1>","secondary_id":"<ID2>","start_at":"2026-09-25T11:00:00Z","end_at":"2026-09-25T12:00:00Z"}`.
+The two IDs must be *different and already enrolled*. Optional `as_known_at`
+applies the same received-by-Jarvis cutoff to both; omitting it uses each
+region's latest retained sample independently. The result includes both
+canonical query IDs, a deterministic combined query ID, the two regions'
+centers and query radii, the computed center separation, per-region sample
+modes, actual provider coverage, and records of comparable observations.
+
+The only numerical cross-place contrast in this slice is **modelled US AQI
+from the same Open-Meteo model lineage, exact source model time, unit, healthy
+producing-sample coverage, and matching fixture-versus-real mode**. The
+difference is *secondary minus primary*. It is not a ground-sensor reading,
+a trend, two independent physical measurements or evidence of causality.
+USGS records are cross-referenced only by the **exact agency event ID**:
+one event returned by two region searches is **one source report**, not
+two independent events; inconsistent reported magnitudes/time are visible
+as potential revision or collection-time disagreement. Different event IDs
+cannot be silently merged because their times look alike. NWS has
+receipt-time-only data and cannot enter source-event-time comparisons.
+
+The iPad/iPhone workbench now offers an explicit second-region picker
+and the previously selected 6/24/72-hour source-time window for a
+two-region read-only comparison. It does not contact providers, start a
+watch, enlarge an enrolled radius, infer a third location, or use device
+GPS. If either selected region is unsampled, expired or the two have mixed
+synthetic/real modes, Jarvis reports a blocked or empty comparison, **not
+an all-clear**. No new live global data provider is claimed.
+
 ### Spatial/temporal limits (deliberate)
 
 The enrolled region bounds every subsequent spatial query: the center is
@@ -184,10 +216,11 @@ real camera imagery or successful source observations on your equipment.
 
 ### What is next
 
-Phase 1 follow-up: source-specific footprint and exact sample/provider
-coverage audit, verified geometry from licensed primary sources and explicit
-source license record; then a
-reproducible *cross-source* spatial/temporal correlation demonstration.
+Phase 1 follow-up: broader source-specific footprints, independent primary
+source licensing records and real on-device end-to-end acceptance. A
+deterministic single-region correlation, hypotheses graph, and historical
+two-region comparison are branch-source implementations rather than
+planet-wide sensor coverage.
 Later phases add actual approved watches and leased typed workers.
 See W0–W16 in [the full spec](WORLD_ARMOR_SPEC.md).
 

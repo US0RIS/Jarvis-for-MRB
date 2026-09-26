@@ -336,6 +336,14 @@ class WorldArmorCorrelationRequest(BaseModel):
     query_radius_km: float | None = None
 
 
+class WorldArmorCrossRegionRequest(BaseModel):
+    primary_id: str
+    secondary_id: str
+    start_at: str
+    end_at: str
+    as_known_at: str | None = None
+
+
 class WorldArmorPushTokenRequest(BaseModel):
     device_token: str
 
@@ -1043,6 +1051,25 @@ def world_armor_correlate(
             as_known_at=request.as_known_at,
             source_ids=request.source_ids,
             query_radius_km=request.query_radius_km,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/regions/compare")
+def world_armor_compare_regions(
+    request: WorldArmorCrossRegionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cross_region import compare_regions
+    try:
+        return compare_regions(
+            request.primary_id, request.secondary_id,
+            start_at=request.start_at, end_at=request.end_at,
+            as_known_at=request.as_known_at,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)

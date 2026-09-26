@@ -1546,6 +1546,9 @@ struct WorldArmorView: View {
                 unreadNotices = response?.unreadCount ?? 0
                 seenNoticeIDs = Set(notices.map { $0.id })
                 hasNoticeBaseline = true
+                cameraReceipts = (try? await client.worldArmorCameraReceipts(
+                    investigationID: current
+                ))?.cameraReceipts ?? []
             }
             if !investigations.contains(where: { $0.id == selectedID }) {
                 selectedID = nil
@@ -1734,6 +1737,41 @@ struct WorldArmorView: View {
             cameraStatus = "Exact external camera watch stopped."
         } catch {
             cameraStatus = "Camera watch stop failed: "
+                + error.localizedDescription
+        }
+    }
+
+    private func refreshCameraEvidence() async {
+        guard let regionID = selectedID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.worldArmorCameraReceipts(
+                investigationID: regionID
+            )
+            guard selectedID == regionID, scenePhase == .active else { return }
+            cameraReceipts = result.cameraReceipts
+            cameraStatus = "Loaded stored camera receipts; no new provider "
+                + "request or background stream."
+        } catch {
+            cameraStatus = "Camera evidence unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func forgetCameraEvidence(_ id: String) async {
+        guard let regionID = selectedID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.worldArmorForgetCameraReceipt(id)
+            let history = try await client.worldArmorCameraReceipts(
+                investigationID: regionID
+            )
+            cameraReceipts = history.cameraReceipts
+            cameraStatus = "Local camera text/hash receipt forgotten."
+        } catch {
+            cameraStatus = "Forget camera receipt failed: "
                 + error.localizedDescription
         }
     }

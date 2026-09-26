@@ -805,15 +805,41 @@ struct WorldArmorView: View {
                 }
                 Stepper("Expire after \(watchLifetime) hours",
                         value: $watchLifetime, in: 1...24)
+                Picker("Evidence attention", selection: $attentionKind) {
+                    Text("No notices").tag("off")
+                    Text("Modelled AQI threshold crossing")
+                        .tag("modelled_aqi_threshold_crossed")
+                    Text("New USGS report").tag("new_usgs_report")
+                    Text("New NWS alert").tag("new_nws_alert")
+                }
+                .pickerStyle(.menu)
+                if attentionKind == "modelled_aqi_threshold_crossed" {
+                    Stepper("Modelled AQI: \(Int(attentionAQI))",
+                            value: $attentionAQI, in: 50...300, step: 25)
+                }
+                if attentionKind == "new_usgs_report" {
+                    Stepper("Reported magnitude: \(attentionMagnitude.formatted())",
+                            value: $attentionMagnitude, in: 2.5...8, step: 0.5)
+                }
+                if attentionKind != "off" {
+                    Picker("Notice cooldown", selection: $attentionCooldown) {
+                        Text("30 minutes").tag(30)
+                        Text("60 minutes").tag(60)
+                        Text("2 hours").tag(120)
+                        Text("6 hours").tag(360)
+                    }
+                    .pickerStyle(.menu)
+                }
                 Button("Enroll bounded watch") {
                     Task { await enrollWatch() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(busy || capabilities?.enabled != true
                           || capabilities?.scheduledWatches != true)
-                Text("Host runner requires an additional local opt-in; "
-                     + "results are saved receipts, NOT live emergency alerts. "
-                     + "No push notifications or actions.")
+                Text("Host runner requires separate local opt-in. Typed "
+                     + "rules save source-qualified INBOX notices, NOT "
+                     + "remote push or emergency alerts. First sampled "
+                     + "evidence establishes the baseline; no external actions.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -830,6 +856,13 @@ struct WorldArmorView: View {
                         if let outcome = item.lastOutcome {
                             Text("Last receipt: " + outcome)
                                 .font(.caption2)
+                        }
+                        if let kind = item.attentionKind, kind != "off" {
+                            Text("Attention: " + kind.replacingOccurrences(
+                                of: "_", with: " "
+                            ) + " · cooldown \(item.attentionCooldownMinutes ?? 60) min")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                         if let difference = item.lastChangeState {
                             Text("Source comparison: " + difference
@@ -872,6 +905,64 @@ struct WorldArmorView: View {
                     Task { await refreshWatches() }
                 }
                 .disabled(busy)
+            }
+        }
+    }
+
+    private var attentionInbox: some View {
+        GroupBox("5 · Evidence attention inbox · \(unreadNotices) unread") {
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle("In-app banners while World Armor is open",
+                       isOn: $foregroundAttentionOptIn)
+                Text("Private inbox only. In-app banners require this view "
+                     + "to be open and active. No remote push, background "
+                     + "wake, emergency dispatch or all-clear.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("Refresh attention inbox") {
+                    Task { await refreshNotices(alertOnNew: false) }
+                }
+                .disabled(busy)
+                ForEach(notices) { notice in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(notice.summary)
+                            .font(.subheadline.weight(
+                                notice.readAt == nil ? .semibold : .regular
+                            ))
+                        Text(notice.source + " · received " + notice.receivedAt)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let observed = notice.observedAt {
+                            Text("Source/model time: " + observed)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Source event time unavailable; receipt only.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            if notice.readAt == nil {
+                                Button("Mark read") {
+                                    Task { await changeNotice(notice.id, action: "read") }
+                                }
+                            }
+                            Button("Forget notice", role: .destructive) {
+                                Task { await changeNotice(notice.id, action: "forget") }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(busy)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial,
+                                in: RoundedRectangle(cornerRadius: 10))
+                }
+                if notices.isEmpty {
+                    Text("No retained notices. This does not establish safety.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

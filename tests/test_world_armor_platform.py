@@ -85,6 +85,27 @@ class SourcePlatformTests(unittest.TestCase):
         self.assertFalse(source["permission_verified_by_jarvis"])
         self.assertFalse(source["capture_time_verified"])
 
+    def test_explicit_public_http_source_is_possible_without_private_ip_access(self):
+        from jarvis_mrb.public_camera_media import validate_public_camera_url
+        url = "http://public-camera.example/current.jpg"
+        with self.assertRaises(ValueError):
+            validate_public_camera_url(url)
+        self.assertEqual(
+            validate_public_camera_url(url, allow_http=True).host,
+            "public-camera.example",
+        )
+        source = self.enroll(kind="public_http", locator=url,
+                             authorized_automated_access=False,
+                             cadence_seconds=0)
+        self.assertEqual(source["kind"], "public_http")
+        self.assertTrue(source["source_display"].startswith("http://"))
+        self.assertNotIn("locator", source)
+        with self.assertRaises(ValueError):
+            self.enroll(kind="public_http",
+                        locator="http://192.168.1.10/frame.jpg")
+        with self.assertRaises(ValueError):
+            self.enroll(kind="public_https", locator=url)
+
     def test_freeform_scene_goal_is_not_two_hardcoded_conditions(self):
         for condition in (
             "heavy rain visible on the highway",

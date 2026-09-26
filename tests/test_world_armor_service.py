@@ -121,7 +121,8 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertEqual(
             set(service.WorldArmorWatchCreateRequest.model_fields),
             {"investigation_id", "interval_minutes", "max_checks",
-             "lifetime_hours"},
+             "lifetime_hours", "attention_kind", "attention_threshold",
+             "attention_cooldown_minutes"},
         )
         routes = {route.path for route in service.app.routes}
         self.assertTrue({
@@ -149,7 +150,8 @@ class WorldArmorServiceBoundaryTests(TestCase):
                              "private, no-store")
             create.assert_called_once_with(
                 "f"*32, interval_minutes=60, max_checks=3,
-                lifetime_hours=2,
+                lifetime_hours=2, attention_kind="off",
+                attention_threshold=None, attention_cooldown_minutes=60,
             )
         with patch.object(service, "API_TOKEN", "private-secret"), \
              patch.dict(os.environ, {

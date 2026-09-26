@@ -299,10 +299,10 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
 
     alert_status = str(alerts.get("status") or "unavailable")
     alert_truncated = isinstance(alerts.get("alerts"), list) and len(alerts["alerts"]) > 15
-    if alert_status == "ok" and not isinstance(alerts.get("alerts"), list):
+    if alert_status in {"ok", "partial"} and not isinstance(alerts.get("alerts"), list):
         alert_status = "unavailable"
     count = 0
-    if alert_status == "ok" and isinstance(alerts.get("alerts"), list):
+    if alert_status in {"ok", "partial"} and isinstance(alerts.get("alerts"), list):
         for a in alerts["alerts"][:15]:
             if not isinstance(a, dict) or not str(a.get("id") or ""):
                 continue
@@ -321,8 +321,8 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "nws_point_alerts",
-        "status": ("partial" if alert_status == "ok" and alert_truncated else
-                   alert_status if alert_status in {"ok","unavailable","unsupported_region"}
+        "status": ("partial" if alert_status in {"ok", "partial"} and alert_truncated else
+                   alert_status if alert_status in {"ok","partial","unavailable","unsupported_region"}
                    else "unavailable"),
         "checked_at": _timestamp(alerts.get("checked_at"))
                       or _timestamp(conditions.get("checked_at")) or checked,
@@ -331,10 +331,10 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
 
     quake_status = str(quake.get("status") or "unavailable")
     quake_truncated = isinstance(quake.get("events"), list) and len(quake["events"]) > 50
-    if quake_status == "ok" and not isinstance(quake.get("events"), list):
+    if quake_status in {"ok", "partial"} and not isinstance(quake.get("events"), list):
         quake_status = "unavailable"
     count = 0
-    if quake_status == "ok" and isinstance(quake.get("events"), list):
+    if quake_status in {"ok", "partial"} and isinstance(quake.get("events"), list):
         for q in quake["events"][:50]:
             if not isinstance(q, dict):
                 continue
@@ -373,8 +373,8 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "usgs_earthquakes",
-        "status": ("partial" if quake_status == "ok" and quake_truncated else
-                   quake_status if quake_status in {"ok","unavailable"} else "unavailable"),
+        "status": ("partial" if quake_status in {"ok", "partial"} and quake_truncated else
+                   quake_status if quake_status in {"ok","partial","unavailable"} else "unavailable"),
         "checked_at": _timestamp(quake.get("checked_at")) or checked,
         "count": count, "scope": "USGS within selected radius / last 24h / M>=2.5; not all incidents",
     })

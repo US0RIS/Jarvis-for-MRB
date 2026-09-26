@@ -54,6 +54,20 @@ class OfficialEarthquakeTests(unittest.TestCase):
         self.assertTrue(answer["source_limit_reached"])
         self.assertEqual(answer["source_result_limit"], 50)
 
+    def test_structurally_invalid_usgs_rows_are_not_an_all_clear(self) -> None:
+        now_ms = int(time.time() * 1000)
+        payload = {"features": [
+            {"id": "usgood", "properties": {"mag": 3.2, "time": now_ms}},
+            {"id": "usbroken", "properties": {"mag": None, "time": now_ms}},
+        ]}
+        with patch("jarvis_mrb.public_incidents.httpx.Client") as client:
+            stream = client.return_value.__enter__.return_value.stream.return_value.__enter__.return_value
+            stream.iter_bytes.return_value = [json.dumps(payload).encode()]
+            result = regional_earthquakes(34.12, -118.16)
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["source_records_discarded"])
+        self.assertEqual(len(result["events"]), 1)
+
     def test_usgs_geojson_epicenter_is_publisher_location_not_query_center(self) -> None:
         now_ms = int(time.time() * 1000)
         payload = {"features": [

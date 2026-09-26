@@ -1486,6 +1486,20 @@ struct WorldArmorView: View {
                             publicCameraURL = ""
                         }
                         .buttonStyle(.bordered)
+                        Button("Prepare persistent source grant for this camera") {
+                            selectedCameraRef = camera.id
+                            publicCameraURL = ""
+                            platformKind = camera.id.hasPrefix("windy-")
+                                ? "windy" : "caltrans"
+                            platformLocator = camera.id
+                            platformLabel = camera.title
+                            platformLatitude = String(camera.latitude)
+                            platformLongitude = String(camera.longitude)
+                            platformStatus = "Source selected; review publisher "
+                                + "access rights and terms at the source "
+                                + "console before enrolling."
+                        }
+                        .buttonStyle(.bordered)
                         if selectedCameraRef == camera.id {
                             if let image = camera.imageURL,
                                let url = URL(string: image),
@@ -1523,6 +1537,18 @@ struct WorldArmorView: View {
                           text: $publicCameraURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                Button("Prepare this public media as persistent source") {
+                    platformKind = "public_https"
+                    platformLocator = publicCameraURL
+                    platformLabel = "Selected public camera media"
+                    platformLatitude = ""
+                    platformLongitude = ""
+                    platformStatus = "Source selected with UNKNOWN "
+                        + "geography. Review exact publisher rights "
+                        + "and permitted cadence before enrollment."
+                }
+                .buttonStyle(.bordered)
+                .disabled(publicCameraURL.isEmpty)
                 Text("An ordinary webcam webpage is not necessarily an "
                      + "image/stream URL. Passwords, signed access tokens, "
                      + "local IPs and private URLs are not accepted in this field.")

@@ -58,6 +58,15 @@ class PhysicalConditionsTests(unittest.TestCase):
         self.assertEqual(response["source_result_limit"], 15)
         self.assertEqual(len(response["alerts"]), 15)
 
+    def test_missing_nws_record_identity_is_reported_as_partial(self) -> None:
+        response = _official_alerts({"features": [
+            {"properties": {"id": "known", "event": "Weather Advisory"}},
+            {"properties": {"event": "Unidentified Advisory"}},
+        ]}, "checked")
+        self.assertEqual(response["status"], "partial")
+        self.assertTrue(response["source_records_discarded_or_unidentified"])
+        self.assertEqual(len(response["alerts"]), 2)
+
     def test_melbourne_uses_air_quality_but_does_not_claim_nws_coverage(self) -> None:
         payload = {"current": {"time": _now(), "us_aqi": 36, "pm2_5": 6.1}}
         with patch("jarvis_mrb.physical_conditions._read_json", return_value=payload) as read:

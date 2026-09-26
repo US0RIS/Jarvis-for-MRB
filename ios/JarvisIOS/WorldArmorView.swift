@@ -252,6 +252,61 @@ struct ArmorPlatformPlan: Decodable {
     }
 }
 
+struct ArmorLiveEvent: Decodable, Identifiable {
+    let seq: Int
+    let eventID: String
+    let kind: String
+    let subsystem: String
+    let sourceID: String?
+    let status: String
+    let priority: String
+    let createdAt: String
+    let summary: String
+    var id: Int { seq }
+    enum CodingKeys: String, CodingKey {
+        case seq, kind, subsystem, status, priority, summary
+        case eventID = "event_id"
+        case sourceID = "source_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct ArmorLiveEventsPage: Decodable {
+    let events: [ArmorLiveEvent]
+    let nextSeq: Int
+    let truncated: Bool
+    let retentionDays: Int
+    enum CodingKeys: String, CodingKey {
+        case events, truncated
+        case nextSeq = "next_seq"
+        case retentionDays = "retention_days"
+    }
+}
+
+struct ArmorLiveStatus: Decodable {
+    let running: Bool
+    let enabled: Bool
+    let autostartEnabled: Bool
+    let heartbeatAt: String?
+    let heartbeatAgeSeconds: Double?
+    let cycleCount: Int
+    let lastCycleMS: Int?
+    let lastError: String
+    let journalEvents: Int
+    let latestSeq: Int
+    enum CodingKeys: String, CodingKey {
+        case running, enabled
+        case autostartEnabled = "autostart_enabled"
+        case heartbeatAt = "heartbeat_at"
+        case heartbeatAgeSeconds = "heartbeat_age_seconds"
+        case cycleCount = "cycle_count"
+        case lastCycleMS = "last_cycle_ms"
+        case lastError = "last_error"
+        case journalEvents = "journal_events"
+        case latestSeq = "latest_seq"
+    }
+}
+
 struct ArmorDistributedWorker: Decodable, Identifiable {
     struct Metrics: Decodable {
         let activeRequests: Int
@@ -913,6 +968,8 @@ struct WorldArmorView: View {
     @State private var movementEntityType = ""
     @State private var movementStatus = "No movement source queried."
     @State private var distributedWorkers: [ArmorDistributedWorker] = []
+    @State private var liveFabricStatus: ArmorLiveStatus?
+    @State private var liveEvents: [ArmorLiveEvent] = []
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -949,6 +1006,7 @@ struct WorldArmorView: View {
             VStack(alignment: .leading, spacing: 15) {
                 heading
                 sourceConsole
+                liveFabricConsole
                 movementConsole
                 enrollment
                 saved
@@ -1415,6 +1473,79 @@ struct WorldArmorView: View {
                 }
                 if notices.isEmpty {
                     Text("No retained notices. This does not establish safety.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var liveFabricConsole: some View {
+        GroupBox("World Armor v7 · live fabric") {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    if let liveFabricStatus {
+                        Text(liveFabricStatus.running ? "Supervisor running" : "Supervisor stopped")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(liveFabricStatus.journalEvents) retained events")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Live fabric status not checked")
+                            .font(.headline)
+                    }
+                }
+                if let liveFabricStatus {
+                    Text("cycles \(liveFabricStatus.cycleCount)"
+                         + (liveFabricStatus.lastCycleMS.map { " · last \($0) ms" } ?? "")
+                         + (liveFabricStatus.heartbeatAgeSeconds.map {
+                             " · heartbeat " + String(format: "%.0f", $0) + "s ago"
+                         } ?? ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if !liveFabricStatus.lastError.isEmpty {
+                        Text("Degraded: " + liveFabricStatus.lastError)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Toggle(
+                    "Local notifications for warning/urgent World Armor events",
+                    isOn: $appModel.settings.worldArmorLiveAlertsEnabled
+                )
+                Text("The durable journal replays missed events after reconnect. "
+                     + "Local notifications require iOS permission and an active "
+                     + "Jarvis connection; closed-app remote APNs is not yet claimed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Start live supervisor") {
+                        Task { await setLiveSupervisor(running: true) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Stop") {
+                        Task { await setLiveSupervisor(running: false) }
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Refresh") {
+                        Task { await refreshLiveFabric() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .disabled(busy)
+                ForEach(liveEvents.prefix(12)) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.summary)
+                            .font(.caption)
+                        Text("#\(event.seq) · \(event.subsystem) · "
+                             + event.priority + " · " + event.createdAt)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if liveEvents.isEmpty {
+                    Text("No retained live events yet.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -2388,6 +2519,14 @@ struct WorldArmorView: View {
             if let fabric = try? await client.worldArmorDistributedWorkers() {
                 distributedWorkers = fabric.workers
             }
+            if let live = try? await client.worldArmorLiveStatus() {
+                liveFabricStatus = live
+                if let page = try? await client.worldArmorLiveEvents(
+                    afterSeq: max(0, live.latestSeq - 25), limit: 25
+                ) {
+                    liveEvents = page.events.reversed()
+                }
+            }
             if let current = selectedID {
                 let response = try? await client.worldArmorNotices(
                     investigationID: current
@@ -2432,6 +2571,39 @@ struct WorldArmorView: View {
             evidenceGraph = nil
             sampleTimes = []
             status = "World Armor unavailable: " + error.localizedDescription
+        }
+    }
+
+    private func refreshLiveFabric() async {
+        do {
+            let live = try await client.worldArmorLiveStatus()
+            liveFabricStatus = live
+            let page = try await client.worldArmorLiveEvents(
+                afterSeq: max(0, live.latestSeq - 25), limit: 25
+            )
+            liveEvents = page.events.reversed()
+        } catch {
+            status = "Live fabric unavailable: " + error.localizedDescription
+        }
+    }
+
+    private func setLiveSupervisor(running: Bool) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            liveFabricStatus = running
+                ? try await client.worldArmorLiveStart()
+                : try await client.worldArmorLiveStop()
+            let live = liveFabricStatus
+            if let live {
+                let page = try await client.worldArmorLiveEvents(
+                    afterSeq: max(0, live.latestSeq - 25), limit: 25
+                )
+                liveEvents = page.events.reversed()
+            }
+        } catch {
+            status = "Could not change live supervisor: " + error.localizedDescription
         }
     }
 

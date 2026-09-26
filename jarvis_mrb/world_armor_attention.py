@@ -137,6 +137,13 @@ def publish_after_watch_sample(
     """
     if watch["attention_kind"] == "off":
         return {"notices_created": 0, "attention_state": "not_enrolled"}
+    # A region can already have foreground or other-watch samples. The
+    # operator's first sample from THIS enrolled watch must still baseline.
+    if not con.execute(
+        "SELECT 1 FROM watch_receipts WHERE watch_id=? LIMIT 1",
+        (watch["id"],),
+    ).fetchone():
+        return {"notices_created": 0, "attention_state": "watch_baseline"}
     if (changes is None
             or changes.get("latest_received_at") != received_at):
         return {"notices_created": 0, "attention_state": "no_comparable_baseline"}

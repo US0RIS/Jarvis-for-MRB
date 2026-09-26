@@ -793,8 +793,15 @@ struct JarvisAPIClient {
     let fallbackBaseURL: String
     let apiToken: String
     let sessionID: String
+    let windyAPIKey: String
 
-    init(baseURL: String, fallbackBaseURL: String = "", apiToken: String, sessionID: String) {
+    init(
+        baseURL: String,
+        fallbackBaseURL: String = "",
+        apiToken: String,
+        sessionID: String,
+        windyAPIKey: String = ""
+    ) {
         self.baseURL = baseURL
         let explicitFallback = fallbackBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         self.fallbackBaseURL = explicitFallback.isEmpty
@@ -802,6 +809,7 @@ struct JarvisAPIClient {
             : explicitFallback
         self.apiToken = apiToken
         self.sessionID = sessionID
+        self.windyAPIKey = windyAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func activeBaseURL() async throws -> String {
@@ -966,7 +974,8 @@ struct JarvisAPIClient {
     func analyzeOfficialPublicCamera(_ cameraID: String) async throws -> PublicCameraAnalysisResponse {
         let (data, response) = try await postData(
             path: "physical/public-cameras/analyze",
-            body: ["camera_id": cameraID]
+            body: ["camera_id": cameraID],
+            headers: windyRequestHeaders()
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraAnalysisResponse.self, from: data)
@@ -1001,7 +1010,8 @@ struct JarvisAPIClient {
                 "longitude": longitude,
                 "radius_km": 10.0,
                 "limit": 8,
-            ]
+            ],
+            headers: windyRequestHeaders()
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PublicCameraDiscoveryResponse.self, from: data)
@@ -1582,7 +1592,8 @@ struct JarvisAPIClient {
         let (data, response) = try await postData(
             path: "world-armor/v1/cameras/discover",
             body: ["latitude": latitude, "longitude": longitude,
-                   "radius_km": radiusKM, "limit": limit]
+                   "radius_km": radiusKM, "limit": limit],
+            headers: windyRequestHeaders()
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(ArmorPublicCameraDiscovery.self, from: data)
@@ -1609,7 +1620,8 @@ struct JarvisAPIClient {
                 "investigation_id": investigationID,
                 "camera_ref": cameraRef, "public_url": publicURL,
                 "condition": condition
-            ]
+            ],
+            headers: windyRequestHeaders()
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(ArmorCameraReceipt.self, from: data)
@@ -2466,6 +2478,9 @@ struct JarvisAPIClient {
         request.httpMethod = "PUT"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers where !value.isEmpty {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         addAuthorization(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         do {
@@ -2576,7 +2591,11 @@ struct JarvisAPIClient {
         return JarvisAPIResponse(ok: decoded.ok, message: Self.collapseRepeatedSir(decoded.message))
     }
 
-    private func postData(path: String, body: [String: Any]) async throws -> (Data, URLResponse) {
+    private func postData(
+        path: String,
+        body: [String: Any],
+        headers: [String: String] = [:]
+    ) async throws -> (Data, URLResponse) {
         let base = try await activeBaseURL()
         guard let url = URL(string: base)?.appendingPathComponent(path) else { throw JarvisAPIError.badURL }
         var request = URLRequest(url: url)
@@ -2591,6 +2610,53 @@ struct JarvisAPIClient {
         } catch {
             await JarvisEndpointResolver.shared.invalidate(base)
             throw error
+        }
+    }
+
+    private func windyRequestHeaders() -> [String: String] {
+        guard !windyAPIKey.isEmpty else { return [:] }
+        return ["X-Jarvis-Windy-Key": windyAPIKey]
+    }
+
+    func testWindyConnection(apiKey: String) async -> GroqConnectionStatus {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            return GroqConnectionStatus(state: "not configured", detail: "No API key is stored.")
+        }
+        guard var parts = URLComponents(string: "https://api.windy.com/webcams/api/v3/webcams") else {
+            return GroqConnectionStatus(state: "Windy unavailable", detail: "Invalid Windy endpoint.")
+        }
+        parts.queryItems = [
+            URLQueryItem(name: "nearby", value: "34.05,-118.25,5"),
+            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "include", value: "location"),
+        ]
+        guard let url = parts.url else {
+            return GroqConnectionStatus(state: "Windy unavailable", detail: "Invalid Windy endpoint.")
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue(key, forHTTPHeaderField: "X-Windy-API-Key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return GroqConnectionStatus(state: "Windy unavailable", detail: "Invalid response.")
+            }
+            switch http.statusCode {
+            case 200..<300:
+                return GroqConnectionStatus(state: "available", detail: "Windy Webcams v3 accepted the key.")
+            case 401, 403:
+                return GroqConnectionStatus(state: "authentication failure", detail: "Windy rejected the API key.")
+            case 429:
+                return GroqConnectionStatus(state: "rate limited", detail: "Windy is rate limiting this account.")
+            default:
+                return GroqConnectionStatus(state: "Windy unavailable", detail: "Windy returned HTTP \(http.statusCode).")
+            }
+        } catch let error as URLError where error.code == .notConnectedToInternet {
+            return GroqConnectionStatus(state: "offline", detail: "No Internet connection.")
+        } catch {
+            return GroqConnectionStatus(state: "Windy unavailable", detail: error.localizedDescription)
         }
     }
 

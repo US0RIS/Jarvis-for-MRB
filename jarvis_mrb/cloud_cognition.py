@@ -20,7 +20,7 @@ _MAX_HISTORY_MESSAGES = 8
 _MAX_CONTEXT_CHARS = 24_000
 
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)(api[_ -]?key|password|passwd|secret|auth(?:entication)?[_ -]?token|bearer)\s*[:=]\s*([^\s,;]+)"),
+    re.compile(r"(?i)(api[_ -]?key|password|passwd|secret|auth(?:entication)?[_ -]?token|token|bearer)\s*[:=]\s*([^\s,;]+)"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\bgsk_[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),

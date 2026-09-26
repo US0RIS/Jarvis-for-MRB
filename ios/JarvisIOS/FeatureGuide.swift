@@ -410,6 +410,7 @@ private struct FeatureDetailView: View {
 private enum FullAcceptanceState: String {
     case pass = "PASS"
     case simulated = "SIM PASS"
+    case expectedFail = "EXPECTED FAIL"
     case manual = "MANUAL"
     case blocked = "BLOCKED"
     case fail = "FAIL"
@@ -418,6 +419,7 @@ private enum FullAcceptanceState: String {
         switch self {
         case .pass: return "checkmark.seal.fill"
         case .simulated: return "checkmark.circle.fill"
+        case .expectedFail: return "shield.lefthalf.filled.badge.checkmark"
         case .manual: return "hand.raised.fill"
         case .blocked: return "exclamationmark.triangle.fill"
         case .fail: return "xmark.octagon.fill"
@@ -450,6 +452,7 @@ private struct FullFeatureAcceptanceView: View {
     @State private var progressText = "Not run"
     @State private var featureResults: [FullAcceptanceFeatureResult] = []
     @State private var systemResults: [FullAcceptanceSystemResult] = []
+    @State private var negativeResults: [FullAcceptanceSystemResult] = []
     @State private var lastRun: Date?
     @State private var copied = false
 
@@ -499,12 +502,34 @@ private struct FullFeatureAcceptanceView: View {
                     LabeledContent("Manual/live acceptance", value: String(counts[.manual] ?? 0))
                     LabeledContent("Blocked", value: String(counts[.blocked] ?? 0))
                     LabeledContent("Failed", value: String(counts[.fail] ?? 0))
+                    let negativeHealthy = negativeResults.filter { $0.state == .expectedFail }.count
+                    LabeledContent("Anti-cheat controls", value: "\(negativeHealthy)/\(negativeResults.count) rejected as expected")
 
                     Button {
                         UIPasteboard.general.string = reportText
                         copied = true
                     } label: {
                         Label(copied ? "Report Copied" : "Copy Full Report", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                }
+            }
+
+            if !negativeResults.isEmpty {
+                Section("Anti-cheat negative controls") {
+                    Text("These checks are deliberately constructed so Jarvis cannot legitimately pass them. A trustworthy run observes the failure. If any impossible control reports success, the harness marks that control FAIL.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(negativeResults) { result in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label(result.state.rawValue, systemImage: result.state.symbol)
+                                .font(.caption.bold())
+                            Text(result.title).font(.headline)
+                            Text(result.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 3)
                     }
                 }
             }
@@ -568,6 +593,7 @@ private struct FullFeatureAcceptanceView: View {
         copied = false
         featureResults = []
         systemResults = []
+        negativeResults = []
         defer {
             running = false
             lastRun = Date()
@@ -587,6 +613,20 @@ private struct FullFeatureAcceptanceView: View {
                 : "\(routeFailures.count) failed: " + routeFailures.map(\.prompt).joined(separator: "; ")
         ))
 
+        progressText = "Running anti-cheat controls…"
+        let impossiblePack = "__jarvis_pack_that_must_not_exist__"
+        let actualPack = architecture.router.previewRoute(for: "What time is it in DC?")
+        negativeResults.append(.init(
+            id: "negative-iphone-route",
+            title: "Impossible iPhone route expectation",
+            state: actualPack == impossiblePack ? .fail : .expectedFail,
+            detail: actualPack == impossiblePack
+                ? "Unexpectedly matched the impossible pack name. The acceptance harness is not trustworthy."
+                : "Expected failure observed: real route was \(actualPack), not the deliberately impossible \(impossiblePack)."
+        ))
+
+        await runUnreachableEndpointCanary()
+
         progressText = "Checking live backend…"
         do {
             let healthy = try await client.health()
@@ -602,6 +642,38 @@ private struct FullFeatureAcceptanceView: View {
                 title: "Windows backend live health",
                 state: .fail,
                 detail: error.localizedDescription
+            ))
+        }
+
+        progressText = "Checking backend anti-cheat route…"
+        do {
+            let canary = try await client.acceptancePreviewBatch([
+                (id: "negative-backend-route", text: "What time is it")
+            ])
+            if let row = canary.items.first {
+                let impossibleFamily = "warp.drive"
+                negativeResults.append(.init(
+                    id: "negative-backend-route",
+                    title: "Impossible backend route expectation",
+                    state: row.family == impossibleFamily ? .fail : .expectedFail,
+                    detail: row.family == impossibleFamily
+                        ? "Unexpectedly produced the deliberately impossible backend family \(impossibleFamily)."
+                        : "Expected failure observed: backend reported \(row.family), not the deliberately impossible \(impossibleFamily)."
+                ))
+            } else {
+                negativeResults.append(.init(
+                    id: "negative-backend-route",
+                    title: "Impossible backend route expectation",
+                    state: .fail,
+                    detail: "The backend returned no canary row, so this negative control could not validate the harness."
+                ))
+            }
+        } catch {
+            negativeResults.append(.init(
+                id: "negative-backend-route",
+                title: "Impossible backend route expectation",
+                state: .fail,
+                detail: "The negative control itself could not run: \(error.localizedDescription)"
             ))
         }
 
@@ -727,12 +799,100 @@ private struct FullFeatureAcceptanceView: View {
                 state: groq.state == "available" ? .pass : .fail,
                 detail: "\(groq.state): \(groq.detail)"
             ))
+            if groq.state == "available" {
+                await runGroqNonexistentModelCanary(apiKey: key)
+            } else {
+                negativeResults.append(.init(
+                    id: "negative-groq-model",
+                    title: "Nonexistent Groq model rejection",
+                    state: .manual,
+                    detail: "Skipped because the normal Groq provider check did not establish a working authenticated account."
+                ))
+            }
         } else {
             systemResults.append(.init(
                 id: "groq",
                 title: "Groq GPT-OSS 120B live provider check",
                 state: .manual,
                 detail: "No Groq API key is stored on this iPhone. Cloud cognition remains a setup-dependent capability."
+            ))
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: .manual,
+                detail: "Skipped because no Groq API key is configured."
+            ))
+        }
+    }
+
+    @MainActor
+    private func runUnreachableEndpointCanary() async {
+        guard let url = URL(string: "http://127.0.0.1:1/__jarvis_negative_control__/health") else {
+            negativeResults.append(.init(
+                id: "negative-unreachable-endpoint",
+                title: "Deliberately unreachable endpoint",
+                state: .fail,
+                detail: "Could not construct the negative-control URL."
+            ))
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 0.75
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let unexpectedlyHealthy = (200..<300).contains(code)
+            negativeResults.append(.init(
+                id: "negative-unreachable-endpoint",
+                title: "Deliberately unreachable endpoint",
+                state: unexpectedlyHealthy ? .fail : .expectedFail,
+                detail: unexpectedlyHealthy
+                    ? "A deliberately dead localhost endpoint returned HTTP \(code). The network acceptance checker is suspect."
+                    : "Expected failure observed: deliberately dead endpoint did not return a healthy response (HTTP \(code))."
+            ))
+        } catch {
+            negativeResults.append(.init(
+                id: "negative-unreachable-endpoint",
+                title: "Deliberately unreachable endpoint",
+                state: .expectedFail,
+                detail: "Expected failure observed: \(error.localizedDescription)"
+            ))
+        }
+    }
+
+    @MainActor
+    private func runGroqNonexistentModelCanary(apiKey: String) async {
+        let fakeModel = "jarvis-negative-control-model-that-must-not-exist"
+        guard let url = URL(string: "https://api.groq.com/openai/v1/models/\(fakeModel)") else {
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: .fail,
+                detail: "Could not construct the negative-control Groq URL."
+            ))
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let wronglyAccepted = (200..<300).contains(code)
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: wronglyAccepted ? .fail : .expectedFail,
+                detail: wronglyAccepted
+                    ? "Groq unexpectedly accepted the deliberately nonexistent model \(fakeModel)."
+                    : "Expected rejection observed: nonexistent Groq model returned HTTP \(code)."
+            ))
+        } catch {
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: .expectedFail,
+                detail: "Expected rejection/failure observed: \(error.localizedDescription)"
             ))
         }
     }
@@ -760,6 +920,11 @@ private struct FullFeatureAcceptanceView: View {
             "SYSTEM"
         ]
         for result in systemResults {
+            lines.append("[\(result.state.rawValue)] \(result.title) — \(result.detail)")
+        }
+        lines.append("")
+        lines.append("ANTI-CHEAT NEGATIVE CONTROLS")
+        for result in negativeResults {
             lines.append("[\(result.state.rawValue)] \(result.title) — \(result.detail)")
         }
         lines.append("")

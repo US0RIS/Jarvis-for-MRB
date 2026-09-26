@@ -48,6 +48,16 @@ class PhysicalConditionsTests(unittest.TestCase):
         self.assertIn("not an all-hazards clearance", response["source_note"])
         self.assertEqual(_official_alerts({"features": []}, "checked")["alerts"], [])
 
+    def test_nws_result_cap_is_not_mislabeled_complete(self) -> None:
+        response = _official_alerts({"features": [
+            {"properties": {"id": f"NWS-{index}", "event": "Heat Advisory"}}
+            for index in range(16)
+        ]}, "checked")
+        self.assertEqual(response["status"], "partial")
+        self.assertTrue(response["source_limit_reached"])
+        self.assertEqual(response["source_result_limit"], 15)
+        self.assertEqual(len(response["alerts"]), 15)
+
     def test_melbourne_uses_air_quality_but_does_not_claim_nws_coverage(self) -> None:
         payload = {"current": {"time": _now(), "us_aqi": 36, "pm2_5": 6.1}}
         with patch("jarvis_mrb.physical_conditions._read_json", return_value=payload) as read:

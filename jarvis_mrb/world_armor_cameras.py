@@ -284,6 +284,55 @@ def inspect_camera(
     )
 
 
+def import_external_camera_watch(
+    investigation_id: str, watch_id: str, *,
+    db_path: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Explicitly import a selected prior public-camera watch text receipt.
+
+    No provider fetch, no live stream, no synthetic publisher capture time.
+    The watch ledger and World Armor are separate, so this is an operator-
+    initiated history import, NOT an atomic cross-database background sync.
+    """
+    _authorize_camera()
+    from jarvis_mrb.external_watches import get_watch, watch_history
+    external = get_watch(watch_id, "personal")
+    if external["kind"] != "camera":
+        raise ValueError("Only an exact selected public camera watch can be imported.")
+    rows = watch_history(watch_id, "personal", limit=1)
+    if not rows:
+        raise ValueError("Camera watch has no retained provider observation yet.")
+    latest = rows[0]
+    if latest["status"] != "ok":
+        raise ValueError("The camera observation has unavailable source coverage.")
+    payload = latest.get("payload") or {}
+    digest = str(payload.get("image_sha256") or "")
+    if not digest:
+        raise ValueError("Camera observation lacks a real frame fingerprint.")
+    cfg = external.get("config") or {}
+    camera_name = str(payload.get("camera_name") or external["label"])[:150]
+    camera_ref = str(payload.get("camera_id") or cfg.get("camera_id")
+                     or cfg.get("camera_ref") or "")[:100]
+    evidence = {
+        "camera_id": camera_ref,
+        "camera_name": camera_name,
+        "media_kind": str(payload.get("media_kind") or "published_still"),
+        "source_kind": "operator_imported_external_camera_watch",
+        "source_url": str(payload.get("source_url")
+                          or latest.get("source_url") or "public camera"),
+        "watch_condition": payload.get("watch_condition"),
+        "condition_status": payload.get("condition_status"),
+        "description": payload.get("description") or latest.get("summary") or "",
+        "image_sha256": digest,
+        "retrieved_at": payload.get("retrieved_at") or latest["checked_at"],
+    }
+    return _store_observation(
+        investigation_id, evidence, point=None, db_path=db_path,
+        now=now, imported_watch_id=watch_id,
+    )
+
+
 def list_camera_receipts(
     investigation_id: str, *, db_path: Path | None = None,
     now: datetime | None = None,

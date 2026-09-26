@@ -1973,10 +1973,7 @@ struct WorldArmorView: View {
                         set: { appModel.settings.worldArmorLiveAlertsEnabled = $0 }
                     )
                 )
-                Text("The durable journal replays missed events after reconnect. "
-                     + "When APNs credentials and this signed app's push entitlement "
-                     + "are configured, warning/urgent events can also arrive while "
-                     + "the app is closed. In-app/local delivery remains a fallback.")
+                Text("LITE personal-team build: closed-app APNs is disabled because Apple Personal Teams cannot provision Push Notifications. The durable journal still replays missed events after reconnect, and in-app/local delivery remains available while Jarvis is running.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 if let pushStatus {

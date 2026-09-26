@@ -92,6 +92,13 @@ class CloudCognitionResolveRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class CloudCognitionFeedbackRequest(BaseModel):
+    request_fingerprint: str
+    user_corrected: bool = False
+    cloud_materially_changed_result: bool | None = None
+    note: str = ""
+
+
 class ExternalWatchCreateRequest(BaseModel):
     scope: str = "personal"
     kind: str
@@ -2983,6 +2990,7 @@ def cloud_cognition_resolve(
     from jarvis_mrb.cloud_cognition import (
         consume_cloud_task,
         record_cloud_result,
+        record_execution_outcome,
         validate_proposal,
     )
 
@@ -2995,8 +3003,28 @@ def cloud_cognition_resolve(
     # permissions, confirmations, audit and verification semantics.
     if proposal.tool:
         reply = execute_tool(proposal.tool, proposal.arguments)
-        return CommandResponse(ok=reply.ok, message=_voice_safe_confirmation(reply.message))
-    return CommandResponse(ok=True, message=proposal.response or "I could not form a useful cloud answer.")
+        message = _voice_safe_confirmation(reply.message)
+        record_execution_outcome(task, proposal, ok=reply.ok, outcome=message)
+        return CommandResponse(ok=reply.ok, message=message)
+    message = proposal.response or "I could not form a useful cloud answer."
+    record_execution_outcome(task, proposal, ok=True, outcome=message)
+    return CommandResponse(ok=True, message=message)
+
+
+@app.post("/cloud-cognition/feedback")
+def cloud_cognition_feedback(
+    request: CloudCognitionFeedbackRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import record_routing_feedback
+    record_routing_feedback(
+        request_fingerprint=request.request_fingerprint,
+        user_corrected=request.user_corrected,
+        cloud_materially_changed_result=request.cloud_materially_changed_result,
+        note=request.note,
+    )
+    return {"ok": True}
 
 
 @app.post("/command", response_model=CommandResponse)

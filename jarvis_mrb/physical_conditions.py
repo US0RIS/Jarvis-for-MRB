@@ -106,16 +106,21 @@ def _official_alerts(data: Any, checked_at: str) -> dict[str, Any]:
     if not isinstance(data, dict) or not isinstance(data.get("features"), list):
         raise ValueError("NWS alerts provider returned an unsupported schema.")
     alerts = []
+    invalid_items = False
     now = datetime.now(timezone.utc)
     for item in data["features"]:
         props = item.get("properties") if isinstance(item, dict) else None
         if not isinstance(props, dict):
+            invalid_items = True
             continue
         expires = _timestamp(props.get("expires"))
         if expires is not None and expires < now:
             continue
+        identifier = str(props.get("id") or item.get("id") or "")[:300]
+        if not identifier:
+            invalid_items = True
         alerts.append({
-            "id": str(props.get("id") or item.get("id") or "")[:300],
+            "id": identifier,
             "event": str(props.get("event") or "")[:150],
             "headline": str(props.get("headline") or "")[:280],
             "severity": str(props.get("severity") or "Unknown")[:40],
@@ -127,10 +132,11 @@ def _official_alerts(data: Any, checked_at: str) -> dict[str, Any]:
         if len(alerts) == 16:
             break
     return {
-        "status": "partial" if len(alerts) > 15 else "ok",
+        "status": "partial" if len(alerts) > 15 or invalid_items else "ok",
         "coverage": "NWS point-specific alerts only",
         "alerts": alerts[:15],
         "source_limit_reached": len(alerts) > 15,
+        "source_records_discarded_or_unidentified": invalid_items,
         "source_result_limit": 15,
         "checked_at": checked_at,
         "source_url": ALERT_DOCS,

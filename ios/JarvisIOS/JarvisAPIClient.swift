@@ -628,6 +628,56 @@ struct GroqConnectionStatus {
     let detail: String
 }
 
+struct AcceptanceRoutePreview: Decodable, Identifiable {
+    let id: String
+    let mode: String
+    let family: String
+    let tool: String?
+    let hasDirectAnswer: Bool
+    let sideEffectsExecuted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, mode, family, tool
+        case hasDirectAnswer = "has_direct_answer"
+        case sideEffectsExecuted = "side_effects_executed"
+    }
+}
+
+struct AcceptancePreviewBatchResponse: Decodable {
+    let ok: Bool
+    let mode: String
+    let sideEffectsExecuted: Bool
+    let items: [AcceptanceRoutePreview]
+
+    enum CodingKeys: String, CodingKey {
+        case ok, mode, items
+        case sideEffectsExecuted = "side_effects_executed"
+    }
+}
+
+struct SyntheticAcceptanceSection: Decodable {
+    let ok: Bool
+    let passed: Int
+    let total: Int
+    let failed: [String]
+}
+
+struct SyntheticAcceptanceResponse: Decodable {
+    let ok: Bool
+    let mode: String
+    let mutatesUserData: Bool
+    let usesExternalServices: Bool
+    let world: SyntheticAcceptanceSection
+    let agency: SyntheticAcceptanceSection
+    let cognition: SyntheticAcceptanceSection
+
+    enum CodingKeys: String, CodingKey {
+        case ok, mode, world, agency, cognition
+        case mutatesUserData = "mutates_user_data"
+        case usesExternalServices = "uses_external_services"
+    }
+}
+
 struct MeetingStartResponse: Decodable {
     let ok: Bool
     let meetingID: Int
@@ -776,6 +826,25 @@ struct JarvisAPIClient {
             await JarvisEndpointResolver.shared.invalidate(base)
             throw error
         }
+    }
+
+    func acceptancePreviewBatch(_ items: [(id: String, text: String)]) async throws -> AcceptancePreviewBatchResponse {
+        let payload: [[String: Any]] = items.map { ["id": $0.id, "text": $0.text] }
+        let (data, response) = try await postData(
+            path: "acceptance/preview-batch",
+            body: ["items": payload]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(AcceptancePreviewBatchResponse.self, from: data)
+    }
+
+    func syntheticAcceptance() async throws -> SyntheticAcceptanceResponse {
+        let (data, response) = try await postData(
+            path: "acceptance/synthetic",
+            body: [:]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(SyntheticAcceptanceResponse.self, from: data)
     }
 
     func listDiligenceMatters() async throws -> [DiligenceMatterSummary] {

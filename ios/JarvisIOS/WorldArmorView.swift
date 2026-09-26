@@ -252,6 +252,106 @@ struct ArmorPlatformPlan: Decodable {
     }
 }
 
+struct ArmorMovementSource: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let kind: String
+    let grantClass: String
+    let termsReference: String
+    let authorizedAutomatedAccess: Bool
+    let providerMinIntervalSeconds: Int
+    let cadenceSeconds: Int
+    let retentionDays: Int
+    let state: String
+    let latitude: Double?
+    let longitude: Double?
+    let radiusKM: Double?
+    let globalScope: Bool
+    let checkCount: Int
+    let lastCheckedAt: String?
+    let lastOutcome: String?
+    enum CodingKeys: String, CodingKey {
+        case id, label, kind, state, latitude, longitude
+        case grantClass = "grant_class"
+        case termsReference = "terms_reference"
+        case authorizedAutomatedAccess = "authorized_automated_access"
+        case providerMinIntervalSeconds = "provider_min_interval_seconds"
+        case cadenceSeconds = "cadence_seconds"
+        case retentionDays = "retention_days"
+        case radiusKM = "radius_km"
+        case globalScope = "global_scope"
+        case checkCount = "check_count"
+        case lastCheckedAt = "last_checked_at"
+        case lastOutcome = "last_outcome"
+    }
+}
+
+struct ArmorMovementSourcePage: Decodable {
+    let sources: [ArmorMovementSource]
+    let nextOffset: Int?
+    let total: Int
+    enum CodingKeys: String, CodingKey {
+        case sources, total
+        case nextOffset = "next_offset"
+    }
+}
+
+struct ArmorMovementEntity: Decodable, Identifiable {
+    let seq: Int
+    let entityID: String
+    let entityType: String
+    let observedAt: String
+    let providerTime: String?
+    let latitude: Double
+    let longitude: Double
+    let altitudeM: Double?
+    let velocityMPS: Double?
+    let headingDeg: Double?
+    let sourceName: String
+    let lastName: String?
+    let lastCallsign: String?
+    let distanceKM: Double?
+    var id: String { entityID }
+    enum CodingKeys: String, CodingKey {
+        case seq, latitude, longitude
+        case entityID = "entity_id"
+        case entityType = "entity_type"
+        case observedAt = "observed_at"
+        case providerTime = "provider_time"
+        case altitudeM = "altitude_m"
+        case velocityMPS = "velocity_mps"
+        case headingDeg = "heading_deg"
+        case sourceName = "source_name"
+        case lastName = "last_name"
+        case lastCallsign = "last_callsign"
+        case distanceKM = "distance_km"
+    }
+}
+
+struct ArmorMovementNearbyPage: Decodable {
+    let entities: [ArmorMovementEntity]
+    let nextAfterSeq: Int?
+    enum CodingKeys: String, CodingKey {
+        case entities
+        case nextAfterSeq = "next_after_seq"
+    }
+}
+
+struct ArmorMovementCollectReceipt: Decodable {
+    let status: String
+    let sourceID: String
+    let entitiesSeen: Int?
+    let observationsSaved: Int?
+    let providerNote: String?
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sourceID = "source_id"
+        case entitiesSeen = "entities_seen"
+        case observationsSaved = "observations_saved"
+        case providerNote = "provider_note"
+    }
+}
+
 struct ArmorWatch: Decodable, Identifiable {
     let id: String
     let investigationID: String
@@ -740,6 +840,23 @@ struct WorldArmorView: View {
     @State private var platformNotices: [ArmorPlatformNotice] = []
     @State private var platformCombinedSummary = ""
     @State private var platformStatus = "No source registry check performed."
+    @State private var movementSources: [ArmorMovementSource] = []
+    @State private var movementTotal = 0
+    @State private var movementNextOffset: Int?
+    @State private var movementKind = "opensky_region"
+    @State private var movementLabel = "Public movement region"
+    @State private var movementTerms = ""
+    @State private var movementGrantClass = "public_publisher"
+    @State private var movementAutomated = false
+    @State private var movementCadence = "60"
+    @State private var movementMinInterval = "0"
+    @State private var movementRetention = "7"
+    @State private var movementLatitude = "34.0500"
+    @State private var movementLongitude = "-118.2500"
+    @State private var movementRadius = "80"
+    @State private var movementEntities: [ArmorMovementEntity] = []
+    @State private var movementEntityType = ""
+    @State private var movementStatus = "No movement source queried."
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -776,6 +893,7 @@ struct WorldArmorView: View {
             VStack(alignment: .leading, spacing: 15) {
                 heading
                 sourceConsole
+                movementConsole
                 enrollment
                 saved
                 if let selected {
@@ -822,6 +940,7 @@ struct WorldArmorView: View {
                 platformNotices = []
                 platformActiveID = nil
                 platformCombinedSummary = ""
+                movementEntities = []
                 notices = []
                 unreadNotices = 0
                 seenNoticeIDs = []
@@ -1245,6 +1364,199 @@ struct WorldArmorView: View {
                 }
             }
         }
+    }
+
+    private var movementConsole: some View {
+        GroupBox("World Armor v3 · planetary movement graph") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Public aircraft and vessel state becomes typed movement "
+                     + "evidence: entity → position → heading/speed → source "
+                     + "time → bounded local history. Transport identifiers "
+                     + "are not treated as people, owners or passenger records.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Movement provider", selection: $movementKind) {
+                    Text("OpenSky · selected region").tag("opensky_region")
+                    Text("OpenSky · provider-global").tag("opensky_global")
+                    Text("AISStream · selected region").tag("aisstream_region")
+                }
+                .pickerStyle(.menu)
+                TextField("Source label", text: $movementLabel)
+                Picker("Declared source permission",
+                       selection: $movementGrantClass) {
+                    Text("Publisher/public data terms").tag("public_publisher")
+                    Text("My API/license contract").tag("api_contract")
+                    Text("Owned or explicitly authorized").tag("owned_or_authorized")
+                }
+                .pickerStyle(.menu)
+                TextField("Provider terms / permission reference (required)",
+                          text: $movementTerms)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Toggle("I have permission for automated polling",
+                       isOn: $movementAutomated)
+                if movementAutomated {
+                    HStack {
+                        TextField("Cadence sec", text: $movementCadence)
+                            .keyboardType(.numberPad)
+                        TextField("Provider minimum sec",
+                                  text: $movementMinInterval)
+                            .keyboardType(.numberPad)
+                    }
+                }
+                TextField("Derived track retention days",
+                          text: $movementRetention)
+                    .keyboardType(.numberPad)
+                if movementKind != "opensky_global" {
+                    HStack {
+                        TextField("Latitude", text: $movementLatitude)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Longitude", text: $movementLongitude)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Radius km", text: $movementRadius)
+                            .keyboardType(.decimalPad)
+                    }
+                } else {
+                    Text("Provider-global OpenSky can consume more provider "
+                         + "credits and bandwidth. Jarvis does not impose a "
+                         + "smaller artificial geography, but the provider's "
+                         + "actual terms, quota and host resources still govern.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Enroll movement source") {
+                        Task { await enrollMovementSource() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || movementTerms.isEmpty)
+                    Button("Refresh sources") {
+                        Task { await refreshMovementSources() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                }
+                Text("Enrolled movement sources · \(movementTotal)")
+                    .font(.headline)
+                ForEach(movementSources) { source in
+                    movementSourceRow(source)
+                }
+                if movementNextOffset != nil {
+                    Button("Load more movement sources") {
+                        Task { await loadMoreMovementSources() }
+                    }
+                    .disabled(busy)
+                }
+                Divider()
+                Text("Query retained latest movement near a point")
+                    .font(.subheadline.weight(.medium))
+                Picker("Entity type", selection: $movementEntityType) {
+                    Text("Aircraft + vessels").tag("")
+                    Text("Aircraft").tag("aircraft")
+                    Text("Vessels").tag("vessel")
+                }
+                .pickerStyle(.segmented)
+                Button("Show retained movement near entered point") {
+                    Task { await queryNearbyMovement() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
+                ForEach(movementEntities) { entity in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(
+                            (entity.lastName ?? entity.lastCallsign
+                             ?? entity.entityID)
+                            + " · " + entity.entityType
+                        )
+                        .font(.subheadline.weight(.medium))
+                        Text(
+                            "\(entity.latitude.formatted()), "
+                            + "\(entity.longitude.formatted())"
+                            + (entity.distanceKM != nil
+                               ? " · \(entity.distanceKM!.formatted()) km"
+                               : "")
+                        )
+                        .font(.caption)
+                        Text(
+                            "Source time: "
+                            + (entity.providerTime ?? entity.observedAt)
+                            + " · " + entity.sourceName
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    Divider()
+                }
+                Text(movementStatus)
+                    .font(.caption)
+                Text("No owner/passenger/crew inference. No missing track "
+                     + "is treated as evidence that an area is clear. "
+                     + "AISStream requires a server-side API key; OpenSky "
+                     + "coverage and quota are provider-dependent.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func movementSourceRow(
+        _ source: ArmorMovementSource
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(source.label + " · " + source.kind)
+                .font(.subheadline.weight(.medium))
+            Text(
+                source.globalScope
+                ? "global provider scope"
+                : "\(source.latitude?.formatted() ?? "?"), "
+                  + "\(source.longitude?.formatted() ?? "?")"
+                  + " · \(source.radiusKM?.formatted() ?? "?") km"
+            )
+            .font(.caption)
+            Text(
+                "\(source.checkCount) checks · "
+                + (source.cadenceSeconds > 0
+                   ? "every \(source.cadenceSeconds)s"
+                   : "manual only")
+                + " · retain \(source.retentionDays)d"
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            HStack {
+                Button("Collect now") {
+                    Task { await collectMovementSource(source.id) }
+                }
+                .disabled(busy || source.state != "active")
+                Button(source.state == "active" ? "Pause" : "Resume") {
+                    Task {
+                        await changeMovementSource(
+                            source.id,
+                            action: source.state == "active"
+                                ? "pause" : "resume"
+                        )
+                    }
+                }
+                .disabled(busy || source.state == "stopped")
+                Button("Stop", role: .destructive) {
+                    Task {
+                        await changeMovementSource(
+                            source.id, action: "stop"
+                        )
+                    }
+                }
+                .disabled(busy || source.state == "stopped")
+            }
+            .buttonStyle(.bordered)
+            Button("Forget movement source + local track history",
+                   role: .destructive) {
+                Task { await forgetMovementSource(source.id) }
+            }
+            .buttonStyle(.bordered)
+            .disabled(busy)
+        }
+        .padding(8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var sourceConsole: some View {
@@ -1980,6 +2292,11 @@ struct WorldArmorView: View {
                 platformNextOffset = page.nextOffset
                 platformTotal = page.total
             }
+            if let movement = try? await client.worldArmorMovementSources() {
+                movementSources = movement.sources
+                movementNextOffset = movement.nextOffset
+                movementTotal = movement.total
+            }
             if let current = selectedID {
                 let response = try? await client.worldArmorNotices(
                     investigationID: current
@@ -2083,6 +2400,185 @@ struct WorldArmorView: View {
             await refreshNotices(alertOnNew: false)
         } catch {
             status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
+    private func refreshMovementSources() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Movement registry refreshed; no provider queried."
+        } catch {
+            movementStatus = "Movement registry unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func loadMoreMovementSources() async {
+        guard !busy, let cursor = movementNextOffset else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorMovementSources(
+                offset: cursor
+            )
+            movementSources.append(contentsOf: page.sources)
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Loaded \(movementSources.count) of "
+                + "\(movementTotal) movement sources."
+        } catch {
+            movementStatus = "Movement pagination unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func enrollMovementSource() async {
+        guard !busy else { return }
+        guard let retention = Int(movementRetention), retention >= 1,
+              let minimum = Int(movementMinInterval), minimum >= 0 else {
+            movementStatus = "Enter positive retention and a valid provider interval."
+            return
+        }
+        let cadence: Int
+        if movementAutomated {
+            guard let entered = Int(movementCadence),
+                  entered >= max(minimum, 1) else {
+                movementStatus = "Scheduled cadence must meet provider terms."
+                return
+            }
+            cadence = entered
+        } else {
+            cadence = 0
+        }
+        var lat: Double?
+        var lon: Double?
+        var radiusKM: Double?
+        if movementKind != "opensky_global" {
+            guard let parsedLat = Double(movementLatitude),
+                  let parsedLon = Double(movementLongitude),
+                  let parsedRadius = Double(movementRadius),
+                  parsedRadius > 0 else {
+                movementStatus = "Enter a valid movement region."
+                return
+            }
+            lat = parsedLat
+            lon = parsedLon
+            radiusKM = parsedRadius
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let source = try await client.worldArmorMovementEnroll(
+                label: movementLabel,
+                kind: movementKind,
+                grantClass: movementGrantClass,
+                termsReference: movementTerms,
+                automated: movementAutomated,
+                providerMinIntervalSeconds: minimum,
+                cadenceSeconds: cadence,
+                retentionDays: retention,
+                latitude: lat, longitude: lon, radiusKM: radiusKM
+            )
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Enrolled " + source.label
+                + ". Collection is still local-host/user initiated."
+        } catch {
+            movementStatus = "Movement source enrollment blocked: "
+                + error.localizedDescription
+        }
+    }
+
+    private func collectMovementSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await client.worldArmorMovementCollect(id)
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Provider status: " + receipt.status
+                + " · entities \(receipt.entitiesSeen ?? 0)"
+                + " · new track points \(receipt.observationsSaved ?? 0). "
+                + (receipt.providerNote ?? "")
+        } catch {
+            movementStatus = "Movement collection unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func changeMovementSource(
+        _ id: String, action: String
+    ) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let source = try await client.worldArmorMovementTransition(
+                id, action: action
+            )
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = source.label + " is " + source.state + "."
+        } catch {
+            movementStatus = "Movement transition unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func forgetMovementSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.worldArmorMovementForget(id)
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementEntities = []
+            movementStatus = "Movement source and its local track history forgotten."
+        } catch {
+            movementStatus = "Movement forget unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func queryNearbyMovement() async {
+        guard !busy,
+              let lat = Double(movementLatitude),
+              let lon = Double(movementLongitude),
+              let radius = Double(movementRadius),
+              radius > 0 else {
+            movementStatus = "Enter a valid point and movement radius."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorMovementNearby(
+                latitude: lat, longitude: lon, radiusKM: radius,
+                entityType: movementEntityType
+            )
+            movementEntities = page.entities
+            movementStatus = "Showing \(page.entities.count) latest retained "
+                + "public movement states. Missing entities do not prove "
+                + "the area is clear."
+        } catch {
+            movementStatus = "Movement query unavailable: "
+                + error.localizedDescription
         }
     }
 

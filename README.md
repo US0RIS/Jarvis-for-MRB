@@ -655,18 +655,32 @@ Cameras should serve an explicit question or watch. They should not become the w
 
 ### Aircraft, ships and places: the movement graph
 
-The desired graph correlates **publicly observable moving entities** with source, time, confidence, geography and explicit user-selected regions:
+**[World Armor v3 movement graph](docs/WORLD_ARMOR_MOVEMENT_GRAPH.md)** now
+implements the first transport layer rather than leaving it as roadmap:
 
 ```text
-source event (ADS-B/MLAT, AIS, official transport/incident)
-  -> entity (aircraft, vessel, transit vehicle or relevant place)
-  -> position / heading / speed / observed-at / provider-time / freshness
-  -> bounded history and change detection
-  -> user-selected POI / proximity / route intersection
-  -> eligible alert / read-only answer / permission-gated action
+public movement source (OpenSky ADS-B/MLAT/etc. or AISStream)
+  -> transport entity (ICAO24 aircraft / MMSI vessel)
+  -> position / altitude / heading / speed / source-observed-at
+  -> deduplicated local history + explicit source grant/cadence/retention
+  -> latest-entity proximity query
+  -> typed co-display with World Armor camera/environmental evidence
 ```
 
-Existing branch source currently offers **OpenSky regional aircraft counts**, not a verified individual flight-tracker UI, tail-number history, passenger insight, aircraft ownership or global real-time coverage. **AIS vessel tracking is roadmap.** Independent adapters would need documented provider terms/quotas, appropriate polling, track-identity reconciliation, stale/duplicate observations, uncertain gaps, and attribution. Alerts should answer “what is near me/this place?” or “what changed?” without claiming private itineraries or correlating people with observed aircraft/vessels absent legitimate evidence and authority. Specific commercial flight status and raw aircraft telemetry are different products and must not be conflated.
+OpenSky can be enrolled for a selected region or explicit provider-global
+scope; optional OAuth credentials stay on the host. AISStream can be enrolled
+for a selected region with a server-side API key. The movement source count is
+not globally capped; UI/API responses are paged and provider quotas plus host
+resources govern collection. A local movement runner is explicit and
+lease-fenced, and stop/pause prevents an in-flight provider response from
+being persisted.
+
+This remains **public transport telemetry, not person tracking**: Jarvis does
+not infer passengers, owners, crew, homes or private itineraries from ICAO24,
+callsign, MMSI or ship name. Missing provider telemetry is not an all-clear.
+Commercial flight status, long-lived AIS socket pooling, rail/transit,
+satellite/road-fleet providers, route-intersection alerts, distributed workers
+and animated historical track maps remain separate future increments.
 
 ### Other evidence surfaces
 

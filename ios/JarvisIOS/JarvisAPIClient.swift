@@ -1152,6 +1152,99 @@ struct JarvisAPIClient {
         return report
     }
 
+    func worldArmorMovementSources(
+        offset: Int = 0
+    ) async throws -> ArmorMovementSourcePage {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v3/movement-sources",
+            query: [
+                URLQueryItem(name: "offset", value: String(offset)),
+                URLQueryItem(name: "page_size", value: "100")
+            ]
+        )
+        return try JSONDecoder().decode(ArmorMovementSourcePage.self, from: data)
+    }
+
+    func worldArmorMovementEnroll(
+        label: String, kind: String, grantClass: String,
+        termsReference: String, automated: Bool,
+        providerMinIntervalSeconds: Int, cadenceSeconds: Int,
+        retentionDays: Int, latitude: Double?,
+        longitude: Double?, radiusKM: Double?
+    ) async throws -> ArmorMovementSource {
+        var body: [String: Any] = [
+            "label": label, "kind": kind,
+            "grant_class": grantClass,
+            "terms_reference": termsReference,
+            "authorized_automated_access": automated,
+            "provider_min_interval_seconds": providerMinIntervalSeconds,
+            "cadence_seconds": cadenceSeconds,
+            "retention_days": retentionDays,
+        ]
+        if let latitude, let longitude, let radiusKM {
+            body["latitude"] = latitude
+            body["longitude"] = longitude
+            body["radius_km"] = radiusKM
+        }
+        let (data, response) = try await postData(
+            path: "world-armor/v3/movement-sources", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorMovementSource.self, from: data)
+    }
+
+    func worldArmorMovementTransition(
+        _ id: String, action: String
+    ) async throws -> ArmorMovementSource {
+        let (data, response) = try await postData(
+            path: "world-armor/v3/movement-sources/transition",
+            body: ["source_id": id, "action": action]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorMovementSource.self, from: data)
+    }
+
+    func worldArmorMovementForget(
+        _ id: String
+    ) async throws -> ArmorPlatformForget {
+        let (data, response) = try await postData(
+            path: "world-armor/v3/movement-sources/forget",
+            body: ["source_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPlatformForget.self, from: data)
+    }
+
+    func worldArmorMovementCollect(
+        _ id: String
+    ) async throws -> ArmorMovementCollectReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v3/movement/collect",
+            body: ["source_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorMovementCollectReceipt.self, from: data)
+    }
+
+    func worldArmorMovementNearby(
+        latitude: Double, longitude: Double,
+        radiusKM: Double, entityType: String = ""
+    ) async throws -> ArmorMovementNearbyPage {
+        var query = [
+            URLQueryItem(name: "latitude", value: String(latitude)),
+            URLQueryItem(name: "longitude", value: String(longitude)),
+            URLQueryItem(name: "radius_km", value: String(radiusKM)),
+            URLQueryItem(name: "page_size", value: "100"),
+        ]
+        if !entityType.isEmpty {
+            query.append(URLQueryItem(name: "entity_type", value: entityType))
+        }
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v3/movement/nearby", query: query
+        )
+        return try JSONDecoder().decode(ArmorMovementNearbyPage.self, from: data)
+    }
+
     func worldArmorPageMedia(_ url: String) async throws -> ArmorPublicPageMedia {
         let (data, response) = try await postData(
             path: "world-armor/v1/cameras/page-media",

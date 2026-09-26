@@ -965,7 +965,8 @@ struct JarvisAPIClient {
     func physicalAwareness(latitude: Double, longitude: Double) async throws -> PhysicalAwarenessResponse {
         let (data, response) = try await postData(
             path: "physical/awareness",
-            body: ["latitude": latitude, "longitude": longitude]
+            body: ["latitude": latitude, "longitude": longitude],
+            headers: windyRequestHeaders()
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(PhysicalAwarenessResponse.self, from: data)

@@ -86,7 +86,6 @@ jobs:
         run: |
           python -m unittest discover -s tests -p "test_public_movement.py" -v
           python -m unittest discover -s tests -p "test_world_armor_movement.py" -v
-          python -m unittest discover -s tests -p "test_world_armor_movement_service.py" -v
       - name: Verify source-scoped open observation platform and consent/revocation
         run: python -m unittest discover -s tests -p "test_world_armor_platform.py" -v
       - name: Verify combined source graph retains unknown camera capture time

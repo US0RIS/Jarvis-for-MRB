@@ -67,9 +67,18 @@ struct MainView: View {
             }
             .alert("Jarvis", isPresented: Binding(
                 get: { appModel.errorMessage != nil },
-                set: { if !$0 { appModel.errorMessage = nil } }
+                set: { isPresented in
+                    guard !isPresented else { return }
+                    DispatchQueue.main.async {
+                        appModel.errorMessage = nil
+                    }
+                }
             )) {
-                Button("OK", role: .cancel) { appModel.errorMessage = nil }
+                Button("OK", role: .cancel) {
+                    DispatchQueue.main.async {
+                        appModel.errorMessage = nil
+                    }
+                }
             } message: {
                 Text(appModel.errorMessage ?? "")
             }

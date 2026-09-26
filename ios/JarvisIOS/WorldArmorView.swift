@@ -1266,6 +1266,15 @@ struct WorldArmorView: View {
             // collection is disabled; no new provider request is issued here.
             investigations = try await client.worldArmorInvestigations().investigations
             watches = (try? await client.worldArmorWatches())?.watches ?? []
+            if let current = selectedID {
+                let response = try? await client.worldArmorNotices(
+                    investigationID: current
+                )
+                notices = response?.notices ?? []
+                unreadNotices = response?.unreadCount ?? 0
+                seenNoticeIDs = Set(notices.map { $0.id })
+                hasNoticeBaseline = true
+            }
             if !investigations.contains(where: { $0.id == selectedID }) {
                 selectedID = nil
                 replayResult = nil
@@ -1273,6 +1282,10 @@ struct WorldArmorView: View {
                 correlations = nil
                 evidenceGraph = nil
                 sampleTimes = []
+                notices = []
+                unreadNotices = 0
+                seenNoticeIDs = []
+                hasNoticeBaseline = false
             }
             if capabilities?.enabled == true {
                 status = "Source registry integrated, not proof that live "
@@ -1297,6 +1310,65 @@ struct WorldArmorView: View {
         }
     }
 
+    private func pollAttentionInbox() async {
+        guard let current = selectedID else { return }
+        while !Task.isCancelled && selectedID == current {
+            if scenePhase == .active && !busy {
+                await refreshNotices(alertOnNew: true)
+            }
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                break
+            }
+        }
+    }
+
+    private func refreshNotices(alertOnNew: Bool) async {
+        guard let current = selectedID else { return }
+        do {
+            let response = try await client.worldArmorNotices(
+                investigationID: current
+            )
+            guard selectedID == current, scenePhase == .active else { return }
+            let newItems = response.notices.filter {
+                !seenNoticeIDs.contains($0.id) && $0.readAt == nil
+            }
+            notices = response.notices
+            unreadNotices = response.unreadCount
+            seenNoticeIDs = Set(response.notices.map { $0.id })
+            if hasNoticeBaseline && alertOnNew && foregroundAttentionOptIn,
+               let first = newItems.first {
+                attentionBannerText = first.summary
+                showAttentionBanner = true
+            }
+            hasNoticeBaseline = true
+        } catch {
+            // Offline/unknown never means all-clear. Keep the prior inbox
+            // and prior seen IDs instead of pretending delivery succeeded.
+            if hasNoticeBaseline {
+                status = "Attention inbox unavailable: "
+                    + error.localizedDescription
+            }
+        }
+    }
+
+    private func changeNotice(_ id: String, action: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            if action == "read" {
+                _ = try await client.worldArmorNoticeRead(id)
+            } else {
+                _ = try await client.worldArmorNoticeForget(id)
+            }
+            await refreshNotices(alertOnNew: false)
+        } catch {
+            status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
     private func refreshWatches() async {
         guard !busy else { return }
         busy = true
@@ -1317,7 +1389,12 @@ struct WorldArmorView: View {
         do {
             _ = try await client.worldArmorWatchCreate(
                 selectedID, intervalMinutes: watchInterval,
-                maxChecks: watchChecks, lifetimeHours: watchLifetime
+                maxChecks: watchChecks, lifetimeHours: watchLifetime,
+                attentionKind: attentionKind,
+                attentionThreshold: attentionKind == "modelled_aqi_threshold_crossed"
+                    ? attentionAQI : attentionKind == "new_usgs_report"
+                        ? attentionMagnitude : nil,
+                attentionCooldownMinutes: attentionCooldown
             )
             watches = try await client.worldArmorWatches().watches
             status = "Watch enrolled. The separate local host runner must "

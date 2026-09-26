@@ -70,7 +70,26 @@ produced it. A stale model result remains inspectable evidence, but cannot
 support an independent-source correlation or hypothesis unless its producing
 sample was `status=ok`. Later provider outage does not rewrite an earlier
 healthy receipt; coverage is evidence-time-specific as well as summarized at
-the latest receipt.
+the latest receipt. The replay's actual `sample_timeline` now includes per-sample
+per-provider `source_coverage` with status, check time, retained-source
+reported count, and scope; the iPhone/iPad rewind menu displays the historical
+status of AQI, NWS and USGS next to each receipt. These are discrete samples,
+not inferred continuous monitoring.
+
+An adapter returning more than the explicit normalization cap (15 NWS alert
+rows or 50 USGS earthquake rows) produces `partial` coverage even when the
+upstream request itself succeeded. The saved rows remain reviewable, but cannot
+corroborate a second source in an evidence candidate; `ok` must not imply that
+the entire response was retained. Counts refer to normalized records before
+deduplication, not necessarily new SQLite observations.
+
+A revision fingerprint covers a source assertion's event time, publish time,
+kind, lineage, geometry basis and normalized values. Correcting a USGS
+occurrence timestamp is therefore a new linked revision even if the magnitude,
+place and other display fields are unchanged. Comparisons of consecutive
+`fixture` and `real_adapter` receipts return
+`comparison=incompatible_adapter_modes` without claiming an AQI or event
+change; both individual samples can still be replayed.
 
 ### Evidence graph and hypothesis discipline
 

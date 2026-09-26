@@ -278,3 +278,89 @@ def snapshot_public_media(url: str, *, provider_signed: bool = False) -> dict[st
         "media_kind": media_kind,
         "bytes": len(frame),
     }
+
+
+def discover_public_page_media(page_url: str) -> dict[str, Any]:
+    """One bounded read of an explicitly chosen public HTML page.
+
+    This does not execute JavaScript, follow embeds, search hosts, or fetch
+    candidate media. The operator chooses a direct media URL afterward.
+    """
+    from html.parser import HTMLParser
+
+    page = validate_public_camera_url(page_url)
+    body, mime = _get(
+        page, limit=180_000, accept="text/html,application/xhtml+xml",
+    )
+    if mime in _IMAGE_TYPES or mime.startswith("multipart/") or mime in _HLS_TYPES:
+        return {
+            "status": "direct_media",
+            "candidates": [{
+                "url": page.url, "source": "exact_user_selected_media",
+                "same_origin": True,
+                "needs_explicit_selection": True,
+            }],
+            "qualifier": "This address is already published media.",
+        }
+    if mime not in ("text/html", "application/xhtml+xml"):
+        raise ValueError("This page does not expose supported public HTML/media.")
+    try:
+        html = body.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise ValueError("Unsupported public page encoding.") from exc
+
+    class CandidateParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.found: list[tuple[str, str]] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if len(self.found) >= 50:
+                return
+            values = dict(attrs)
+            if tag == "meta" and str(values.get("property") or "").lower() in {
+                "og:image", "twitter:image",
+            }:
+                self.found.append((values.get("content") or "", "public_page_thumbnail"))
+            elif tag in {"img", "source", "video"}:
+                candidate = values.get("src") or values.get("data-src") or ""
+                meta = " ".join(str(values.get(x) or "") for x in (
+                    "alt", "id", "class", "type", "title",
+                )).lower()
+                suffix = candidate.lower().split("?", 1)[0]
+                if ("camera" in meta or "webcam" in meta or "live" in meta
+                        or "snapshot" in meta or "image/" in meta
+                        or suffix.endswith((".m3u8", ".jpg", ".jpeg",
+                                            ".png", ".webp"))):
+                    self.found.append((candidate, "html_camera_media_candidate"))
+
+    parser = CandidateParser()
+    parser.feed(html[:180_000])
+    unique: set[str] = set()
+    candidates = []
+    for relative, source in parser.found:
+        if len(candidates) >= 15:
+            break
+        try:
+            candidate = validate_public_camera_url(urljoin(page.url, relative))
+        except (ValueError, TypeError):
+            continue
+        if candidate.url in unique:
+            continue
+        unique.add(candidate.url)
+        candidates.append({
+            "url": candidate.url, "source": source,
+            "same_origin": candidate.host == page.host,
+            "needs_explicit_selection": True,
+        })
+    return {
+        "status": "candidates_found" if candidates else "no_static_media_candidates",
+        "candidates": candidates,
+        "page_display": page.display,
+        "qualifier": (
+            "Only literal media links in this selected HTML document were "
+            "examined; no JavaScript/player/iframe execution, recording, "
+            "private access or external media request. A thumbnail may not "
+            "be a live camera image. Choose a specific candidate to inspect."
+        ),
+    }

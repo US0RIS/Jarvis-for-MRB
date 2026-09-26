@@ -14,6 +14,7 @@ on:
       - jarvis/world-armor-attention-inbox
       - jarvis/world-armor-global-public-cameras
       - jarvis/world-armor-open-observation-platform
+      - jarvis/world-armor-movement-graph
   pull_request:
     paths:
       - "ios/**"
@@ -39,8 +40,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_deterministic_dispatch.py" -v
       - name: Verify conversational voice and non-compulsory Jarvis address
         run: python -m unittest discover -s tests -p "test_conversational_personality.py" -v
-      - name: Install provider HTTP and bounded public-camera image decoders for isolated tests
-        run: python -m pip install httpx Pillow
+      - name: Install isolated public-world dependencies
+        run: python -m pip install httpx Pillow websockets
       - name: Verify camera-free sensor opportunities and physical authority boundaries
         run: python -m unittest discover -s tests -p "test_sensor_opportunities.py" -v
       - name: Verify iPhone microphone/GPS/privacy and enrolled HomeKit actuator wiring
@@ -81,6 +82,11 @@ jobs:
         run: python -m unittest discover -s tests -p "test_world_armor_attention.py" -v
       - name: Verify global public camera source and evidence boundaries
         run: python -m unittest discover -s tests -p "test_world_armor_global_cameras.py" -v
+      - name: Verify planetary aircraft/vessel movement adapters and graph
+        run: |
+          python -m unittest discover -s tests -p "test_public_movement.py" -v
+          python -m unittest discover -s tests -p "test_world_armor_movement.py" -v
+          python -m unittest discover -s tests -p "test_world_armor_movement_service.py" -v
       - name: Verify source-scoped open observation platform and consent/revocation
         run: python -m unittest discover -s tests -p "test_world_armor_platform.py" -v
       - name: Verify combined source graph retains unknown camera capture time

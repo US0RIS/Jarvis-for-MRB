@@ -498,9 +498,6 @@ struct SettingsView: View {
         groqStatus = status.state == "available"
             ? "Available"
             : "\(status.state): \(status.detail)"
-        if status.state == "available" {
-            settings.cloudCognitionEnabled = true
-        }
     }
 
     private func checkNeuralVoice() async {

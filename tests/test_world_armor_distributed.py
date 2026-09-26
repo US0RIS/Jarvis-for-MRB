@@ -20,6 +20,7 @@ class DistributedObserverTests(unittest.TestCase):
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
         flags = patch.dict(os.environ, {
             "JARVIS_WORLD_ARMOR_ENABLED": "1",
+            "JARVIS_WORLD_ARMOR_CAMERAS_ENABLED": "1",
             "JARVIS_WORLD_ARMOR_PLATFORM_ENABLED": "1",
             "JARVIS_WORLD_ARMOR_MOVEMENT_ENABLED": "1",
             "AISSTREAM_API_KEY": "test-key",

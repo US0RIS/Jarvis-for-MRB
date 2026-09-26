@@ -907,6 +907,21 @@ def world_armor_watch_stop(
         _armor_error(exc)
 
 
+@app.post("/world-armor/v1/watches/forget")
+def world_armor_watch_forget(
+    request: WorldArmorWatchIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_watches import forget_watch
+    try:
+        return forget_watch(request.watch_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
 @app.post("/world-armor/v1/watches/pause")
 def world_armor_watch_pause(
     request: WorldArmorWatchIdRequest,

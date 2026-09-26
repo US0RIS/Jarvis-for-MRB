@@ -541,3 +541,270 @@ captured before prioritization.
 - **Feature-Idea Harvester.** Periodically mine opt-in public discussions, project
   issues, changelogs, and the project's own failed requests for candidate Jarvis
   capabilities and append evidence-backed ideas to a review queue before future.md.
+
+
+## Adjacent-field idea mining — 2026-09-26
+
+Concepts translated from ubiquitous computing, emergency management, intelligence
+analysis, SRE/distributed systems, industrial control, accessibility, AR/spatial
+computing, end-user programming, and personal knowledge management.
+
+### Attention, command, and situational awareness
+
+- **Attention Commander.** A Common Operating Picture can become useless when every
+  subsystem competes to put its information on screen. Give Jarvis a single explicit
+  arbitration layer that decides what deserves scarce visual/audio/HUD attention now,
+  why, for how long, and what gets demoted. Missions and emergencies can temporarily
+  change the arbitration policy.
+- **Dynamic Common Operating Picture.** Instead of one giant dashboard, synthesize a
+  temporary operational view around the active question/mission: only relevant map
+  layers, entities, timelines, dependencies, alerts, cameras, people, and controls.
+  Tear it down or archive it when the situation ends.
+- **Information Triage Officer.** When a situation produces too much evidence, rank
+  information by decision relevance, novelty, confidence, consequence, and time
+  sensitivity—not merely timestamp.
+- **Decision Window Detection.** Distinguish facts that are merely interesting from
+  situations where a decision must be made before a closing window; escalate the latter
+  as the window shrinks.
+- **Operational Tempo.** Infer whether a situation is stable, accelerating, resolving,
+  or becoming chaotic and adjust refresh rates, model allocation, notification
+  thresholds, and display density accordingly.
+- **Cognitive-Load Governor.** Estimate current interaction burden from driving,
+  conversation, meetings, active alerts, task switching, and device use; compress or
+  defer nonessential information until capacity returns.
+- **Sterile-Cockpit Mode.** During high-workload/high-consequence intervals, suppress
+  unrelated Jarvis chatter and low-priority actions automatically while preserving
+  critical exceptions.
+- **Mode Annunciation.** Jarvis always makes consequential mode/state changes visible
+  enough to avoid "automation surprise": what mode it is in, what it is currently
+  controlling, and what changed the mode.
+- **Automation Surprise Detector.** Detect when observed system behavior diverges from
+  the user's likely mental model or the declared automation state and proactively
+  explain the discrepancy.
+- **Return-to-Manual Handoff.** If automation loses required evidence/capability, make
+  the handoff explicit: what stopped being automated, what state it left behind, and
+  what the user now needs to control manually.
+
+### Intelligence-analysis primitives
+
+- **Analysis of Competing Hypotheses (ACH) Engine.** For ambiguous investigations,
+  explicitly enumerate plausible hypotheses, map evidence for/against each, weight
+  source reliability, seek disconfirming evidence, and show what observation would
+  most distinguish the remaining possibilities.
+- **Key-Assumption Register.** Important plans/inferences expose the assumptions they
+  depend on. Jarvis watches for evidence that invalidates an assumption and can
+  automatically reopen the conclusion.
+- **Disconfirm-Me Mode.** Given a conclusion, deliberately search for evidence that
+  would make it wrong instead of gathering only corroboration.
+- **Evidence Diagnosticity Scoring.** Prefer evidence that separates hypotheses over
+  evidence that is merely consistent with all of them.
+- **Information-Gain Planner.** When uncertain, choose the next lawful/authorized
+  observation or query expected to reduce uncertainty the most.
+- **Source Independence Graph.** Detect when five apparently separate reports all trace
+  back to the same original source so corroboration is not overstated.
+- **Claim Lineage.** Any synthesized claim can expand into its chain:
+  raw observation -> extraction -> inference -> corroboration -> conclusion.
+- **Assumption Expiry.** Assumptions have freshness windows and must be revalidated
+  when circumstances materially change.
+- **Collection Plan Generator.** For a question Jarvis cannot yet answer, construct an
+  explicit evidence collection plan identifying missing facts, available sources,
+  expected value, cost, and stopping conditions.
+- **Investigation Stop Rule.** Prevent endless research by defining what confidence,
+  evidence, or decision threshold is sufficient for the actual decision at hand.
+- **Alternative-Explanation Prompt.** Before a high-impact conclusion, generate at
+  least one materially different plausible explanation and test it.
+- **Analytic Confidence Calibration.** Track whether prior confidence estimates proved
+  justified and recalibrate future language/thresholds by domain.
+
+### Reliability / SRE / distributed-system ideas
+
+- **Jarvis Reliability SLOs.** Define measurable reliability objectives for important
+  capabilities: command latency, observation freshness, alert delivery, action
+  verification, sync convergence, and availability.
+- **Capability Error Budgets.** Track tolerated failures/staleness for each capability;
+  repeated budget exhaustion automatically shifts engineering attention from adding
+  features to reliability.
+- **Automation Ownership Registry.** Every automation declares purpose, owner,
+  dependencies, credentials/permissions, trigger, side effects, rollback, last test,
+  and retirement condition so the system never accumulates mysterious jobs.
+- **Automation Maintenance Cost Meter.** Estimate how much operational complexity an
+  automation creates versus the human effort it saves; flag automations that have
+  become net-negative.
+- **Runbook Compiler.** Turn a successfully resolved incident/problem into an
+  inspectable deterministic runbook, preserving decision points that still require
+  judgment.
+- **Human-Fix Memory.** Correlate anomaly telemetry with what the human actually did to
+  resolve it. When the same pattern recurs, surface prior successful interventions and
+  differences from the previous case.
+- **Recurring-Failure Clustering.** Detect that superficially separate incidents are
+  manifestations of the same underlying pattern across time/devices/services.
+- **Known-Good State Snapshots.** Preserve enough configuration/state to compare a
+  malfunctioning system against its last verified healthy state.
+- **Change-Correlation Engine.** When something breaks, automatically identify nearby
+  software/config/device/network/environment changes that plausibly preceded it.
+- **Canary Actions.** Before applying a broad Jarvis-generated change, test the action
+  on the smallest safe scope and verify outcome.
+- **Progressive Rollout.** Expand a successful action gradually across devices/rules/
+  environments with automatic halt on anomalous results.
+- **Automatic Rollback Contract.** Actions can declare measurable success conditions
+  and a reversible rollback that executes if those conditions fail.
+- **Chaos Jarvis.** In a safe simulation/test environment, intentionally remove
+  providers, hosts, network links, sensors, models, and permissions to discover hidden
+  single points of failure before reality does.
+- **Graceful-Degradation Planner.** Precompute substitute paths when a capability
+  disappears: alternate model, alternate device, cached map, SMS instead of data,
+  local sensor instead of cloud provider, etc.
+- **Split-Brain Detector.** Detect when different Jarvis nodes hold incompatible world
+  state or believe different authorities are active.
+- **Eventual-Reconciliation Ledger.** Offline nodes may continue recording observations
+  and safe local actions; when connectivity returns, merge histories with explicit
+  conflict handling rather than treating the cloud copy as automatically correct.
+- **Local Mesh Sync.** Let nearby Jarvis devices exchange relevant state directly over
+  LAN/Bluetooth/ad-hoc links when Internet/cloud services are unavailable.
+- **Long-Now Export.** Maintain a documented, portable representation of core memory,
+  graph state, automations, and provenance so Jarvis remains recoverable even if a
+  vendor/service/project disappears.
+
+### Industrial-control lessons
+
+- **Alarm Rationalization.** Periodically analyze alert frequency, duration,
+  acknowledgment, consequence, and usefulness; identify nuisance alarms, duplicate
+  alarms, permanently active alarms, and alerts that never change behavior.
+- **Alarm Flood Mode.** When many alerts share one likely cause, collapse them into the
+  causal incident rather than independently interrupting for every symptom.
+- **First-Out Analysis.** In cascades, preserve and highlight the earliest meaningful
+  state change that likely initiated the downstream alarm storm.
+- **Intervention Timeline.** For any physical/digital entity, show telemetry, alerts,
+  human actions, Jarvis actions, maintenance, configuration changes, and outcomes on
+  one timeline.
+- **Condition-Based Maintenance for Jarvis Hardware.** Use temperatures, battery
+  health, SMART data, fan behavior, error counts, connectivity, and other telemetry to
+  service the PC/Macs/sensor nodes before a likely failure—using deterministic
+  thresholds where they outperform speculative ML.
+- **Degradation Trend Detector.** Identify slow drift away from an entity's own healthy
+  baseline even when no fixed alarm threshold has yet been crossed.
+- **Operating Envelope Model.** Learn/define normal combinations of state rather than
+  isolated scalar thresholds; flag impossible or unusual combinations.
+- **Maintenance Verification.** After a repair/configuration change, verify that the
+  original symptom actually disappeared and that no new abnormal state was introduced.
+
+### Spatial computing / AR
+
+- **Persistent World Layer.** Maintain Jarvis-owned semantic anchors that survive
+  sessions: objects, controls, notes, warnings, remembered locations, procedures, and
+  live data attached to physical places.
+- **Cross-Device Spatial Anchor Abstraction.** Hide vendor-specific anchor systems
+  behind Jarvis IDs so an anchor created from one capable device can be represented,
+  approximated, or re-localized from another.
+- **Anchor Confidence + Drift.** Treat spatial anchors as uncertain measurements;
+  estimate localization quality, detect drift, and re-anchor using multiple visual/
+  geometric references.
+- **Walk-Into Interfaces.** Entering a known physical zone can instantiate the relevant
+  Jarvis interface automatically: workshop tools in workshop, travel board near luggage,
+  system dashboard at desk, cooking context in kitchen.
+- **Live Physical Labels.** Attach current dynamic information to stable real-world
+  objects/places—device status, next maintenance, instructions, ownership, destination,
+  warnings, or relevant mission state.
+- **Spatial Inbox.** Leave a virtual note/task/reminder at a physical location and have
+  it resurface when the right person returns there.
+- **Shared Spatial Context.** With explicit participant consent, multiple enrolled
+  users can reference the same Jarvis spatial entity/anchor during a collaborative
+  task without needing identical hardware.
+- **Spatial Procedure Overlay.** Step-by-step instructions attach to the actual
+  component/control involved, advancing only after visual/sensor evidence indicates
+  the step was completed.
+- **Visual Change Memory.** Compare a current view against prior observations of the
+  same anchored space and highlight meaningful changes.
+- **Semantic Room Map.** Go beyond geometry: identify what areas are *for*, what
+  objects normally belong there, which controls affect what, and which missions/
+  routines commonly occur there.
+- **Place-Bound Live Data.** Physical spaces can expose contextually relevant live
+  information when viewed/entered rather than forcing the user to locate an app.
+
+### Accessibility-derived interaction ideas
+
+- **Input-Modality Independence.** No important Jarvis capability should inherently
+  require voice. Commands/actions can be invoked by touch, keyboard, eye/gaze where
+  hardware permits, gesture, switches, text, or automation using the same semantic
+  intent layer.
+- **Output-Modality Independence.** Any important response should have equivalent
+  visual, auditory, and haptic/notification representations where hardware supports
+  them.
+- **Interaction Capability Negotiation.** Jarvis knows which modalities are currently
+  available/reliable (hands occupied, noisy room, display unavailable, driving, etc.)
+  and chooses accordingly.
+- **Describe-on-Demand.** A universal "what am I looking at / what changed / what's
+  important here?" operation over the current visual scene with explicit uncertainty.
+- **Navigation Landmark Memory.** Learn useful landmarks and decision points along
+  familiar routes, not merely GPS coordinates, to support richer situational guidance.
+- **Interface Semantic Overlay.** Where permitted, understand visible GUI structure and
+  provide a consistent Jarvis interaction layer over otherwise inconsistent apps.
+- **Accessibility as Core Architecture.** Keep semantic labels, predictable focus/
+  navigation, keyboard control, and modality alternatives native rather than relying
+  on an AI agent to repair inaccessible interfaces after the fact.
+
+### End-user programming / malleable systems
+
+- **Demonstrate -> Compile -> Verify.** User performs a digital workflow once; Jarvis
+  records it, extracts variables/conditions, compiles the stable path into deterministic
+  code, uses an agent only for genuinely variable edges, and asks the user to verify a
+  replay before activation.
+- **Just-in-Time Automation.** Midway through repetitive work, say "do the rest like
+  that." Jarvis infers the repeated transformation from the examples already completed
+  and previews the remaining actions.
+- **Automation Generalization Dialog.** After demonstration, Jarvis asks only the
+  questions needed to distinguish constants from variables: "always this folder or
+  whichever folder is open?"
+- **Automation Versioning.** User-created automations are first-class versioned
+  artifacts with diffs, tests, rollback, dependencies, and provenance.
+- **Editable Generated Logic.** Natural-language automation is never a black box:
+  expose a human-readable rule/state-machine representation that can be directly
+  edited.
+- **Composable Capability Blocks.** Small Jarvis primitives can be connected into
+  bespoke workflows without requiring a new app or full software project.
+- **Personal Micro-App Generator.** If a workflow deserves a persistent interface,
+  Jarvis can generate a tiny purpose-built local UI around the underlying capability
+  graph rather than forcing interaction through chat forever.
+- **Interface-by-Use.** Frequently used commands/queries can crystallize into buttons,
+  panels, HUD widgets, or dedicated views automatically; rarely used ones can recede.
+- **Personal API.** Expose authorized pieces of Jarvis's world model and capabilities
+  through a stable local API/DSL so the user can build on top of Jarvis rather than
+  only converse with it.
+
+### Memory that returns at the useful moment
+
+- **Why-I-Saved-It Memory.** Captures preserve the user's surrounding goal/context and,
+  when inferable, the reason the item appeared relevant—not just the content itself.
+- **Contextual Resurfacing.** Stored knowledge resurfaces when it becomes relevant to a
+  current problem/person/place/decision, rather than through arbitrary "on this day"
+  reminders.
+- **Knowledge Activation Queue.** Separate "saved" from "processed/understood/applied."
+  Maintain a prioritized queue that can be consumed incrementally during appropriate
+  idle windows.
+- **Application Test for Knowledge.** For useful saved concepts, optionally ask "where
+  could this change something you currently do?" and connect knowledge to an actual
+  project, decision, procedure, or automation.
+- **Memory Utility Tracking.** Track which stored information actually gets retrieved,
+  changes decisions, or supports actions; use this to improve capture/resurfacing
+  policies without deleting provenance.
+- **Forgetting-Aware Compression.** Keep raw sources intact but maintain progressively
+  shorter high-value representations for rapid resurfacing, with links back to full
+  evidence.
+- **Spaced Resurfacing for Important Non-Tasks.** Concepts the user wants to retain can
+  reappear at expanding intervals, integrated with real context rather than requiring
+  a separate flashcard application.
+
+### Meta-Jarvis ideas prompted by the research
+
+- **Concept Importer.** Maintain a catalog of useful abstractions from other disciplines
+  (SRE, aviation, intelligence analysis, emergency management, industrial control,
+  robotics, HCI) and periodically ask whether new Jarvis subsystems should inherit
+  those patterns.
+- **Anti-Feature Detector.** Mine user behavior and public discussions not only for
+  desired features but for recurring complaints about complexity, distraction,
+  unreliability, privacy, and maintenance; encode these as design constraints.
+- **Complexity Budget.** Every new subsystem consumes explicit complexity/maintenance/
+  attention budget. Prefer a new primitive that collapses several special cases over
+  five separate features.
+- **Feature Crystallization.** Detect clusters of future.md ideas that are actually
+  manifestations of one missing primitive and propose a unifying architecture.

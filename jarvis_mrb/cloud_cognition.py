@@ -548,6 +548,45 @@ def record_cloud_result(task: PendingCloudTask, proposal: CloudProposal, metadat
     })
 
 
+def record_execution_outcome(
+    task: PendingCloudTask,
+    proposal: CloudProposal,
+    *,
+    ok: bool,
+    outcome: str,
+) -> None:
+    safe_outcome, redactions = redact_secrets(outcome)
+    _telemetry.append({
+        "at": int(time.time()),
+        "event": "execution_outcome",
+        "task_id": task.id,
+        "request_fingerprint": hashlib.sha256(task.text.encode("utf-8")).hexdigest()[:16],
+        "proposal_tool": proposal.tool,
+        "execution_ok": bool(ok),
+        "outcome_fingerprint": hashlib.sha256(safe_outcome.encode("utf-8")).hexdigest()[:16],
+        "redactions": redactions,
+    })
+
+
+def record_routing_feedback(
+    *,
+    request_fingerprint: str,
+    user_corrected: bool,
+    cloud_materially_changed_result: bool | None = None,
+    note: str = "",
+) -> None:
+    clean_note, redactions = redact_secrets(note[:500])
+    _telemetry.append({
+        "at": int(time.time()),
+        "event": "routing_feedback",
+        "request_fingerprint": request_fingerprint[:64],
+        "user_corrected": bool(user_corrected),
+        "cloud_materially_changed_result": cloud_materially_changed_result,
+        "note_fingerprint": hashlib.sha256(clean_note.encode("utf-8")).hexdigest()[:16] if clean_note else "",
+        "redactions": redactions,
+    })
+
+
 def telemetry_snapshot(limit: int = 50) -> dict[str, Any]:
     rows = list(_telemetry)[-max(1, min(limit, 200)):]
     return {

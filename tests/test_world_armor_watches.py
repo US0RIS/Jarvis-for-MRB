@@ -232,6 +232,30 @@ class WorldArmorStandingWatchTests(TestCase):
                 (watch["id"],),
             ).fetchone()[0], 0)
 
+    def test_watch_grant_forget_does_not_delete_region_samples(self):
+        watch = self.enroll(max_checks=1)
+        self.tick()
+        with patch.dict(os.environ, {
+            "JARVIS_WORLD_ARMOR_ENABLED": "0",
+            "JARVIS_WORLD_ARMOR_WATCHES_ENABLED": "0",
+        }):
+            result = watches.forget_watch(watch["id"], db_path=self.db)
+            self.assertEqual(result["deleted"], 1)
+            self.assertEqual(result["investigation_samples_deleted"], 0)
+            self.assertEqual(watches.forget_watch(
+                watch["id"], db_path=self.db,
+            )["deleted"], 0)
+        replayed = armor.replay(
+            self.region, db_path=self.db,
+            now=NOW + timedelta(minutes=1),
+        )
+        self.assertEqual(replayed["samples_retained"], 1)
+        with closing(sqlite3.connect(self.db)) as con:
+            self.assertEqual(con.execute(
+                "SELECT COUNT(*) FROM watch_receipts WHERE watch_id=?",
+                (watch["id"],),
+            ).fetchone()[0], 0)
+
     def test_does_not_start_background_thread_or_provider_on_creation(self):
         with patch("jarvis_mrb.physical_conditions.physical_conditions",
                    side_effect=AssertionError("background collection")):

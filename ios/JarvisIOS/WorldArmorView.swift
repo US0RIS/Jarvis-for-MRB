@@ -905,6 +905,52 @@ struct ArmorForgetReceipt: Decodable {
     let qualifier: String?
 }
 
+struct ArmorPushStatus: Decodable {
+    let enabled: Bool
+    let providerConfigured: Bool
+    let registeredDevices: Int
+    let pending: Int
+    let dead: Int
+    let sentRetained: Int
+    let oldestPendingAt: String?
+    let maxPending: Int
+    let maxAttempts: Int
+    let deliverySemantics: String
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, pending, dead
+        case providerConfigured = "provider_configured"
+        case registeredDevices = "registered_devices"
+        case sentRetained = "sent_retained"
+        case oldestPendingAt = "oldest_pending_at"
+        case maxPending = "max_pending"
+        case maxAttempts = "max_attempts"
+        case deliverySemantics = "delivery_semantics"
+    }
+}
+
+struct ArmorPushRegistration: Decodable {
+    let deviceID: String
+    let tokenHash: String
+    let enabled: Bool
+    let pushTransportEnabled: Bool
+    let providerConfigured: Bool
+    let tokenReflected: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case deviceID = "device_id"
+        case tokenHash = "token_hash"
+        case pushTransportEnabled = "push_transport_enabled"
+        case providerConfigured = "provider_configured"
+        case tokenReflected = "token_reflected"
+    }
+}
+
+struct ArmorPushUnregister: Decodable {
+    let disabled: Bool
+}
+
 struct ArmorFullStatus: Decodable {
     struct Layers: Decodable {
         let realityBrowser: String
@@ -1212,6 +1258,7 @@ struct WorldArmorView: View {
     @State private var movementEntityType = ""
     @State private var movementStatus = "No movement source queried."
     @State private var distributedWorkers: [ArmorDistributedWorker] = []
+    @State private var pushStatus: ArmorPushStatus?
     @State private var fullScopeStatus: ArmorFullStatus?
     @State private var realityBrowser: ArmorRealityBrowser?
     @State private var syntheticSenses: ArmorSyntheticSenses?
@@ -1918,14 +1965,24 @@ struct WorldArmorView: View {
                     }
                 }
                 Toggle(
-                    "Local notifications for warning/urgent World Armor events",
+                    "Notifications for warning/urgent World Armor events",
                     isOn: $appModel.settings.worldArmorLiveAlertsEnabled
                 )
                 Text("The durable journal replays missed events after reconnect. "
-                     + "Local notifications require iOS permission and an active "
-                     + "Jarvis connection; closed-app remote APNs is not yet claimed.")
+                     + "When APNs credentials and this signed app's push entitlement "
+                     + "are configured, warning/urgent events can also arrive while "
+                     + "the app is closed. In-app/local delivery remains a fallback.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let pushStatus {
+                    Text("Closed-app APNs: "
+                         + (pushStatus.providerConfigured ? "provider configured" : "provider not configured")
+                         + " · devices \(pushStatus.registeredDevices)"
+                         + " · pending \(pushStatus.pending)"
+                         + (pushStatus.dead > 0 ? " · dead \(pushStatus.dead)" : ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("Start live supervisor") {
                         Task { await setLiveSupervisor(running: true) }
@@ -3029,6 +3086,7 @@ struct WorldArmorView: View {
             if let fabric = try? await client.worldArmorDistributedWorkers() {
                 distributedWorkers = fabric.workers
             }
+            pushStatus = try? await client.worldArmorPushStatus()
             if let live = try? await client.worldArmorLiveStatus() {
                 liveFabricStatus = live
                 if let page = try? await client.worldArmorLiveEvents(
@@ -3092,6 +3150,7 @@ struct WorldArmorView: View {
                 afterSeq: max(0, live.latestSeq - 25), limit: 25
             )
             liveEvents = Array(page.events.reversed())
+            pushStatus = try? await client.worldArmorPushStatus()
         } catch {
             status = "Live fabric unavailable: " + error.localizedDescription
         }

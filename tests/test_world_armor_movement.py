@@ -173,7 +173,8 @@ class MovementGraphTests(unittest.TestCase):
 
     def test_stop_during_network_blocks_inflight_save(self):
         source = self.enroll_air()
-        def revoke(_source):
+        def revoke(_source, worker_id="windows"):
+            self.assertEqual(worker_id, "windows")
             movement.transition_source(
                 source["id"], "stop", db_path=self.db,
             )

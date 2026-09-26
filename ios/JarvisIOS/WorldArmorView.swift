@@ -28,6 +28,23 @@ struct ArmorCapabilities: Decodable {
     }
 }
 
+struct ArmorPublicPageMediaCandidate: Decodable, Identifiable {
+    let url: String
+    let source: String
+    let sameOrigin: Bool
+    var id: String { url }
+    enum CodingKeys: String, CodingKey {
+        case url, source
+        case sameOrigin = "same_origin"
+    }
+}
+
+struct ArmorPublicPageMedia: Decodable {
+    let status: String
+    let candidates: [ArmorPublicPageMediaCandidate]
+    let qualifier: String
+}
+
 struct ArmorPublicCamera: Decodable, Identifiable {
     let id: String
     let title: String
@@ -572,6 +589,7 @@ struct WorldArmorView: View {
     @State private var cameraReceipts: [ArmorCameraReceipt] = []
     @State private var selectedCameraRef = ""
     @State private var publicCameraURL = ""
+    @State private var publicPageMedia: [ArmorPublicPageMediaCandidate] = []
     @State private var cameraCondition = ""
     @State private var cameraWatch: ExternalWatchSummary?
     @State private var cameraStatus = "No public camera requested."

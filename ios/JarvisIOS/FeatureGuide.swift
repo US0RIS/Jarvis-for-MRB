@@ -101,7 +101,7 @@ enum JarvisFeatureCatalog {
             f("fast-perception", "Vision & Perception", "Fast structural perception", "Perform inexpensive iPhone-side visual checks.", "Optional Apple Vision requests can count detected faces/humans without identity, find rectangles, OCR text, decode codes and detect attention saliency. These are structural signals, not semantic scene understanding.", "Open Power Features and inspect Local Event Timeline.", "Enable Continuous on-device fast perception and inspect the perception summary while changing what the glasses see.", .frontendOnly, "viewfinder.circle"),
             f("visual-change", "Vision & Perception", "Visual scene-change detector", "Notice large changes between recent glasses frames.", "The iPhone compares Apple Vision image feature prints over time and records a local visual-change event when the whole-frame distance crosses your threshold. It intentionally does not claim which semantic object changed.", "Jarvis, what changed visually?", "Enable Detect major visual scene changes, look at one scene, then turn toward a substantially different scene and ask the example.", .frontendOnly, "rectangle.2.swap"),
             f("passive-vision", "Vision & Perception", "Backend passive vision transport", "Sample Ray-Ban frames for PC-side Moondream analysis.", "When Passive vision is enabled, the iPhone sends sampled frames to the authenticated PC path. Remote/Tailscale mode reduces frame rate/resolution to conserve bandwidth.", "Open Persistent Presence and inspect Passive vision status.", "Enable Passive vision and verify the Ray-Ban stream and backend receive/analyze status change. This transport can work even though the separate conversational recent-frame recall bug is pending deployment.", .ready, "eye.fill", runnable: false),
-            f("live-scene-pending", "Vision & Perception", "General ‘what can you see?’ conversational scene recall", "Backend fix exists in the repository but is not deployed on the user’s current PC.", "The recent-frame Moondream path was corrected in source to avoid multi-image requests, but because the Windows backend cannot currently be updated/tested, this feature must not be counted as implemented on the running system.", "Jarvis, what can you see right now?", "Do not use this as a pass/fail test until the PC backend is updated. After deployment, verify a fresh-frame question and a recent-history question separately.", .pendingBackend, "eye.trianglebadge.exclamationmark", runnable: false),
+            f("live-scene-pending", "Vision & Perception", "General ‘what can you see?’ conversational scene recall", "The backend fix is now deployed, but real camera/model acceptance is still required.", "The recent-frame Moondream path was corrected in source to avoid multi-image requests and is present on the current backend. A source deployment is not proof that the physical Ray-Bans → iPhone → PC → vision-model path works on this installation.", "Jarvis, what can you see right now?", "With the Ray-Bans connected and camera enabled, ask for the current scene and separately ask about recent visual history. Treat this as passed only after real fresh-frame/model output is observed.", .ready, "eye.trianglebadge.exclamationmark", runnable: false),
             f("spatial-last-seen", "Vision & Perception", "Backend spatial last-seen memory", "Remember conservative object sightings from PC vision.", "The existing backend can store last-seen scene/context records for portable objects. It is evidence-based scene memory, not a precise 3D map or navigation system.", "Jarvis, where did I last see my keys?", "Ask about an object previously observed by the backend and confirm the answer refers to a recorded sighting rather than inventing a location.", .ready, "mappin.and.ellipse")
         ]
 
@@ -241,9 +241,9 @@ enum JarvisFeatureCatalog {
             f("packs-tab", "Capability Architecture", "Packs diagnostics tab", "Inspect the capability registry, quality system and routing tests from the iPhone.", "The third main app tab shows registered packs, last routing decision, camera-gate state, semantic-audit control, canonical regression results and encrypted execution receipts.", "Open the Packs tab.", "Verify the registry and regression controls are visible and that a new local request updates Last decision/receipts.", .frontendOnly, "square.stack.3d.up.fill", runnable: false)
         ]
 
-        // MARK: Backend source changes waiting for deployment
+        // MARK: Backend planner guardrails
         x += [
-            f("backend-tool-necessity-pending", "Backend Update Pending", "Backend direct-answer / tool-necessity gate", "Reduce unnecessary tool use after the Windows server can be updated.", "Backend source now tells the planner that tools are the exception: answer ordinary knowledge, reasoning, arithmetic and supplied date/time directly; use tools only when they add information or perform an action. A post-plan necessity gate can reject obviously mismatched tool calls such as inspecting Clock.app for ‘What time is it in DC?’. The user currently cannot update the Windows server, so this source change must remain marked pending deployment.", "Jarvis, what time is it in DC?", "Do not judge this backend gate until the Windows PC is updated/restarted. In the meantime the iPhone deterministic local utility should already answer this particular example without the backend.", .pendingBackend, "wrench.and.screwdriver.fill", runnable: false)
+            f("backend-tool-necessity-pending", "Backend Planner", "Backend direct-answer / tool-necessity gate", "Reduce unnecessary tool use on the deployed Windows backend.", "The current backend tells the planner that tools are the exception: ordinary knowledge/reasoning should be answered directly, while tools are used only when they add information or perform an action. The source is deployed; live planner behavior still needs an end-to-end model test rather than a routing-only simulation.", "Explain why ice floats in one sentence.", "Run a harmless ordinary knowledge question that reaches the backend planner and verify the response is a direct answer with no unrelated tool execution.", .ready, "wrench.and.screwdriver.fill", runnable: false)
         ]
 
         // MARK: Explicit limits
@@ -410,6 +410,7 @@ private struct FeatureDetailView: View {
 private enum FullAcceptanceState: String {
     case pass = "PASS"
     case simulated = "SIM PASS"
+    case unverified = "UNVERIFIED"
     case expectedFail = "EXPECTED FAIL"
     case manual = "MANUAL"
     case blocked = "BLOCKED"
@@ -419,6 +420,7 @@ private enum FullAcceptanceState: String {
         switch self {
         case .pass: return "checkmark.seal.fill"
         case .simulated: return "checkmark.circle.fill"
+        case .unverified: return "questionmark.diamond.fill"
         case .expectedFail: return "shield.lefthalf.filled.badge.checkmark"
         case .manual: return "hand.raised.fill"
         case .blocked: return "exclamationmark.triangle.fill"
@@ -511,6 +513,7 @@ private struct FullFeatureAcceptanceView: View {
                 Section("Summary") {
                     LabeledContent("Catalog entries", value: String(featureResults.count))
                     LabeledContent("Simulation passed", value: String(counts[.simulated] ?? 0))
+                    LabeledContent("Unverified planner fallback", value: String(counts[.unverified] ?? 0))
                     LabeledContent("Manual/live acceptance", value: String(counts[.manual] ?? 0))
                     LabeledContent("Blocked", value: String(counts[.blocked] ?? 0))
                     LabeledContent("Failed", value: String(counts[.fail] ?? 0))
@@ -760,11 +763,11 @@ private struct FullFeatureAcceptanceView: View {
                         title: feature.title,
                         category: feature.category,
                         prompt: feature.examplePrompt,
-                        state: .simulated,
+                        state: row.mode == "deterministic" ? .simulated : .unverified,
                         route: route,
                         detail: row.mode == "deterministic"
                             ? "Backend deterministic dispatcher recognized this prompt. The tool/direct answer was not executed."
-                            : "Prompt cleanly falls through to the backend model-planner path. The model itself was not invoked and no tool was executed."
+                            : "The prompt only reached the generic backend model-planner boundary. Because the model was not invoked and no feature-specific behavior was observed, this is not evidence that the cataloged feature works."
                     )
                 }
             } catch {

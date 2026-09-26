@@ -13,6 +13,7 @@ on:
       - jarvis/world-armor-standing-watches
       - jarvis/world-armor-attention-inbox
       - jarvis/world-armor-global-public-cameras
+      - jarvis/world-armor-open-observation-platform
   pull_request:
     paths:
       - "ios/**"
@@ -80,6 +81,10 @@ jobs:
         run: python -m unittest discover -s tests -p "test_world_armor_attention.py" -v
       - name: Verify global public camera source and evidence boundaries
         run: python -m unittest discover -s tests -p "test_world_armor_global_cameras.py" -v
+      - name: Verify source-scoped open observation platform and consent/revocation
+        run: python -m unittest discover -s tests -p "test_world_armor_platform.py" -v
+      - name: Verify combined source graph retains unknown camera capture time
+        run: python -m unittest discover -s tests -p "test_world_armor_graph_platform.py" -v
       - name: Verify durable opt-in Reality Graph missions and no-model answers
         run: python -m unittest discover -s tests -p "test_reality_graph_missions.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback

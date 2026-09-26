@@ -85,8 +85,10 @@ Cloud output is untrusted proposal data. It is never itself a permission grant.
 `compile_cloud_context`:
 
 - includes the current request;
-- includes at most the most recent eight relevant user/assistant messages;
+- considers at most the most recent eight user/assistant messages, always preserves the immediately preceding exchange for follow-up resolution, and requires older nearby messages to have deterministic lexical relevance to the current request;
 - excludes messages marked `[local-only]` / `[local_only]`;
+- excludes `[sensitive]` context by default unless it is explicitly paired with `[cloud-ok]`;
+- recognizes `[cloud-safe]` and `[cloud-minimize]` classifications, with a smaller transmission budget for explicitly minimized/sensitive-approved material;
 - accepts source-labelled evidence with observed time, staleness and uncertainty fields;
 - excludes evidence explicitly classified local-only;
 - deterministically redacts API keys, passwords, bearer/auth tokens, private keys and common secret formats;
@@ -159,6 +161,7 @@ Authenticated backend endpoints:
 - `GET /cloud-cognition/status`
 - `POST /cloud-cognition/prepare`
 - `POST /cloud-cognition/resolve`
+- `POST /cloud-cognition/feedback`
 
 The normal app does not send its Groq credential to these endpoints.
 

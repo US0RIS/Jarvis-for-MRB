@@ -47,20 +47,24 @@ def physical_awareness(
     latitude: float, longitude: float, *, windy_api_key: str | None = None
 ) -> dict[str, Any]:
     from jarvis_mrb.physical_conditions import physical_conditions
-    from jarvis_mrb.public_camera_catalog import discover_combined_public_cameras
+    from jarvis_mrb.public_camera_catalog import (
+        discover_combined_public_cameras,
+        discover_public_cameras,
+    )
     from jarvis_mrb.public_facilities import nearby_mapped_facilities
     from jarvis_mrb.public_incidents import regional_earthquakes
 
     _validate_position(latitude, longitude)
+    camera_discovery = discover_public_cameras
+    if str(windy_api_key or "").strip():
+        camera_discovery = lambda lat, lon: discover_combined_public_cameras(
+            lat, lon, radius_km=10, limit=8, windy_api_key=windy_api_key,
+        )
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
             "cameras": pool.submit(
-                _safe_call,
-                lambda lat, lon: discover_combined_public_cameras(
-                    lat, lon, radius_km=10, limit=8,
-                    windy_api_key=windy_api_key,
-                ),
-                "camera catalog", latitude, longitude,
+                _safe_call, camera_discovery, "camera catalog",
+                latitude, longitude,
             ),
             "conditions": pool.submit(_safe_call, physical_conditions, "environmental data", latitude, longitude),
             "facilities": pool.submit(_safe_call, nearby_mapped_facilities, "public mapping", latitude, longitude),

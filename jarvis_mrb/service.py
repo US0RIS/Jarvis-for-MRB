@@ -261,6 +261,10 @@ class WorldArmorCameraInspectRequest(BaseModel):
 class WorldArmorCameraReceiptIdRequest(BaseModel):
     receipt_id: str
 
+
+class WorldArmorPublicPageRequest(BaseModel):
+    public_url: str
+
 class WorldArmorCorrelationRequest(BaseModel):
     investigation_id: str
     start_at: str
@@ -1026,6 +1030,23 @@ def world_armor_notice_forget(
     from jarvis_mrb.world_armor_attention import forget_notice
     try:
         return forget_notice(request.notice_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/page-media")
+def world_armor_camera_page_media(
+    request: WorldArmorPublicPageRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import _authorize_camera
+    from jarvis_mrb.public_camera_media import discover_public_page_media
+    try:
+        _authorize_camera()
+        return discover_public_page_media(request.public_url)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
 

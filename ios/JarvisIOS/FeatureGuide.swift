@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -263,6 +264,7 @@ enum JarvisFeatureCatalog {
 
 struct FeatureGuideView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
+    @EnvironmentObject private var architecture: CapabilityArchitectureController
     @State private var searchText = ""
     @State private var selectedCategory = "All"
 
@@ -285,6 +287,17 @@ struct FeatureGuideView: View {
 
     var body: some View {
         List {
+            Section("Acceptance") {
+                NavigationLink {
+                    FullFeatureAcceptanceView()
+                } label: {
+                    Label("Run Full Feature Acceptance", systemImage: "checkmark.seal.fill")
+                }
+                Text("One button simulates every cataloged prompt without executing writes, then runs live backend/Groq checks and isolated World Model, Agency, and cognition acceptance suites. Hardware/provider features remain explicitly marked as requiring real-world acceptance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Category", selection: $selectedCategory) {
                     ForEach(categories, id: \.self) { Text($0).tag($0) }
@@ -390,5 +403,373 @@ private struct FeatureDetailView: View {
         }
         .navigationTitle("Feature")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+
+private enum FullAcceptanceState: String {
+    case pass = "PASS"
+    case simulated = "SIM PASS"
+    case manual = "MANUAL"
+    case blocked = "BLOCKED"
+    case fail = "FAIL"
+
+    var symbol: String {
+        switch self {
+        case .pass: return "checkmark.seal.fill"
+        case .simulated: return "checkmark.circle.fill"
+        case .manual: return "hand.raised.fill"
+        case .blocked: return "exclamationmark.triangle.fill"
+        case .fail: return "xmark.octagon.fill"
+        }
+    }
+}
+
+private struct FullAcceptanceFeatureResult: Identifiable {
+    let id: String
+    let title: String
+    let category: String
+    let prompt: String
+    let state: FullAcceptanceState
+    let route: String
+    let detail: String
+}
+
+private struct FullAcceptanceSystemResult: Identifiable {
+    let id: String
+    let title: String
+    let state: FullAcceptanceState
+    let detail: String
+}
+
+private struct FullFeatureAcceptanceView: View {
+    @EnvironmentObject private var appModel: JarvisAppModel
+    @EnvironmentObject private var architecture: CapabilityArchitectureController
+
+    @State private var running = false
+    @State private var progressText = "Not run"
+    @State private var featureResults: [FullAcceptanceFeatureResult] = []
+    @State private var systemResults: [FullAcceptanceSystemResult] = []
+    @State private var lastRun: Date?
+    @State private var copied = false
+
+    private var client: JarvisAPIClient {
+        JarvisAPIClient(
+            baseURL: appModel.settings.baseURL,
+            fallbackBaseURL: appModel.settings.fallbackBaseURL,
+            apiToken: appModel.settings.apiToken,
+            sessionID: appModel.settings.conversationSessionID
+        )
+    }
+
+    private var counts: [FullAcceptanceState: Int] {
+        Dictionary(grouping: featureResults, by: \.state).mapValues(\.count)
+    }
+
+    var body: some View {
+        List {
+            Section("Run") {
+                Button {
+                    Task { await runAll() }
+                } label: {
+                    Label(running ? "Running Full Acceptance…" : "Run Every Feature Test", systemImage: "play.circle.fill")
+                }
+                .disabled(running)
+
+                if running {
+                    ProgressView()
+                    Text(progressText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let lastRun {
+                    Text("Last run: \(lastRun.formatted(date: .abbreviated, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("This suite never sends email, creates calendar/reminder writes, launches apps, changes HomeKit, moves physical hardware, or spends a model-proposed action grant. It simulates prompt routing, performs safe live connectivity/provider checks, and runs isolated backend acceptance harnesses.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !featureResults.isEmpty {
+                Section("Summary") {
+                    LabeledContent("Catalog entries", value: String(featureResults.count))
+                    LabeledContent("Simulation passed", value: String(counts[.simulated] ?? 0))
+                    LabeledContent("Manual/live acceptance", value: String(counts[.manual] ?? 0))
+                    LabeledContent("Blocked", value: String(counts[.blocked] ?? 0))
+                    LabeledContent("Failed", value: String(counts[.fail] ?? 0))
+
+                    Button {
+                        UIPasteboard.general.string = reportText
+                        copied = true
+                    } label: {
+                        Label(copied ? "Report Copied" : "Copy Full Report", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                }
+            }
+
+            if !systemResults.isEmpty {
+                Section("System acceptance") {
+                    ForEach(systemResults) { result in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label(result.state.rawValue, systemImage: result.state.symbol)
+                                .font(.caption.bold())
+                            Text(result.title).font(.headline)
+                            Text(result.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+
+            if !featureResults.isEmpty {
+                ForEach(Dictionary(grouping: featureResults, by: \.category).keys.sorted(), id: \.self) { category in
+                    Section(category) {
+                        ForEach((Dictionary(grouping: featureResults, by: \.category)[category] ?? [])) { result in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Label(result.state.rawValue, systemImage: result.state.symbol)
+                                        .font(.caption.bold())
+                                    Spacer()
+                                    if !result.route.isEmpty {
+                                        Text(result.route)
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(result.title).font(.headline)
+                                if !result.prompt.isEmpty {
+                                    Text(result.prompt)
+                                        .font(.caption.monospaced())
+                                        .lineLimit(3)
+                                }
+                                Text(result.detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Full Acceptance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @MainActor
+    private func runAll() async {
+        running = true
+        copied = false
+        featureResults = []
+        systemResults = []
+        defer {
+            running = false
+            lastRun = Date()
+            progressText = "Complete"
+        }
+
+        progressText = "Checking iPhone capability router…"
+        architecture.router.runRegressionSuite()
+        let routeRegressions = architecture.router.regressionResults
+        let routeFailures = routeRegressions.filter { !$0.passed }
+        systemResults.append(.init(
+            id: "iphone-routing",
+            title: "iPhone capability routing regression",
+            state: routeFailures.isEmpty ? .pass : .fail,
+            detail: routeFailures.isEmpty
+                ? "\(routeRegressions.count)/\(routeRegressions.count) canonical route/quality cases passed."
+                : "\(routeFailures.count) failed: " + routeFailures.map(\.prompt).joined(separator: "; ")
+        ))
+
+        progressText = "Checking live backend…"
+        do {
+            let healthy = try await client.health()
+            systemResults.append(.init(
+                id: "backend-health",
+                title: "Windows backend live health",
+                state: healthy ? .pass : .fail,
+                detail: healthy ? "Authenticated iPhone request reached the configured Jarvis backend." : "Backend returned an unhealthy response."
+            ))
+        } catch {
+            systemResults.append(.init(
+                id: "backend-health",
+                title: "Windows backend live health",
+                state: .fail,
+                detail: error.localizedDescription
+            ))
+        }
+
+        progressText = "Simulating every cataloged prompt…"
+        var provisional: [String: FullAcceptanceFeatureResult] = [:]
+        var backendItems: [(id: String, text: String)] = []
+
+        for feature in JarvisFeatureCatalog.all {
+            if feature.status == .pendingBackend {
+                provisional[feature.id] = .init(
+                    id: feature.id,
+                    title: feature.title,
+                    category: feature.category,
+                    prompt: feature.examplePrompt,
+                    state: .blocked,
+                    route: "",
+                    detail: "Catalog marks this feature as pending backend deployment; it is not counted as working."
+                )
+                continue
+            }
+
+            if !feature.runnable {
+                provisional[feature.id] = .init(
+                    id: feature.id,
+                    title: feature.title,
+                    category: feature.category,
+                    prompt: feature.examplePrompt,
+                    state: .manual,
+                    route: "",
+                    detail: "The catalog intentionally marks this as a setup, UI, side-effect, hardware, or platform-boundary verification. It is included in the report but not auto-executed."
+                )
+                continue
+            }
+
+            let route = architecture.router.previewRoute(for: feature.examplePrompt)
+            if route != "backend" {
+                provisional[feature.id] = .init(
+                    id: feature.id,
+                    title: feature.title,
+                    category: feature.category,
+                    prompt: feature.examplePrompt,
+                    state: .simulated,
+                    route: route,
+                    detail: "Prompt was accepted by the real iPhone capability router in dry-run mode. No handler/write was executed."
+                )
+            } else {
+                backendItems.append((feature.id, feature.examplePrompt))
+            }
+        }
+
+        if !backendItems.isEmpty {
+            do {
+                let preview = try await client.acceptancePreviewBatch(backendItems)
+                let byID = Dictionary(uniqueKeysWithValues: preview.items.map { ($0.id, $0) })
+                for feature in JarvisFeatureCatalog.all where provisional[feature.id] == nil {
+                    guard let row = byID[feature.id] else {
+                        provisional[feature.id] = .init(
+                            id: feature.id, title: feature.title, category: feature.category,
+                            prompt: feature.examplePrompt, state: .fail, route: "",
+                            detail: "Backend preview returned no row for this feature."
+                        )
+                        continue
+                    }
+                    let route = row.mode == "deterministic"
+                        ? [row.mode, row.family, row.tool].compactMap { $0 }.joined(separator: " → ")
+                        : "model_planner"
+                    provisional[feature.id] = .init(
+                        id: feature.id,
+                        title: feature.title,
+                        category: feature.category,
+                        prompt: feature.examplePrompt,
+                        state: .simulated,
+                        route: route,
+                        detail: row.mode == "deterministic"
+                            ? "Backend deterministic dispatcher recognized this prompt. The tool/direct answer was not executed."
+                            : "Prompt cleanly falls through to the backend model-planner path. The model itself was not invoked and no tool was executed."
+                    )
+                }
+            } catch {
+                for feature in JarvisFeatureCatalog.all where provisional[feature.id] == nil {
+                    provisional[feature.id] = .init(
+                        id: feature.id,
+                        title: feature.title,
+                        category: feature.category,
+                        prompt: feature.examplePrompt,
+                        state: .fail,
+                        route: "backend",
+                        detail: "Backend dry-run preview failed: \(error.localizedDescription)"
+                    )
+                }
+            }
+        }
+
+        featureResults = JarvisFeatureCatalog.all.compactMap { provisional[$0.id] }
+
+        progressText = "Running isolated backend acceptance…"
+        do {
+            let synthetic = try await client.syntheticAcceptance()
+            systemResults.append(sectionResult(
+                id: "world-synthetic", title: "World Model fixed-endpoint synthetic acceptance", section: synthetic.world
+            ))
+            systemResults.append(sectionResult(
+                id: "agency-synthetic", title: "Agency A1–A12 synthetic acceptance", section: synthetic.agency
+            ))
+            systemResults.append(sectionResult(
+                id: "cognition-synthetic", title: "Cloud/local cognition routing benchmark", section: synthetic.cognition
+            ))
+        } catch {
+            systemResults.append(.init(
+                id: "backend-synthetic",
+                title: "Backend isolated acceptance harnesses",
+                state: .fail,
+                detail: error.localizedDescription
+            ))
+        }
+
+        progressText = "Checking Groq provider…"
+        if let key = appModel.settings.groqAPIKeyForRequest() {
+            let groq = await client.testGroqConnection(apiKey: key)
+            systemResults.append(.init(
+                id: "groq",
+                title: "Groq GPT-OSS 120B live provider check",
+                state: groq.state == "available" ? .pass : .fail,
+                detail: "\(groq.state): \(groq.detail)"
+            ))
+        } else {
+            systemResults.append(.init(
+                id: "groq",
+                title: "Groq GPT-OSS 120B live provider check",
+                state: .manual,
+                detail: "No Groq API key is stored on this iPhone. Cloud cognition remains a setup-dependent capability."
+            ))
+        }
+    }
+
+    private func sectionResult(
+        id: String,
+        title: String,
+        section: SyntheticAcceptanceSection
+    ) -> FullAcceptanceSystemResult {
+        FullAcceptanceSystemResult(
+            id: id,
+            title: title,
+            state: section.ok ? .pass : .fail,
+            detail: section.ok
+                ? "\(section.passed)/\(section.total) isolated checks passed."
+                : "\(section.passed)/\(section.total) passed. Failures: " + section.failed.joined(separator: "; ")
+        )
+    }
+
+    private var reportText: String {
+        var lines = [
+            "JARVIS FULL FEATURE ACCEPTANCE",
+            "Generated: \((lastRun ?? Date()).formatted(date: .numeric, time: .standard))",
+            "",
+            "SYSTEM"
+        ]
+        for result in systemResults {
+            lines.append("[\(result.state.rawValue)] \(result.title) — \(result.detail)")
+        }
+        lines.append("")
+        lines.append("FEATURES")
+        for result in featureResults {
+            lines.append("[\(result.state.rawValue)] \(result.category) / \(result.title)")
+            if !result.route.isEmpty { lines.append("  route: \(result.route)") }
+            if !result.prompt.isEmpty { lines.append("  prompt: \(result.prompt)") }
+            lines.append("  \(result.detail)")
+        }
+        return lines.joined(separator: "\n")
     }
 }

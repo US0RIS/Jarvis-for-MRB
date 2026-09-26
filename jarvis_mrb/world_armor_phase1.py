@@ -302,9 +302,11 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     if alert_status in {"ok", "partial"} and not isinstance(alerts.get("alerts"), list):
         alert_status = "unavailable"
     count = 0
+    alert_invalid = False
     if alert_status in {"ok", "partial"} and isinstance(alerts.get("alerts"), list):
         for a in alerts["alerts"][:15]:
             if not isinstance(a, dict) or not str(a.get("id") or ""):
+                alert_invalid = True
                 continue
             identifier = str(a["id"])[:300]
             collected.append({
@@ -321,7 +323,7 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "nws_point_alerts",
-        "status": ("partial" if alert_status in {"ok", "partial"} and alert_truncated else
+        "status": ("partial" if alert_status in {"ok", "partial"} and (alert_truncated or alert_invalid) else
                    alert_status if alert_status in {"ok","partial","unavailable","unsupported_region"}
                    else "unavailable"),
         "checked_at": _timestamp(alerts.get("checked_at"))
@@ -334,16 +336,20 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     if quake_status in {"ok", "partial"} and not isinstance(quake.get("events"), list):
         quake_status = "unavailable"
     count = 0
+    quake_invalid = False
     if quake_status in {"ok", "partial"} and isinstance(quake.get("events"), list):
         for q in quake["events"][:50]:
             if not isinstance(q, dict):
+                quake_invalid = True
                 continue
             event_time = _timestamp(q.get("occurred_at"))
             key = str(q.get("id") or "")
             mag = q.get("magnitude")
             if not key or not event_time or type(mag) not in (int, float) or not math.isfinite(mag):
+                quake_invalid = True
                 continue
             if datetime.fromisoformat(event_time) > received + timedelta(seconds=30):
+                quake_invalid = True
                 continue
             qlat, qlon = q.get("latitude"), q.get("longitude")
             has_epicenter = (
@@ -373,7 +379,7 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "usgs_earthquakes",
-        "status": ("partial" if quake_status in {"ok", "partial"} and quake_truncated else
+        "status": ("partial" if quake_status in {"ok", "partial"} and (quake_truncated or quake_invalid) else
                    quake_status if quake_status in {"ok","partial","unavailable"} else "unavailable"),
         "checked_at": _timestamp(quake.get("checked_at")) or checked,
         "count": count, "scope": "USGS within selected radius / last 24h / M>=2.5; not all incidents",

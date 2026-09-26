@@ -97,6 +97,20 @@ evidence, as in Phase 1.
   `sample_degraded_or_partial`. It is never a physical "all-clear."
   Collection failures are labelled, and no successful observation is
   fabricated. No push message is sent.
+- Each saved watch receipt also has a deterministic **source comparison**
+  against the two latest retained samples in that exact region. Possible
+  classifications include `baseline_or_incomparable_receipts`,
+  `retained_source_report_delta`,
+  `no_report_delta_in_two_receipts_not_all_clear`, and
+  `coverage_degraded_or_unknown`. The comparison reuses the Phase 1
+  read-only `compare_recent` contract; a source revision or changed
+  modelled AQI value is NOT a verified change in physical conditions,
+  and a first-received report is NOT necessarily a new event. If a
+  foreground sample interleaves the watch receipts, the comparison is
+  between the latest retained investigation samples, not claimed to be
+  exclusively between two automated ticks. No-alert/unchanged is never
+  translated to "safe." The iPhone/iPad management panel displays the
+  persisted comparison label without creating a notification.
 - An expired region deletes watch rows with its child rows the next time
   the existing store pruning path runs. Merely passing a watch's own TTL
   changes its watch state to expired; it need not immediately delete

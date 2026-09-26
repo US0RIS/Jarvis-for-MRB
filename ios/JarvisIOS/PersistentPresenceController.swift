@@ -301,67 +301,12 @@ final class PersistentPresenceController: ObservableObject {
     }
 
     private func syncWorldArmorRemotePushIfNeeded(force: Bool = false) async {
-        let now = Date()
-        guard force || now.timeIntervalSince(lastWorldArmorPushSync) >= 30 else {
-            return
-        }
-        lastWorldArmorPushSync = now
-        let defaults = UserDefaults.standard
-        let backendTokenKey = "jarvis.worldArmorPush.backendRegisteredToken"
-        let token = defaults.string(
-            forKey: WorldArmorPushAppDelegate.tokenKey
-        )?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let persistedBackendToken = defaults.string(
-            forKey: backendTokenKey
-        )?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard appModel.settings.worldArmorLiveAlertsEnabled else {
-            if let persistedBackendToken, !persistedBackendToken.isEmpty {
-                let result = try? await client.worldArmorPushUnregister(
-                    persistedBackendToken
-                )
-                if result?.disabled == true {
-                    defaults.removeObject(forKey: backendTokenKey)
-                }
-            }
-            registeredWorldArmorPushToken = nil
-            return
-        }
-
-        let center = UNUserNotificationCenter.current()
-        var settings = await center.notificationSettings()
-        if settings.authorizationStatus == .notDetermined {
-            _ = try? await center.requestAuthorization(
-                options: [.alert, .sound, .badge]
-            )
-            settings = await center.notificationSettings()
-        }
-        guard settings.authorizationStatus == .authorized
-                || settings.authorizationStatus == .provisional
-                || settings.authorizationStatus == .ephemeral else {
-            return
-        }
-
-        UIApplication.shared.registerForRemoteNotifications()
-        guard let token, !token.isEmpty else { return }
-        guard force || registeredWorldArmorPushToken != token else { return }
-        do {
-            let registration = try await client.worldArmorPushRegister(token)
-            if registration.enabled {
-                if let persistedBackendToken,
-                   !persistedBackendToken.isEmpty,
-                   persistedBackendToken != token {
-                    _ = try? await client.worldArmorPushUnregister(
-                        persistedBackendToken
-                    )
-                }
-                defaults.set(token, forKey: backendTokenKey)
-                registeredWorldArmorPushToken = token
-            }
-        } catch {
-            // Reconnect loop retries. Local/live-socket notification delivery
-            // remains available and the durable event journal is authoritative.
-        }
+        // LITE / Personal Team build: APNs is intentionally unavailable because
+        // Apple Personal Teams cannot provision the Push Notifications entitlement.
+        // Keep this call site as a no-op so reconnect/start logic remains identical.
+        // In-app/local notification delivery and durable journal replay still work.
+        _ = force
+        registeredWorldArmorPushToken = nil
     }
 
     private var usingRemotePath: Bool {

@@ -129,6 +129,20 @@ class WorldArmorAttentionTests(TestCase):
         self.assertEqual(third["notices_created"], 0)
         self.assertEqual(self.inbox()["unread_count"], 1)
 
+    def test_first_watch_tick_baselines_even_after_a_foreground_receipt(self):
+        self.enroll("modelled_aqi_threshold_crossed", 100, checks=2)
+        with patch.object(armor, "_clock", return_value=NOW), \
+             patch("jarvis_mrb.physical_conditions.physical_conditions",
+                   return_value=conditions(NOW, aqi=43)), \
+             patch("jarvis_mrb.public_incidents.regional_earthquakes",
+                   return_value=quakes(NOW)):
+            armor.observe_once(self.region, db_path=self.db)
+        moment = NOW + timedelta(minutes=30)
+        result = self.tick(moment, air=conditions(moment, aqi=115))
+        self.assertEqual(result["attention_state"], "watch_baseline")
+        self.assertEqual(result["notices_created"], 0)
+        self.assertEqual(self.inbox()["unread_count"], 0)
+
     def test_aqi_freshness_and_partial_coverage_prevent_notice(self):
         self.enroll("modelled_aqi_threshold_crossed", 100, checks=2)
         self.tick(NOW)

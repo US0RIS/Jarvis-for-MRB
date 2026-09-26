@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from typing import Annotated, Any
@@ -78,6 +82,15 @@ _world_armor_guard_started = False
 class CommandRequest(BaseModel):
     text: str
     session_id: str | None = None
+
+
+class AcceptancePreviewItem(BaseModel):
+    id: str
+    text: str
+
+
+class AcceptancePreviewBatchRequest(BaseModel):
+    items: list[AcceptancePreviewItem]
 
 
 class CloudCognitionPrepareRequest(BaseModel):
@@ -898,6 +911,164 @@ def model_routing_status(
     _check_auth(authorization)
     from jarvis_mrb.deterministic_dispatch import routing_status
     return routing_status()
+
+
+@app.post("/acceptance/preview-batch")
+def acceptance_preview_batch(
+    request: AcceptancePreviewBatchRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Pure prompt-routing preview. Never executes tools, writes, or a model."""
+    _check_auth(authorization)
+    if len(request.items) > 300:
+        raise HTTPException(status_code=400, detail="At most 300 acceptance prompts may be previewed at once.")
+    from jarvis_mrb.deterministic_dispatch import dispatch
+
+    rows: list[dict[str, Any]] = []
+    for item in request.items:
+        text = item.text.strip()
+        if not text:
+            rows.append({
+                "id": item.id,
+                "mode": "invalid",
+                "family": "invalid",
+                "tool": None,
+                "has_direct_answer": False,
+                "side_effects_executed": False,
+            })
+            continue
+        route = dispatch(text)
+        if route is None:
+            rows.append({
+                "id": item.id,
+                "mode": "model_planner",
+                "family": "model_planner",
+                "tool": None,
+                "has_direct_answer": False,
+                "side_effects_executed": False,
+            })
+        else:
+            rows.append({
+                "id": item.id,
+                "mode": "deterministic",
+                "family": route.family,
+                "tool": route.tool or None,
+                "has_direct_answer": bool(route.answer),
+                "side_effects_executed": False,
+            })
+    return {
+        "ok": True,
+        "mode": "dry_run",
+        "side_effects_executed": False,
+        "items": rows,
+    }
+
+
+def _run_acceptance_subprocess(module: str, *, compact: bool = False) -> dict[str, Any]:
+    """Run synthetic acceptance outside the live server process and deployed APPDATA."""
+    args = [sys.executable, "-m", module]
+    if compact:
+        args.append("--compact")
+    with tempfile.TemporaryDirectory(prefix="jarvis-acceptance-") as isolated_appdata:
+        env = dict(os.environ)
+        env["APPDATA"] = isolated_appdata
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "ok": False,
+                "failed_checks": [{"name": f"{module} process failed: {exc}"}],
+            }
+    try:
+        payload = json.loads(proc.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return {
+            "ok": False,
+            "failed_checks": [{
+                "name": (
+                    f"{module} returned non-JSON output"
+                    + (f": {proc.stderr[:500]}" if proc.stderr else "")
+                )
+            }],
+        }
+    if not isinstance(payload, dict):
+        return {"ok": False, "failed_checks": [{"name": f"{module} returned an invalid payload"}]}
+    return payload
+
+
+@app.post("/acceptance/synthetic")
+def acceptance_synthetic(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Run isolated acceptance in child processes; never retarget live server globals."""
+    _check_auth(authorization)
+    from jarvis_mrb.cognitive_benchmark import evaluate as evaluate_cognition
+
+    world = _run_acceptance_subprocess("jarvis_mrb.world_acceptance_check", compact=True)
+    agency = _run_acceptance_subprocess("jarvis_mrb.agency_acceptance_check")
+    cognition = evaluate_cognition()
+
+    world_criteria = world.get("criteria") or {}
+    world_passed = sum(1 for value in world_criteria.values() if bool((value or {}).get("passed")))
+    world_total = len(world_criteria)
+    world_failed = [
+        str(item.get("name") or "unnamed world check")
+        for item in (world.get("failed_checks") or [])
+    ][:50]
+
+    agency_gates = agency.get("synthetic_gate_results") or {}
+    agency_passed = sum(
+        1 for value in agency_gates.values()
+        if bool((value or {}).get("synthetic_passed"))
+    )
+    agency_total = len(agency_gates)
+    agency_failed = [
+        str(item.get("name") or "unnamed agency check")
+        for item in (agency.get("failed_checks") or [])
+    ][:50]
+
+    cognition_total = int(cognition.get("total") or 0)
+    cognition_passed = int(cognition.get("matched") or 0)
+    cognition_failed = [
+        str(row.get("category") or "unnamed cognition case")
+        for row in (cognition.get("rows") or [])
+        if not bool(row.get("matched"))
+    ][:50]
+
+    result = {
+        "world": {
+            "ok": bool(world.get("ok")),
+            "passed": world_passed,
+            "total": world_total,
+            "failed": world_failed,
+        },
+        "agency": {
+            "ok": bool(agency.get("ok")),
+            "passed": agency_passed,
+            "total": agency_total,
+            "failed": agency_failed,
+        },
+        "cognition": {
+            "ok": cognition_total == cognition_passed,
+            "passed": cognition_passed,
+            "total": cognition_total,
+            "failed": cognition_failed,
+        },
+    }
+    return {
+        "ok": all(section["ok"] for section in result.values()),
+        "mode": "synthetic_isolated",
+        "mutates_user_data": False,
+        "uses_external_services": False,
+        **result,
+    }
 
 
 @app.get("/health")

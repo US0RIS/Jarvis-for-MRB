@@ -1365,6 +1365,199 @@ struct WorldArmorView: View {
         }
     }
 
+    private var movementConsole: some View {
+        GroupBox("World Armor v3 · planetary movement graph") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Public aircraft and vessel state becomes typed movement "
+                     + "evidence: entity → position → heading/speed → source "
+                     + "time → bounded local history. Transport identifiers "
+                     + "are not treated as people, owners or passenger records.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Movement provider", selection: $movementKind) {
+                    Text("OpenSky · selected region").tag("opensky_region")
+                    Text("OpenSky · provider-global").tag("opensky_global")
+                    Text("AISStream · selected region").tag("aisstream_region")
+                }
+                .pickerStyle(.menu)
+                TextField("Source label", text: $movementLabel)
+                Picker("Declared source permission",
+                       selection: $movementGrantClass) {
+                    Text("Publisher/public data terms").tag("public_publisher")
+                    Text("My API/license contract").tag("api_contract")
+                    Text("Owned or explicitly authorized").tag("owned_or_authorized")
+                }
+                .pickerStyle(.menu)
+                TextField("Provider terms / permission reference (required)",
+                          text: $movementTerms)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Toggle("I have permission for automated polling",
+                       isOn: $movementAutomated)
+                if movementAutomated {
+                    HStack {
+                        TextField("Cadence sec", text: $movementCadence)
+                            .keyboardType(.numberPad)
+                        TextField("Provider minimum sec",
+                                  text: $movementMinInterval)
+                            .keyboardType(.numberPad)
+                    }
+                }
+                TextField("Derived track retention days",
+                          text: $movementRetention)
+                    .keyboardType(.numberPad)
+                if movementKind != "opensky_global" {
+                    HStack {
+                        TextField("Latitude", text: $movementLatitude)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Longitude", text: $movementLongitude)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Radius km", text: $movementRadius)
+                            .keyboardType(.decimalPad)
+                    }
+                } else {
+                    Text("Provider-global OpenSky can consume more provider "
+                         + "credits and bandwidth. Jarvis does not impose a "
+                         + "smaller artificial geography, but the provider's "
+                         + "actual terms, quota and host resources still govern.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Enroll movement source") {
+                        Task { await enrollMovementSource() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || movementTerms.isEmpty)
+                    Button("Refresh sources") {
+                        Task { await refreshMovementSources() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                }
+                Text("Enrolled movement sources · \(movementTotal)")
+                    .font(.headline)
+                ForEach(movementSources) { source in
+                    movementSourceRow(source)
+                }
+                if movementNextOffset != nil {
+                    Button("Load more movement sources") {
+                        Task { await loadMoreMovementSources() }
+                    }
+                    .disabled(busy)
+                }
+                Divider()
+                Text("Query retained latest movement near a point")
+                    .font(.subheadline.weight(.medium))
+                Picker("Entity type", selection: $movementEntityType) {
+                    Text("Aircraft + vessels").tag("")
+                    Text("Aircraft").tag("aircraft")
+                    Text("Vessels").tag("vessel")
+                }
+                .pickerStyle(.segmented)
+                Button("Show retained movement near entered point") {
+                    Task { await queryNearbyMovement() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy)
+                ForEach(movementEntities) { entity in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(
+                            (entity.lastName ?? entity.lastCallsign
+                             ?? entity.entityID)
+                            + " · " + entity.entityType
+                        )
+                        .font(.subheadline.weight(.medium))
+                        Text(
+                            "\(entity.latitude.formatted()), "
+                            + "\(entity.longitude.formatted())"
+                            + (entity.distanceKM != nil
+                               ? " · \(entity.distanceKM!.formatted()) km"
+                               : "")
+                        )
+                        .font(.caption)
+                        Text(
+                            "Source time: "
+                            + (entity.providerTime ?? entity.observedAt)
+                            + " · " + entity.sourceName
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    Divider()
+                }
+                Text(movementStatus)
+                    .font(.caption)
+                Text("No owner/passenger/crew inference. No missing track "
+                     + "is treated as evidence that an area is clear. "
+                     + "AISStream requires a server-side API key; OpenSky "
+                     + "coverage and quota are provider-dependent.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func movementSourceRow(
+        _ source: ArmorMovementSource
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(source.label + " · " + source.kind)
+                .font(.subheadline.weight(.medium))
+            Text(
+                source.globalScope
+                ? "global provider scope"
+                : "\(source.latitude?.formatted() ?? "?"), "
+                  + "\(source.longitude?.formatted() ?? "?")"
+                  + " · \(source.radiusKM?.formatted() ?? "?") km"
+            )
+            .font(.caption)
+            Text(
+                "\(source.checkCount) checks · "
+                + (source.cadenceSeconds > 0
+                   ? "every \(source.cadenceSeconds)s"
+                   : "manual only")
+                + " · retain \(source.retentionDays)d"
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            HStack {
+                Button("Collect now") {
+                    Task { await collectMovementSource(source.id) }
+                }
+                .disabled(busy || source.state != "active")
+                Button(source.state == "active" ? "Pause" : "Resume") {
+                    Task {
+                        await changeMovementSource(
+                            source.id,
+                            action: source.state == "active"
+                                ? "pause" : "resume"
+                        )
+                    }
+                }
+                .disabled(busy || source.state == "stopped")
+                Button("Stop", role: .destructive) {
+                    Task {
+                        await changeMovementSource(
+                            source.id, action: "stop"
+                        )
+                    }
+                }
+                .disabled(busy || source.state == "stopped")
+            }
+            .buttonStyle(.bordered)
+            Button("Forget movement source + local track history",
+                   role: .destructive) {
+                Task { await forgetMovementSource(source.id) }
+            }
+            .buttonStyle(.bordered)
+            .disabled(busy)
+        }
+        .padding(8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
     private var sourceConsole: some View {
         GroupBox("World Armor v2 · open observation platform") {
             VStack(alignment: .leading, spacing: 9) {

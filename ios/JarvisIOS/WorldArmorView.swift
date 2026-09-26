@@ -1338,7 +1338,7 @@ struct WorldArmorView: View {
                     .disabled(busy)
                 }
                 if let id = platformActiveID {
-                    Text("Evidence for " + id.prefix(8))
+                    Text("Evidence for " + String(id.prefix(8)))
                         .font(.subheadline.weight(.medium))
                     ForEach(platformEvidence) { event in
                         VStack(alignment: .leading, spacing: 4) {

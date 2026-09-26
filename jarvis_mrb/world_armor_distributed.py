@@ -26,6 +26,7 @@ from jarvis_mrb.world_armor_movement import (
 
 _COOLDOWN_BASE_SECONDS = 15
 _COOLDOWN_MAX_SECONDS = 300
+_MAX_DISPATCH_THREADS = 32
 
 
 def _remote_capabilities(capabilities: dict[str, Any]) -> list[str]:
@@ -409,7 +410,7 @@ def _run_assigned_jobs(
 
     # Assignments were already capped by each worker's advertised capacity.
     if remote:
-        with ThreadPoolExecutor(max_workers=len(remote)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(remote), _MAX_DISPATCH_THREADS)) as pool:
             future_map = {
                 pool.submit(
                     execute, sid, path=path, worker=worker, now=now

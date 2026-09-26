@@ -59,6 +59,9 @@ class MacNodeProtocolTests(unittest.TestCase):
         self.assertEqual(info["capabilities"]["screen"], "session_opt_in")
         self.assertEqual(info["capabilities"]["remote_input"], "not_implemented")
         self.assertEqual(info["capabilities"]["clipboard"], "not_implemented")
+        self.assertEqual(info["worker_metrics"]["capacity"], 1)
+        self.assertEqual(info["worker_metrics"]["active_requests"], 0)
+        self.assertGreaterEqual(info["worker_metrics"]["normalized_load"], 0)
         self.assertEqual(headers["Cache-Control"], "private, no-store")
         self.assertNotIn("token", info)
 
@@ -377,6 +380,47 @@ class MeshCoordinatorTests(unittest.TestCase):
             "JARVIS_MESH_MACBOOK_TOKEN": "x" * 48,
         }):
             self.assertIsNotNone(mesh._config("macbook"))
+
+    def test_explicit_observer_registry_can_grow_without_network_discovery(self):
+        with patch.dict("os.environ", {
+            "JARVIS_MESH_WORLD_WORKER_IDS": "observer-3,edge_4",
+            "JARVIS_MESH_OBSERVER_3_URL": "http://127.0.0.1:8766",
+            "JARVIS_MESH_OBSERVER_3_TOKEN": "z" * 48,
+            "JARVIS_MESH_OBSERVER_3_LABEL": "Garage Mac",
+        }):
+            ids = mesh.observer_ids()
+            self.assertEqual(ids[:2], ("macbook", "macmini"))
+            self.assertIn("observer-3", ids)
+            self.assertIn("edge_4", ids)
+            self.assertIsNotNone(mesh._config("observer-3"))
+            with self.assertRaises(ValueError):
+                mesh._config("not-registered")
+            with self.assertRaises(ValueError):
+                mesh.begin_screen("observer-3")
+        with patch.dict("os.environ", {
+            "JARVIS_MESH_WORLD_WORKER_IDS": "bad worker id",
+        }):
+            with self.assertRaises(ValueError):
+                mesh.observer_ids()
+
+    def test_world_observer_capacity_is_bounded_and_reported(self):
+        module = runpy.run_path(str(MAC), run_name="mesh_capacity")
+        state = module["NodeState"](
+            token="c" * 48, device_id="observer-3", label="Observer",
+            allow_world_observer=True, world_capacity=2,
+        )
+        self.assertEqual(state.worker_metrics()["capacity"], 2)
+        state.authorize_world_observation()
+        state.last_world_request_at = 0.0
+        state.authorize_world_observation()
+        self.assertEqual(state.worker_metrics()["active_requests"], 2)
+        state.last_world_request_at = 0.0
+        with self.assertRaises(RuntimeError):
+            state.authorize_world_observation()
+        state.finish_world_observation()
+        self.assertEqual(state.worker_metrics()["active_requests"], 1)
+        state.finish_world_observation()
+        self.assertEqual(state.worker_metrics()["active_requests"], 0)
 
     def test_auth_transport_and_screen_binary_response_limits(self):
         module = runpy.run_path(str(MAC), run_name="mesh_test")

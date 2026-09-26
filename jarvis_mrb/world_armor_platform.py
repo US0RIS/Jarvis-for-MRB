@@ -166,6 +166,10 @@ def _present(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     result = dict(row)
     result.pop("lease_token", None)
     result.pop("lease_until", None)
+    # Fetchable locators remain confined to the host SQLite ledger. A direct
+    # URL can include harmless query metadata; do not reflect it through the
+    # iPhone API even if no recognized credential-name is present.
+    result.pop("locator", None)
     result["authorized_automated_access"] = bool(result["authorized_automated_access"])
     result["alert_armed"] = bool(result["alert_armed"])
     result["capture_time_verified"] = False

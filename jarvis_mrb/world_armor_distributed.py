@@ -146,6 +146,7 @@ def _metrics(value: Any) -> dict[str, float | int]:
 def available_workers(*, db_path: Path | None = None) -> dict[str, Any]:
     from jarvis_mrb import reality_mesh
     fabric = reality_mesh.nodes()
+    registered = set(reality_mesh.observer_ids())
     health = _health_snapshot(_dbpath(db_path))
     workers = [{
         "id": "windows", "status": "online",
@@ -164,7 +165,8 @@ def available_workers(*, db_path: Path | None = None) -> dict[str, Any]:
             continue
         node_id = str(node.get("id") or "")
         capabilities = node.get("capabilities")
-        if (node_id == "windows" or node.get("status") != "online"
+        if (node_id == "windows" or node_id not in registered
+                or node.get("status") != "online"
                 or not isinstance(capabilities, dict)):
             continue
         advertised = _remote_capabilities(capabilities)

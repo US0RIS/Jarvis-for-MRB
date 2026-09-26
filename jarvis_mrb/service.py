@@ -225,6 +225,17 @@ class WorldArmorReplayRequest(BaseModel):
     investigation_id: str
     as_known_at: str | None = None
 
+
+class WorldArmorWatchCreateRequest(BaseModel):
+    investigation_id: str
+    interval_minutes: int = 60
+    max_checks: int = 6
+    lifetime_hours: int = 6
+
+
+class WorldArmorWatchIdRequest(BaseModel):
+    watch_id: str
+
 class WorldArmorCorrelationRequest(BaseModel):
     investigation_id: str
     start_at: str
@@ -842,6 +853,86 @@ def world_armor_hypotheses(
             source_ids=request.source_ids,
             query_radius_km=request.query_radius_km,
         )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/watches")
+def world_armor_watch_create(
+    request: WorldArmorWatchCreateRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_watches import create_watch
+    try:
+        return create_watch(
+            request.investigation_id,
+            interval_minutes=request.interval_minutes,
+            max_checks=request.max_checks,
+            lifetime_hours=request.lifetime_hours,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.get("/world-armor/v1/watches")
+def world_armor_watch_list(
+    response: Response,
+    investigation_id: str | None = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_watches import list_watches
+    try:
+        return list_watches(investigation_id=investigation_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/watches/stop")
+def world_armor_watch_stop(
+    request: WorldArmorWatchIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_watches import stop_watch
+    try:
+        return stop_watch(request.watch_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/watches/pause")
+def world_armor_watch_pause(
+    request: WorldArmorWatchIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_watches import pause_watch
+    try:
+        return pause_watch(request.watch_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/watches/resume")
+def world_armor_watch_resume(
+    request: WorldArmorWatchIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_watches import resume_watch
+    try:
+        return resume_watch(request.watch_id)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
 

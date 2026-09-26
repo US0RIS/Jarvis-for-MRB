@@ -59,6 +59,23 @@ an emergency safety system, a live source acceptance or an autonomous
 external action path. New code is a stacked draft on the watches branch,
 not deployed to the operator's machines.
 
+## World Armor v2 — open observation platform (stacked draft)
+
+**[Source access, collector, evidence and host setup](docs/WORLD_ARMOR_OPEN_PLATFORM.md).**
+An explicitly enabled durable camera-source registry replaces fixed source
+counts and expiry with per-source permission records, optional expiry/check
+budgets, operator-declared permitted cadence, retention and host disk budget.
+Run a separate local collector explicitly or inspect a particular public
+camera from the native iPhone/iPad source console; freeform infrastructure/
+environmental watch goals and unchanged-frame vision offload replace the
+old two-predicate-only watch path. A typed graph co-displays retained public
+camera receipts with existing environmental reports, preserving **unknown
+camera capture times and viewing footprints**. Source consent revoke/forget
+remains available while collection is disabled. This is NOT a merger of all
+previous v1 limited-region capabilities or a claim that unconfigured global
+webcams, remote Mac workers, RTSP/WebRTC/DRM, raw footage archives and
+closed-app push are operational.
+
 ## World Armor public cameras — wider-world media slice (stacked draft)
 
 **[Public camera runbook](docs/WORLD_ARMOR_PUBLIC_CAMERAS.md)** adds an

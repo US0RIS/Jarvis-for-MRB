@@ -1152,19 +1152,16 @@ struct JarvisAPIClient {
         return report
     }
 
-    func worldArmorLiveStatus() async throws -> [String: Any] {
+    func worldArmorLiveStatus() async throws -> ArmorLiveStatus {
         let data = try await worldArmorPlatformGet(
             path: "world-armor/v7/live/status"
         )
-        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw JarvisAPIError.badResponse
-        }
-        return value
+        return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
     }
 
     func worldArmorLiveEvents(
         afterSeq: Int, limit: Int = 100
-    ) async throws -> [String: Any] {
+    ) async throws -> ArmorLiveEventsPage {
         let data = try await worldArmorPlatformGet(
             path: "world-armor/v7/live/events",
             query: [
@@ -1172,32 +1169,23 @@ struct JarvisAPIClient {
                 URLQueryItem(name: "limit", value: String(min(max(limit, 1), 500))),
             ]
         )
-        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw JarvisAPIError.badResponse
-        }
-        return value
+        return try JSONDecoder().decode(ArmorLiveEventsPage.self, from: data)
     }
 
-    func worldArmorLiveStart() async throws -> [String: Any] {
+    func worldArmorLiveStart() async throws -> ArmorLiveStatus {
         let (data, response) = try await postData(
             path: "world-armor/v7/live/start", body: [:]
         )
         try validate(response: response, data: data)
-        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw JarvisAPIError.badResponse
-        }
-        return value
+        return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
     }
 
-    func worldArmorLiveStop() async throws -> [String: Any] {
+    func worldArmorLiveStop() async throws -> ArmorLiveStatus {
         let (data, response) = try await postData(
             path: "world-armor/v7/live/stop", body: [:]
         )
         try validate(response: response, data: data)
-        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw JarvisAPIError.badResponse
-        }
-        return value
+        return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
     }
 
     func worldArmorDistributedWorkers() async throws -> ArmorDistributedWorkers {

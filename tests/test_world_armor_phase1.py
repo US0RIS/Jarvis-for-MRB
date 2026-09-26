@@ -265,6 +265,11 @@ class WorldArmorKernelTests(TestCase):
         replayed = self.replay(key)
         self.assertFalse(replayed["coverage_complete_for_integrated_sources"])
         self.assertEqual(replayed["observation_count"], 66)
+        receipt_sources = replayed["sample_timeline"][0]["source_coverage"]
+        self.assertEqual(receipt_sources["nws_point_alerts"]["status"], "partial")
+        self.assertEqual(receipt_sources["nws_point_alerts"]["reported_count"], 15)
+        self.assertEqual(receipt_sources["usgs_earthquakes"]["status"], "partial")
+        self.assertEqual(receipt_sources["openmeteo_model"]["status"], "ok")
         usgs = next(o for o in replayed["observations"]
                     if o["source"] == "usgs_earthquakes")
         self.assertEqual(usgs["sample_coverage_status"], "partial")

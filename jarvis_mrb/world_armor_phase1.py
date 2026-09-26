@@ -412,13 +412,26 @@ def _capture(investigation_id: str, conditions: dict[str, Any],
         for o in collected:
             digest = _digest(o)
             prior = con.execute(
-                "SELECT id,revision,digest FROM observations "
+                "SELECT id,revision,digest,kind,observed_at,published_at,"
+                "lineage,geometry_basis,values_json FROM observations "
                 "WHERE investigation_id=? AND provider=? AND provider_key=? "
                 "ORDER BY revision DESC LIMIT 1",
                 (investigation_id, o["provider"], o["provider_key"]),
             ).fetchone()
+            # Reconstruct an old row's source assertion. Databases created by
+            # the initial Phase 1 kernel stored a values-only fingerprint;
+            # treating that legacy digest as the new assertion digest would
+            # manufacture a revision when collecting identical information.
+            prior_assertion = ({
+                "kind": prior["kind"],
+                "observed_at": prior["observed_at"],
+                "published_at": prior["published_at"],
+                "lineage": prior["lineage"],
+                "geometry_basis": prior["geometry_basis"],
+                "values": json.loads(prior["values_json"]),
+            } if prior else None)
             # A->B->A is a new source revision, not a duplicate of ancient A.
-            if prior and prior["digest"] == digest:
+            if prior_assertion is not None and _digest(prior_assertion) == digest:
                 continue
             con.execute(
                 """INSERT INTO observations (

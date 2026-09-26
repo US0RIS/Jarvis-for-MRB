@@ -202,16 +202,24 @@ def events(
             "truncated": False, "retention_days": _MAX_EVENT_AGE_DAYS,
         }
     with closing(_connect(path)) as con:
+        bounds = con.execute(
+            "SELECT COALESCE(MIN(seq),0),COALESCE(MAX(seq),0) FROM live_events"
+        ).fetchone()
         rows = con.execute(
             "SELECT * FROM live_events WHERE seq>? "
             "ORDER BY seq LIMIT ?",
             (after_seq, limit + 1),
         ).fetchall()
+    oldest_seq, latest_seq = int(bounds[0]), int(bounds[1])
     chosen = rows[:limit]
     next_seq = int(chosen[-1]["seq"]) if chosen else after_seq
+    replay_gap = bool(oldest_seq and after_seq and after_seq < oldest_seq - 1)
     return {
         "events": [_present(row) for row in chosen],
         "next_seq": next_seq,
+        "oldest_seq": oldest_seq,
+        "latest_seq": latest_seq,
+        "replay_gap": replay_gap,
         "truncated": len(rows) > limit,
         "retention_days": _MAX_EVENT_AGE_DAYS,
     }
@@ -377,7 +385,9 @@ def _journal_results(
     return count
 
 
-def _run_watch_batch(*, limit: int, now: datetime) -> list[dict[str, Any]]:
+def _run_watch_batch(
+    *, limit: int, now: datetime, live_db_path: Path,
+) -> list[dict[str, Any]]:
     if os.getenv("JARVIS_WORLD_ARMOR_WATCHES_ENABLED") != "1":
         return []
     from jarvis_mrb.world_armor_watches import run_due_once
@@ -413,7 +423,7 @@ def _run_watch_batch(*, limit: int, now: datetime) -> list[dict[str, Any]]:
                             "observed_at": notice.get("observed_at"),
                             "received_at": notice.get("received_at"),
                         },
-                        now=now,
+                        now=now, db_path=live_db_path,
                     )
             except Exception:
                 pass
@@ -488,7 +498,9 @@ def run_cycle(
             )
 
     try:
-        watches = _run_watch_batch(limit=watch_limit, now=instant)
+        watches = _run_watch_batch(
+            limit=watch_limit, now=instant, live_db_path=path
+        )
         result["watches"] = watches
         result["events_created"] += _journal_results(
             "watch", watches, path=path, now=instant,

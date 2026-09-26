@@ -195,9 +195,9 @@ def correlate(
                     "No verified shared footprint or causal mechanism."
                 ),
             })
-            if len(candidates) >= _MAX_PAIRS:
+            if len(candidates) > _MAX_PAIRS:
                 break
-        if len(candidates) >= _MAX_PAIRS:
+        if len(candidates) > _MAX_PAIRS:
             break
     coverage = {
         source: (report["coverage"].get(source) or {
@@ -243,8 +243,8 @@ def correlate(
         "degraded_observations": degraded,
         "receipt_time_only_observations": receipt_only,
         "spatially_indeterminate_observations": spatial_indeterminate[:60],
-        "candidate_links": candidates,
-        "candidate_links_truncated": len(candidates) >= _MAX_PAIRS,
+        "candidate_links": candidates[:_MAX_PAIRS],
+        "candidate_links_truncated": len(candidates) > _MAX_PAIRS,
         "source_coverage": coverage,
         "coverage_adequate_to_claim_no_world_events": False,
         "hypotheses_proven": 0,

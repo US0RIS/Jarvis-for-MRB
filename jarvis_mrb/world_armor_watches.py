@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from jarvis_mrb.world_armor_phase1 import (
     STORE, ArmorDisabled, _clock, _connect, _identifier, _record,
-    _require_enabled, observe_once,
+    _require_enabled, observe_once, compare_recent,
 )
 
 _MAX_ACTIVE = 12
@@ -249,7 +249,7 @@ def _claim(db_path: Path, instant: datetime) -> dict[str, Any] | None:
 
 def _finish(db_path: Path, claim: dict[str, Any], *,
             instant: datetime, sample_id: str | None,
-            outcome: str) -> dict[str, Any]:
+            outcome: str, change_state: str = "not_evaluated") -> dict[str, Any]:
     with closing(_connect(db_path, create=False)) as con, con:
         con.execute("BEGIN IMMEDIATE")
         row = con.execute(
@@ -262,24 +262,51 @@ def _finish(db_path: Path, claim: dict[str, Any], *,
         if sample_id is not None:
             con.execute(
                 "INSERT OR IGNORE INTO watch_receipts "
-                "(watch_id,sample_id,collected_at,outcome) VALUES(?,?,?,?)",
-                (claim["id"], sample_id, instant.isoformat(), outcome),
+                "(watch_id,sample_id,collected_at,outcome,change_state) "
+                "VALUES(?,?,?,?,?)",
+                (claim["id"], sample_id, instant.isoformat(),
+                 outcome, change_state),
             )
         end = (row["expires_at"] <= instant.isoformat()
                or row["check_count"] >= row["max_checks"])
         con.execute(
             "UPDATE watches SET state=?,lease_token=NULL,lease_until=NULL,"
-            "last_checked_at=?,last_outcome=? WHERE id=?",
+            "last_checked_at=?,last_outcome=?,last_change_state=? "
+            "WHERE id=?",
             ("expired" if row["expires_at"] <= instant.isoformat() else
              "exhausted" if end else "active",
-             instant.isoformat(), outcome, claim["id"]),
+             instant.isoformat(), outcome, change_state, claim["id"]),
         )
         updated = con.execute(
             "SELECT * FROM watches WHERE id=?", (claim["id"],)
         ).fetchone()
     return {**_present(updated), "checked": True,
             "sample_saved": sample_id is not None,
-            "outcome": outcome, "sample_id": sample_id}
+            "outcome": outcome, "sample_id": sample_id,
+            "change_state": change_state}
+
+
+def _classify_retained_change(
+    investigation_id: str, received_at: str, *,
+    path: Path, now: datetime, coverage_ok: bool,
+) -> str:
+    """Read-only, bounded sample comparison; never assert onset/all-clear."""
+    if not coverage_ok:
+        return "coverage_degraded_or_unknown"
+    try:
+        changes = compare_recent(investigation_id, db_path=path, now=now)
+    except (ValueError, KeyError, sqlite3.Error):
+        return "comparison_unavailable"
+    if (changes.get("comparison") != "two_received_samples"
+            or changes.get("latest_received_at") != received_at):
+        return "baseline_or_incomparable_receipts"
+    if changes.get("source_record_changes") or changes.get(
+        "modelled_air_quality_change"
+    ):
+        return "retained_source_report_delta"
+    if changes.get("source_changes"):
+        return "source_availability_changed"
+    return "no_report_delta_in_two_receipts_not_all_clear"
 
 
 def run_due_once(*, db_path: Path | None = None,
@@ -308,9 +335,15 @@ def run_due_once(*, db_path: Path | None = None,
     outcome = ("sample_coverage_ok"
                if receipt["all_sources_available"]
                else "sample_degraded_or_partial")
+    change_state = _classify_retained_change(
+        claimed["investigation_id"], receipt["received_at"],
+        path=path, now=_clock(now),
+        coverage_ok=receipt["all_sources_available"],
+    )
     return _finish(
         path, claimed, instant=_clock(now),
         sample_id=receipt["sample_id"], outcome=outcome,
+        change_state=change_state,
     )
 
 

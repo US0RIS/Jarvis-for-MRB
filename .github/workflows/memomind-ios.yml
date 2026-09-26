@@ -150,7 +150,7 @@ jobs:
       - name: Install portable backend dependencies (Windows-only pycaw/comtypes excluded)
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install psutil Pillow fastapi uvicorn httpx dateparser tzdata google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib pypdf openpyxl
+          python3 -m pip install psutil Pillow fastapi uvicorn httpx dateparser tzdata google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib pypdf openpyxl websockets
           python3 -m pip install -e . --no-deps
           mkdir -p "$APPDATA"
       - name: Full repository unittest discovery

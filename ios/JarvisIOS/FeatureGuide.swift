@@ -614,7 +614,7 @@ private struct FullFeatureAcceptanceView: View {
         ))
 
         progressText = "Running anti-cheat controls…"
-        let impossiblePack = "__jarvis_pack_that_must_not_exist__"
+        let impossiblePack = "__negative_control_pack_\(UUID().uuidString)__"
         let actualPack = architecture.router.previewRoute(for: "What time is it in DC?")
         negativeResults.append(.init(
             id: "negative-iphone-route",
@@ -651,7 +651,7 @@ private struct FullFeatureAcceptanceView: View {
                 (id: "negative-backend-route", text: "What time is it")
             ])
             if let row = canary.items.first {
-                let impossibleFamily = "warp.drive"
+                let impossibleFamily = "__negative_control_backend_family_\(UUID().uuidString)__"
                 negativeResults.append(.init(
                     id: "negative-backend-route",
                     title: "Impossible backend route expectation",
@@ -862,7 +862,7 @@ private struct FullFeatureAcceptanceView: View {
 
     @MainActor
     private func runGroqNonexistentModelCanary(apiKey: String) async {
-        let fakeModel = "jarvis-negative-control-model-that-must-not-exist"
+        let fakeModel = "jarvis-negative-control-\(UUID().uuidString.lowercased())"
         guard let url = URL(string: "https://api.groq.com/openai/v1/models/\(fakeModel)") else {
             negativeResults.append(.init(
                 id: "negative-groq-model",

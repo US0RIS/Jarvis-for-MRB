@@ -396,3 +396,148 @@ constraints during design review.
   time window, and evidence set so a later "what changed since this?" has an exact baseline.
 - **Reality Graph debugger.** Inspect why an entity/edge exists, which observation created
   it, which inference transformed it, and what would invalidate it.
+
+
+## Internet idea-mining — 2026-09-26
+
+Ideas synthesized from discussions among Home Assistant, LocalLLaMA, Obsidian,
+self-hosting, smart-glasses, and personal-assistant users. These are deliberately
+captured before prioritization.
+
+- **Contextual Delivery / Follow-Me Information.** Treat every reminder, alert, answer,
+  and proactive observation as a routable information object with recipient, urgency,
+  expiry, prerequisites, privacy level, and acceptable surfaces. Deliver it where the
+  intended person actually is; defer it if the current context makes it unactionable;
+  migrate it across room speakers, glasses, watch, phone, desktop, car, and displays.
+- **Ambient Output Fabric.** Do not equate "Jarvis wants to tell me something" with a
+  phone notification. Choose among speech, HUD text, watch complication, desktop
+  overlay, e-paper/room display, light/state cue, phone notification, or silence based
+  on urgency and context. Prefer the least intrusive channel that conveys enough
+  information.
+- **Social Context Modes.** Make social situation a first-class world state: alone,
+  family, guest, babysitter, dinner party, meeting, public, confidential-work, sleep,
+  driving, etc. Globally alter narration, visible information, sensing behavior,
+  permissions, proactive thresholds, and automations accordingly.
+- **Temporary Delegated Capability.** Generate scoped, expiring capabilities for a
+  guest/family member/collaborator to control or query only specified Jarvis entities
+  without receiving full Jarvis access. Include expiry, revocation, rate limits, and
+  audit trail.
+- **Presence-as-Invocation.** Wake words are only one trigger. A person entering a
+  relevant place, looking at an object, beginning a known routine, picking up a device,
+  or a state transition can open a conversational opportunity when policy permits.
+- **Conversation Handoff.** Begin a conversation on glasses, walk into the car, and
+  continue it there; move to the desktop and let visual output expand automatically
+  without restarting context.
+- **Interruptibility as a primitive.** Guaranteed low-latency barge-in everywhere:
+  stop, pause, correct, shorten, change output device, or redirect an executing plan.
+- **Zero-Friction Capture Bus.** Any input—spoken fragment, screenshot, photo, URL,
+  currently playing media, selected text, file, location, object, or gesture—can be
+  dumped into Jarvis in one action. Jarvis timestamps it, preserves raw source,
+  associates current context, and organizes later rather than demanding metadata at
+  capture time.
+- **Capture Current Context Automatically.** When saving a thought, optionally attach
+  what was playing/on-screen, current app/document, location/place, active mission,
+  nearby graph entities, and recent conversation so a fragment remains intelligible
+  months later.
+- **Automatic Connection Discovery.** Periodically find non-obvious semantic,
+  temporal, spatial, causal, and people/project connections among captured material.
+  Suggest links rather than silently rewriting the user's knowledge.
+- **Memory Promotion Pipeline.** Separate raw episodic captures from durable facts,
+  preferences, procedures, and project knowledge. Repeated/corroborated information
+  can be proposed for promotion; contradictions trigger review.
+- **Memory Provenance + Revision.** Every remembered fact points back to the
+  observation/message/document that produced it and supports correction, supersession,
+  expiry, and confidence.
+- **Routine Learning Without Programming.** Detect repeated sequences across device,
+  location, calendar, home, and application state and ask whether they should become a
+  macro/automation. Learn conditions and exceptions from demonstrations.
+- **Counterfactual Automation Testing.** Before enabling a learned automation, replay
+  it over historical context and show when it would have fired, including likely false
+  positives and annoying edge cases.
+- **Behavioral Automation Success Metrics.** Measure whether proactive nudges are
+  useful: acted on, dismissed, snoozed, overridden, or repeatedly ignored. Adapt
+  thresholds and retire low-value behaviors rather than letting automation accumulate.
+- **Falsifiable Proactivity.** A proactive interruption must be able to state the
+  concrete evidence and opportunity that justified interrupting now; default to
+  silence when the case is weak.
+- **Opportunity Detector.** Look for actionable gaps, not merely deadlines: calendar
+  gap + nearby errand, destination + low vehicle range, good outdoor conditions +
+  pending task, upcoming meeting + unread relevant document, etc.
+- **Obligation Extraction.** Continuously convert commitments hidden in email,
+  messages, documents, calendar entries, receipts, and conversations into an evolving
+  obligation graph with owner, deadline, dependencies, evidence, and status.
+- **Auto-Resolving Tasks.** Tasks can complete themselves when reality proves the
+  underlying condition happened (device begins charging, package arrives, form
+  submission receipt appears, location reached), instead of requiring checkbox labor.
+- **Condition-Relative Recurrence.** Support "30 days after I actually changed the
+  filter" rather than only calendar recurrence.
+- **Preparation Engine.** Work backward from future events to required state:
+  tomorrow's destination + vehicle range -> charge tonight; weather + clothing/task;
+  flight + traffic + parking + security -> departure time; meeting + document changes
+  -> review prompt.
+- **Reversible First Response.** For high-consequence anomalies, identify and perform
+  only pre-authorized, reversible damage-limiting actions first, then escalate to the
+  user. Example class: stop a process, isolate a device, pause an automation, close an
+  authorized utility valve, preserve evidence.
+- **Invariant Watchdog.** Critical safety/reliability conditions are checked as state
+  invariants, not only edge-triggered events. Re-evaluate them at startup, reconnect,
+  sensor recovery, and periodically so Jarvis cannot miss a bad state that began while
+  it was offline.
+- **Critical-Sensor Redundancy.** Allow multiple independent sensors/providers to back
+  important assertions; detect disagreement, degraded coverage, dead batteries, stale
+  readings, and common-mode dependencies.
+- **Failure-State Awareness.** "No alert" is not equivalent to "all clear." Every
+  monitor knows whether it currently has enough live evidence to make its assertion.
+- **Automation State Machines.** Replace sprawling independent IF/THEN rules with
+  explicit contextual states and permitted transitions for home, missions, trips,
+  routines, devices, and other domains.
+- **State Restoration.** Temporary automation changes remember the prior state and
+  restore it afterward rather than assuming a hardcoded default.
+- **Personalized Environment Profiles.** Environment follows the identified/authorized
+  person: preferred display density, audio level, temperature, lighting, privacy,
+  notification style, and accessible controls, while resolving multi-person conflicts.
+- **World-Aware Media.** Playback can follow the user across rooms/devices, adjust for
+  ambient noise, pause when conversation begins, preserve position, and choose a
+  suitable output surface automatically.
+- **Physical Status Vocabulary.** Subtle physical cues (light pattern, e-paper icon,
+  watch complication, HUD glyph) can represent persistent low-urgency Jarvis state
+  without speech or push notifications.
+- **Multi-Modal Escalation Ladder.** Alerts escalate across surfaces only if not
+  acknowledged or if the underlying condition worsens; acknowledgement on any surface
+  cancels redundant noise elsewhere.
+- **Personal Digital Twin for Mundane Work.** Maintain enough structured context about
+  ongoing obligations, communication patterns, files, calendar, and preferences to
+  prepare routine work and propose actions without re-explaining context each time.
+- **Local-First / Cloud-Escalation Router.** Deterministic code handles known tasks;
+  cheap/local models handle bounded extraction/classification; stronger local/cloud
+  models receive only the context necessary for difficult reasoning. Latency,
+  privacy, cost, and capability are routing inputs.
+- **Offline Capability Manifest.** Jarvis can answer "what can you still do right now?"
+  based on actual connectivity, available hosts/models/sensors, cached data, and
+  permissions rather than a static feature list.
+- **Self-Healing Integrations.** Detect broken automations/providers, identify likely
+  API/schema/device changes, test a repair in a sandbox/dry run, and propose or apply
+  authorized repairs with rollback.
+- **Automation Dependency Map.** Show which seemingly small device/API/provider
+  failures would disable important higher-level capabilities.
+- **Physical Consequence Graph.** Encode downstream consequences of failures/actions
+  (e.g. leak -> water damage; low EV range -> tomorrow's trip risk) so attention is
+  prioritized by expected consequence rather than novelty.
+- **Useful Boredom Detector.** During genuinely idle windows, surface one high-value,
+  context-appropriate task that fits the available time/place/tools instead of a
+  generic to-do list.
+- **Micro-Opportunity Bundling.** Combine several nearby low-cost actions into one
+  suggestion: "You're already near X and have 18 free minutes; Y and Z can both be
+  completed here."
+- **Personal Friction Miner.** Analyze repeated manual corrections, app switching,
+  dismissed prompts, recurring searches, repeated commands, and repeated sequences to
+  propose new Jarvis features/automations automatically.
+- **"Why isn't this automatic?" log.** A one-command capture specifically for moments
+  of friction. Jarvis records the surrounding state and later clusters these moments
+  into candidate features.
+- **Capability Gap Detection.** When Jarvis repeatedly cannot complete a class of
+  requests, aggregate failures and propose the missing sensor, API, permission,
+  deterministic function, or UI primitive that would unlock them.
+- **Feature-Idea Harvester.** Periodically mine opt-in public discussions, project
+  issues, changelogs, and the project's own failed requests for candidate Jarvis
+  capabilities and append evidence-backed ideas to a review queue before future.md.

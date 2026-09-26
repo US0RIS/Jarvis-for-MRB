@@ -9,6 +9,7 @@ on:
       - jarvis/converge-main-2026-09
       - jarvis/situation-evidence-unification
       - jarvis/world-armor-phase1-kernel
+      - jarvis/world-armor-correlation-workbench
   pull_request:
     paths:
       - "ios/**"
@@ -66,6 +67,10 @@ jobs:
         run: python -m unittest discover -s tests -p "test_situation_evidence.py" -v
       - name: Verify World Armor opt-in event kernel and source-qualified replay
         run: python -m unittest discover -s tests -p "test_world_armor_phase1.py" -v
+      - name: Verify bounded cross-source temporal correlation and source coverage
+        run: python -m unittest discover -s tests -p "test_world_armor_correlation.py" -v
+      - name: Verify World Armor evidence graph and non-causal hypothesis discipline
+        run: python -m unittest discover -s tests -p "test_world_armor_hypotheses.py" -v
       - name: Verify durable opt-in Reality Graph missions and no-model answers
         run: python -m unittest discover -s tests -p "test_reality_graph_missions.py" -v
       - name: Verify explicit structured meeting actions and semantic fallback

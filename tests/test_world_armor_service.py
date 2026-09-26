@@ -37,6 +37,82 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertNotIn("/world-armor/v1/fixture",routes)
         self.assertIn("/world-armor/v1/observe",routes)
 
+    def test_correlate_requires_auth_and_accepts_only_typed_query(self):
+        request=service.WorldArmorCorrelationRequest(
+            investigation_id="0"*32,
+            start_at="2026-09-24T18:00:00Z",
+            end_at="2026-09-24T19:00:00Z",
+        )
+        self.assertEqual(
+            set(service.WorldArmorCorrelationRequest.model_fields),
+            {"investigation_id", "start_at", "end_at",
+             "as_known_at", "source_ids", "query_radius_km"},
+        )
+        with patch.object(service,"API_TOKEN","private-secret"):
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_correlate(request,Response(),authorization=None)
+            self.assertEqual(ctx.exception.status_code,401)
+            with patch.dict(os.environ, {"JARVIS_WORLD_ARMOR_ENABLED":"0"}):
+                response=Response()
+                with self.assertRaises(HTTPException) as ctx:
+                    service.world_armor_correlate(
+                        request,response,
+                        authorization="Bearer private-secret")
+                self.assertEqual(ctx.exception.status_code,503)
+                self.assertEqual(response.headers["Cache-Control"],"private, no-store")
+
+    def test_hypothesis_query_requires_auth_and_has_no_freeform_claim_field(self):
+        request=service.WorldArmorCorrelationRequest(
+            investigation_id="0"*32,
+            start_at="2026-09-24T18:00:00Z",
+            end_at="2026-09-24T19:00:00Z",
+            query_radius_km=10,
+        )
+        self.assertNotIn("claim",service.WorldArmorCorrelationRequest.model_fields)
+        self.assertNotIn("prompt",service.WorldArmorCorrelationRequest.model_fields)
+        with patch.object(service,"API_TOKEN","private-secret"):
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_hypotheses(
+                    request,Response(),authorization=None)
+            self.assertEqual(ctx.exception.status_code,401)
+            with patch.dict(os.environ,{"JARVIS_WORLD_ARMOR_ENABLED":"0"}):
+                with self.assertRaises(HTTPException) as ctx:
+                    service.world_armor_hypotheses(
+                        request,Response(),
+                        authorization="Bearer private-secret")
+                self.assertEqual(ctx.exception.status_code,503)
+
+    def test_ios_workbench_has_real_correlation_and_receipt_timeline_wiring(self):
+        from pathlib import Path
+        root=Path(__file__).resolve().parents[1]
+        view=(root/"ios/JarvisIOS/WorldArmorView.swift").read_text(encoding="utf-8")
+        client=(root/"ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        self.assertIn("worldArmorCorrelate(",view)
+        self.assertIn("worldArmorHypotheses(",view)
+        self.assertIn("hypothesisPanel(",view)
+        self.assertIn("candidate explanations",view)
+        self.assertIn("alternativeExplanations",view)
+        self.assertIn("missingEvidence",view)
+        self.assertIn("MapCircle(",view)
+        observation_section=view.split("struct ArmorObservation",1)[1].split(
+            "struct ArmorSampleMoment",1
+        )[0]
+        coverage_section=view.split("struct ArmorCoverage",1)[1].split(
+            "struct ArmorValues",1
+        )[0]
+        self.assertIn('sampleCoverageStatus = "sample_coverage_status"',
+                      observation_section)
+        self.assertNotIn("sampleCoverageStatus",coverage_section)
+        self.assertIn("temporalQueryPanel",view)
+        self.assertIn("correlationPanel(",view)
+        self.assertIn("sampleTimeline",view)
+        self.assertIn("Rewind to a retained receipt",view)
+        self.assertIn("source_coverage",view)
+        self.assertIn("world-armor/v1/correlate",client)
+        self.assertIn("world-armor/v1/hypotheses/query",client)
+        self.assertIn("in: ...Date()",view)
+        self.assertIn("UIApplication", (root/"ios/JarvisIOS/RealityMesh.swift").read_text(encoding="utf-8"))
+
     def test_disabled_create_does_not_touch_database(self):
         request=service.WorldArmorCreateRequest(
             label="Test",latitude=34.1,longitude=-118.2)

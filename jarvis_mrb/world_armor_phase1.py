@@ -157,10 +157,22 @@ def _record(con: sqlite3.Connection, key: str, now: datetime) -> dict[str, Any]:
     return dict(row)
 
 
-def _digest(value: dict[str, Any]) -> str:
+def _digest(observation: dict[str, Any]) -> str:
+    """Fingerprint the whole normalized source assertion, not only values.
+
+    A publisher correction to occurrence time, geometry provenance or kind
+    must create a traversable revision even if its display values are equal.
+    Adapter mode is intentionally sample provenance, not source identity.
+    """
+    assertion = {
+        field: observation[field] for field in (
+            "kind", "observed_at", "published_at", "lineage",
+            "geometry_basis", "values",
+        )
+    }
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                   allow_nan=False).encode("utf-8")
+        json.dumps(assertion, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False, allow_nan=False).encode("utf-8")
     ).hexdigest()
 
 
@@ -286,12 +298,15 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
     })
 
     alert_status = str(alerts.get("status") or "unavailable")
-    if alert_status == "ok" and not isinstance(alerts.get("alerts"), list):
+    alert_truncated = isinstance(alerts.get("alerts"), list) and len(alerts["alerts"]) > 15
+    if alert_status in {"ok", "partial"} and not isinstance(alerts.get("alerts"), list):
         alert_status = "unavailable"
     count = 0
-    if alert_status == "ok" and isinstance(alerts.get("alerts"), list):
+    alert_invalid = False
+    if alert_status in {"ok", "partial"} and isinstance(alerts.get("alerts"), list):
         for a in alerts["alerts"][:15]:
             if not isinstance(a, dict) or not str(a.get("id") or ""):
+                alert_invalid = True
                 continue
             identifier = str(a["id"])[:300]
             collected.append({
@@ -308,44 +323,64 @@ def _normalized(conditions: dict[str, Any], quake: dict[str, Any], *,
             count += 1
     cover.append({
         "provider": "nws_point_alerts",
-        "status": alert_status if alert_status in {"ok","unavailable","unsupported_region"}
-                  else "unavailable",
+        "status": ("partial" if alert_status in {"ok", "partial"} and (alert_truncated or alert_invalid) else
+                   alert_status if alert_status in {"ok","partial","unavailable","unsupported_region"}
+                   else "unavailable"),
         "checked_at": _timestamp(alerts.get("checked_at"))
                       or _timestamp(conditions.get("checked_at")) or checked,
         "count": count, "scope": "NWS supported point only; not all-hazards",
     })
 
     quake_status = str(quake.get("status") or "unavailable")
-    if quake_status == "ok" and not isinstance(quake.get("events"), list):
+    quake_truncated = isinstance(quake.get("events"), list) and len(quake["events"]) > 50
+    if quake_status in {"ok", "partial"} and not isinstance(quake.get("events"), list):
         quake_status = "unavailable"
     count = 0
-    if quake_status == "ok" and isinstance(quake.get("events"), list):
+    quake_invalid = False
+    if quake_status in {"ok", "partial"} and isinstance(quake.get("events"), list):
         for q in quake["events"][:50]:
             if not isinstance(q, dict):
+                quake_invalid = True
                 continue
             event_time = _timestamp(q.get("occurred_at"))
             key = str(q.get("id") or "")
             mag = q.get("magnitude")
             if not key or not event_time or type(mag) not in (int, float) or not math.isfinite(mag):
+                quake_invalid = True
                 continue
             if datetime.fromisoformat(event_time) > received + timedelta(seconds=30):
+                quake_invalid = True
                 continue
+            qlat, qlon = q.get("latitude"), q.get("longitude")
+            has_epicenter = (
+                type(qlat) in (int, float) and type(qlon) in (int, float)
+                and math.isfinite(qlat) and math.isfinite(qlon)
+                and -90 <= qlat <= 90 and -180 <= qlon <= 180
+            )
+            geo = ({"latitude": round(float(qlat), 5),
+                    "longitude": round(float(qlon), 5)}
+                   if has_epicenter else {})
             collected.append({
                 "provider": "usgs_earthquakes", "provider_key": key[:70],
                 "kind": "reported_earthquake", "observed_at": event_time,
                 "published_at": None, "lineage": "usgs_primary_event",
-                "geometry_basis": "within_queried_radius_exact_epicenter_not_in_adapter",
+                "geometry_basis": (
+                    "usgs_primary_reported_epicenter" if has_epicenter else
+                    "within_queried_radius_epicenter_unknown"
+                ),
                 "values": {
                     "magnitude": round(float(mag), 1),
                     "place": str(q.get("place") or "")[:160],
                     "reviewed": bool(q.get("reviewed")),
                     "source_url": str(q.get("source_url") or "")[:300],
+                    **geo,
                 },
             })
             count += 1
     cover.append({
         "provider": "usgs_earthquakes",
-        "status": quake_status if quake_status in {"ok","unavailable"} else "unavailable",
+        "status": ("partial" if quake_status in {"ok", "partial"} and (quake_truncated or quake_invalid) else
+                   quake_status if quake_status in {"ok","partial","unavailable"} else "unavailable"),
         "checked_at": _timestamp(quake.get("checked_at")) or checked,
         "count": count, "scope": "USGS within selected radius / last 24h / M>=2.5; not all incidents",
     })
@@ -381,15 +416,28 @@ def _capture(investigation_id: str, conditions: dict[str, Any],
             raise ValueError("Normalized observation budget exceeded.")
         count = 0
         for o in collected:
-            digest = _digest(o["values"])
+            digest = _digest(o)
             prior = con.execute(
-                "SELECT id,revision,digest FROM observations "
+                "SELECT id,revision,digest,kind,observed_at,published_at,"
+                "lineage,geometry_basis,values_json FROM observations "
                 "WHERE investigation_id=? AND provider=? AND provider_key=? "
                 "ORDER BY revision DESC LIMIT 1",
                 (investigation_id, o["provider"], o["provider_key"]),
             ).fetchone()
+            # Reconstruct an old row's source assertion. Databases created by
+            # the initial Phase 1 kernel stored a values-only fingerprint;
+            # treating that legacy digest as the new assertion digest would
+            # manufacture a revision when collecting identical information.
+            prior_assertion = ({
+                "kind": prior["kind"],
+                "observed_at": prior["observed_at"],
+                "published_at": prior["published_at"],
+                "lineage": prior["lineage"],
+                "geometry_basis": prior["geometry_basis"],
+                "values": json.loads(prior["values_json"]),
+            } if prior else None)
             # A->B->A is a new source revision, not a duplicate of ancient A.
-            if prior and prior["digest"] == digest:
+            if prior_assertion is not None and _digest(prior_assertion) == digest:
                 continue
             con.execute(
                 """INSERT INTO observations (
@@ -479,19 +527,30 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
                WHERE s.investigation_id=? AND s.received_at<=?
                ORDER BY s.received_at,s.id""", (investigation_id, cutoff)
         ).fetchall()
+    coverage_by_sample: dict[tuple[str,str], dict[str, Any]] = {}
     last_cover: dict[str, dict[str, Any]] = {}
     for row in cover:
+        coverage_by_sample[(row["sample_id"],row["provider"])] = dict(row)
         last_cover[row["provider"]] = {
             "source": row["provider"], "status": row["status"],
             "checked_at": row["checked_at"], "received_at": row["received_at"],
             "reported_count": row["observation_count"],
             "scope": row["scope"], "adapter_mode": row["adapter_mode"],
         }
+    sample_modes = {row["id"]: row["adapter_mode"] for row in samples}
     visible: dict[tuple[str,str], dict[str, Any]] = {}
+    observation_history: list[dict[str, Any]] = []
     revision_history: list[dict[str, Any]] = []
     for row in obs:
         entry = {
             "id":row["id"],"source":row["provider"],
+            "adapter_mode":sample_modes.get(row["sample_id"], "unknown"),
+            "sample_coverage_status":(
+                coverage_by_sample.get((row["sample_id"],row["provider"])) or {}
+            ).get("status","unknown"),
+            "sample_coverage_checked_at":(
+                coverage_by_sample.get((row["sample_id"],row["provider"])) or {}
+            ).get("checked_at"),
             "provider_key":row["provider_key"],"kind":row["kind"],
             "observed_at":row["observed_at"],"published_at":row["published_at"],
             "received_at":row["received_at"],"revision":row["revision"],
@@ -499,6 +558,7 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
             "lineage":row["lineage"],"geometry_basis":row["geometry_basis"],
             "values":json.loads(row["values_json"]),
         }
+        observation_history.append(entry)
         visible[(row["provider"],row["provider_key"])] = entry
         if row["supersedes_id"]:
             revision_history.append({
@@ -515,7 +575,22 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
                          "latitude":item["latitude"],"longitude":item["longitude"],
                          "radius_km":item["radius_km"],"expires_at":item["expires_at"]},
         "as_known_at":cutoff, "samples_retained":len(samples),
+        "sample_timeline":[
+            {"id":row["id"],"received_at":row["received_at"],
+             "adapter_mode":row["adapter_mode"],
+             "source_coverage":{
+                 source:{
+                     "status":coverage_by_sample[(row["id"],source)]["status"],
+                     "checked_at":coverage_by_sample[(row["id"],source)]["checked_at"],
+                     "reported_count":coverage_by_sample[(row["id"],source)]["observation_count"],
+                     "scope":coverage_by_sample[(row["id"],source)]["scope"],
+                 }
+                 for source in _PROVIDERS
+                 if (row["id"],source) in coverage_by_sample
+             }} for row in samples
+        ],
         "observation_count":len(observations),"observations":observations,
+        "observation_history":observation_history[:1200],
         "revisions":revision_history[:1200],"coverage":last_cover,
         "coverage_complete_for_integrated_sources":available,
         "mode": ("fixture_only" if modes==["fixture"] else
@@ -558,6 +633,20 @@ def compare_recent(investigation_id: str, *, db_path: Path | None = None,
     if len(samples)<2 or samples[0]["received_at"]==samples[1]["received_at"]:
         return empty
     latest, previous = samples[0], samples[1]
+    if latest["adapter_mode"] != previous["adapter_mode"]:
+        return {
+            **empty,
+            "comparison": "incompatible_adapter_modes",
+            "previous_received_at": previous["received_at"],
+            "latest_received_at": latest["received_at"],
+            "previous_mode": previous["adapter_mode"],
+            "latest_mode": latest["adapter_mode"],
+            "qualifier": (
+                "Fixture and real-adapter samples must not be compared as "
+                "a real-world change. Each receipt remains available for "
+                "source-qualified replay."
+            ),
+        }
     before = replay(investigation_id, as_known_at=previous["received_at"],
                     db_path=path, now=instant)
     after = replay(investigation_id, as_known_at=latest["received_at"],

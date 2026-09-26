@@ -102,31 +102,10 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
                 worker_id=worker, now=now,
             ))
         except (ValueError, KeyError, RuntimeError) as exc:
-            # A remote worker outage does not silently widen authority to a
-            # different source/provider. Regional OpenSky may fall back to
-            # controller-local collection because it is the SAME enrolled
-            # provider request and grant; a failed provider result itself
-            # never becomes an all-clear.
-            if worker != "windows" and row["kind"] == "opensky_region":
-                try:
-                    outcomes.append(collect_source(
-                        row["id"], db_path=path, scheduled=True,
-                        worker_id="windows", now=now,
-                    ))
-                    outcomes[-1]["worker_fallback_from"] = worker
-                    continue
-                except (ValueError, KeyError, RuntimeError) as fallback:
-                    outcomes.append({
-                        "source_id": row["id"],
-                        "status": "not_collected",
-                        "worker_id": worker,
-                        "fallback_worker": "windows",
-                        "error_type": type(fallback).__name__,
-                    })
-                    continue
             outcomes.append({
                 "source_id": row["id"], "status": "not_collected",
                 "worker_id": worker, "error_type": type(exc).__name__,
+                "fallback_attempted": False,
             })
     with closing(_connect(path, create=True)) as con:
         remaining = con.execute(

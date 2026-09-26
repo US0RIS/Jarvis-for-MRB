@@ -72,9 +72,17 @@ def _present(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
 
 def create_watch(investigation_id: str, *, interval_minutes: int,
                  max_checks: int, lifetime_hours: int,
+                 attention_kind: str = "off",
+                 attention_threshold: float | None = None,
+                 attention_cooldown_minutes: int = 60,
                  db_path: Path | None = None,
                  now: datetime | None = None) -> dict[str, Any]:
     _require_watch_enabled()
+    from jarvis_mrb.world_armor_attention import validate_rule
+    attention_kind, attention_threshold, attention_cooldown_minutes = (
+        validate_rule(attention_kind, attention_threshold,
+                      attention_cooldown_minutes)
+    )
     if (type(interval_minutes) is not int or
             not 30 <= interval_minutes <= 360):
         raise ValueError("Watch interval must be 30–360 whole minutes.")
@@ -101,10 +109,12 @@ def create_watch(investigation_id: str, *, interval_minutes: int,
         key = uuid4().hex
         con.execute(
             "INSERT INTO watches(id,investigation_id,created_at,expires_at,"
-            "next_due_at,interval_minutes,max_checks,state) "
-            "VALUES(?,?,?,?,?,?,?,'active')",
+            "next_due_at,interval_minutes,max_checks,state,attention_kind,"
+            "attention_threshold,attention_cooldown_minutes) "
+            "VALUES(?,?,?,?,?,?,?,'active',?,?,?)",
             (key, region["id"], instant.isoformat(), expiry,
-             instant.isoformat(), interval_minutes, max_checks),
+             instant.isoformat(), interval_minutes, max_checks,
+             attention_kind, attention_threshold, attention_cooldown_minutes),
         )
         record = con.execute(
             "SELECT * FROM watches WHERE id=?", (key,)
@@ -263,12 +273,15 @@ def _claim(db_path: Path, instant: datetime) -> dict[str, Any] | None:
             "id": row["id"], "investigation_id": row["investigation_id"],
             "lease": token, "max_checks": row["max_checks"],
             "check_count": row["check_count"] + 1,
+            "attention_kind": row["attention_kind"],
         }
 
 
 def _finish(db_path: Path, claim: dict[str, Any], *,
             instant: datetime, sample_id: str | None,
-            outcome: str, change_state: str = "not_evaluated") -> dict[str, Any]:
+            outcome: str, change_state: str = "not_evaluated",
+            changes: dict[str, Any] | None = None,
+            received_at: str | None = None) -> dict[str, Any]:
     with closing(_connect(db_path, create=False)) as con, con:
         con.execute("BEGIN IMMEDIATE")
         row = con.execute(
@@ -276,9 +289,17 @@ def _finish(db_path: Path, claim: dict[str, Any], *,
         ).fetchone()
         if row is None or row["lease_token"] != claim["lease"]:
             return {"watch_id": claim["id"], "checked": True,
-                    "sample_saved": False,
+                    "sample_saved": False, "notices_created": 0,
+                    "attention_state": "revoked_or_superseded",
                     "outcome": "revoked_or_superseded_no_watch_completion"}
+        attention = {"notices_created": 0, "attention_state": "no_saved_sample"}
         if sample_id is not None:
+            from jarvis_mrb.world_armor_attention import publish_after_watch_sample
+            attention = publish_after_watch_sample(
+                con, row, sample_id=sample_id,
+                received_at=received_at or instant.isoformat(),
+                instant=instant, changes=changes,
+            )
             con.execute(
                 "INSERT OR IGNORE INTO watch_receipts "
                 "(watch_id,sample_id,collected_at,outcome,change_state) "
@@ -302,7 +323,7 @@ def _finish(db_path: Path, claim: dict[str, Any], *,
     return {**_present(updated), "checked": True,
             "sample_saved": sample_id is not None,
             "outcome": outcome, "sample_id": sample_id,
-            "change_state": change_state}
+            "change_state": change_state, **attention}
 
 
 def _classify_retained_change(
@@ -354,15 +375,22 @@ def run_due_once(*, db_path: Path | None = None,
     outcome = ("sample_coverage_ok"
                if receipt["all_sources_available"]
                else "sample_degraded_or_partial")
+    finished_at = _clock(now)
     change_state = _classify_retained_change(
         claimed["investigation_id"], receipt["received_at"],
-        path=path, now=_clock(now),
+        path=path, now=finished_at,
         coverage_ok=receipt["all_sources_available"],
     )
+    from jarvis_mrb.world_armor_attention import inspect_sample
+    changes = inspect_sample(
+        claimed["investigation_id"], receipt["received_at"],
+        db_path=path, now=finished_at,
+    ) if claimed.get("attention_kind", "off") != "off" else None
     return _finish(
-        path, claimed, instant=_clock(now),
+        path, claimed, instant=finished_at,
         sample_id=receipt["sample_id"], outcome=outcome,
-        change_state=change_state,
+        change_state=change_state, changes=changes,
+        received_at=receipt["received_at"],
     )
 
 

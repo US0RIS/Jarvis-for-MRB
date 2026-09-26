@@ -8,6 +8,7 @@ final class SettingsStore: ObservableObject {
     @Published var cloudCognitionEnabled: Bool { didSet { defaults.set(cloudCognitionEnabled, forKey: "jarvis.cloudCognitionEnabled") } }
     @Published var cognitionMode: String { didSet { defaults.set(cognitionMode, forKey: "jarvis.cognitionMode") } }
     @Published private(set) var groqKeyConfigured: Bool
+    @Published private(set) var windyKeyConfigured: Bool
     @Published var homeLatitude: Double { didSet { defaults.set(homeLatitude, forKey: "jarvis.homeLatitude") } }
     @Published var homeLongitude: Double { didSet { defaults.set(homeLongitude, forKey: "jarvis.homeLongitude") } }
     @Published var homeRadius: Double { didSet { defaults.set(homeRadius, forKey: "jarvis.homeRadius") } }
@@ -93,6 +94,7 @@ final class SettingsStore: ObservableObject {
         cloudCognitionEnabled = defaults.object(forKey: "jarvis.cloudCognitionEnabled") as? Bool ?? false
         cognitionMode = defaults.string(forKey: "jarvis.cognitionMode") ?? "auto"
         groqKeyConfigured = !(KeychainStore.read("jarvis.groqAPIKey") ?? "").isEmpty
+        windyKeyConfigured = !(KeychainStore.read("jarvis.windyWebcamsAPIKey") ?? "").isEmpty
         homeLatitude = defaults.object(forKey: "jarvis.homeLatitude") as? Double ?? 0
         homeLongitude = defaults.object(forKey: "jarvis.homeLongitude") as? Double ?? 0
         homeRadius = defaults.object(forKey: "jarvis.homeRadius") as? Double ?? 150
@@ -166,6 +168,26 @@ final class SettingsStore: ObservableObject {
 
     func groqAPIKeyForRequest() -> String? {
         let value = KeychainStore.read("jarvis.groqAPIKey")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    func saveWindyAPIKey(_ rawValue: String) {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            deleteWindyAPIKey()
+            return
+        }
+        KeychainStore.save(value, account: "jarvis.windyWebcamsAPIKey")
+        windyKeyConfigured = true
+    }
+
+    func deleteWindyAPIKey() {
+        KeychainStore.delete("jarvis.windyWebcamsAPIKey")
+        windyKeyConfigured = false
+    }
+
+    func windyAPIKeyForRequest() -> String? {
+        let value = KeychainStore.read("jarvis.windyWebcamsAPIKey")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? nil : value
     }
 }

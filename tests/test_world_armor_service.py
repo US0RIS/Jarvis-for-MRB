@@ -127,6 +127,7 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertTrue({
             "/world-armor/v1/watches",
             "/world-armor/v1/watches/stop",
+            "/world-armor/v1/watches/forget",
             "/world-armor/v1/watches/pause",
             "/world-armor/v1/watches/resume",
         }.issubset(routes))
@@ -191,6 +192,7 @@ class WorldArmorServiceBoundaryTests(TestCase):
             encoding="utf-8")
         self.assertIn("worldArmorWatchCreate(", view)
         self.assertIn("worldArmorWatchTransition(", view)
+        self.assertIn("worldArmorWatchForget(", view)
         self.assertIn("worldArmorWatches()", view)
         self.assertIn("watchRunnerAutoStarted", view)
         self.assertIn("world-armor/v1/watches/", client)

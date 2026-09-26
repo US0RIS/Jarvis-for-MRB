@@ -20,6 +20,7 @@ on:
       - jarvis/world-armor-worker-orchestration
       - jarvis/world-armor-live-fabric
       - jarvis/world-armor-full-scope
+      - jarvis/cloud-cognition-groq-lite
   pull_request:
     paths:
       - "ios/**"

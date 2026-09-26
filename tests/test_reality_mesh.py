@@ -393,6 +393,12 @@ class MeshCoordinatorTests(unittest.TestCase):
             "JARVIS_MESH_MACBOOK_URL":
                 "http://127.0.0.1:" + str(host.server_port),
             "JARVIS_MESH_MACBOOK_TOKEN": "b" * 48,
+        }), patch.object(mesh, "probe", return_value={
+            "id": "macbook", "status": "online",
+            "capabilities": {
+                "world_observer": "opensky_region_read_only"
+            },
+            "observed_at": datetime.now(timezone.utc).isoformat(),
         }):
             receipt = mesh.world_observe("macbook", {
                 "kind": "opensky_region", "latitude": 34.05,

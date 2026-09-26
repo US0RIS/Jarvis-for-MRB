@@ -808,3 +808,144 @@ computing, end-user programming, and personal knowledge management.
   five separate features.
 - **Feature Crystallization.** Detect clusters of future.md ideas that are actually
   manifestations of one missing primitive and propose a unifying architecture.
+
+
+## Ethical context, necessity, and emergency authority — 2026-09-26
+
+Jarvis should not treat ethics/safety as a context-free list of forbidden verbs. The same
+technical action can have radically different ethical significance depending on authorization,
+necessity, imminence, affected parties, alternatives, proportionality, and purpose. At the same
+time, "it's an emergency" must never become a magic phrase that disables safeguards.
+
+- **Ethical Context Engine.** Evaluate consequential requests against structured circumstances:
+  intended outcome, authorization, ownership, affected parties, threatened interests, severity,
+  imminence, available alternatives, reversibility, collateral effects, evidence quality, and
+  applicable hard boundaries. Produce an inspectable decision record rather than an opaque
+  LLM yes/no.
+- **Necessity & Proportionality Engine.** For normally restricted actions, ask whether the
+  action is actually necessary to address the demonstrated problem and whether a less
+  intrusive/risky intervention can adequately achieve the same protective outcome.
+- **Least-Intervention Planner.** Search first for the smallest sufficient intervention.
+  Prefer ordinary authorized routes, then reversible protective actions, before considering
+  exceptional actions with larger externalities.
+- **Scoped Emergency Authority.** Exceptional circumstances may justify narrowly expanded
+  authority, but only for the specific protective objective, target, time window, and action
+  class supported by evidence. Never implement a global `EMERGENCY_MODE = SAFETY_OFF`.
+- **Emergency Authority TTL.** Any exceptional grant expires automatically when its time,
+  condition, mission, or protective objective ends. Reauthorization requires fresh evidence.
+- **Emergency Scope Firewall.** Prevent an exception justified for one entity/action from
+  silently expanding to adjacent systems. Authority to open one emergency exit does not imply
+  authority to disable a facility's security system.
+- **Circumstance Verification.** Where practical, corroborate claimed exceptional
+  circumstances using available sensors, device state, location, communications attempts,
+  environmental data, system telemetry, or other independent evidence. Absence of
+  corroboration is not automatically proof the claim is false, especially when sensors may
+  themselves have failed.
+- **Evidence-Weighted Urgency.** Balance confidence against consequence and time. Jarvis
+  should not demand courtroom-level certainty while a credible physical danger is rapidly
+  worsening, but should require stronger evidence before taking more consequential or
+  irreversible actions.
+- **Competing-Interest Model.** Explicitly represent whose safety, privacy, property,
+  security, autonomy, and other interests could be affected rather than optimizing only for
+  the requesting user.
+- **Protect-Life Priority Without Blank Check.** Serious imminent threats to human safety
+  substantially change the proportionality calculation, while still requiring Jarvis to
+  minimize unnecessary harm and scope.
+- **Emergency Escalation Ladder.** Encode domain-specific ordered options such as:
+  ordinary controls -> documented emergency mechanisms -> contact responsible humans/
+  emergency services -> reversible protective intervention -> narrowly justified exceptional
+  intervention. Permit skipping steps when delay itself materially increases danger.
+- **Alternative Exhaustion Record.** Track what safer options were attempted, unavailable,
+  failed, or were too slow for the circumstances so later decisions do not repeatedly retry
+  dead ends.
+- **Reversible-First Bias.** When two interventions can plausibly protect the same interest,
+  strongly prefer the one that can be undone and independently verified.
+- **Minimum Necessary Damage Budget.** If some property/system disruption is genuinely
+  necessary to prevent substantially greater harm, optimize explicitly for the minimum
+  sufficient disruption rather than treating authorization as unlimited once crossed.
+- **Exceptional-Action Verification Loop.** After each consequential step, reassess the
+  situation before escalating further. Stop as soon as the protective objective has been
+  achieved.
+- **Automatic Authority Retraction.** When the emergency predicate clears, immediately
+  retract exceptional permissions and return subsystems to ordinary authority policy.
+- **Mandatory Exceptional-Action Audit.** Preserve evidence, reasoning inputs, alternatives
+  considered, authority granted, actions attempted, outcomes, and termination reason for
+  every use of exceptional authority.
+- **Post-Emergency Restoration.** After immediate danger ends, identify temporary changes,
+  disabled protections, damaged configuration, exposed credentials, or other consequences
+  requiring restoration or human follow-up.
+- **Uncertain-Emergency Handling.** Distinguish "verified emergency," "credible possible
+  emergency," "unverified claim," and "contradicted claim" rather than forcing a binary
+  emergency/not-emergency state.
+- **Anti-Pretext Checks.** Look for mismatches between the claimed protective objective and
+  requested scope. A request framed as rescue that asks for unrelated persistent access,
+  credential harvesting, concealment, or broader compromise should not inherit the emergency
+  justification.
+- **No Concealment Benefit.** Exceptional protective authority does not automatically grant
+  authority to erase logs, evade legitimate responders, establish persistence, hide the
+  intervention, or preserve access after the protective need ends.
+- **Ethical Decision Explainability.** Jarvis should be able to answer: what circumstances
+  changed the decision, what safer options existed, why this action was or was not necessary,
+  what constraint still applies, and what new evidence would change the decision.
+- **Policy/Value Separation.** Keep hard legal/authorization/security boundaries,
+  configurable user values, contextual risk assessment, and model-generated interpretation
+  as separate layers so one probabilistic model output cannot silently rewrite policy.
+- **Ethics Regression Tests.** Maintain scenario suites where superficially similar requests
+  differ in authorization/context (owner recovery vs intrusion, rescue vs theft, emergency
+  shutdown vs sabotage, medical disclosure to responder vs curiosity) and test that policy
+  responds to the meaningful distinctions.
+- **Ethical Red-Team Simulator.** Test emergency/necessity logic against fabricated urgency,
+  social engineering, sensor spoofing, scope creep, conflicting evidence, compromised
+  devices, and ambiguous ownership before enabling stronger real-world actions.
+
+### Small-model emergency competence
+
+Jarvis's local 8B model should not be expected to invent expert emergency procedures or
+complex ethical judgments reliably under pressure. Build competence into deterministic
+systems and curated knowledge so the model mainly identifies context, fills structured
+fields, communicates, and chooses among verified capabilities.
+
+- **Emergency Playbook Library.** Curate offline, source-attributed playbooks for plausible
+  emergencies involving home, vehicle, travel, computing, severe weather, power/network
+  failure, entrapment, and other supported domains. Prefer authoritative manufacturer/
+  government/emergency guidance and store revision/freshness metadata.
+- **Emergency Capability Index.** Maintain a locally available map of emergency mechanisms
+  Jarvis actually knows how to invoke or explain: enrolled-device SOS functions, emergency
+  contacts, building/device manuals, shutoffs, alarms, communications paths, offline maps,
+  and authorized actuators.
+- **Deterministic Emergency State Machine.** Encode common high-stakes flows as explicit
+  state machines with evidence gates, escalation criteria, stopping conditions, and safe
+  fallbacks rather than free-form agent loops.
+- **Procedure Retrieval Before Generation.** In emergencies, retrieve the relevant verified
+  playbook/manual first. The model may summarize/contextualize it but should not casually
+  fabricate a procedure from parametric memory.
+- **Offline Emergency Knowledge Pack.** Keep critical manuals, contacts, local maps,
+  emergency procedures, device recovery instructions, and essential capability metadata
+  locally accessible when Internet/cloud models are unavailable.
+- **Emergency Model Escalation.** If connectivity exists and the situation requires
+  reasoning beyond the local model's calibrated competence, route a minimal necessary
+  context package to a stronger approved model/service while preserving the ability to
+  continue locally if that route fails.
+- **Competence-Aware Routing.** Each emergency task type declares whether it is safe for
+  deterministic handling, retrieval + small model, stronger-model consultation, human
+  expert escalation, or emergency-services escalation.
+- **Don't-Let-the-8B-Wing-It Rule.** High-consequence novel procedures with weak retrieved
+  evidence should trigger explicit uncertainty and escalation rather than confident
+  improvisation.
+- **Emergency Communications Composer.** Deterministically assemble a concise responder
+  packet from known facts: identity/contact as configured, location if available, nature of
+  emergency, hazards, relevant sensor readings, accessibility needs, actions already tried,
+  and callback path.
+- **Emergency Evidence Snapshot.** Freeze recent sensor/world-model history when an
+  emergency begins so responders or later review can reconstruct what happened even if
+  devices subsequently fail.
+- **Power/Connectivity Survival Mode.** When infrastructure degrades, shed nonessential
+  workloads, preserve battery/compute for sensing, communications, local reasoning, and
+  critical automations, and reduce expensive continuous inference.
+- **Emergency Self-Test.** Periodically verify that offline playbooks open, contacts are
+  current, critical local models start, important sensor nodes report, fallback
+  communications exist, and emergency automations still pass dry-run tests.
+- **Emergency Drill Mode.** Safely simulate emergencies end-to-end without performing
+  dangerous real-world effects; measure whether Jarvis recognized the situation, found the
+  right playbook, chose appropriate escalation, communicated clearly, and terminated
+  exceptional authority correctly.

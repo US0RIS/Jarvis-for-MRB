@@ -167,6 +167,25 @@ def stop_watch(watch_id: str, *, db_path: Path | None = None,
             "past_samples_retained_until_region_forget_or_expiry": True}
 
 
+def forget_watch(watch_id: str, *, db_path: Path | None = None) -> dict[str, Any]:
+    """Revoke and delete exactly one watch grant and its watch receipts.
+
+    The region's normalized observations belong to the investigation and
+    remain until the user explicitly forgets that investigation or it expires.
+    """
+    path = _path(db_path)
+    if not path.is_file():
+        return {"deleted": 0, "investigation_samples_deleted": 0}
+    with closing(_connect(path, create=True)) as con, con:
+        con.execute("BEGIN IMMEDIATE")
+        cursor = con.execute("DELETE FROM watches WHERE id=?",
+                             (_identifier(watch_id),))
+    return {"deleted": cursor.rowcount,
+            "investigation_samples_deleted": 0,
+            "qualifier": ("The watch grant and its watch receipts were deleted; "
+                          "investigation samples were not deleted.")}
+
+
 def pause_watch(watch_id: str, *, db_path: Path | None = None,
                 now: datetime | None = None) -> dict[str, Any]:
     path = _path(db_path)

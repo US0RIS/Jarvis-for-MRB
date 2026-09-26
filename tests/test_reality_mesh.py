@@ -194,6 +194,48 @@ class MacNodeProtocolTests(unittest.TestCase):
         self.assertEqual(receipt["device_id"], "macbook")
         self.assertEqual(len(called), 1)
 
+    def test_world_observer_accepts_typed_enrolled_public_camera_task(self):
+        self.state.allow_world_observer = True
+        module = self.http.RequestHandlerClass.do_POST.__globals__
+        module["_observe_public_world"] = lambda payload: {
+            "status": "ok",
+            "provider": "public_camera",
+            "worker_observed_at": datetime.now(timezone.utc).isoformat(),
+            "sha256": "a" * 64,
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "media_kind": "published_still",
+            "source_display": "https://camera.example/current.jpg",
+            "same_published_frame": False,
+            "evaluation": {
+                "condition_status": "observed",
+                "description": "Heavy rain is visible on the roadway.",
+                "model": "local-moondream",
+            },
+            "raw_image_returned": False,
+            "source": "test camera worker",
+        }
+        health = json.loads(self.request("/v1/health")[2])
+        self.assertIn(
+            "camera_source_analysis_read_only",
+            health["capabilities"]["world_observer_capabilities"],
+        )
+        self.state.last_world_request_at = 0.0
+        status, _, raw = self.request(
+            "/v1/world/observe", method="POST",
+            payload={
+                "kind": "camera_source",
+                "source_kind": "public_https",
+                "locator": "https://camera.example/current.jpg",
+                "scene_goal": "visible heavy rain on the roadway",
+                "last_image_hash": None,
+            },
+        )
+        self.assertEqual(status, 200)
+        receipt = json.loads(raw)
+        self.assertEqual(receipt["provider"], "public_camera")
+        self.assertFalse(receipt["raw_image_returned"])
+        self.assertEqual(receipt["device_id"], "macbook")
+
     def test_world_observer_rejects_arbitrary_url_and_unknown_tasks_before_io(self):
         self.state.allow_world_observer = True
         module = self.http.RequestHandlerClass.do_POST.__globals__

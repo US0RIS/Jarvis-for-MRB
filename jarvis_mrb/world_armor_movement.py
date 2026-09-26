@@ -480,7 +480,34 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
     if worker_id not in ("windows", "macbook", "macmini"):
         raise ValueError("Unknown World Armor movement worker.")
     source = _lease(source_id, path=path, now=start, scheduled=scheduled)
-    result = _collect_provider(source, worker_id=worker_id)
+    try:
+        result = _collect_provider(source, worker_id=worker_id)
+    except Exception:
+        failed = _instant() if now is None else _instant(now)
+        with closing(_connect(path, create=True)) as con, con:
+            con.execute("BEGIN IMMEDIATE")
+            current = con.execute(
+                "SELECT state,lease_token FROM movement_sources WHERE id=?",
+                (source_id,),
+            ).fetchone()
+            if (current and current["state"] == "active"
+                    and current["lease_token"] == source["lease"]):
+                con.execute(
+                    "UPDATE movement_sources SET lease_token=NULL,"
+                    "lease_until=NULL,last_checked_at=?,last_outcome=?,"
+                    "check_count=check_count+1 WHERE id=?",
+                    (failed.isoformat(), "worker_or_provider_error", source_id),
+                )
+                con.execute(
+                    "INSERT INTO movement_checks"
+                    "(source_id,checked_at,provider_status,entities_seen,"
+                    "new_observations,error_type,worker_id)"
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (source_id, failed.isoformat(), "unavailable", 0, 0,
+                     "worker_or_provider_error", worker_id),
+                )
+                _prune(con, source, failed)
+        raise
     finish = _instant() if now is None else _instant(now)
     provider_status = str(result.get("status") or "unavailable")
     entities = result.get("entities")

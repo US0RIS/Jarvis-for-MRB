@@ -89,7 +89,8 @@ final class JarvisAppModel: ObservableObject {
             baseURL: settings.baseURL,
             fallbackBaseURL: settings.fallbackBaseURL,
             apiToken: settings.apiToken,
-            sessionID: settings.conversationSessionID
+            sessionID: settings.conversationSessionID,
+            windyAPIKey: settings.windyAPIKeyForRequest() ?? ""
         )
     }
 

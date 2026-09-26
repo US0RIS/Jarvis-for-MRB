@@ -19,7 +19,8 @@ import time
 from typing import Any
 
 from jarvis_mrb.world_armor_movement import (
-    _connect, _dbpath, _instant, _require_enabled, collect_source,
+    _connect, _dbpath, _fail_leased_source, _instant, _lease,
+    _persist_provider_result, _require_enabled, collect_source,
 )
 
 _COOLDOWN_BASE_SECONDS = 15
@@ -289,6 +290,70 @@ def _mark_in_memory(
         return
 
 
+def _pooled_ais(
+    rows: list[Any], *, path: Path, now: datetime,
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """Lease due AIS sources before one controller-side multi-region session."""
+    if not rows:
+        return {}, False
+    from jarvis_mrb.public_movement import aisstream_position_multi_burst
+
+    leased: list[dict[str, Any]] = []
+    outcomes: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source_id = str(row["id"])
+        try:
+            leased.append(_lease(
+                source_id, path=path, now=now, scheduled=True
+            ))
+        except (ValueError, KeyError, RuntimeError) as exc:
+            outcomes[source_id] = {
+                "source_id": source_id, "status": "not_collected",
+                "worker_id": "windows", "error_type": type(exc).__name__,
+                "fallback_attempted": False,
+            }
+    if not leased:
+        return outcomes, False
+    regions = [{
+        "id": source["id"],
+        "latitude": source["latitude"],
+        "longitude": source["longitude"],
+        "radius_km": source["radius_km"],
+    } for source in leased]
+    try:
+        pooled = aisstream_position_multi_burst(regions)
+    except Exception:
+        for source in leased:
+            _fail_leased_source(
+                source, path=path, worker_id="windows", now=now,
+                error_type="pooled_ais_error",
+            )
+            outcomes[source["id"]] = {
+                "source_id": source["id"], "status": "not_collected",
+                "worker_id": "windows", "error_type": "pooled_ais_error",
+                "fallback_attempted": False,
+            }
+        return outcomes, True
+    results = pooled.get("results")
+    if not isinstance(results, dict):
+        results = {}
+    for source in leased:
+        result = results.get(source["id"])
+        if not isinstance(result, dict):
+            result = {
+                "status": "unavailable", "entities": [],
+                "checked_at": pooled.get("checked_at"),
+                "source_observed_at": None,
+                "source_note": "Pooled AIS result missing exact source partition.",
+            }
+        outcomes[source["id"]] = _persist_provider_result(
+            source, result, path=path, worker_id="windows", now=now
+        )
+        outcomes[source["id"]]["pooled_transport"] = True
+        outcomes[source["id"]]["pooled_region_count"] = len(leased)
+    return outcomes, bool(pooled.get("pooled_connection"))
+
+
 def run_due(*, db_path: Path | None = None, limit: int = 8,
             now: datetime | None = None) -> dict[str, Any]:
     """One capability/load-aware movement dispatch pass."""
@@ -315,17 +380,27 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
     fabric = available_workers(db_path=path)
     workers = fabric["workers"]
     assignments: dict[str, int] = {}
-    outcomes = []
+    outcomes_by_id: dict[str, dict[str, Any]] = {}
+
+    ais_rows = [row for row in rows if row["kind"] == "aisstream_region"]
+    pooled_ais, pooled_connected = _pooled_ais(
+        ais_rows, path=path, now=instant
+    )
+    outcomes_by_id.update(pooled_ais)
+
     for row in rows:
+        source_id = str(row["id"])
+        if row["kind"] == "aisstream_region":
+            continue
         worker = _movement_worker(
             row["kind"], workers, assignments, instant
         )
         try:
             result = collect_source(
-                row["id"], db_path=path, scheduled=True,
+                source_id, db_path=path, scheduled=True,
                 worker_id=worker, now=now,
             )
-            outcomes.append(result)
+            outcomes_by_id[source_id] = result
             success = result.get("status") not in {
                 "unavailable", "not_collected"
             }
@@ -342,11 +417,15 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
             _mark_in_memory(
                 workers, worker, success=False, now=instant
             )
-            outcomes.append({
-                "source_id": row["id"], "status": "not_collected",
+            outcomes_by_id[source_id] = {
+                "source_id": source_id, "status": "not_collected",
                 "worker_id": worker, "error_type": type(exc).__name__,
                 "fallback_attempted": False,
-            })
+            }
+    outcomes = [
+        outcomes_by_id[str(row["id"])]
+        for row in rows if str(row["id"]) in outcomes_by_id
+    ]
     with closing(_connect(path, create=True)) as con:
         remaining = con.execute(
             "SELECT count(*) FROM movement_sources "
@@ -360,12 +439,13 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
         "due_remaining": remaining,
         "workers": workers,
         "scheduler": "capability_load_health_aware",
+        "ais_pooled_connection": pooled_connected,
+        "ais_pooled_sources": len(ais_rows),
         "controller_authority": (
             "source grants, leases, cadence, normalization and persistence"
         ),
         "remote_action_authority": False,
     }
-
 
 def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
                    now: datetime | None = None) -> dict[str, Any]:

@@ -720,6 +720,26 @@ struct WorldArmorView: View {
     @State private var cameraWatch: ExternalWatchSummary?
     @State private var cameraWatchImportID = ""
     @State private var cameraStatus = "No public camera requested."
+    @State private var platformSources: [ArmorPlatformSource] = []
+    @State private var platformTotal = 0
+    @State private var platformNextOffset: Int?
+    @State private var platformKind = "public_https"
+    @State private var platformLocator = ""
+    @State private var platformLabel = "Public camera"
+    @State private var platformGoal = ""
+    @State private var platformTerms = ""
+    @State private var platformGrantClass = "public_publisher"
+    @State private var platformAutomated = false
+    @State private var platformCadence = "60"
+    @State private var platformMinInterval = "0"
+    @State private var platformRetentionDays = "30"
+    @State private var platformLatitude = ""
+    @State private var platformLongitude = ""
+    @State private var platformActiveID: String?
+    @State private var platformEvidence: [ArmorPlatformObservation] = []
+    @State private var platformNotices: [ArmorPlatformNotice] = []
+    @State private var platformCombinedSummary = ""
+    @State private var platformStatus = "No source registry check performed."
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -755,6 +775,7 @@ struct WorldArmorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
                 heading
+                sourceConsole
                 enrollment
                 saved
                 if let selected {
@@ -1713,6 +1734,11 @@ struct WorldArmorView: View {
             // collection is disabled; no new provider request is issued here.
             investigations = try await client.worldArmorInvestigations().investigations
             watches = (try? await client.worldArmorWatches())?.watches ?? []
+            if let page = try? await client.worldArmorPlatformSources() {
+                platformSources = page.sources
+                platformNextOffset = page.nextOffset
+                platformTotal = page.total
+            }
             if let current = selectedID {
                 let response = try? await client.worldArmorNotices(
                     investigationID: current

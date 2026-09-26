@@ -178,6 +178,10 @@ def probe(node_id: str) -> dict[str, Any]:
             "label": str(data.get("label") or record["label"])[:100],
             "observed_at": data["observed_at"],
             "capabilities": data["capabilities"],
+            "worker_metrics": (
+                data.get("worker_metrics")
+                if isinstance(data.get("worker_metrics"), dict) else {}
+            ),
             "screen_session_active": data.get("screen_session_active") is True,
             "evidence": "Live authenticated response from matching explicitly configured macOS node.",
         })

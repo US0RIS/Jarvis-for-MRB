@@ -227,11 +227,11 @@ def list_notices(*, investigation_id: str | None = None,
         if unread_only:
             query += " AND n.read_at IS NULL"
         query += " ORDER BY n.created_at DESC,n.id DESC LIMIT ?"
-        rows = con.execute(query, tuple(params + [_MAX_NOTICES])).fetchall()
-    return {"notices": [dict(r) for r in rows],
+        rows = con.execute(query, tuple(params + [_MAX_NOTICES + 1])).fetchall()
+    return {"notices": [dict(r) for r in rows[:_MAX_NOTICES]],
             "unread_count": unread,
             "delivery": "private_inbox_only_no_remote_push",
-            "truncated": len(rows) >= _MAX_NOTICES}
+            "truncated": len(rows) > _MAX_NOTICES}
 
 
 def mark_read(notice_id: str, *, db_path: Path | None = None,

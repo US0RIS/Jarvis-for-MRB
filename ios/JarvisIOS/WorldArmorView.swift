@@ -940,6 +940,7 @@ struct WorldArmorView: View {
                 platformNotices = []
                 platformActiveID = nil
                 platformCombinedSummary = ""
+                movementEntities = []
                 notices = []
                 unreadNotices = 0
                 seenNoticeIDs = []
@@ -2399,6 +2400,185 @@ struct WorldArmorView: View {
             await refreshNotices(alertOnNew: false)
         } catch {
             status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
+    private func refreshMovementSources() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Movement registry refreshed; no provider queried."
+        } catch {
+            movementStatus = "Movement registry unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func loadMoreMovementSources() async {
+        guard !busy, let cursor = movementNextOffset else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorMovementSources(
+                offset: cursor
+            )
+            movementSources.append(contentsOf: page.sources)
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Loaded \(movementSources.count) of "
+                + "\(movementTotal) movement sources."
+        } catch {
+            movementStatus = "Movement pagination unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func enrollMovementSource() async {
+        guard !busy else { return }
+        guard let retention = Int(movementRetention), retention >= 1,
+              let minimum = Int(movementMinInterval), minimum >= 0 else {
+            movementStatus = "Enter positive retention and a valid provider interval."
+            return
+        }
+        let cadence: Int
+        if movementAutomated {
+            guard let entered = Int(movementCadence),
+                  entered >= max(minimum, 1) else {
+                movementStatus = "Scheduled cadence must meet provider terms."
+                return
+            }
+            cadence = entered
+        } else {
+            cadence = 0
+        }
+        var lat: Double?
+        var lon: Double?
+        var radiusKM: Double?
+        if movementKind != "opensky_global" {
+            guard let parsedLat = Double(movementLatitude),
+                  let parsedLon = Double(movementLongitude),
+                  let parsedRadius = Double(movementRadius),
+                  parsedRadius > 0 else {
+                movementStatus = "Enter a valid movement region."
+                return
+            }
+            lat = parsedLat
+            lon = parsedLon
+            radiusKM = parsedRadius
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let source = try await client.worldArmorMovementEnroll(
+                label: movementLabel,
+                kind: movementKind,
+                grantClass: movementGrantClass,
+                termsReference: movementTerms,
+                automated: movementAutomated,
+                providerMinIntervalSeconds: minimum,
+                cadenceSeconds: cadence,
+                retentionDays: retention,
+                latitude: lat, longitude: lon, radiusKM: radiusKM
+            )
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Enrolled " + source.label
+                + ". Collection is still local-host/user initiated."
+        } catch {
+            movementStatus = "Movement source enrollment blocked: "
+                + error.localizedDescription
+        }
+    }
+
+    private func collectMovementSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await client.worldArmorMovementCollect(id)
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = "Provider status: " + receipt.status
+                + " · entities \(receipt.entitiesSeen ?? 0)"
+                + " · new track points \(receipt.observationsSaved ?? 0). "
+                + (receipt.providerNote ?? "")
+        } catch {
+            movementStatus = "Movement collection unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func changeMovementSource(
+        _ id: String, action: String
+    ) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let source = try await client.worldArmorMovementTransition(
+                id, action: action
+            )
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementStatus = source.label + " is " + source.state + "."
+        } catch {
+            movementStatus = "Movement transition unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func forgetMovementSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.worldArmorMovementForget(id)
+            let page = try await client.worldArmorMovementSources()
+            movementSources = page.sources
+            movementTotal = page.total
+            movementNextOffset = page.nextOffset
+            movementEntities = []
+            movementStatus = "Movement source and its local track history forgotten."
+        } catch {
+            movementStatus = "Movement forget unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func queryNearbyMovement() async {
+        guard !busy,
+              let lat = Double(movementLatitude),
+              let lon = Double(movementLongitude),
+              let radius = Double(movementRadius),
+              radius > 0 else {
+            movementStatus = "Enter a valid point and movement radius."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorMovementNearby(
+                latitude: lat, longitude: lon, radiusKM: radius,
+                entityType: movementEntityType
+            )
+            movementEntities = page.entities
+            movementStatus = "Showing \(page.entities.count) latest retained "
+                + "public movement states. Missing entities do not prove "
+                + "the area is clear."
+        } catch {
+            movementStatus = "Movement query unavailable: "
+                + error.localizedDescription
         }
     }
 

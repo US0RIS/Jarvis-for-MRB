@@ -131,7 +131,8 @@ def _connect(path: Path, *, create: bool = False) -> sqlite3.Connection:
           geometry_basis TEXT NOT NULL,
           change_kind TEXT NOT NULL,
           adapter_mode TEXT NOT NULL DEFAULT 'real_adapter',
-          source_status TEXT NOT NULL DEFAULT 'ok'
+          source_status TEXT NOT NULL DEFAULT 'ok',
+          worker_id TEXT NOT NULL DEFAULT 'windows'
         );
         CREATE INDEX IF NOT EXISTS ix_platform_evidence_source
           ON source_evidence(source_id,seq);
@@ -154,11 +155,32 @@ def _connect(path: Path, *, create: bool = False) -> sqlite3.Connection:
           source_id TEXT NOT NULL REFERENCES source_grants(id) ON DELETE CASCADE,
           checked_at TEXT NOT NULL,
           status TEXT NOT NULL,
-          error_type TEXT
+          error_type TEXT,
+          worker_id TEXT NOT NULL DEFAULT 'windows'
         );
         CREATE INDEX IF NOT EXISTS ix_platform_checks_source
           ON source_checks(source_id,seq);
         """)
+        evidence_fields = {
+            row["name"] for row in con.execute(
+                "PRAGMA table_info(source_evidence)"
+            )
+        }
+        if "worker_id" not in evidence_fields:
+            con.execute(
+                "ALTER TABLE source_evidence "
+                "ADD COLUMN worker_id TEXT NOT NULL DEFAULT 'windows'"
+            )
+        check_fields = {
+            row["name"] for row in con.execute(
+                "PRAGMA table_info(source_checks)"
+            )
+        }
+        if "worker_id" not in check_fields:
+            con.execute(
+                "ALTER TABLE source_checks "
+                "ADD COLUMN worker_id TEXT NOT NULL DEFAULT 'windows'"
+            )
     return con
 
 

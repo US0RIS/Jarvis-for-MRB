@@ -102,7 +102,7 @@ def _prune(con: sqlite3.Connection, row: dict[str, Any], now: datetime) -> None:
 
 
 def _finish_error(row: dict[str, Any], *, path: Path,
-                  error: Exception,
+                  error: Exception, worker_id: str = "windows",
                   now: datetime | None = None) -> dict[str, Any]:
     now = _instant(now)
     with closing(_connect(path)) as con, con:
@@ -116,44 +116,90 @@ def _finish_error(row: dict[str, Any], *, path: Path,
             (now.isoformat(), "unavailable", row["id"]),
         )
         con.execute(
-            "INSERT INTO source_checks(source_id,checked_at,status,error_type)"
-            "VALUES(?,?,?,?)",
-            (row["id"], now.isoformat(), "unavailable", type(error).__name__),
+            "INSERT INTO source_checks"
+            "(source_id,checked_at,status,error_type,worker_id)"
+            "VALUES(?,?,?,?,?)",
+            (row["id"], now.isoformat(), "unavailable",
+             type(error).__name__, worker_id),
         )
         _prune(con, row, now)
     return {
         "status": "unavailable", "source_id": row["id"],
-        "error_type": type(error).__name__,
+        "error_type": type(error).__name__, "worker_id": worker_id,
         "source_status": "unknown_not_all_clear", "data_saved": False,
     }
 
 
 def observe_source(source_id: str, *, db_path: Path | None = None,
-                   scheduled: bool = False,
+                   scheduled: bool = False, worker_id: str = "windows",
                    now: datetime | None = None) -> dict[str, Any]:
-    """The sole host execution path; external bytes and model calls outside SQL locks."""
+    """Lease-fenced camera observation on Windows or one exact paired Mac."""
+    if worker_id not in ("windows", "macbook", "macmini"):
+        raise ValueError("Camera worker must be Windows or an exact paired Mac.")
     start = _instant(now)
     path = _dbpath(db_path)
     row = _acquire_lease(source_id, path=path, now=start, scheduled=scheduled)
     frame: bytes | None = None
     try:
-        received = perception.acquire_source(row["kind"], row["locator"])
-        frame = received.pop("frame")
-        image_hash = received["sha256"]
-        if (not image_hash or len(image_hash) != 64 or not frame):
-            raise ValueError("Provider yielded no normalized camera frame.")
-        if row["last_image_hash"] == image_hash:
-            # No model invocation and no evidence/event created for a re-served
-            # identical frame. A repeated frame isn't a later verified capture.
-            evaluation = None
+        if worker_id == "windows":
+            received = perception.acquire_source(row["kind"], row["locator"])
+            frame = received.pop("frame")
+            image_hash = received["sha256"]
+            if (not image_hash or len(image_hash) != 64 or not frame):
+                raise ValueError("Provider yielded no normalized camera frame.")
+            if row["last_image_hash"] == image_hash:
+                # No model invocation and no evidence/event created for a re-served
+                # identical frame. A repeated frame isn't a later verified capture.
+                evaluation = None
+            else:
+                evaluation = perception.interpret_frame(
+                    frame, row["scene_goal"],
+                )
         else:
-            evaluation = perception.interpret_frame(
-                frame, row["scene_goal"],
-            )
+            from jarvis_mrb import reality_mesh
+            remote = reality_mesh.world_observe(worker_id, {
+                "kind": "camera_source",
+                "source_kind": row["kind"],
+                "locator": row["locator"],
+                "scene_goal": row["scene_goal"],
+                "last_image_hash": row["last_image_hash"],
+            })
+            if (remote.get("status") != "ok"
+                    or remote.get("provider") != "public_camera"
+                    or remote.get("device_id") != worker_id):
+                raise RuntimeError("Camera worker returned an invalid receipt.")
+            image_hash = remote.get("sha256")
+            if type(image_hash) is not str or len(image_hash) != 64:
+                raise RuntimeError("Camera worker returned an invalid frame digest.")
+            received = {
+                "sha256": image_hash,
+                "retrieved_at": remote.get("retrieved_at"),
+                "capture_time": None,
+                "media_kind": remote.get("media_kind"),
+                "source_display": remote.get("source_display"),
+            }
+            if not all(
+                isinstance(received.get(name), str) and received.get(name)
+                for name in ("retrieved_at", "media_kind", "source_display")
+            ):
+                raise RuntimeError("Camera worker returned incomplete source metadata.")
+            if remote.get("same_published_frame") is True:
+                evaluation = None
+            else:
+                evaluation = remote.get("evaluation")
+                if not isinstance(evaluation, dict):
+                    raise RuntimeError("Camera worker returned no normalized evaluation.")
+                if (evaluation.get("condition_status")
+                        not in ("observed", "not_observed", "uncertain", None)
+                        or not isinstance(evaluation.get("description"), str)
+                        or not isinstance(evaluation.get("model"), str)):
+                    raise RuntimeError("Camera worker evaluation schema is invalid.")
     except Exception as exc:
-        return _finish_error(row, path=path, error=exc, now=now)
+        return _finish_error(
+            row, path=path, error=exc, worker_id=worker_id, now=now
+        )
     finally:
-        # Nothing persists the model image bytes. Wipe the only local binding.
+        # Raw camera bytes never persist. Remote workers do not return them.
         frame = None
 
     finish = _instant() if now is None else _instant(now)
@@ -170,16 +216,18 @@ def observe_source(source_id: str, *, db_path: Path | None = None,
                 (finish.isoformat(), "unchanged_published_frame", row["id"]),
             )
             con.execute(
-                "INSERT INTO source_checks(source_id,checked_at,status,error_type)"
-                "VALUES(?,?,?,NULL)",
-                (row["id"], finish.isoformat(), "unchanged_published_frame"),
+                "INSERT INTO source_checks"
+                "(source_id,checked_at,status,error_type,worker_id)"
+                "VALUES(?,?,?,NULL,?)",
+                (row["id"], finish.isoformat(),
+                 "unchanged_published_frame", worker_id),
             )
             _prune(con, row, finish)
             return {
                 "status": "ok", "source_id": row["id"],
                 "change_kind": "same_published_image_not_new_capture",
                 "model_calls": 0, "evidence_inserted": 0,
-                "capture_time_verified": False,
+                "capture_time_verified": False, "worker_id": worker_id,
             }
 
         decision = evaluation["condition_status"]
@@ -204,13 +252,14 @@ def observe_source(source_id: str, *, db_path: Path | None = None,
             """INSERT INTO source_evidence
              (id,source_id,image_sha256,description,condition_status,
               scene_goal,source_capture_at,retrieved_at,received_at,
-              media_kind,model,source_display,geometry_basis,change_kind)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              media_kind,model,source_display,geometry_basis,change_kind,worker_id)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (evidence_id, row["id"], image_hash,
              evaluation["description"], decision, row["scene_goal"],
              None, received["retrieved_at"], finish.isoformat(),
              received["media_kind"], evaluation["model"],
-             received["source_display"], row["spatial_basis"], change),
+             received["source_display"], row["spatial_basis"], change,
+             worker_id),
         )
         if notice:
             con.execute(
@@ -233,9 +282,10 @@ def observe_source(source_id: str, *, db_path: Path | None = None,
              row["id"]),
         )
         con.execute(
-            "INSERT INTO source_checks(source_id,checked_at,status,error_type)"
-            "VALUES(?,?,?,NULL)",
-            (row["id"], finish.isoformat(), "ok"),
+            "INSERT INTO source_checks"
+            "(source_id,checked_at,status,error_type,worker_id)"
+            "VALUES(?,?,?,NULL,?)",
+            (row["id"], finish.isoformat(), "ok", worker_id),
         )
         _prune(con, row, finish)
     return {
@@ -245,7 +295,7 @@ def observe_source(source_id: str, *, db_path: Path | None = None,
         "model_calls": 1, "evidence_inserted": 1,
         "capture_time_verified": False,
         "source_is_current": "not_verified",
-        "no_image_retained": True,
+        "no_image_retained": True, "worker_id": worker_id,
     }
 
 

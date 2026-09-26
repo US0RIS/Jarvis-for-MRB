@@ -59,6 +59,28 @@ an emergency safety system, a live source acceptance or an autonomous
 external action path. New code is a stacked draft on the watches branch,
 not deployed to the operator's machines.
 
+## World Armor v5 — distributed camera workers (stacked draft)
+
+**[Distributed camera worker runbook](docs/WORLD_ARMOR_DISTRIBUTED_CAMERAS.md).**
+The existing private Reality Mesh now also supports typed, rights-scoped
+public-camera work on the exact paired MacBook Air / Mac mini. With
+`--allow-world-observer`, a Mac may fetch and locally interpret an already
+enrolled Caltrans or explicit public HTTP(S) camera source; generic media still
+passes the same public-DNS/private-address/no-redirect media guard. Windy stays
+on Windows so its API credential is not delegated. Raw camera frames are never
+returned to Windows: the worker returns only digest/source metadata and the
+structured environmental/infrastructure observation. Windows still owns the
+source grant, terms, cadence, lease, revocation, retention, notice logic and
+final evidence write, and camera evidence/checks now retain `worker_id`.
+
+Run the added camera pass explicitly with
+`jarvis-world-distributed --include-cameras --camera-limit 4`.
+A failed worker is not silently retried through another machine in the same
+source interval, and stop/pause/revocation while the Mac is working vetoes late
+persistence. This expands the observation fabric without adding private-camera
+access, network scanning, person identification/tracking, arbitrary commands
+or action authority.
+
 ## World Armor v4 — distributed public-world observers (stacked draft)
 
 **[Distributed observer runbook](docs/WORLD_ARMOR_DISTRIBUTED.md).**

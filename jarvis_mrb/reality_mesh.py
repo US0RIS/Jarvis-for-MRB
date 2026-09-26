@@ -204,30 +204,58 @@ def nodes() -> dict[str, Any]:
 
 
 def world_observe(node_id: str, task: dict[str, Any]) -> dict[str, Any]:
-    """Run one fixed read-only public-world task on an explicitly paired Mac."""
+    """Run one typed read-only public-world task on an explicitly paired Mac."""
     if node_id not in _IDS:
         raise ValueError("Distributed world observer must be an exact paired Mac.")
     if not isinstance(task, dict):
         raise ValueError("World observer task must be a typed object.")
-    allowed = {"kind", "latitude", "longitude", "radius_km"}
-    if set(task) - allowed or task.get("kind") != "opensky_region":
-        raise ValueError("Only typed OpenSky region worker tasks are supported.")
+    kind = task.get("kind")
+    if kind == "opensky_region":
+        allowed = {"kind", "latitude", "longitude", "radius_km"}
+        required_capability = "opensky_region_read_only"
+    elif kind == "camera_source":
+        allowed = {
+            "kind", "source_kind", "locator", "scene_goal",
+            "last_image_hash",
+        }
+        required_capability = "camera_source_analysis_read_only"
+    else:
+        raise ValueError("Unregistered distributed world-observer task.")
+    if set(task) - allowed:
+        raise ValueError("Unregistered distributed world-observer field.")
+
     state = probe(node_id)
     if state["status"] != "online":
         raise NodeUnavailable("Mac observer is offline or identity-unverified.")
     capabilities = state.get("capabilities") or {}
-    if capabilities.get("world_observer") != "opensky_region_read_only":
-        raise NodeUnavailable("Mac was not started with world-observer opt-in.")
+    advertised = capabilities.get("world_observer_capabilities")
+    if not isinstance(advertised, list):
+        advertised = (
+            ["opensky_region_read_only"]
+            if capabilities.get("world_observer") == "opensky_region_read_only"
+            else []
+        )
+    if required_capability not in advertised:
+        raise NodeUnavailable(
+            "Mac was not started with the required world-observer capability."
+        )
     response, _, _ = _request(
         node_id, "POST", "/v1/world/observe", payload=task,
     )
     if (not response or response.get("status") != "ok"
-            or response.get("device_id") != node_id
-            or response.get("provider") != "opensky"
-            or not isinstance(response.get("provider_payload"), dict)):
+            or response.get("device_id") != node_id):
         raise NodeUnavailable("Mac world observer returned invalid evidence.")
+    if kind == "opensky_region":
+        if (response.get("provider") != "opensky"
+                or not isinstance(response.get("provider_payload"), dict)):
+            raise NodeUnavailable("Mac OpenSky observer returned invalid evidence.")
+    else:
+        if (response.get("provider") != "public_camera"
+                or not isinstance(response.get("sha256"), str)
+                or len(response["sha256"]) != 64
+                or response.get("raw_image_returned") is not False):
+            raise NodeUnavailable("Mac camera observer returned invalid evidence.")
     return response
-
 
 def _valid_node(node_id: str) -> None:
     if node_id not in _IDS:

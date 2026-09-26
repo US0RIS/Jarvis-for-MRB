@@ -206,6 +206,33 @@ class SourcePlatformTests(unittest.TestCase):
         self.assertEqual(len(notes), 2)
         self.assertTrue(all("Unconfirmed" in note["summary"] for note in notes))
 
+    def test_remote_camera_worker_lineage_persists_without_raw_frame(self):
+        source = self.enroll()
+        remote = {
+            "status": "ok",
+            "provider": "public_camera",
+            "device_id": "macbook",
+            "sha256": "b" * 64,
+            "retrieved_at": self.now.isoformat(),
+            "media_kind": "published_still",
+            "source_display": "https://public-camera.example/road.jpg",
+            "same_published_frame": False,
+            "evaluation": self.result(),
+            "raw_image_returned": False,
+        }
+        with patch("jarvis_mrb.reality_mesh.world_observe",
+                   return_value=remote):
+            receipt = runner.observe_source(
+                source["id"], db_path=self.db, now=self.now,
+                worker_id="macbook",
+            )
+        self.assertEqual(receipt["worker_id"], "macbook")
+        self.assertTrue(receipt["no_image_retained"])
+        evidence = registry.observations(db_path=self.db)["observations"]
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["worker_id"], "macbook")
+        self.assertEqual(evidence[0]["image_sha256"], "b" * 64)
+
     def test_stop_during_http_blocks_evidence_and_notice(self):
         source = self.enroll()
         def stop_during_fetch(kind, locator):

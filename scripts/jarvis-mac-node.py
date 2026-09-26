@@ -21,6 +21,7 @@ import platform
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -32,7 +33,7 @@ from urllib.request import Request, urlopen
 VERSION = 1
 MAX_SCREEN_BYTES = 4_000_000
 MAX_SESSION_SECONDS = 300
-MAX_REQUEST_BYTES = 2048
+MAX_REQUEST_BYTES = 4096
 MAX_WORLD_BYTES = 8_000_000
 OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
 _EXACT_APPS = ("Safari", "Notes", "Calendar", "Preview", "Finder")
@@ -228,20 +229,91 @@ def _movement_bbox(latitude: float, longitude: float,
     }
 
 
+def _world_perception_module():
+    # Keep the Mac node lightweight at startup; camera dependencies are loaded
+    # only when this explicit observer capability is used.
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from jarvis_mrb import world_armor_perception
+    return world_armor_perception
+
+
 def _validate_world_task(payload: dict[str, Any]) -> None:
-    if set(payload) - {"kind", "latitude", "longitude", "radius_km"}:
-        raise ValueError("Unregistered world-observer field.")
-    if payload.get("kind") != "opensky_region":
-        raise ValueError("This Mac observer currently supports OpenSky regions only.")
-    _movement_bbox(
-        payload.get("latitude"), payload.get("longitude"),
-        payload.get("radius_km"),
-    )
+    kind = payload.get("kind")
+    if kind == "opensky_region":
+        if set(payload) - {"kind", "latitude", "longitude", "radius_km"}:
+            raise ValueError("Unregistered OpenSky observer field.")
+        _movement_bbox(
+            payload.get("latitude"), payload.get("longitude"),
+            payload.get("radius_km"),
+        )
+        return
+    if kind == "camera_source":
+        allowed = {
+            "kind", "source_kind", "locator", "scene_goal",
+            "last_image_hash",
+        }
+        if set(payload) - allowed:
+            raise ValueError("Unregistered camera observer field.")
+        if payload.get("source_kind") not in {
+            "caltrans", "public_https", "public_http"
+        }:
+            raise ValueError(
+                "Mac camera workers support Caltrans or explicit public media only."
+            )
+        locator = payload.get("locator")
+        if type(locator) is not str or not 1 <= len(locator) <= 1800:
+            raise ValueError("Camera locator is absent or oversized.")
+        last_hash = payload.get("last_image_hash")
+        if last_hash is not None and (
+            type(last_hash) is not str or len(last_hash) != 64
+            or any(ch not in "0123456789abcdef" for ch in last_hash.lower())
+        ):
+            raise ValueError("Last camera frame digest is invalid.")
+        perception = _world_perception_module()
+        perception.validate_scene_goal(payload.get("scene_goal") or "")
+        return
+    raise ValueError("Unregistered world-observer task.")
 
 
 def _observe_public_world(payload: dict[str, Any]) -> dict[str, Any]:
-    """One fixed-provider read-only fetch. No arbitrary URL/RPC/network target."""
+    """One typed read-only public-world observation with no action authority."""
     _validate_world_task(payload)
+    if payload.get("kind") == "camera_source":
+        perception = _world_perception_module()
+        frame: bytes | None = None
+        try:
+            received = perception.acquire_source(
+                payload["source_kind"], payload["locator"]
+            )
+            frame = received.pop("frame")
+            digest = received.get("sha256")
+            if type(digest) is not str or len(digest) != 64 or not frame:
+                raise RuntimeError("Camera adapter yielded no normalized frame.")
+            same = payload.get("last_image_hash") == digest
+            evaluation = None if same else perception.interpret_frame(
+                frame, payload.get("scene_goal") or ""
+            )
+            return {
+                "status": "ok",
+                "provider": "public_camera",
+                "worker_observed_at": iso(utcnow()),
+                "sha256": digest,
+                "retrieved_at": received.get("retrieved_at"),
+                "media_kind": received.get("media_kind"),
+                "source_display": received.get("source_display"),
+                "same_published_frame": same,
+                "evaluation": evaluation,
+                "raw_image_returned": False,
+                "source": (
+                    "Rights-scoped enrolled public camera fetched and "
+                    "interpreted on explicitly opted-in private Mac worker"
+                ),
+            }
+        finally:
+            frame = None
+
     box = _movement_bbox(
         payload.get("latitude"), payload.get("longitude"),
         payload.get("radius_km"),
@@ -328,6 +400,13 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                     "world_observer": (
                         "opensky_region_read_only"
                         if state.allow_world_observer else "disabled"
+                    ),
+                    "world_observer_capabilities": (
+                        [
+                            "opensky_region_read_only",
+                            "camera_source_analysis_read_only",
+                        ]
+                        if state.allow_world_observer else []
                     ),
                 },
                 "screen_session_active": state.active(),
@@ -445,7 +524,7 @@ def main() -> None:
     parser.add_argument("--allow-app-launch", action="store_true",
                         help="Separately enable five fixed Mac app names by explicit phone tap")
     parser.add_argument("--allow-world-observer", action="store_true",
-                        help="Enable fixed read-only OpenSky region observations for World Armor")
+                        help="Enable typed read-only OpenSky and enrolled public-camera observations for World Armor")
     args = parser.parse_args()
     token = os.environ.get("JARVIS_MESH_NODE_TOKEN", "")
     if not 1 <= args.port <= 65535:

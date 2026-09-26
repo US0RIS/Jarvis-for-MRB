@@ -210,6 +210,85 @@ class WorldArmorKernelTests(TestCase):
         self.assertEqual(view["observation_count"],3)
         self.assertEqual(len(view["revisions"]),0)
 
+    def test_publisher_time_correction_is_retained_as_source_revision(self):
+        key = self.new()
+        first = quakes()
+        self.ingest(key, quake=first)
+        amended = quakes()
+        amended["events"][0]["occurred_at"] = (
+            NOW - timedelta(minutes=40)
+        ).isoformat()
+        self.ingest(key, quake=amended, time=NOW + timedelta(minutes=5))
+        before = self.replay(key, at=NOW.isoformat())
+        after = self.replay(key)
+        original = next(o for o in before["observations"]
+                        if o["source"] == "usgs_earthquakes")
+        corrected = next(o for o in after["observations"]
+                         if o["source"] == "usgs_earthquakes")
+        self.assertEqual(original["revision"], 1)
+        self.assertEqual(corrected["revision"], 2)
+        self.assertNotEqual(original["observed_at"], corrected["observed_at"])
+        self.assertEqual(corrected["supersedes_id"], original["id"])
+        self.assertEqual(len(after["revisions"]), 1)
+        changes = armor.compare_recent(
+            key, db_path=self.db, now=NOW + timedelta(minutes=6)
+        )
+        self.assertTrue(any(
+            row["source"] == "usgs_earthquakes"
+            and row["kind"] == "source_record_revision"
+            for row in changes["source_record_changes"]
+        ))
+
+    def test_source_result_caps_report_partial_not_complete_coverage(self):
+        key = self.new()
+        original_quake = quakes()["events"][0]
+        many_quakes = [
+            {**original_quake, "id": f"quake-{idx}"}
+            for idx in range(51)
+        ]
+        original_alert = conditions()["weather_alerts"]["alerts"][0]
+        many_alerts = [
+            {**original_alert, "id": f"alert-{idx}"}
+            for idx in range(16)
+        ]
+        receipt = self.ingest(
+            key,
+            air=conditions(alerts=many_alerts),
+            quake=quakes(events=many_quakes),
+        )
+        coverage = {item["provider"]: item for item in receipt["coverage"]}
+        self.assertEqual(coverage["nws_point_alerts"]["status"], "partial")
+        self.assertEqual(coverage["usgs_earthquakes"]["status"], "partial")
+        self.assertEqual(coverage["nws_point_alerts"]["count"], 15)
+        self.assertEqual(coverage["usgs_earthquakes"]["count"], 50)
+        self.assertFalse(receipt["all_sources_available"])
+        replayed = self.replay(key)
+        self.assertFalse(replayed["coverage_complete_for_integrated_sources"])
+        self.assertEqual(replayed["observation_count"], 66)
+        usgs = next(o for o in replayed["observations"]
+                    if o["source"] == "usgs_earthquakes")
+        self.assertEqual(usgs["sample_coverage_status"], "partial")
+
+    def test_fixture_and_real_sample_changes_do_not_masquerade_as_world_delta(self):
+        key = self.new()
+        self.ingest(key)
+        real_time = NOW + timedelta(minutes=5)
+        with patch.object(armor, "_clock", return_value=real_time), \
+             patch("jarvis_mrb.physical_conditions.physical_conditions",
+                   return_value=conditions(aqi=83)), \
+             patch("jarvis_mrb.public_incidents.regional_earthquakes",
+                   return_value=quakes(mag=4.6)):
+            armor.observe_once(key, db_path=self.db)
+        changes = armor.compare_recent(
+            key, db_path=self.db, now=NOW + timedelta(minutes=10)
+        )
+        self.assertEqual(changes["comparison"], "incompatible_adapter_modes")
+        self.assertEqual(changes["previous_mode"], "fixture")
+        self.assertEqual(changes["latest_mode"], "real_adapter")
+        self.assertEqual(changes["source_record_changes"], [])
+        self.assertIsNone(changes["modelled_air_quality_change"])
+        self.assertEqual(changes["source_changes"], [])
+
     def test_data_validation_never_stores_nan_or_missing_source_time_as_now(self):
         key=self.new()
         air=conditions(aqi=float("nan"))

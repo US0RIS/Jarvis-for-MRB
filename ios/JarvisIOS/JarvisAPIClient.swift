@@ -2479,9 +2479,6 @@ struct JarvisAPIClient {
         request.httpMethod = "PUT"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        for (name, value) in headers where !value.isEmpty {
-            request.setValue(value, forHTTPHeaderField: name)
-        }
         addAuthorization(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         do {
@@ -2603,6 +2600,9 @@ struct JarvisAPIClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers where !value.isEmpty {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         addAuthorization(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

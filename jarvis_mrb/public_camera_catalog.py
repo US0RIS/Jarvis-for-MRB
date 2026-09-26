@@ -246,15 +246,24 @@ def discover_combined_public_cameras(
         api_key=windy_api_key,
     )
 
-    combined = list(cal.get("cameras") or []) + list(windy.get("cameras") or [])
+    combined: list[dict[str, Any]] = []
+    for item in list(cal.get("cameras") or []) + list(windy.get("cameras") or []):
+        distance = _km(
+            latitude,
+            longitude,
+            float(item["latitude"]),
+            float(item["longitude"]),
+        )
+        combined.append({
+            **item,
+            "nearby_place": str(item.get("nearby_place") or "")[:90],
+            "distance_km": round(distance, 2),
+            "image_url": str(item.get("image_url") or ""),
+            "stream_url": str(item.get("stream_url") or ""),
+        })
     combined.sort(
         key=lambda item: (
-            _km(
-                latitude,
-                longitude,
-                float(item["latitude"]),
-                float(item["longitude"]),
-            ),
+            float(item["distance_km"]),
             str(item.get("id") or ""),
         )
     )

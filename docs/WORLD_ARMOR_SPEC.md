@@ -709,9 +709,33 @@ Exit: at least one additional domain yields demonstrably useful **cross-domain**
 
 ### Phase 5 — full-scope World Armor interfaces
 
-Reality Browser (navigable immersive timeline), Presence (authorized physical embodiment), Causal Debugger (stronger mechanism testing), Synthetic Senses and Parallel Existence remain part of the **full World Armor target**. They are later layers because they depend on the evidence, live-fabric and authority infrastructure from Phases 1–4; deferral is a sequencing decision, not a removal of scope.
+The stacked `jarvis/world-armor-full-scope` implementation candidate now exposes
+all five retained full-scope interfaces on top of the evidence/live-fabric foundation:
 
-Each interface still receives its own implementation and acceptance gates. Presence may act only through separately authorized actuators; Reality Browser must preserve source/time/coverage uncertainty; Causal Debugger must distinguish mechanisms from correlations; Synthetic Senses must identify derived/modelled signals; Parallel Existence may distribute analysis but cannot manufacture source authority or physical completion.
+- **Reality Browser** — retained event/evidence navigation with explicit time basis,
+  replay gaps and no interpolation of missing observations.
+- **Synthetic Senses** — derived operational/world signals that identify their retained
+  event basis and are never serialized as direct world facts.
+- **Causal Debugger** — falsifiable mechanism checks over candidate hypotheses, with
+  alternatives and missing evidence visible; it emits no causal conclusion from
+  correlation alone.
+- **Parallel Existence** — bounded concurrent typed analyses with a durable run receipt;
+  analysis concurrency does not expand source or action authority.
+- **Presence** — exact short-lived actuator grants. The first concrete bridge is one
+  already-discovered Apple Home light on the iPhone; dispatch, HomeKit command
+  acceptance and fresh accessory-reported state are distinct receipts.
+
+The same phase also adds an optional durable APNs outbox for warning/urgent World Armor
+events and runtime recovery guards. Those are delivery/resilience infrastructure, not
+new evidence or action authority. Production APNs signing, a physical iPhone, real
+provider access, actual HomeKit hardware and host watchdog behavior remain
+environment-specific acceptance gates.
+
+Presence may act only through separately authorized actuators; Reality Browser must
+preserve source/time/coverage uncertainty; Causal Debugger must distinguish mechanisms
+from correlations; Synthetic Senses must identify derived/modelled signals; Parallel
+Existence may distribute analysis but cannot manufacture source authority or physical
+completion. A green PR establishes source implementation, not observed deployment.
 
 ### Economic extension
 
@@ -719,7 +743,7 @@ A separately approved, independently risk-reviewed charter, not part of any auto
 
 ---
 
-## 18. Acceptance contract: W0–W16
+## 18. Acceptance contract: W0–W18
 
 ### Evidence standard
 
@@ -744,6 +768,8 @@ Unit tests, deterministic fixture replay, injected provider failures, Windows ru
 | W14 — iOS correctness | Exact branch simulator build, foreground/background privacy and explicit view reset tested; real iPhone tests tracked separately |
 | W15 — live provider truth | Real authorized source demonstrates a bounded event and source receipt, with license record checked; no synthetic provider passed off as live |
 | W16 — human capability demo | Operator answers a genuine cross-domain question with provenance, identifies at least one uncertainty, and can replay/stop/delete the investigation without a developer editing the DB |
+| W17 — full-scope semantics | Reality Browser preserves gaps; Synthetic Senses remain derived; Causal Debugger remains non-causal without mechanism proof; Parallel Existence cannot expand authority; Presence requires an exact expiring grant and a separate readback receipt |
+| W18 — resilient delivery | Warning/urgent push survives transient APNs failure through the bounded outbox; invalid tokens terminate; in-process live/push threads recover; the external watchdog restarts an unexpectedly exited live child without creating a second collector |
 
 **REAL release rule:** Phase 1 cannot be called “Observed deployed” until W0–W8 plus relevant W10/W12–W16 pass on the actual installed Windows/iPhone configuration and real permitted providers. W9/W11 are mandatory before Phase 3 “Observed deployed.” A PR merge never satisfies these gates.
 

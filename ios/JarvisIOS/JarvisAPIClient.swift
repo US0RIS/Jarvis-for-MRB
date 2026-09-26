@@ -1152,6 +1152,54 @@ struct JarvisAPIClient {
         return report
     }
 
+    func worldArmorLiveStatus() async throws -> [String: Any] {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v7/live/status"
+        )
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw JarvisAPIError.badResponse
+        }
+        return value
+    }
+
+    func worldArmorLiveEvents(
+        afterSeq: Int, limit: Int = 100
+    ) async throws -> [String: Any] {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v7/live/events",
+            query: [
+                URLQueryItem(name: "after_seq", value: String(max(0, afterSeq))),
+                URLQueryItem(name: "limit", value: String(min(max(limit, 1), 500))),
+            ]
+        )
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw JarvisAPIError.badResponse
+        }
+        return value
+    }
+
+    func worldArmorLiveStart() async throws -> [String: Any] {
+        let (data, response) = try await postData(
+            path: "world-armor/v7/live/start", body: [:]
+        )
+        try validate(response: response, data: data)
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw JarvisAPIError.badResponse
+        }
+        return value
+    }
+
+    func worldArmorLiveStop() async throws -> [String: Any] {
+        let (data, response) = try await postData(
+            path: "world-armor/v7/live/stop", body: [:]
+        )
+        try validate(response: response, data: data)
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw JarvisAPIError.badResponse
+        }
+        return value
+    }
+
     func worldArmorDistributedWorkers() async throws -> ArmorDistributedWorkers {
         let data = try await worldArmorPlatformGet(
             path: "world-armor/v6/workers"

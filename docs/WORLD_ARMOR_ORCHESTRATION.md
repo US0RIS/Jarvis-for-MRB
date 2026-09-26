@@ -68,10 +68,13 @@ an eligible remote worker by:
 6. virtual assignments already made in the current dispatch pass.
 
 If no remote worker qualifies, Windows executes the same enrolled source
-locally. A failure does not trigger an immediate second request for the same
-source. The next source may use another worker, while the failed worker enters
-an exponentially increasing controller-side cooldown (15 seconds up to five
-minutes).
+locally. Remote jobs assigned in one pass actually execute concurrently up to
+each worker's advertised capacity; the controller uses a 32-thread execution
+pool as a host throughput guard, not a source-count limit. Windows-local work
+remains serialized. A failure does not trigger an immediate second request for
+the same source. The next undispatched source may use another worker, while the
+failed worker enters an exponentially increasing controller-side cooldown
+(15 seconds up to five minutes).
 
 The controller persists only orchestration health: success/failure counts,
 consecutive failures, last success/failure and cooldown expiry. Successful work

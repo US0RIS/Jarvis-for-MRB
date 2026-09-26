@@ -469,6 +469,18 @@ private struct FullFeatureAcceptanceView: View {
         Dictionary(grouping: featureResults, by: \.state).mapValues(\.count)
     }
 
+    private var activeNegativeResults: [FullAcceptanceSystemResult] {
+        negativeResults.filter { $0.state != .manual }
+    }
+
+    private var healthyNegativeCount: Int {
+        activeNegativeResults.filter { $0.state == .expectedFail }.count
+    }
+
+    private var skippedNegativeCount: Int {
+        negativeResults.filter { $0.state == .manual }.count
+    }
+
     var body: some View {
         List {
             Section("Run") {
@@ -502,8 +514,11 @@ private struct FullFeatureAcceptanceView: View {
                     LabeledContent("Manual/live acceptance", value: String(counts[.manual] ?? 0))
                     LabeledContent("Blocked", value: String(counts[.blocked] ?? 0))
                     LabeledContent("Failed", value: String(counts[.fail] ?? 0))
-                    let negativeHealthy = negativeResults.filter { $0.state == .expectedFail }.count
-                    LabeledContent("Anti-cheat controls", value: "\(negativeHealthy)/\(negativeResults.count) rejected as expected")
+                    LabeledContent(
+                        "Anti-cheat controls",
+                        value: "\(healthyNegativeCount)/\(activeNegativeResults.count) active rejected"
+                            + (skippedNegativeCount > 0 ? " • \(skippedNegativeCount) skipped" : "")
+                    )
 
                     Button {
                         UIPasteboard.general.string = reportText
@@ -823,6 +838,17 @@ private struct FullFeatureAcceptanceView: View {
                 detail: "Skipped because no Groq API key is configured."
             ))
         }
+
+        let activeControls = negativeResults.filter { $0.state != .manual }
+        let badControls = activeControls.filter { $0.state != .expectedFail }
+        systemResults.append(.init(
+            id: "acceptance-integrity",
+            title: "Acceptance harness integrity",
+            state: !activeControls.isEmpty && badControls.isEmpty ? .pass : .fail,
+            detail: badControls.isEmpty && !activeControls.isEmpty
+                ? "\(activeControls.count)/\(activeControls.count) active negative controls failed exactly as expected."
+                : "Negative-control integrity failure: \(badControls.map(\.title).joined(separator: "; "))."
+        ))
     }
 
     @MainActor

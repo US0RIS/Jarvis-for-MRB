@@ -1030,6 +1030,17 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorPublicCameraDiscovery.self, from: data)
     }
 
+    func worldArmorImportCameraWatch(
+        investigationID: String, watchID: String
+    ) async throws -> ArmorCameraReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/cameras/import-watch",
+            body: ["investigation_id": investigationID, "watch_id": watchID]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCameraReceipt.self, from: data)
+    }
+
     func worldArmorInspectCamera(
         investigationID: String, cameraRef: String = "",
         publicURL: String = "", condition: String = ""

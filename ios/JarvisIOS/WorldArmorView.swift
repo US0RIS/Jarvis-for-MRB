@@ -1243,6 +1243,208 @@ struct WorldArmorView: View {
         }
     }
 
+    private var sourceConsole: some View {
+        GroupBox("World Armor v2 · open observation platform") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Persistent, explicitly enrolled source grants. No fixed "
+                     + "camera count or 72-hour watch expiry. Each camera has "
+                     + "its own access terms, polling cadence and retention. "
+                     + "A public website is not automatically permission "
+                     + "for continuous scraping or recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Source label", text: $platformLabel)
+                Picker("Source adapter", selection: $platformKind) {
+                    Text("Exact public HTTPS media").tag("public_https")
+                    Text("Caltrans catalog ID").tag("caltrans")
+                    Text("Windy Webcams ID").tag("windy")
+                }
+                .pickerStyle(.menu)
+                TextField("Public media URL or official camera ID",
+                          text: $platformLocator)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Goal: e.g., is the road visibly flooded?",
+                          text: $platformGoal)
+                Picker("Declared source permission", selection: $platformGrantClass) {
+                    Text("Publisher's public media").tag("public_publisher")
+                    Text("My API/license contract").tag("api_contract")
+                    Text("Owned or explicitly authorized").tag("owned_or_authorized")
+                }
+                .pickerStyle(.menu)
+                TextField("Publisher terms or permission reference (required)",
+                          text: $platformTerms)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Toggle("I have permission for automated polling",
+                       isOn: $platformAutomated)
+                if platformAutomated {
+                    TextField("Check cadence in seconds",
+                              text: $platformCadence)
+                        .keyboardType(.numberPad)
+                    TextField("Publisher's minimum interval (seconds)",
+                              text: $platformMinInterval)
+                        .keyboardType(.numberPad)
+                }
+                TextField("Keep derived evidence for days",
+                          text: $platformRetentionDays)
+                    .keyboardType(.numberPad)
+                HStack {
+                    TextField("Camera latitude (optional)",
+                              text: $platformLatitude)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Camera longitude (optional)",
+                              text: $platformLongitude)
+                        .keyboardType(.numbersAndPunctuation)
+                }
+                Text("An entered camera point is operator-reported; "
+                     + "it is not the camera's verified viewing footprint. "
+                     + "Permissions are recorded but not independently "
+                     + "certified by Jarvis. Raw frames are not archived.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Enroll this exact source") {
+                        Task { await enrollPlatformSource() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || platformLocator.isEmpty
+                              || platformTerms.isEmpty)
+                    Button("Preflight active sources") {
+                        Task { await planPlatformSources() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                }
+                HStack {
+                    Text("Enrolled sources · \(platformTotal)")
+                        .font(.headline)
+                    Button("Refresh") {
+                        Task { await refreshPlatformSources() }
+                    }
+                    .disabled(busy)
+                }
+                ForEach(platformSources) { source in
+                    platformSourceRow(source)
+                }
+                if platformNextOffset != nil {
+                    Button("Load more sources") {
+                        Task { await loadMorePlatformSources() }
+                    }
+                    .disabled(busy)
+                }
+                if let id = platformActiveID {
+                    Text("Evidence for " + id.prefix(8))
+                        .font(.subheadline.weight(.medium))
+                    ForEach(platformEvidence) { event in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(event.description)
+                            Text("Model classification: "
+                                 + (event.conditionStatus ?? "scene only"))
+                                .font(.caption)
+                            Text("Jarvis received: " + event.receivedAt
+                                 + " · publisher capture time "
+                                 + (event.sourceCaptureAt ?? "unknown"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(event.changeKind.replacingOccurrences(
+                                of: "_", with: " "
+                            ))
+                                .font(.caption2)
+                        }
+                        Divider()
+                    }
+                    ForEach(platformNotices) { notice in
+                        Text("Watch notice: " + notice.summary)
+                            .font(.caption)
+                    }
+                    if platformEvidence.isEmpty {
+                        Text("No retained observations for this selected source.")
+                            .font(.caption)
+                    }
+                }
+                if let regionID = selectedID {
+                    Button("Co-display cameras with selected region evidence") {
+                        Task { await inspectCombinedPlatformEvidence(regionID) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                    if !platformCombinedSummary.isEmpty {
+                        Text(platformCombinedSummary).font(.caption)
+                    }
+                }
+                Text(platformStatus)
+                    .font(.caption)
+                Text("Host collector is not started by opening this view. "
+                     + "Remote distributed workers and closed-app push "
+                     + "have not been enabled.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func platformSourceRow(
+        _ source: ArmorPlatformSource
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(source.label + " · " + source.kind)
+                .font(.subheadline.weight(.medium))
+            Text(source.sourceDisplay + " · " + source.state)
+                .font(.caption)
+            Text(source.sceneGoal.isEmpty
+                 ? "General environmental scene description"
+                 : "Observation goal: " + source.sceneGoal)
+                .font(.caption)
+            Text("\(source.checkCount) checks · "
+                 + (source.cadenceSeconds > 0
+                    ? "every \(source.cadenceSeconds)s"
+                    : "manual only")
+                 + " · retain \(source.retentionDays)d")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let outcome = source.lastOutcome {
+                Text("Last source outcome: " + outcome)
+                    .font(.caption2)
+            }
+            HStack {
+                Button("Inspect") {
+                    Task { await observePlatformSource(source.id) }
+                }
+                .disabled(busy || source.state != "active")
+                Button("Evidence") {
+                    Task { await readPlatformEvidence(source.id) }
+                }
+                .disabled(busy)
+                Button(source.state == "active" ? "Pause" : "Resume") {
+                    Task {
+                        await changePlatformSource(
+                            source.id,
+                            action: source.state == "active"
+                                ? "pause" : "resume"
+                        )
+                    }
+                }
+                .disabled(busy || source.state == "stopped")
+            }
+            .buttonStyle(.bordered)
+            HStack {
+                Button("Stop", role: .destructive) {
+                    Task { await changePlatformSource(source.id, action: "stop") }
+                }
+                .disabled(busy || source.state == "stopped")
+                Button("Forget + erase evidence", role: .destructive) {
+                    Task { await forgetPlatformSource(source.id) }
+                }
+                .disabled(busy)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
     private var publicCameraWorkbench: some View {
         GroupBox("6 · Public camera evidence · worldwide when configured") {
             VStack(alignment: .leading, spacing: 9) {

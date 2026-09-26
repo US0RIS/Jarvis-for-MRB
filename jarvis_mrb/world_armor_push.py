@@ -156,10 +156,20 @@ def unregister_device(
     if not path.exists():
         return {"disabled": False}
     with closing(_connect(path)) as con, con:
+        instant = _now().isoformat()
+        row = con.execute(
+            "SELECT id FROM push_devices WHERE token=?", (value,)
+        ).fetchone()
         result = con.execute(
             "UPDATE push_devices SET enabled=0,updated_at=? WHERE token=?",
-            (_now().isoformat(), value),
+            (instant, value),
         )
+        if row is not None:
+            con.execute(
+                "UPDATE push_outbox SET state='dead',last_error='device_disabled' "
+                "WHERE device_id=? AND state='pending'",
+                (row["id"],),
+            )
     return {"disabled": result.rowcount == 1}
 
 
@@ -433,6 +443,12 @@ def drain_once(
                         row["device_id"],
                     ),
                 )
+                if terminal_token:
+                    con.execute(
+                        "UPDATE push_outbox SET state='dead',last_error=? "
+                        "WHERE device_id=? AND state='pending'",
+                        ("device_disabled:" + reason, row["device_id"]),
+                    )
                 failed += 1
     return {
         "attempted": len(rows),

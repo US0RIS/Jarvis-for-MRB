@@ -1,9 +1,22 @@
 # Future Ideas
 
-An unordered scratchpad of feature ideas for Jarvis. Nothing here is scoped,
-scheduled, or committed to — this is a place to dump ideas before they're
+An deliberately broad, unordered scratchpad of feature ideas for Jarvis. Nothing here is scoped,
+scheduled, prioritized, or committed to — this is a place to dump ideas before they're
 lost, not a roadmap. Move an idea out of this file and into a real design
 doc (or just implement it) once someone decides to act on it.
+
+## Governing principle: go broad to go narrow
+
+Capture **every potentially useful Jarvis feature idea, big or small, before evaluating it**.
+Do not omit an idea merely because it seems impractical, duplicative, expensive, futuristic,
+low-priority, or outside the current architecture. The purpose of this file is divergent
+exploration: maximize the candidate set first; converge later.
+
+Ideas may be tagged with feasibility, dependencies, legal/authorization boundaries, risk, or
+implementation notes, but those are metadata rather than reasons to erase the idea. An idea
+leaves this dump only when it is promoted into a design/implementation artifact, superseded
+with its lineage preserved, or explicitly rejected with a recorded reason. Implementation
+must still respect applicable law, consent, authorization, security, and safety constraints.
 
 ## Proactive / situational awareness
 
@@ -165,10 +178,11 @@ explicit "possible condition" framing rather than a certainty claim.
   reporting into the world model as another observation source,
   extending the pattern the pitch-servo bench already proved out.
 
-Explicitly not in this list, on purpose: thermostats/locks/garage doors
-(real safety/security stakes), any private or third-party CCTV, anything
-framed as "global" coverage, or actuation without a fresh per-action
-grant. See the CCTV boundary-decision note in the README for why.
+Additional ideas should still be captured here even when they involve higher-stakes devices,
+third-party infrastructure, global-scale coverage, or stronger forms of actuation. Their
+presence in this idea dump is **not** implementation approval. Record the applicable legal,
+consent, authorization, safety, and security constraints alongside them and resolve those
+constraints during design review.
 
 ## Security hardening (defensive, not offensive)
 
@@ -267,3 +281,118 @@ grant. See the CCTV boundary-decision note in the README for why.
   and the world model that always states where an answer came from and
   how stale it is, rather than presenting fused evidence as a single
   unsourced fact.
+
+
+## Reality / intelligence / agency idea dump
+
+- **Counterfactual Engine / Shadow Reality.** Fork relevant Reality Graph state and simulate
+  plausible consequences before acting: travel departure times, infrastructure failures,
+  weather trajectories, device changes, scheduling decisions, and other bounded scenarios.
+  Preserve uncertainty rather than presenting simulation as prediction.
+
+- **Reality Rewind / physical-world DVR.** Make historical world state queryable as
+  `state(t)`: reconstruct what Jarvis observed at a place or around an entity at a past time
+  from timestamped sensors, public feeds, device observations, and stored graph history.
+
+- **Reality Diff.** Continuously compute meaningful state changes rather than forcing the user
+  to inspect raw observations: object appeared/disappeared, vehicle arrived/left, route
+  degraded, flight diverted, webpage changed, device joined/left, crowd level changed, etc.
+
+- **World Assertions / desired-state controller.** Let the user declare durable predicates
+  such as "important files exist in two places" or "I don't miss material flight changes."
+  Jarvis monitors whether each assertion remains true, proposes or performs authorized
+  interventions when it does not, and verifies the resulting state.
+
+- **Reality Compiler.** Compile natural-language intentions into bounded persistent monitors,
+  graph nodes, triggers, collectors, UI surfaces, notification policies, verification rules,
+  and cleanup behavior. Goal: English -> inspectable world-monitoring program.
+
+- **Universal Object Interface.** Objects perceived through glasses/phone cameras can become
+  durable Reality Graph entities associated with visual embeddings, manuals, discovered
+  devices/APIs, prior observations, capabilities, and authorized controls. "This is the
+  projector" becomes a reusable object binding.
+
+- **Spatial Bookmarks.** "Remember this" stores a place/orientation/visual context/object
+  snapshot so physical locations and objects can later be recalled or searched.
+
+- **Physical Ctrl-F.** Search personal spatial memory for objects: "where did I last see the
+  screwdriver?" Return last-observed evidence, timestamp, confidence, and location rather
+  than pretending current location is known.
+
+- **World Search.** Query live physical-world observations as a search corpus: public cameras,
+  environmental sensors, aircraft, ships, transit, weather, user-owned sensors, and other
+  lawful/authorized sources. Examples include "show public cameras with visible snow" or
+  "aircraft within 20 miles currently descending."
+
+- **Sensor-Fusion Superresolution.** Derive observations that no single feed can provide by
+  combining camera/audio/location/maps/weather/ADS-B/AIS/device telemetry and other evidence,
+  with provenance and confidence attached to each derived fact.
+
+- **Autonomous Investigation.** "Figure out what's happening" launches a bounded evidence
+  investigation across relevant sources, maintains competing hypotheses, seeks
+  disconfirming evidence, and returns the best-supported explanation plus uncertainty.
+
+- **Physical Macros.** "Learn what I'm doing" observes a user-performed physical procedure,
+  models objects/actions/dependencies/verification states, and later guides repetition or
+  performs only those substeps available through authorized actuators.
+
+- **Mission Mode.** Promote a goal/event/trip/project into a temporary attention domain.
+  Jarvis automatically binds relevant people, places, messages, documents, reservations,
+  sensors, deadlines, world events, and automations; reallocates attention while active;
+  then archives the mission cleanly.
+
+- **Closed-loop Outcome Mode.** Generalize the Jarvis control loop to
+  Desired World -> Current World -> Difference -> Intervention -> Verification. Keep desired
+  outcomes, evidence, authority boundaries, action receipts, and rollback/recovery explicit.
+
+## Small ideas worth preserving too
+
+- **"Why did you tell me this?"** Every proactive interruption can expose the exact evidence,
+  rule/assertion/mission, and confidence that caused it.
+- **Attention budget.** Give proactive subsystems a shared interruption budget so hundreds of
+  monitors do not turn Jarvis into notification spam.
+- **Observation TTLs.** Every world fact carries an expiry/staleness policy appropriate to
+  its source.
+- **Confidence decay.** Inferred physical state becomes less certain as time passes without
+  corroborating observations.
+- **Contradiction detector.** Flag when two trusted sources disagree rather than silently
+  choosing one.
+- **Source reputation ledger.** Track empirical reliability/freshness of feeds and sensors
+  and use it in fusion confidence.
+- **Coverage map.** Visualize where Jarvis can currently see/sense and, equally important,
+  where it has no evidence.
+- **Capability graph.** Model what Jarvis can observe, infer, or affect for every entity and
+  what permission/source enables each capability.
+- **Cost-aware sensing.** Prefer cheap/local/cacheable observations and escalate to expensive
+  model/API calls only when the expected information gain warrants it.
+- **Model router by cognitive difficulty.** Hardcoded functions first, small local models for
+  bounded classification/extraction, larger models only for tasks requiring them.
+- **Evidence snapshots.** Freeze the exact evidence set behind consequential conclusions so
+  later queries can reconstruct why Jarvis believed something.
+- **Uncertainty UI.** Make unknown / stale / inferred / directly observed visually distinct
+  everywhere, not just in prose.
+- **One-command temporary watch.** "Watch this for the next two hours" creates an expiring
+  monitor from whatever entity/place/feed is currently in context.
+- **Follow-the-entity.** A watch can migrate among lawful data sources as an entity moves,
+  rather than being tied to one camera/feed.
+- **Automatic watch retirement.** Remove temporary collectors when their mission, assertion,
+  or TTL ends.
+- **Replayable automations.** Dry-run an automation against historical Reality Graph data
+  before enabling it.
+- **Failure rehearsal.** Periodically simulate loss of an important provider/device and
+  report which Jarvis capabilities silently depend on it.
+- **Offline degradation plans.** Each major capability declares what still works without
+  Internet, cloud models, phone, home power, or a particular host.
+- **World-model garbage collection.** Merge duplicates, retire stale entities, preserve
+  provenance, and prevent the graph from accumulating contradictory zombie state.
+- **Personal vocabulary/alias graph.** Learn that informal names like "the Porsche," "home,"
+  or "Matt's laptop" resolve to specific graph entities, with explicit disambiguation when
+  aliases collide.
+- **Teach-by-correction.** "No, that's the garage remote" updates an entity binding and
+  propagates the correction to dependent memories/inferences with audit history.
+- **Temporal questions as a first-class query language.** Native support for before/after,
+  since/until, first/last, duration, recurrence, and change-point questions across the graph.
+- **World-model bookmarks in conversation.** Any answer can pin its underlying entities,
+  time window, and evidence set so a later "what changed since this?" has an exact baseline.
+- **Reality Graph debugger.** Inspect why an entity/edge exists, which observation created
+  it, which inference transformed it, and what would invalidate it.

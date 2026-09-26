@@ -11,6 +11,7 @@ on:
       - jarvis/world-armor-attention-inbox
       - jarvis/world-armor-global-public-cameras
       - jarvis/world-armor-open-observation-platform
+      - jarvis/world-armor-movement-graph
   pull_request:
     branches:
       - main

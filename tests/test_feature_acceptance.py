@@ -87,10 +87,10 @@ class FeatureAcceptanceIOSSourceTests(unittest.TestCase):
         self.assertIn("Impossible backend route expectation", self.guide)
         self.assertIn("Deliberately unreachable endpoint", self.guide)
         self.assertIn("Nonexistent Groq model rejection", self.guide)
-        self.assertIn("__jarvis_pack_that_must_not_exist__", self.guide)
-        self.assertIn('"warp.drive"', self.guide)
+        self.assertIn("__negative_control_pack_\\(UUID().uuidString)__", self.guide)
+        self.assertIn("__negative_control_backend_family_\\(UUID().uuidString)__", self.guide)
         self.assertIn("127.0.0.1:1/__jarvis_negative_control__", self.guide)
-        self.assertIn("jarvis-negative-control-model-that-must-not-exist", self.guide)
+        self.assertIn("jarvis-negative-control-\\(UUID().uuidString.lowercased())", self.guide)
 
     def test_negative_controls_invert_success_semantics(self):
         self.assertIn("actualPack == impossiblePack ? .fail : .expectedFail", self.guide)

@@ -72,6 +72,7 @@ _knowledge_started = False
 _proactive_started = False
 _world_armor_live_started = False
 _world_armor_push_started = False
+_world_armor_guard_started = False
 
 
 class CommandRequest(BaseModel):
@@ -699,14 +700,44 @@ def _start_tts_in_background() -> None:
 
 def _ensure_world_armor_live_supervisor() -> None:
     global _world_armor_live_started
-    if _world_armor_live_started:
-        return
-    from jarvis_mrb.world_armor_live import autostart_enabled, start_supervisor
+    from jarvis_mrb.world_armor_live import (
+        autostart_enabled, start_supervisor, supervisor_alive,
+    )
     if not autostart_enabled():
         return
+    if supervisor_alive():
+        _world_armor_live_started = True
+        return
+    _world_armor_live_started = False
     if start_supervisor():
         _world_armor_live_started = True
         record_runtime_success("world_armor_live")
+
+
+def _world_armor_guard_loop() -> None:
+    while True:
+        try:
+            _ensure_world_armor_live_supervisor()
+            _ensure_world_armor_push_worker()
+        except Exception as exc:
+            record_runtime_failure("world_armor_guard", exc)
+        time.sleep(15)
+
+
+def _ensure_world_armor_guard() -> None:
+    global _world_armor_guard_started
+    if _world_armor_guard_started:
+        return
+    from jarvis_mrb.world_armor_live import autostart_enabled
+    from jarvis_mrb.world_armor_push import enabled as push_enabled
+    if not autostart_enabled() and not push_enabled():
+        return
+    _world_armor_guard_started = True
+    threading.Thread(
+        target=_world_armor_guard_loop,
+        name="world-armor-runtime-guard",
+        daemon=True,
+    ).start()
 
 
 def _ensure_world_armor_push_worker() -> None:
@@ -830,6 +861,10 @@ def startup() -> None:
         _ensure_world_armor_push_worker()
     except Exception as exc:
         record_runtime_failure("world_armor_push", exc)
+    try:
+        _ensure_world_armor_guard()
+    except Exception as exc:
+        record_runtime_failure("world_armor_guard", exc)
     _start_tts_in_background()
     start_proactive_monitor()
     _proactive_started = True

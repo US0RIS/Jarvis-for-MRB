@@ -53,9 +53,14 @@ license, or promise that every webcam website can be programmatically read.
    from the World Armor AQI/USGS/NWS watch runner. Existing 15-minute
    minimum cadence, fixed expiry and two distinct positive frame
    requirement are retained. The iPhone/iPad workbench exposes an
-   explicit "Watch exact camera · 3h" button. This external watch's
-   history is NOT yet automatically synchronized with the World Armor
-   evidence sidecar.
+   explicit "Watch exact camera · 3h" button and separate **Check exact
+   watch + import** / **Import saved watch frame** controls. An operator
+   can import one already-retained public camera text/hash receipt into
+   the World Armor sidecar by its exact personal watch ID. Importing
+   saved evidence makes no new network request. A check + import first
+   makes one explicitly tapped provider request. Ongoing watch
+   observations are **not automatically synchronized**, and the source
+   databases do not claim a cross-store atomic transaction.
 7. **Native World Armor iPhone/iPad interface:** search actual catalog
    sources; read coverage status; select a specific camera; optionally
    preview its published still; paste a direct public media URL; inspect
@@ -110,6 +115,11 @@ Under the existing private bearer gate, all with
 - `POST /world-armor/v1/cameras/discover` with finite
   `latitude`, `longitude`, `radius_km` (1–250) and
   `limit` (1–100). Includes separate provider statuses.
+- `POST /world-armor/v1/cameras/import-watch` with
+  `{"investigation_id":"<region-id>","watch_id":"<existing personal watch-id>"}`
+  copies ONE already-retained exact camera watch text/hash receipt
+  without refetching the source. Watch history remains separately
+  deletable under its own lifecycle.
 - `POST /world-armor/v1/cameras/inspect` with
   `investigation_id`, **exactly one of** `camera_ref`
   or `public_url`, and optional `condition`.

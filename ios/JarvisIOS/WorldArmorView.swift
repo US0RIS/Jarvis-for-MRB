@@ -15,12 +15,97 @@ struct ArmorCapabilities: Decodable {
     let sourceState: String
     let scheduledWatches: Bool?
     let watchRunnerAutoStarted: Bool?
+    let cameraCollection: Bool?
+    let windyGlobalCatalogConfigured: Bool?
     let providers: [Provider]
     enum CodingKeys: String, CodingKey {
         case enabled, mode, providers
         case sourceState = "source_state"
         case scheduledWatches = "scheduled_watches"
         case watchRunnerAutoStarted = "watch_runner_auto_started"
+        case cameraCollection = "camera_collection"
+        case windyGlobalCatalogConfigured = "windy_global_catalog_configured"
+    }
+}
+
+struct ArmorPublicCamera: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let provider: String
+    let latitude: Double
+    let longitude: Double
+    let imageURL: String?
+    let streamURL: String?
+    let providerDetailURL: String?
+    let sourceNote: String?
+    enum CodingKeys: String, CodingKey {
+        case id, title, provider, latitude, longitude
+        case imageURL = "image_url"
+        case streamURL = "stream_url"
+        case providerDetailURL = "provider_detail_url"
+        case sourceNote = "source_note"
+    }
+}
+
+struct ArmorPublicCameraProviderStatus: Decodable, Identifiable {
+    let provider: String
+    let status: String
+    let keyRequired: String?
+    var id: String { provider }
+    enum CodingKeys: String, CodingKey {
+        case provider, status
+        case keyRequired = "key_required"
+    }
+}
+
+struct ArmorPublicCameraDiscovery: Decodable {
+    let cameras: [ArmorPublicCamera]
+    let providerStatuses: [ArmorPublicCameraProviderStatus]
+    let qualifier: String
+    enum CodingKeys: String, CodingKey {
+        case cameras, qualifier
+        case providerStatuses = "provider_statuses"
+    }
+}
+
+struct ArmorCameraReceipt: Decodable, Identifiable {
+    let id: String
+    let investigationID: String
+    let cameraRef: String
+    let provider: String
+    let title: String
+    let mediaKind: String
+    let sourceDisplay: String
+    let condition: String?
+    let classification: String?
+    let description: String
+    let imageSHA256: String
+    let retrievedAt: String
+    let captureTime: String?
+    let receivedAt: String
+    let spatialBasis: String
+    let changeState: String
+    enum CodingKeys: String, CodingKey {
+        case id, provider, title, condition, classification, description
+        case investigationID = "investigation_id"
+        case cameraRef = "camera_ref"
+        case mediaKind = "media_kind"
+        case sourceDisplay = "source_display"
+        case imageSHA256 = "image_sha256"
+        case retrievedAt = "retrieved_at"
+        case captureTime = "capture_time"
+        case receivedAt = "received_at"
+        case spatialBasis = "spatial_basis"
+        case changeState = "change_state"
+    }
+}
+
+struct ArmorCameraReceiptList: Decodable {
+    let cameraReceipts: [ArmorCameraReceipt]
+    let sourceCoverage: String
+    enum CodingKeys: String, CodingKey {
+        case cameraReceipts = "camera_receipts"
+        case sourceCoverage = "source_coverage"
     }
 }
 

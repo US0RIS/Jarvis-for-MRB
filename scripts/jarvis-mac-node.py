@@ -228,12 +228,20 @@ def _movement_bbox(latitude: float, longitude: float,
     }
 
 
-def _observe_public_world(payload: dict[str, Any]) -> dict[str, Any]:
-    """One fixed-provider read-only fetch. No arbitrary URL/RPC/network target."""
+def _validate_world_task(payload: dict[str, Any]) -> None:
     if set(payload) - {"kind", "latitude", "longitude", "radius_km"}:
         raise ValueError("Unregistered world-observer field.")
     if payload.get("kind") != "opensky_region":
         raise ValueError("This Mac observer currently supports OpenSky regions only.")
+    _movement_bbox(
+        payload.get("latitude"), payload.get("longitude"),
+        payload.get("radius_km"),
+    )
+
+
+def _observe_public_world(payload: dict[str, Any]) -> dict[str, Any]:
+    """One fixed-provider read-only fetch. No arbitrary URL/RPC/network target."""
+    _validate_world_task(payload)
     box = _movement_bbox(
         payload.get("latitude"), payload.get("longitude"),
         payload.get("radius_km"),
@@ -376,6 +384,7 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 if not isinstance(payload, dict):
                     raise ValueError("JSON object required.")
                 if self.path == "/v1/world/observe":
+                    _validate_world_task(payload)
                     state.authorize_world_observation()
                     result = _observe_public_world(payload)
                     self._json(200, {

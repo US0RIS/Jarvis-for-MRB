@@ -124,13 +124,33 @@ struct ArmorObservation: Decodable, Identifiable {
 }
 
 struct ArmorSampleMoment: Decodable, Identifiable {
+    struct SourceCoverage: Decodable {
+        let status: String
+        let reportedCount: Int
+        enum CodingKeys: String, CodingKey {
+            case status
+            case reportedCount = "reported_count"
+        }
+    }
     let id: String
     let receivedAt: String
     let adapterMode: String
+    let sourceCoverage: [String: SourceCoverage]?
+    var coverageSummary: String {
+        let labels = [
+            ("openmeteo_model", "AQI"),
+            ("nws_point_alerts", "NWS"),
+            ("usgs_earthquakes", "USGS")
+        ]
+        return labels.map { source, label in
+            label + " " + (sourceCoverage?[source]?.status ?? "not checked")
+        }.joined(separator: " · ")
+    }
     enum CodingKeys: String, CodingKey {
         case id
         case receivedAt = "received_at"
         case adapterMode = "adapter_mode"
+        case sourceCoverage = "source_coverage"
     }
 }
 
@@ -599,7 +619,8 @@ struct WorldArmorView: View {
                     Menu("Rewind to a retained receipt") {
                         Button("Latest saved evidence") { asKnownAt = "" }
                         ForEach(sampleTimes) { item in
-                            Button(item.receivedAt + " • " + item.adapterMode) {
+                            Button(item.receivedAt + " • " + item.adapterMode
+                                   + " • " + item.coverageSummary) {
                                 asKnownAt = item.receivedAt
                                 Task { await replay() }
                             }

@@ -77,6 +77,7 @@ def _km(a: float, b: float, c: float, d: float) -> float:
 def discover_public_cameras_global(
     latitude: float, longitude: float, *,
     radius_km: float = 30, limit: int = 30,
+    windy_api_key: str | None = None,
 ) -> dict[str, Any]:
     _require_enabled()
     if (type(latitude) not in (float, int)
@@ -95,6 +96,7 @@ def discover_public_cameras_global(
     try:
         windy = discover_windy_cameras(
             latitude, longitude, radius_km=radius_km, limit=limit,
+            api_key=windy_api_key,
         )
         results.extend(windy["cameras"])
         statuses.append({
@@ -148,13 +150,15 @@ def discover_public_cameras_global(
     }
 
 
-def _catalog_geography(camera_ref: str) -> tuple[float, float] | None:
+def _catalog_geography(
+    camera_ref: str, *, windy_api_key: str | None = None
+) -> tuple[float, float] | None:
     if camera_ref.startswith("caltrans-d"):
         from jarvis_mrb.public_camera_vision import _pick
         item = _pick(camera_ref)
     elif camera_ref.startswith("windy-"):
         from jarvis_mrb.public_camera_windy import camera_from_windy_id
-        item = camera_from_windy_id(camera_ref)
+        item = camera_from_windy_id(camera_ref, api_key=windy_api_key)
     else:
         raise ValueError("Unsupported public camera catalog ID.")
     latitude = float(item["latitude"])
@@ -248,6 +252,7 @@ def _store_observation(
 def inspect_camera(
     investigation_id: str, *, camera_ref: str = "",
     public_url: str = "", condition: str = "",
+    windy_api_key: str | None = None,
     db_path: Path | None = None, now: datetime | None = None,
 ) -> dict[str, Any]:
     """One explicitly selected camera, no hidden long-running stream."""
@@ -269,7 +274,7 @@ def inspect_camera(
         validate_public_camera_url(public_url)
         point = None
     else:
-        point = _catalog_geography(camera_ref)
+        point = _catalog_geography(camera_ref, windy_api_key=windy_api_key)
         if _km(
             record["latitude"], record["longitude"], point[0], point[1],
         ) > record["radius_km"]:
@@ -277,6 +282,7 @@ def inspect_camera(
     from jarvis_mrb.public_camera_vision import analyze_public_camera
     observed = analyze_public_camera(
         camera_ref=camera_ref, public_url=public_url, condition=condition,
+        windy_api_key=windy_api_key,
     )
     return _store_observation(
         investigation_id, observed, point=point,

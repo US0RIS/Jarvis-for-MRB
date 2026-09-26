@@ -165,6 +165,63 @@ class AISMovementTests(unittest.TestCase):
         self.assertEqual(connect.call_args.args[0],
                          "wss://stream.aisstream.io/v0/stream")
 
+    def test_pooled_ais_partitions_one_connection_into_exact_regions(self):
+        position = {
+            "MessageType": "PositionReport",
+            "MetaData": {
+                "MMSI": 368207620,
+                "ShipName": "EXAMPLE VESSEL",
+                "Latitude": 33.74,
+                "Longitude": -118.25,
+            },
+            "Message": {
+                "PositionReport": {
+                    "UserID": 368207620,
+                    "Sog": 12.4,
+                    "Cog": 86.7,
+                    "TrueHeading": 87,
+                }
+            },
+        }
+
+        class Socket:
+            def __init__(self):
+                self.calls = 0
+                self.sent = None
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def send(self, payload):
+                self.sent = json.loads(payload)
+            def recv(self, timeout=None):
+                self.calls += 1
+                if self.calls == 1:
+                    return json.dumps(position)
+                raise TimeoutError()
+
+        socket = Socket()
+        regions = [
+            {"id": "la", "latitude": 33.75, "longitude": -118.25,
+             "radius_km": 30},
+            {"id": "ny", "latitude": 40.71, "longitude": -74.0,
+             "radius_km": 30},
+        ]
+        with patch.dict(os.environ, {
+            "AISSTREAM_API_KEY": "server-secret",
+        }), patch("websockets.sync.client.connect",
+                  return_value=socket) as connect:
+            result = public_movement.aisstream_position_multi_burst(
+                regions, duration_seconds=0.5
+            )
+        self.assertTrue(result["pooled_connection"])
+        self.assertEqual(result["region_count"], 2)
+        self.assertEqual(len(result["results"]["la"]["entities"]), 1)
+        self.assertEqual(result["results"]["ny"]["entities"], [])
+        self.assertEqual(len(socket.sent["BoundingBoxes"]), 2)
+        self.assertEqual(connect.call_count, 1)
+        self.assertNotIn("server-secret", str(result))
+
     def test_bbox_can_expand_to_global_without_private_network_access(self):
         self.assertEqual(
             public_movement._bbox(0, 0, 20_000),

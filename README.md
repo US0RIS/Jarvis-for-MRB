@@ -6,6 +6,42 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
+## World Armor v8 — full-scope suit (stacked implementation candidate)
+
+**[Full-scope runbook](docs/WORLD_ARMOR_FULL_SCOPE.md).** The
+`jarvis/world-armor-full-scope` branch completes the software-side Phase-5
+architecture on top of v7 rather than narrowing the original design. It adds
+runtime **Reality Browser, Synthetic Senses, Causal Debugger, Parallel
+Existence and Presence** interfaces. Reality Browser preserves gaps and source
+provenance; Synthetic Senses are labelled derived rather than direct world
+facts; Causal Debugger exposes missing mechanism evidence instead of promoting
+correlation to cause; Parallel Existence runs bounded typed analyses
+concurrently without manufacturing source or action authority.
+
+Presence now has one concrete end-to-end actuator class: an exact,
+short-lived, use-bounded grant for a light already present in the iPhone's
+Apple Home catalog. Dispatch is initially `dispatched_unverified`; the iPhone
+executes the local HomeKit write and posts fresh accessory readback as a
+separate receipt. Locks, garage doors, arbitrary URLs and generic robot
+commands are not exposed by this bridge.
+
+v8 also closes the delivery/runtime gaps left by v7: warning/urgent events can
+enter a durable bounded APNs outbox with HTTP/2 provider-token delivery,
+retry/backoff and invalid-token handling; the iPhone explicitly registers or
+revokes its token when the World Armor notification toggle changes. A
+15-second in-service guard restarts opted-in live/push threads, and the
+optional `jarvis-world-live-watchdog` process can independently restart the
+live-supervisor child with capped exponential backoff. The general
+public-camera path already accepts explicitly enrolled public JPEG/PNG/WebP,
+MJPEG and bounded unencrypted HLS media plus one-page literal media discovery;
+there is no global camera-count ceiling.
+
+This remains an **implementation candidate, not an observed-deployed claim**.
+Real APNs credentials/signing, physical iPhone notification delivery, actual
+authorized providers, long-run Windows/watchdog recovery, paired workers and
+the selected HomeKit accessory still require environment-specific acceptance
+on the exact branch SHA.
+
 ## World Armor Phase 1 — limited executable evidence kernel
 
 **[Phase 1 runbook](docs/WORLD_ARMOR_PHASE1.md)** implements a default-off,
@@ -72,12 +108,9 @@ reconnect. Warning/urgent events can reach MemoMind and opt-in local
 notifications without turning informational polling into alert spam.
 
 The supervisor still cannot create source grants, discover private sources,
-expand rights, identify/track people, or gain action authority. True closed-app
-APNs delivery is not claimed yet.
-
-The original full World Armor scope remains intact: Reality Browser, Presence,
-Causal Debugger, Synthetic Senses and Parallel Existence are later full-scope
-layers, not removed ideas.
+expand rights, identify/track people, or gain action authority. The stacked v8
+branch adds durable APNs transport and the original five full-scope interfaces;
+v7 itself remains the evidence/live-fabric foundation.
 
 ## World Armor v6 — worker orchestration + pooled transport (stacked draft)
 
@@ -180,17 +213,17 @@ source-timed World Armor camera correlation.
 
 ## World Armor — proposed planetary-scale extension
 
-**[Full design specification](docs/WORLD_ARMOR_SPEC.md)** for the Planetary Event
-Fabric and Distributed Agency: source-qualified infrastructure OSINT, spatial
-and temporal correlation, uncertainty-aware event investigations, explicit
-regional watches, and tightly scoped computation across authorized paired
-devices. **Design-only PR #7 / broader Roadmap:** the specification itself did not
-implement runtime capabilities. The separate stacked Phase 1 code branch
-contains a limited event store and read-only authenticated endpoints, **not**
-a global collector, RF sensor, live AIS service, trading service, cloud worker
-or device-deployment verification. The Reality Browser, Presence,
-Causal Debugger, Synthetic Senses and Parallel Existence ideas are preserved
-and remain on hold.
+**[Full design specification](docs/WORLD_ARMOR_SPEC.md)** defines the Planetary
+Event Fabric and Distributed Agency: source-qualified infrastructure OSINT,
+spatial/temporal correlation, uncertainty-aware investigations, explicit
+watches and tightly scoped computation across authorized paired devices. The
+specification began as design-only work; the stacked World Armor branches now
+implement the evidence kernel, watches/attention, open camera platform,
+movement graph, distributed observers, worker orchestration, persistent live
+fabric and the v8 full-scope interfaces. This source history still does **not**
+by itself prove live provider entitlement, APNs/device delivery, a worldwide
+camera inventory, RF deployment, arbitrary robotics or any other
+environment-specific physical acceptance.
 
 ## Meeting prebrief convergence — read-only source-qualified evidence
 

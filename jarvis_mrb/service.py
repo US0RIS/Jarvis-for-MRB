@@ -1999,6 +1999,7 @@ def world_armor_camera_discover(
     request: WorldArmorPublicCameraSearchRequest,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
@@ -2007,6 +2008,7 @@ def world_armor_camera_discover(
         return discover_public_cameras_global(
             request.latitude, request.longitude,
             radius_km=request.radius_km, limit=request.limit,
+            windy_api_key=x_jarvis_windy_key,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
@@ -2034,6 +2036,7 @@ def world_armor_camera_inspect(
     request: WorldArmorCameraInspectRequest,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
@@ -2042,6 +2045,7 @@ def world_armor_camera_inspect(
         return inspect_camera(
             request.investigation_id, camera_ref=request.camera_ref,
             public_url=request.public_url, condition=request.condition,
+            windy_api_key=x_jarvis_windy_key,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
@@ -3052,11 +3056,17 @@ def nearby_physical_awareness(
 def analyze_public_camera_still(
     request: OfficialCameraAnalysisRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """Explicit one-still vision pass for a catalog-verified public camera ID."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_vision import analyze_official_still
+    from jarvis_mrb.public_camera_vision import analyze_official_still, analyze_public_camera
     try:
+        if request.camera_id.startswith("windy-"):
+            return analyze_public_camera(
+                camera_ref=request.camera_id,
+                windy_api_key=x_jarvis_windy_key,
+            )
         return analyze_official_still(request.camera_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -3102,15 +3112,57 @@ def nearby_physical_conditions(
 def nearby_public_cameras(
     request: NearbyPublicCameraRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """Opt-in public provider lookup. POST avoids putting coordinates in URL access logs."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_catalog import discover_public_cameras
+    from jarvis_mrb.public_camera_catalog import discover_public_cameras, _km
+    from jarvis_mrb.public_camera_windy import discover_windy_cameras
     try:
-        return discover_public_cameras(
+        cal = discover_public_cameras(
             request.latitude, request.longitude,
-            radius_km=request.radius_km, limit=request.limit,
+            radius_km=min(request.radius_km, 50), limit=request.limit,
         )
+        windy = discover_windy_cameras(
+            request.latitude, request.longitude,
+            radius_km=min(max(request.radius_km, 1), 250),
+            limit=request.limit,
+            api_key=x_jarvis_windy_key,
+        )
+        combined = list(cal.get("cameras") or []) + list(windy.get("cameras") or [])
+        combined.sort(key=lambda item: (
+            _km(
+                request.latitude, request.longitude,
+                float(item["latitude"]), float(item["longitude"])
+            ),
+            str(item.get("id") or ""),
+        ))
+        sources = []
+        if cal.get("status") not in {"unsupported_region"}:
+            sources.append("Caltrans")
+        if windy.get("status") != "not_configured":
+            sources.append("Windy Webcams")
+        status = "ok" if combined else (
+            "not_configured"
+            if windy.get("status") == "not_configured" and cal.get("status") == "unsupported_region"
+            else cal.get("status") or windy.get("status") or "unavailable"
+        )
+        return {
+            "status": status,
+            "coverage": " + ".join(sources) if sources else "No configured public camera directory for this area",
+            "cameras": combined[:request.limit],
+            "source_url": (
+                "https://api.windy.com/webcams/docs"
+                if windy.get("status") != "not_configured"
+                else str(cal.get("source_url") or "")
+            ),
+            "source_note": (
+                "Camera directories are incomplete. A listed record does not prove a current usable frame, verified capture time, or viewing footprint. "
+                + ("Windy worldwide directory enabled from the iPhone credential." if x_jarvis_windy_key else
+                   "Windy worldwide directory requires a key in Jarvis Settings or on the backend.")
+            ),
+            "coordinates_stored": False,
+        }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -142,8 +142,9 @@ struct ArmorSampleMoment: Decodable, Identifiable {
             ("nws_point_alerts", "NWS"),
             ("usgs_earthquakes", "USGS")
         ]
-        return labels.map { source, label in
-            label + " " + (sourceCoverage?[source]?.status ?? "not checked")
+        return labels.map { entry in
+            let (source, label) = entry
+            return label + " " + (sourceCoverage?[source]?.status ?? "not checked")
         }.joined(separator: " · ")
     }
     enum CodingKeys: String, CodingKey {

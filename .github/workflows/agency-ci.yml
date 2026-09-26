@@ -12,6 +12,7 @@ on:
       - jarvis/world-armor-global-public-cameras
       - jarvis/world-armor-open-observation-platform
       - jarvis/world-armor-movement-graph
+      - jarvis/world-armor-distributed-observers
   pull_request:
     branches:
       - main

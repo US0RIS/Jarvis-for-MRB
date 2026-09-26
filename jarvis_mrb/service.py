@@ -1103,6 +1103,20 @@ def _world_armor_platform_error(exc: Exception) -> None:
     raise exc
 
 
+@app.get("/world-armor/v4/workers")
+def world_armor_distributed_workers(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_distributed import available_workers
+    try:
+        return available_workers()
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
 @app.post("/world-armor/v3/movement-sources")
 def world_armor_movement_enroll(
     request: WorldArmorMovementEnrollRequest,

@@ -80,6 +80,18 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class CloudCognitionPrepareRequest(BaseModel):
+    text: str
+    session_id: str | None = None
+    mode: str = "auto"
+
+
+class CloudCognitionResolveRequest(BaseModel):
+    task_id: str
+    proposal: dict[str, Any]
+    metadata: dict[str, Any] | None = None
+
+
 class ExternalWatchCreateRequest(BaseModel):
     scope: str = "personal"
     kind: str
@@ -2931,6 +2943,60 @@ def agency_command_view(authorization: Annotated[str | None, Header()] = None) -
     _check_auth(authorization)
     from jarvis_mrb.agency_command_view import build_command_view
     return build_command_view()
+
+
+@app.get("/cloud-cognition/status")
+def cloud_cognition_status(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import telemetry_snapshot
+    return telemetry_snapshot()
+
+
+@app.post("/cloud-cognition/prepare")
+def cloud_cognition_prepare(
+    request: CloudCognitionPrepareRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import prepare_cloud_task
+
+    session_id = request.session_id or "default"
+    effective_text = _command_alias(request.text)
+    history = _contextual_history(session_id, effective_text, limit=12)
+    return prepare_cloud_task(
+        effective_text,
+        session_id=session_id,
+        history=history,
+        force=request.mode,
+    )
+
+
+@app.post("/cloud-cognition/resolve", response_model=CommandResponse)
+def cloud_cognition_resolve(
+    request: CloudCognitionResolveRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CommandResponse:
+    _check_auth(authorization)
+    from jarvis_mrb.agent import execute_tool
+    from jarvis_mrb.cloud_cognition import (
+        consume_cloud_task,
+        record_cloud_result,
+        validate_proposal,
+    )
+
+    task = consume_cloud_task(request.task_id)
+    proposal = validate_proposal(request.proposal)
+    record_cloud_result(task, proposal, request.metadata)
+
+    # Cloud output is a proposal, never authority. Existing deterministic tool
+    # dispatch remains the only execution path and therefore keeps the normal
+    # permissions, confirmations, audit and verification semantics.
+    if proposal.tool:
+        reply = execute_tool(proposal.tool, proposal.arguments)
+        return CommandResponse(ok=reply.ok, message=_voice_safe_confirmation(reply.message))
+    return CommandResponse(ok=True, message=proposal.response or "I could not form a useful cloud answer.")
 
 
 @app.post("/command", response_model=CommandResponse)

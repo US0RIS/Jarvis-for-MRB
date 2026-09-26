@@ -1260,6 +1260,7 @@ struct WorldArmorView: View {
                 TextField("Source label", text: $platformLabel)
                 Picker("Source adapter", selection: $platformKind) {
                     Text("Exact public HTTPS media").tag("public_https")
+                    Text("Exact public HTTP media · insecure").tag("public_http")
                     Text("Caltrans catalog ID").tag("caltrans")
                     Text("Windy Webcams ID").tag("windy")
                 }
@@ -1300,6 +1301,14 @@ struct WorldArmorView: View {
                     TextField("Camera longitude (optional)",
                               text: $platformLongitude)
                         .keyboardType(.numbersAndPunctuation)
+                }
+                if platformKind == "public_http" {
+                    Text("HTTP is unencrypted and vulnerable to tampering. "
+                         + "Enroll only this exact publicly accessible "
+                         + "feed after checking publisher terms. "
+                         + "Jarvis still blocks private IP destinations.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 Text("An entered camera point is operator-reported; "
                      + "it is not the camera's verified viewing footprint. "

@@ -31,6 +31,20 @@ evidence while leaving the degraded observation inspectable. A cross-source matc
 within a bounded inquiry region*, not exact physical co-location or
 causation. The larger design below remains a roadmap.
 
+## World Armor Phase 3A — bounded local standing watches (stacked draft)
+
+**[Standing-watch runbook](docs/WORLD_ARMOR_WATCHES.md)** adds an actual,
+separately opted-in, explicitly started Windows-host collection runner and a
+native iPhone/iPad watch management panel on
+`jarvis/world-armor-standing-watches`. Exact saved region, cadence (30–360
+minutes), check budget (1–12), absolute expiry, SQLite leases and
+transaction-fenced stop/pause prevent unbounded or late-retained sampling.
+The runner uses **only the existing bounded modelled AQI, NWS and USGS
+adapters**. Enrolling a watch does not start the runner. It has no automatic
+installation/startup, notifications, predicate alerts, third-party actions,
+camera feed collection, or worker network. CI success is not physical-device
+or live-source acceptance; PR #12 remains draft and stacked on PR #9.
+
 ## World Armor — proposed planetary-scale extension
 
 **[Full design specification](docs/WORLD_ARMOR_SPEC.md)** for the Planetary Event

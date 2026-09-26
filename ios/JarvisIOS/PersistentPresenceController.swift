@@ -2,6 +2,7 @@ import CoreLocation
 import Foundation
 import HealthKit
 import UIKit
+import UserNotifications
 
 @MainActor
 final class HealthContextManager: ObservableObject {
@@ -135,6 +136,7 @@ final class PersistentPresenceController: ObservableObject {
     private var pendingAnnouncements: [(String, String)] = []
     private var lastObservedResponse = ""
     private var responseCompletionPending = false
+    private let worldArmorLiveSeqKey = "jarvis.worldArmorLive.lastSeq"
 
     init(appModel: JarvisAppModel) {
         self.appModel = appModel
@@ -413,6 +415,7 @@ final class PersistentPresenceController: ObservableObject {
                         ? "Connected over LAN"
                         : "Connected over Tailscale"
                     await sendEnvironmentState()
+                    await replayWorldArmorLiveEvents()
                 } catch {
                     companionStatus = "Waiting for Jarvis server"
                     activeServerURL = ""
@@ -626,6 +629,101 @@ final class PersistentPresenceController: ObservableObject {
         thresholdRank(severity) >= thresholdRank(appModel.settings.proactiveThreshold)
     }
 
+    private func worldArmorEventSeq(_ event: [String: Any]) -> Int? {
+        if let value = event["seq"] as? Int { return value }
+        if let value = event["seq"] as? NSNumber { return value.intValue }
+        return nil
+    }
+
+    private func rememberWorldArmorSeq(_ seq: Int) {
+        let defaults = UserDefaults.standard
+        let prior = defaults.integer(forKey: worldArmorLiveSeqKey)
+        if seq > prior {
+            defaults.set(seq, forKey: worldArmorLiveSeqKey)
+        }
+    }
+
+    private func replayWorldArmorLiveEvents() async {
+        var cursor = UserDefaults.standard.integer(forKey: worldArmorLiveSeqKey)
+        var pages = 0
+        while pages < 5 {
+            pages += 1
+            guard let response = try? await client.worldArmorLiveEvents(
+                afterSeq: cursor, limit: 100
+            ) else { return }
+            let rows = response["events"] as? [[String: Any]] ?? []
+            for row in rows {
+                if let seq = worldArmorEventSeq(row), seq <= cursor { continue }
+                await handleWorldArmorEvent(row, replayed: true)
+                if let seq = worldArmorEventSeq(row) {
+                    cursor = max(cursor, seq)
+                    rememberWorldArmorSeq(cursor)
+                }
+            }
+            let truncated = (response["truncated"] as? Bool)
+                ?? (response["truncated"] as? NSNumber)?.boolValue
+                ?? false
+            if !truncated || rows.isEmpty { return }
+        }
+    }
+
+    private func deliverWorldArmorLocalNotification(
+        message: String, priority: String
+    ) async {
+        guard appModel.settings.worldArmorLiveAlertsEnabled,
+              !message.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        }
+        let updated = await center.notificationSettings()
+        guard updated.authorizationStatus == .authorized
+                || updated.authorizationStatus == .provisional else { return }
+        let content = UNMutableNotificationContent()
+        content.title = priority == "urgent"
+            ? "World Armor urgent"
+            : "World Armor"
+        content.body = message
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "world-armor-" + UUID().uuidString,
+            content: content, trigger: nil
+        )
+        try? await center.add(request)
+    }
+
+    private func handleWorldArmorEvent(
+        _ worldEvent: [String: Any], replayed: Bool
+    ) async {
+        guard let seq = worldArmorEventSeq(worldEvent) else { return }
+        let prior = UserDefaults.standard.integer(forKey: worldArmorLiveSeqKey)
+        if !replayed && seq <= prior { return }
+        rememberWorldArmorSeq(seq)
+
+        let priority = String(describing: worldEvent["priority"] ?? "info")
+            .lowercased()
+        let message = Self.collapseRepeatedSir(
+            String(describing: worldEvent["summary"] ?? "")
+        )
+        guard priority == "warning" || priority == "urgent",
+              !message.isEmpty else { return }
+
+        lastProactiveMessage = message
+        appModel.memoMind.presentProactiveAlert(message, severity: priority)
+        if appModel.settings.worldArmorLiveAlertsEnabled {
+            await deliverWorldArmorLocalNotification(
+                message: message, priority: priority
+            )
+        }
+        if appModel.settings.proactiveAnnouncements,
+           proactiveAlertMeetsThreshold(priority),
+           UIApplication.shared.applicationState == .active {
+            pendingAnnouncements.append((message, "attention"))
+            await drainAnnouncements()
+        }
+    }
+
     private func handleCompanionEvent(_ event: [String: Any]) async {
         let type = String(describing: event["type"] ?? "")
         let cue = String(describing: event["cue"] ?? "attention")
@@ -639,6 +737,13 @@ final class PersistentPresenceController: ObservableObject {
         }
         if type == "thinking_stop" {
             cuePlayer.stopThinking()
+            return
+        }
+
+        if type == "world_armor_event" {
+            if let worldEvent = event["event"] as? [String: Any] {
+                await handleWorldArmorEvent(worldEvent, replayed: false)
+            }
             return
         }
 

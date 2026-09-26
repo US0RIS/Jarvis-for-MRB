@@ -31,7 +31,9 @@ class WindyRequestCredentialTests(unittest.TestCase):
         self.assertNotIn("ios-test-secret", repr(result))
 
     def test_world_armor_threads_request_key_to_windy_provider(self):
-        with patch(
+        with patch.object(
+            armor_cameras, "_require_enabled", return_value=None
+        ), patch(
             "jarvis_mrb.public_camera_windy.discover_windy_cameras",
             return_value={"status": "ok", "cameras": [], "reported_total": 0},
         ) as provider:

@@ -19,6 +19,7 @@ on:
       - jarvis/world-armor-distributed-camera-workers
       - jarvis/world-armor-worker-orchestration
       - jarvis/world-armor-live-fabric
+      - jarvis/world-armor-full-scope
   pull_request:
     paths:
       - "ios/**"
@@ -90,6 +91,12 @@ jobs:
         run: python -m unittest discover -s tests -p "test_world_armor_distributed.py" -v
       - name: Verify durable World Armor live fabric and supervisor
         run: python -m unittest discover -s tests -p "test_world_armor_live.py" -v
+      - name: Verify World Armor v8 full-scope interfaces and bounded Presence
+        run: python -m unittest discover -s tests -p "test_world_armor_full.py" -v
+      - name: Verify durable closed-app World Armor push outbox
+        run: python -m unittest discover -s tests -p "test_world_armor_push.py" -v
+      - name: Verify World Armor process watchdog recovery contract
+        run: python -m unittest discover -s tests -p "test_world_armor_watchdog.py" -v
       - name: Verify planetary aircraft/vessel movement adapters and graph
         run: |
           python -m unittest discover -s tests -p "test_public_movement.py" -v
@@ -158,7 +165,7 @@ jobs:
       - name: Install portable backend dependencies (Windows-only pycaw/comtypes excluded)
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install psutil Pillow fastapi uvicorn httpx dateparser tzdata google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib pypdf openpyxl websockets
+          python3 -m pip install psutil Pillow fastapi uvicorn httpx h2 cryptography dateparser tzdata google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib pypdf openpyxl websockets
           python3 -m pip install -e . --no-deps
           mkdir -p "$APPDATA"
       - name: Full repository unittest discovery

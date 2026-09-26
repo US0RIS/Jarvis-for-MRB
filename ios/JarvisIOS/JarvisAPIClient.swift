@@ -687,7 +687,7 @@ private actor JarvisEndpointResolver {
         }
 
         for (index, candidate) in candidates.enumerated() {
-            let timeout: TimeInterval = index == 0 ? 0.25 : 1.5
+            let timeout: TimeInterval = index == 0 ? 2.0 : 3.0
             if await probe(candidate, apiToken: apiToken, timeout: timeout) {
                 cachedURL = candidate
                 cachedUntil = Date().addingTimeInterval(30)

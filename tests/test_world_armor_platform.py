@@ -123,7 +123,7 @@ class SourcePlatformTests(unittest.TestCase):
     def test_duplicate_publication_avoids_second_model_call(self):
         source = self.enroll()
         with patch.object(runner.perception, "acquire_source",
-                          return_value=self.camera_frame("a")) as fetch, \
+                          side_effect=lambda *a: self.camera_frame("a")) as fetch, \
              patch.object(runner.perception, "interpret_frame",
                           return_value=self.result()) as model:
             one = runner.observe_source(

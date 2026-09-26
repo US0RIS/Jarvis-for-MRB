@@ -1008,6 +1008,43 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorCreated.self, from: data)
     }
 
+    func worldArmorWatches() async throws -> ArmorWatchList {
+        let (data, response) = try await get(
+            path: "world-armor/v1/watches", timeout: 10
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorWatchList.self, from: data)
+    }
+
+    func worldArmorWatchCreate(
+        _ investigationID: String, intervalMinutes: Int,
+        maxChecks: Int, lifetimeHours: Int
+    ) async throws -> ArmorWatch {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/watches",
+            body: ["investigation_id": investigationID,
+                   "interval_minutes": intervalMinutes,
+                   "max_checks": maxChecks,
+                   "lifetime_hours": lifetimeHours]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorWatch.self, from: data)
+    }
+
+    func worldArmorWatchTransition(
+        _ id: String, action: String
+    ) async throws -> ArmorWatch {
+        guard ["stop", "pause", "resume"].contains(action) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await postData(
+            path: "world-armor/v1/watches/" + action,
+            body: ["watch_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorWatch.self, from: data)
+    }
+
     func worldArmorObserve(_ id: String) async throws -> ArmorSampleReceipt {
         let (data, response) = try await postData(
             path: "world-armor/v1/observe", body: ["investigation_id": id]

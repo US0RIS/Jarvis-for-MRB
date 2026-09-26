@@ -9,6 +9,7 @@ on:
       - jarvis/world-armor-correlation-workbench
       - jarvis/world-armor-standing-watches
       - jarvis/world-armor-attention-inbox
+      - jarvis/world-armor-global-public-cameras
   pull_request:
     branches:
       - main

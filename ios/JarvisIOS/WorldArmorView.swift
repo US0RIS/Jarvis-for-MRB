@@ -56,6 +56,10 @@ struct ArmorWatch: Decodable, Identifiable {
     }
 }
 
+struct ArmorWatchForgetReceipt: Decodable {
+    let deleted: Int
+}
+
 struct ArmorWatchList: Decodable {
     let watches: [ArmorWatch]
     let runnerAutoStarted: Bool
@@ -780,6 +784,11 @@ struct WorldArmorView: View {
                                     Task { await changeWatch(item.id, action: "stop") }
                                 }
                                 .disabled(busy)
+                            } else {
+                                Button("Forget watch", role: .destructive) {
+                                    Task { await forgetWatch(item.id) }
+                                }
+                                .disabled(busy)
                             }
                         }
                         .buttonStyle(.bordered)
@@ -1153,6 +1162,21 @@ struct WorldArmorView: View {
                 + "be started explicitly; no provider check has happened yet."
         } catch {
             status = "Watch enrollment blocked: " + error.localizedDescription
+        }
+    }
+
+    private func forgetWatch(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.worldArmorWatchForget(id)
+            watches = try await client.worldArmorWatches().watches
+            status = result.deleted > 0
+                ? "Watch grant forgotten; region samples remain until region Forget."
+                : "Watch grant was already absent."
+        } catch {
+            status = "Watch Forget failed: " + error.localizedDescription
         }
     }
 

@@ -262,6 +262,37 @@ class WorldArmorCameraReceiptIdRequest(BaseModel):
     receipt_id: str
 
 
+class WorldArmorSourceEnrollRequest(BaseModel):
+    label: str
+    kind: str
+    locator: str
+    grant_class: str
+    terms_reference: str
+    authorized_automated_access: bool = False
+    automated_min_interval_seconds: int = 0
+    cadence_seconds: int = 0
+    sample_budget: int | None = None
+    consent_expires_at: str | None = None
+    retention_days: int = 30
+    scene_goal: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class WorldArmorSourceIDRequest(BaseModel):
+    source_id: str
+
+
+class WorldArmorSourceActionRequest(BaseModel):
+    source_id: str
+    action: str
+
+
+class WorldArmorSourcePlanRequest(BaseModel):
+    source_ids: list[str] | None = None
+    max_concurrent: int = 4
+
+
 class WorldArmorPublicPageRequest(BaseModel):
     public_url: str
 
@@ -1037,6 +1068,162 @@ def world_armor_notice_forget(
         return forget_notice(request.notice_id)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
+
+
+def _world_armor_platform_error(exc: Exception) -> None:
+    if isinstance(exc, KeyError):
+        raise HTTPException(status_code=404, detail=str(exc)[:240]) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=422, detail=str(exc)[:240]) from exc
+    if isinstance(exc, RuntimeError):
+        raise HTTPException(status_code=503, detail=str(exc)[:240]) from exc
+    raise exc
+
+
+@app.post("/world-armor/v2/source-grants")
+def world_armor_source_enroll(
+    request: WorldArmorSourceEnrollRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import enroll_source
+    try:
+        return enroll_source(**request.model_dump())
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v2/source-grants")
+def world_armor_sources(
+    response: Response,
+    offset: int = 0,
+    page_size: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import list_sources
+    try:
+        return list_sources(offset=offset, page_size=page_size)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v2/source-grants/transition")
+def world_armor_source_transition(
+    request: WorldArmorSourceActionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import transition_source
+    try:
+        return transition_source(request.source_id, request.action)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v2/source-grants/forget")
+def world_armor_source_forget(
+    request: WorldArmorSourceIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import forget_source
+    try:
+        return forget_source(request.source_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v2/sources/observe")
+def world_armor_source_observe(
+    request: WorldArmorSourceIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_observe import observe_source
+    try:
+        return observe_source(request.source_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v2/observations")
+def world_armor_source_observations(
+    response: Response,
+    source_id: str | None = None,
+    after_seq: int = 0,
+    page_size: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import observations
+    try:
+        return observations(source_id=source_id, after_seq=after_seq,
+                            page_size=page_size)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v2/notices")
+def world_armor_source_notices(
+    response: Response,
+    source_id: str | None = None,
+    after_seq: int = 0,
+    page_size: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import notices
+    try:
+        return notices(source_id=source_id, after_seq=after_seq,
+                       page_size=page_size)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v2/plan")
+def world_armor_source_plan(
+    request: WorldArmorSourcePlanRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_platform import plan
+    try:
+        return plan(source_ids=request.source_ids,
+                    max_concurrent=request.max_concurrent)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v2/combined-evidence")
+def world_armor_combined_evidence(
+    response: Response,
+    investigation_id: str,
+    after_seq: int = 0,
+    page_size: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_graph import combined_evidence
+    try:
+        return combined_evidence(investigation_id,
+                                 after_seq=after_seq,page_size=page_size)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
 
 
 @app.post("/world-armor/v1/cameras/page-media")

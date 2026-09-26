@@ -1008,6 +1008,150 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorCreated.self, from: data)
     }
 
+    private func worldArmorPlatformGet(
+        path: String, query: [URLQueryItem] = []
+    ) async throws -> Data {
+        let base = try await activeBaseURL()
+        guard let address = URL(string: base)?
+            .appendingPathComponent(path),
+              var components = URLComponents(
+                  url: address, resolvingAgainstBaseURL: false
+              ) else { throw JarvisAPIError.badURL }
+        if !query.isEmpty {
+            components.queryItems = query
+        }
+        guard let endpoint = components.url else {
+            throw JarvisAPIError.badURL
+        }
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 15
+        addAuthorization(to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return data
+    }
+
+    func worldArmorPlatformSources(
+        offset: Int = 0
+    ) async throws -> ArmorPlatformSourcePage {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v2/source-grants",
+            query: [URLQueryItem(name: "offset", value: String(offset)),
+                    URLQueryItem(name: "page_size", value: "100")]
+        )
+        return try JSONDecoder().decode(ArmorPlatformSourcePage.self, from: data)
+    }
+
+    func worldArmorPlatformEnroll(
+        label: String, kind: String, locator: String,
+        grantClass: String, termsReference: String,
+        automated: Bool, sourceMinIntervalSeconds: Int,
+        cadenceSeconds: Int, retentionDays: Int,
+        goal: String, latitude: Double?, longitude: Double?
+    ) async throws -> ArmorPlatformSource {
+        var body: [String: Any] = [
+            "label": label, "kind": kind, "locator": locator,
+            "grant_class": grantClass, "terms_reference": termsReference,
+            "authorized_automated_access": automated,
+            "automated_min_interval_seconds": sourceMinIntervalSeconds,
+            "cadence_seconds": cadenceSeconds,
+            "retention_days": retentionDays,
+            "scene_goal": goal,
+        ]
+        if let latitude, let longitude {
+            body["latitude"] = latitude
+            body["longitude"] = longitude
+        }
+        let (data, response) = try await postData(
+            path: "world-armor/v2/source-grants", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPlatformSource.self, from: data)
+    }
+
+    func worldArmorPlatformTransition(
+        _ id: String, action: String
+    ) async throws -> ArmorPlatformSource {
+        let (data, response) = try await postData(
+            path: "world-armor/v2/source-grants/transition",
+            body: ["source_id": id, "action": action]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPlatformSource.self, from: data)
+    }
+
+    func worldArmorPlatformForget(
+        _ id: String
+    ) async throws -> ArmorPlatformForget {
+        let (data, response) = try await postData(
+            path: "world-armor/v2/source-grants/forget",
+            body: ["source_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPlatformForget.self, from: data)
+    }
+
+    func worldArmorPlatformObserve(
+        _ id: String
+    ) async throws -> ArmorPlatformCheck {
+        let (data, response) = try await postData(
+            path: "world-armor/v2/sources/observe",
+            body: ["source_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPlatformCheck.self, from: data)
+    }
+
+    func worldArmorPlatformEvidence(
+        sourceID: String, afterSeq: Int = 0
+    ) async throws -> ArmorPlatformEvidencePage {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v2/observations",
+            query: [
+                URLQueryItem(name: "source_id", value: sourceID),
+                URLQueryItem(name: "after_seq", value: String(afterSeq))
+            ]
+        )
+        return try JSONDecoder().decode(ArmorPlatformEvidencePage.self, from: data)
+    }
+
+    func worldArmorPlatformNotices(
+        sourceID: String
+    ) async throws -> ArmorPlatformNoticesPage {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v2/notices",
+            query: [URLQueryItem(name: "source_id", value: sourceID)]
+        )
+        return try JSONDecoder().decode(ArmorPlatformNoticesPage.self, from: data)
+    }
+
+    func worldArmorPlatformPlan() async throws -> ArmorPlatformPlan {
+        let (data, response) = try await postData(
+            path: "world-armor/v2/plan",
+            body: ["max_concurrent": 4]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPlatformPlan.self, from: data)
+    }
+
+    func worldArmorCombinedCameraEvidence(
+        investigationID: String
+    ) async throws -> [String: Any] {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v2/combined-evidence",
+            query: [
+                URLQueryItem(name: "investigation_id",
+                             value: investigationID)
+            ]
+        )
+        guard let report = try JSONSerialization.jsonObject(
+            with: data
+        ) as? [String: Any] else {
+            throw JarvisAPIError.badResponse
+        }
+        return report
+    }
+
     func worldArmorPageMedia(_ url: String) async throws -> ArmorPublicPageMedia {
         let (data, response) = try await postData(
             path: "world-armor/v1/cameras/page-media",

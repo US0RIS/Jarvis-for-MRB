@@ -10,6 +10,7 @@ on:
       - jarvis/world-armor-standing-watches
       - jarvis/world-armor-attention-inbox
       - jarvis/world-armor-global-public-cameras
+      - jarvis/world-armor-open-observation-platform
   pull_request:
     branches:
       - main

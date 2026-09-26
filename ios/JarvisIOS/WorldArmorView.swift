@@ -126,6 +126,132 @@ struct ArmorCameraReceiptList: Decodable {
     }
 }
 
+struct ArmorPlatformSource: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let kind: String
+    let sourceDisplay: String
+    let sceneGoal: String
+    let grantClass: String
+    let termsReference: String
+    let state: String
+    let cadenceSeconds: Int
+    let checkCount: Int
+    let sampleBudget: Int?
+    let consentExpiresAt: String?
+    let lastCheckedAt: String?
+    let lastOutcome: String?
+    let authorizedAutomatedAccess: Bool
+    let retentionDays: Int
+    let permissionVerifiedByJarvis: Bool
+    enum CodingKeys: String, CodingKey {
+        case id, label, kind, state
+        case sourceDisplay = "source_display"
+        case sceneGoal = "scene_goal"
+        case grantClass = "grant_class"
+        case termsReference = "terms_reference"
+        case cadenceSeconds = "cadence_seconds"
+        case checkCount = "check_count"
+        case sampleBudget = "sample_budget"
+        case consentExpiresAt = "consent_expires_at"
+        case lastCheckedAt = "last_checked_at"
+        case lastOutcome = "last_outcome"
+        case authorizedAutomatedAccess = "authorized_automated_access"
+        case retentionDays = "retention_days"
+        case permissionVerifiedByJarvis = "permission_verified_by_jarvis"
+    }
+}
+
+struct ArmorPlatformSourcePage: Decodable {
+    let sources: [ArmorPlatformSource]
+    let nextOffset: Int?
+    let total: Int
+    enum CodingKeys: String, CodingKey {
+        case sources, total
+        case nextOffset = "next_offset"
+    }
+}
+
+struct ArmorPlatformObservation: Decodable, Identifiable {
+    let id: String
+    let seq: Int
+    let sourceID: String
+    let description: String
+    let conditionStatus: String?
+    let sceneGoal: String
+    let sourceCaptureAt: String?
+    let receivedAt: String
+    let changeKind: String
+    enum CodingKeys: String, CodingKey {
+        case id, seq, description
+        case sourceID = "source_id"
+        case conditionStatus = "condition_status"
+        case sceneGoal = "scene_goal"
+        case sourceCaptureAt = "source_capture_at"
+        case receivedAt = "received_at"
+        case changeKind = "change_kind"
+    }
+}
+
+struct ArmorPlatformEvidencePage: Decodable {
+    let observations: [ArmorPlatformObservation]
+    let nextAfterSeq: Int?
+    enum CodingKeys: String, CodingKey {
+        case observations
+        case nextAfterSeq = "next_after_seq"
+    }
+}
+
+struct ArmorPlatformNotice: Decodable, Identifiable {
+    let id: String
+    let sourceID: String
+    let summary: String
+    let createdAt: String
+    enum CodingKeys: String, CodingKey {
+        case id, summary
+        case sourceID = "source_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct ArmorPlatformNoticesPage: Decodable {
+    let notices: [ArmorPlatformNotice]
+}
+
+struct ArmorPlatformCheck: Decodable {
+    let status: String
+    let sourceID: String
+    let modelCalls: Int?
+    let changeKind: String?
+    let noticeCreated: Bool?
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sourceID = "source_id"
+        case modelCalls = "model_calls"
+        case changeKind = "change_kind"
+        case noticeCreated = "notice_created"
+    }
+}
+
+struct ArmorPlatformForget: Decodable {
+    let deleted: Int
+}
+
+struct ArmorPlatformPlan: Decodable {
+    let available: Int
+    let automated: Int
+    let proposedHostConcurrency: Int
+    let providerEntitlementIndependentlyVerified: Bool
+    let remoteDistributedWorkers: Bool
+    enum CodingKeys: String, CodingKey {
+        case available, automated
+        case proposedHostConcurrency = "proposed_host_concurrency"
+        case providerEntitlementIndependentlyVerified =
+             "provider_entitlement_independently_verified"
+        case remoteDistributedWorkers = "remote_distributed_workers"
+    }
+}
+
 struct ArmorWatch: Decodable, Identifiable {
     let id: String
     let investigationID: String
@@ -594,6 +720,26 @@ struct WorldArmorView: View {
     @State private var cameraWatch: ExternalWatchSummary?
     @State private var cameraWatchImportID = ""
     @State private var cameraStatus = "No public camera requested."
+    @State private var platformSources: [ArmorPlatformSource] = []
+    @State private var platformTotal = 0
+    @State private var platformNextOffset: Int?
+    @State private var platformKind = "public_https"
+    @State private var platformLocator = ""
+    @State private var platformLabel = "Public camera"
+    @State private var platformGoal = ""
+    @State private var platformTerms = ""
+    @State private var platformGrantClass = "public_publisher"
+    @State private var platformAutomated = false
+    @State private var platformCadence = "60"
+    @State private var platformMinInterval = "0"
+    @State private var platformRetentionDays = "30"
+    @State private var platformLatitude = ""
+    @State private var platformLongitude = ""
+    @State private var platformActiveID: String?
+    @State private var platformEvidence: [ArmorPlatformObservation] = []
+    @State private var platformNotices: [ArmorPlatformNotice] = []
+    @State private var platformCombinedSummary = ""
+    @State private var platformStatus = "No source registry check performed."
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -629,6 +775,7 @@ struct WorldArmorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
                 heading
+                sourceConsole
                 enrollment
                 saved
                 if let selected {
@@ -671,6 +818,10 @@ struct WorldArmorView: View {
                 correlations = nil
                 evidenceGraph = nil
                 sampleTimes = []
+                platformEvidence = []
+                platformNotices = []
+                platformActiveID = nil
+                platformCombinedSummary = ""
                 notices = []
                 unreadNotices = 0
                 seenNoticeIDs = []
@@ -1096,6 +1247,217 @@ struct WorldArmorView: View {
         }
     }
 
+    private var sourceConsole: some View {
+        GroupBox("World Armor v2 · open observation platform") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Persistent, explicitly enrolled source grants. No fixed "
+                     + "camera count or 72-hour watch expiry. Each camera has "
+                     + "its own access terms, polling cadence and retention. "
+                     + "A public website is not automatically permission "
+                     + "for continuous scraping or recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Source label", text: $platformLabel)
+                Picker("Source adapter", selection: $platformKind) {
+                    Text("Exact public HTTPS media").tag("public_https")
+                    Text("Exact public HTTP media · insecure").tag("public_http")
+                    Text("Caltrans catalog ID").tag("caltrans")
+                    Text("Windy Webcams ID").tag("windy")
+                }
+                .pickerStyle(.menu)
+                TextField("Public media URL or official camera ID",
+                          text: $platformLocator)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Goal: e.g., is the road visibly flooded?",
+                          text: $platformGoal)
+                Picker("Declared source permission", selection: $platformGrantClass) {
+                    Text("Publisher's public media").tag("public_publisher")
+                    Text("My API/license contract").tag("api_contract")
+                    Text("Owned or explicitly authorized").tag("owned_or_authorized")
+                }
+                .pickerStyle(.menu)
+                TextField("Publisher terms or permission reference (required)",
+                          text: $platformTerms)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Toggle("I have permission for automated polling",
+                       isOn: $platformAutomated)
+                if platformAutomated {
+                    TextField("Check cadence in seconds",
+                              text: $platformCadence)
+                        .keyboardType(.numberPad)
+                    TextField("Publisher's minimum interval (seconds)",
+                              text: $platformMinInterval)
+                        .keyboardType(.numberPad)
+                }
+                TextField("Keep derived evidence for days",
+                          text: $platformRetentionDays)
+                    .keyboardType(.numberPad)
+                HStack {
+                    TextField("Camera latitude (optional)",
+                              text: $platformLatitude)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Camera longitude (optional)",
+                              text: $platformLongitude)
+                        .keyboardType(.numbersAndPunctuation)
+                }
+                if platformKind == "public_http" {
+                    Text("HTTP is unencrypted and vulnerable to tampering. "
+                         + "Enroll only this exact publicly accessible "
+                         + "feed after checking publisher terms. "
+                         + "Jarvis still blocks private IP destinations.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text("An entered camera point is operator-reported; "
+                     + "it is not the camera's verified viewing footprint. "
+                     + "Permissions are recorded but not independently "
+                     + "certified by Jarvis. Raw frames are not archived.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Enroll this exact source") {
+                        Task { await enrollPlatformSource() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || platformLocator.isEmpty
+                              || platformTerms.isEmpty)
+                    Button("Preflight active sources") {
+                        Task { await planPlatformSources() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                }
+                HStack {
+                    Text("Enrolled sources · \(platformTotal)")
+                        .font(.headline)
+                    Button("Refresh") {
+                        Task { await refreshPlatformSources() }
+                    }
+                    .disabled(busy)
+                }
+                ForEach(platformSources) { source in
+                    platformSourceRow(source)
+                }
+                if platformNextOffset != nil {
+                    Button("Load more sources") {
+                        Task { await loadMorePlatformSources() }
+                    }
+                    .disabled(busy)
+                }
+                if let id = platformActiveID {
+                    Text("Evidence for " + String(id.prefix(8)))
+                        .font(.subheadline.weight(.medium))
+                    ForEach(platformEvidence) { event in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(event.description)
+                            Text("Model classification: "
+                                 + (event.conditionStatus ?? "scene only"))
+                                .font(.caption)
+                            Text("Jarvis received: " + event.receivedAt
+                                 + " · publisher capture time "
+                                 + (event.sourceCaptureAt ?? "unknown"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(event.changeKind.replacingOccurrences(
+                                of: "_", with: " "
+                            ))
+                                .font(.caption2)
+                        }
+                        Divider()
+                    }
+                    ForEach(platformNotices) { notice in
+                        Text("Watch notice: " + notice.summary)
+                            .font(.caption)
+                    }
+                    if platformEvidence.isEmpty {
+                        Text("No retained observations for this selected source.")
+                            .font(.caption)
+                    }
+                }
+                if let regionID = selectedID {
+                    Button("Co-display cameras with selected region evidence") {
+                        Task { await inspectCombinedPlatformEvidence(regionID) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                    if !platformCombinedSummary.isEmpty {
+                        Text(platformCombinedSummary).font(.caption)
+                    }
+                }
+                Text(platformStatus)
+                    .font(.caption)
+                Text("Host collector is not started by opening this view. "
+                     + "Remote distributed workers and closed-app push "
+                     + "have not been enabled.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func platformSourceRow(
+        _ source: ArmorPlatformSource
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(source.label + " · " + source.kind)
+                .font(.subheadline.weight(.medium))
+            Text(source.sourceDisplay + " · " + source.state)
+                .font(.caption)
+            Text(source.sceneGoal.isEmpty
+                 ? "General environmental scene description"
+                 : "Observation goal: " + source.sceneGoal)
+                .font(.caption)
+            Text("\(source.checkCount) checks · "
+                 + (source.cadenceSeconds > 0
+                    ? "every \(source.cadenceSeconds)s"
+                    : "manual only")
+                 + " · retain \(source.retentionDays)d")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let outcome = source.lastOutcome {
+                Text("Last source outcome: " + outcome)
+                    .font(.caption2)
+            }
+            HStack {
+                Button("Inspect") {
+                    Task { await observePlatformSource(source.id) }
+                }
+                .disabled(busy || source.state != "active")
+                Button("Evidence") {
+                    Task { await readPlatformEvidence(source.id) }
+                }
+                .disabled(busy)
+                Button(source.state == "active" ? "Pause" : "Resume") {
+                    Task {
+                        await changePlatformSource(
+                            source.id,
+                            action: source.state == "active"
+                                ? "pause" : "resume"
+                        )
+                    }
+                }
+                .disabled(busy || source.state == "stopped")
+            }
+            .buttonStyle(.bordered)
+            HStack {
+                Button("Stop", role: .destructive) {
+                    Task { await changePlatformSource(source.id, action: "stop") }
+                }
+                .disabled(busy || source.state == "stopped")
+                Button("Forget + erase evidence", role: .destructive) {
+                    Task { await forgetPlatformSource(source.id) }
+                }
+                .disabled(busy)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
     private var publicCameraWorkbench: some View {
         GroupBox("6 · Public camera evidence · worldwide when configured") {
             VStack(alignment: .leading, spacing: 9) {
@@ -1131,6 +1493,20 @@ struct WorldArmorView: View {
                                : "Select this camera") {
                             selectedCameraRef = camera.id
                             publicCameraURL = ""
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Prepare persistent source grant for this camera") {
+                            selectedCameraRef = camera.id
+                            publicCameraURL = ""
+                            platformKind = camera.id.hasPrefix("windy-")
+                                ? "windy" : "caltrans"
+                            platformLocator = camera.id
+                            platformLabel = camera.title
+                            platformLatitude = String(camera.latitude)
+                            platformLongitude = String(camera.longitude)
+                            platformStatus = "Source selected; review publisher "
+                                + "access rights and terms at the source "
+                                + "console before enrolling."
                         }
                         .buttonStyle(.bordered)
                         if selectedCameraRef == camera.id {
@@ -1170,6 +1546,18 @@ struct WorldArmorView: View {
                           text: $publicCameraURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                Button("Prepare this public media as persistent source") {
+                    platformKind = "public_https"
+                    platformLocator = publicCameraURL
+                    platformLabel = "Selected public camera media"
+                    platformLatitude = ""
+                    platformLongitude = ""
+                    platformStatus = "Source selected with UNKNOWN "
+                        + "geography. Review exact publisher rights "
+                        + "and permitted cadence before enrollment."
+                }
+                .buttonStyle(.bordered)
+                .disabled(publicCameraURL.isEmpty)
                 Text("An ordinary webcam webpage is not necessarily an "
                      + "image/stream URL. Passwords, signed access tokens, "
                      + "local IPs and private URLs are not accepted in this field.")
@@ -1587,6 +1975,11 @@ struct WorldArmorView: View {
             // collection is disabled; no new provider request is issued here.
             investigations = try await client.worldArmorInvestigations().investigations
             watches = (try? await client.worldArmorWatches())?.watches ?? []
+            if let page = try? await client.worldArmorPlatformSources() {
+                platformSources = page.sources
+                platformNextOffset = page.nextOffset
+                platformTotal = page.total
+            }
             if let current = selectedID {
                 let response = try? await client.worldArmorNotices(
                     investigationID: current
@@ -1690,6 +2083,245 @@ struct WorldArmorView: View {
             await refreshNotices(alertOnNew: false)
         } catch {
             status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
+    private func refreshPlatformSources() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Source register refreshed. No camera fetched."
+        } catch {
+            platformStatus = "Source register unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func loadMorePlatformSources() async {
+        guard !busy, let cursor = platformNextOffset else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorPlatformSources(
+                offset: cursor
+            )
+            platformSources.append(contentsOf: page.sources)
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Loaded \(platformSources.count) of "
+                + "\(platformTotal) enrolled sources."
+        } catch {
+            platformStatus = "Source pagination unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func enrollPlatformSource() async {
+        guard !busy else { return }
+        guard let retention = Int(platformRetentionDays),
+              retention >= 1 else {
+            platformStatus = "Enter positive derived-evidence retention days."
+            return
+        }
+        guard let publisherMinimum = Int(platformMinInterval),
+              publisherMinimum >= 0 else {
+            platformStatus = "Enter the source's permitted minimum interval."
+            return
+        }
+        let cadence: Int
+        if platformAutomated {
+            guard let entered = Int(platformCadence),
+                  entered >= max(publisherMinimum, 1) else {
+                platformStatus = "Polling cadence must meet source permissions."
+                return
+            }
+            cadence = entered
+        } else {
+            cadence = 0
+        }
+        let latText = platformLatitude.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let lonText = platformLongitude.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if latText.isEmpty != lonText.isEmpty {
+            platformStatus = "Provide both camera coordinates or neither."
+            return
+        }
+        let lat = latText.isEmpty ? nil : Double(latText)
+        let lon = lonText.isEmpty ? nil : Double(lonText)
+        if !latText.isEmpty && (lat == nil || lon == nil) {
+            platformStatus = "Camera coordinates must be numeric."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let enrolled = try await client.worldArmorPlatformEnroll(
+                label: platformLabel, kind: platformKind,
+                locator: platformLocator,
+                grantClass: platformGrantClass,
+                termsReference: platformTerms,
+                automated: platformAutomated,
+                sourceMinIntervalSeconds: publisherMinimum,
+                cadenceSeconds: cadence,
+                retentionDays: retention, goal: platformGoal,
+                latitude: lat, longitude: lon
+            )
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Source " + enrolled.id
+                + " enrolled with exact declared rights. Host runner "
+                + "requires explicit start; no camera was fetched."
+        } catch {
+            platformStatus = "Source enrollment blocked: "
+                + error.localizedDescription
+        }
+    }
+
+    private func planPlatformSources() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let preflight = try await client.worldArmorPlatformPlan()
+            platformStatus = "\(preflight.available) eligible sources; "
+                + "\(preflight.automated) explicitly permitted for scheduled "
+                + "checks. Suggested host batch "
+                + "\(preflight.proposedHostConcurrency). Permissions not "
+                + "independently verified; remote workers unavailable."
+        } catch {
+            platformStatus = "Source plan unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func observePlatformSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await client.worldArmorPlatformObserve(id)
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformNextOffset = page.nextOffset
+            platformTotal = page.total
+            let records = try await client.worldArmorPlatformEvidence(
+                sourceID: id
+            )
+            platformActiveID = id
+            platformEvidence = records.observations
+            platformNotices = try await client.worldArmorPlatformNotices(
+                sourceID: id
+            ).notices
+            platformStatus = "Source check: " + receipt.status
+                + "; model calls \(receipt.modelCalls ?? 0). "
+                + "Identical published images skip redundant model passes."
+        } catch {
+            platformStatus = "Source observation unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func readPlatformEvidence(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await client.worldArmorPlatformEvidence(
+                sourceID: id
+            )
+            platformActiveID = id
+            platformEvidence = page.observations
+            platformNotices = try await client.worldArmorPlatformNotices(
+                sourceID: id
+            ).notices
+            platformStatus = "Loaded derived evidence, not publisher footage. "
+                + "Source capture times remain unverified."
+        } catch {
+            platformStatus = "Evidence unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func changePlatformSource(
+        _ id: String, action: String
+    ) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let item = try await client.worldArmorPlatformTransition(
+                id, action: action
+            )
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            platformStatus = "Source " + item.label + " is " + item.state
+                + ". Leased observations cannot save after stop/pause."
+        } catch {
+            platformStatus = "Source transition unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func forgetPlatformSource(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let receipt = try await client.worldArmorPlatformForget(id)
+            let page = try await client.worldArmorPlatformSources()
+            platformSources = page.sources
+            platformTotal = page.total
+            platformNextOffset = page.nextOffset
+            if platformActiveID == id {
+                platformActiveID = nil
+                platformEvidence = []
+                platformNotices = []
+            }
+            platformStatus = receipt.deleted > 0
+                ? "Source and all its local text/hash evidence forgotten."
+                : "Selected source was already absent."
+        } catch {
+            platformStatus = "Forget source unavailable: "
+                + error.localizedDescription
+        }
+    }
+
+    private func inspectCombinedPlatformEvidence(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let data = try await client.worldArmorCombinedCameraEvidence(
+                investigationID: id
+            )
+            let cameras = (data["camera_observations"]
+                           as? [[String: Any]]) ?? []
+            let environmental = (data["environmental_observations"]
+                                 as? [[String: Any]]) ?? []
+            let unlocated = (data["enrolled_camera_location_unknown_source_ids"]
+                             as? [String]) ?? []
+            platformCombinedSummary =
+                "\(cameras.count) camera receipts near the selected "
+                + "region's camera points and \(environmental.count) "
+                + "environmental source observations; "
+                + "\(unlocated.count) camera sources have unknown geography. "
+                + "These are CO-DISPLAYED, not correlated by fabricated "
+                + "camera capture times or verified view cones."
+        } catch {
+            platformCombinedSummary =
+                "Combined evidence unavailable: " + error.localizedDescription
         }
     }
 

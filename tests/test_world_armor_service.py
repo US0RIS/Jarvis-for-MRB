@@ -113,6 +113,89 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertIn("in: ...Date()",view)
         self.assertIn("UIApplication", (root/"ios/JarvisIOS/RealityMesh.swift").read_text(encoding="utf-8"))
 
+    def test_watch_management_requires_private_auth_and_explicit_feature_gate(self):
+        request = service.WorldArmorWatchCreateRequest(
+            investigation_id="f"*32, interval_minutes=60,
+            max_checks=3, lifetime_hours=2,
+        )
+        self.assertEqual(
+            set(service.WorldArmorWatchCreateRequest.model_fields),
+            {"investigation_id", "interval_minutes", "max_checks",
+             "lifetime_hours"},
+        )
+        routes = {route.path for route in service.app.routes}
+        self.assertTrue({
+            "/world-armor/v1/watches",
+            "/world-armor/v1/watches/stop",
+            "/world-armor/v1/watches/pause",
+            "/world-armor/v1/watches/resume",
+        }.issubset(routes))
+        with patch.object(service, "API_TOKEN", "private-secret"), \
+             patch("jarvis_mrb.world_armor_watches.create_watch",
+                   return_value={"id": "a"*32, "state": "active"}) as create:
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_watch_create(
+                    request, Response(), authorization=None,
+                )
+            self.assertEqual(ctx.exception.status_code, 401)
+            create.assert_not_called()
+            response = Response()
+            answer = service.world_armor_watch_create(
+                request, response, authorization="Bearer private-secret",
+            )
+            self.assertEqual(answer["state"], "active")
+            self.assertEqual(response.headers["Cache-Control"],
+                             "private, no-store")
+            create.assert_called_once_with(
+                "f"*32, interval_minutes=60, max_checks=3,
+                lifetime_hours=2,
+            )
+        with patch.object(service, "API_TOKEN", "private-secret"), \
+             patch.dict(os.environ, {
+                 "JARVIS_WORLD_ARMOR_ENABLED": "1",
+                 "JARVIS_WORLD_ARMOR_WATCHES_ENABLED": "0",
+             }):
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_watch_create(
+                    request, Response(), authorization="Bearer private-secret",
+                )
+            self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_watch_stop_remains_authorized_while_watches_disabled(self):
+        request = service.WorldArmorWatchIdRequest(watch_id="e"*32)
+        with patch.object(service, "API_TOKEN", "private-secret"), \
+             patch("jarvis_mrb.world_armor_watches.stop_watch",
+                   return_value={"state": "revoked"}) as stop, \
+             patch.dict(os.environ, {
+                 "JARVIS_WORLD_ARMOR_ENABLED": "0",
+                 "JARVIS_WORLD_ARMOR_WATCHES_ENABLED": "0",
+             }):
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_watch_stop(
+                    request, Response(), authorization=None,
+                )
+            self.assertEqual(ctx.exception.status_code, 401)
+            stop.assert_not_called()
+            self.assertEqual(service.world_armor_watch_stop(
+                request, Response(),
+                authorization="Bearer private-secret",
+            )["state"], "revoked")
+            stop.assert_called_once_with("e"*32)
+
+    def test_ios_workbench_wires_actual_watch_management_not_auto_start(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        view = (root/"ios/JarvisIOS/WorldArmorView.swift").read_text(
+            encoding="utf-8")
+        client = (root/"ios/JarvisIOS/JarvisAPIClient.swift").read_text(
+            encoding="utf-8")
+        self.assertIn("worldArmorWatchCreate(", view)
+        self.assertIn("worldArmorWatchTransition(", view)
+        self.assertIn("worldArmorWatches()", view)
+        self.assertIn("watchRunnerAutoStarted", view)
+        self.assertIn("world-armor/v1/watches/", client)
+        self.assertIn("Enrolling a watch does NOT start", view)
+
     def test_disabled_create_does_not_touch_database(self):
         request=service.WorldArmorCreateRequest(
             label="Test",latitude=34.1,longitude=-118.2)

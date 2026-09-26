@@ -1242,9 +1242,8 @@ struct WorldArmorView: View {
                 Text(cameraStatus)
                     .font(.caption)
                 Divider()
-                Text("Saved camera receipts • \(
-                    cameraReceipts.count
-                ) · no footage archive or verified capture time")
+                Text("Saved camera receipts • \(cameraReceipts.count)"
+                     + " · no footage archive or verified capture time")
                     .font(.subheadline.weight(.medium))
                 Button("Refresh retained camera evidence") {
                     Task { await refreshCameraEvidence() }

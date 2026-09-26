@@ -265,6 +265,11 @@ class WorldArmorCameraReceiptIdRequest(BaseModel):
 class WorldArmorPublicPageRequest(BaseModel):
     public_url: str
 
+
+class WorldArmorImportCameraWatchRequest(BaseModel):
+    investigation_id: str
+    watch_id: str
+
 class WorldArmorCorrelationRequest(BaseModel):
     investigation_id: str
     start_at: str
@@ -1064,6 +1069,23 @@ def world_armor_camera_discover(
         return discover_public_cameras_global(
             request.latitude, request.longitude,
             radius_km=request.radius_km, limit=request.limit,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/cameras/import-watch")
+def world_armor_camera_import_watch(
+    request: WorldArmorImportCameraWatchRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_cameras import import_external_camera_watch
+    try:
+        return import_external_camera_watch(
+            request.investigation_id, request.watch_id,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)

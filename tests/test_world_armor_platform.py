@@ -62,6 +62,14 @@ class SourcePlatformTests(unittest.TestCase):
                 "description": "Apparent rain visible; capture time unknown.",
                 "model": "local-moondream"}
 
+    def test_empty_preflight_stable_contract_for_native_reader(self):
+        report = registry.plan(db_path=self.db)
+        self.assertEqual(report["available"], 0)
+        self.assertEqual(report["automated"], 0)
+        self.assertEqual(report["proposed_host_concurrency"], 4)
+        self.assertFalse(report["provider_entitlement_independently_verified"])
+        self.assertFalse(report["remote_distributed_workers"])
+
     def test_permission_reference_required_and_expiry_optional(self):
         with self.assertRaises(ValueError):
             self.enroll(terms_reference="")

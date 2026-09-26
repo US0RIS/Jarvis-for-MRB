@@ -38,12 +38,21 @@ def combined_evidence(investigation_id: str, *,
     at = _clock(now)
     report = replay(investigation_id, db_path=world_db_path, now=at)
     region = report["investigation"]
-    sources = list_sources(db_path=platform_db_path, offset=0, page_size=200)
+    # Source directory pages are retrieval windows, not source count caps.
+    source_rows = []
+    offset = 0
+    while True:
+        part = list_sources(db_path=platform_db_path,
+                            offset=offset, page_size=200)
+        source_rows.extend(part["sources"])
+        if part["next_offset"] is None:
+            break
+        offset = part["next_offset"]
     # No falsely broad geographic coverage: a camera whose reported location
     # is unknown is returned separately, and selection is operator-attested.
     eligible: dict[str, dict[str, Any]] = {}
     unknown: list[str] = []
-    for entry in sources["sources"]:
+    for entry in source_rows:
         if entry["latitude"] is None or entry["longitude"] is None:
             unknown.append(entry["id"])
             continue
@@ -72,7 +81,7 @@ def combined_evidence(investigation_id: str, *,
         "nearby_camera_sources": list(eligible.values()),
         "enrolled_camera_location_unknown_source_ids": unknown,
         "next_camera_after_seq": events["next_after_seq"],
-        "source_catalog_next_offset": sources["next_offset"],
+        "source_catalog_next_offset": None,
         "temporal_join": "co_display_only_camera_capture_times_unverified",
         "camera_observation_time": "Jarvis_receipt_not_publisher_capture",
         "source_independent_confirmation": False,

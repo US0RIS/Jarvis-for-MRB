@@ -155,6 +155,67 @@ class MacNodeProtocolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 launch("Terminal")
 
+    def test_world_observer_requires_separate_startup_opt_in_and_fixed_task(self):
+        health = json.loads(self.request("/v1/health")[2])
+        self.assertEqual(health["capabilities"]["world_observer"], "disabled")
+        with self.assertRaises(HTTPError) as denied:
+            self.request(
+                "/v1/world/observe", method="POST",
+                payload={"kind": "opensky_region", "latitude": 34.05,
+                         "longitude": -118.25, "radius_km": 30},
+            )
+        self.assertEqual(denied.exception.code, 403)
+
+        self.state.allow_world_observer = True
+        module = self.http.RequestHandlerClass.do_POST.__globals__
+        called = []
+        module["_observe_public_world"] = lambda payload: (
+            called.append(payload) or {
+                "status": "ok", "provider": "opensky",
+                "worker_observed_at": datetime.now(timezone.utc).isoformat(),
+                "provider_payload": {"time": 1, "states": []},
+                "source": "test fixed provider",
+            }
+        )
+        health = json.loads(self.request("/v1/health")[2])
+        self.assertEqual(
+            health["capabilities"]["world_observer"],
+            "opensky_region_read_only",
+        )
+        status, _, raw = self.request(
+            "/v1/world/observe", method="POST",
+            payload={"kind": "opensky_region", "latitude": 34.05,
+                     "longitude": -118.25, "radius_km": 30},
+        )
+        self.assertEqual(status, 200)
+        receipt = json.loads(raw)
+        self.assertEqual(receipt["provider"], "opensky")
+        self.assertEqual(receipt["device_id"], "macbook")
+        self.assertEqual(len(called), 1)
+
+    def test_world_observer_rejects_arbitrary_url_and_unknown_tasks_before_io(self):
+        self.state.allow_world_observer = True
+        module = self.http.RequestHandlerClass.do_POST.__globals__
+        observed = []
+        module["_observe_public_world"] = lambda payload: observed.append(payload)
+        for payload in (
+            {"kind": "arbitrary_http", "url": "https://example.com"},
+            {"kind": "opensky_region", "latitude": 34.0,
+             "longitude": -118.2, "radius_km": 20,
+             "url": "https://example.com"},
+            {"kind": "shell", "command": "whoami"},
+        ):
+            # The route delegates typed validation to the fixed helper. Put
+            # back the real helper just for rejection so this test verifies
+            # network target/task scope rather than the mock above.
+            real = runpy.run_path(str(MAC), run_name="mesh_world_validate")
+            module["_observe_public_world"] = real["_observe_public_world"]
+            with self.assertRaises(HTTPError) as denied:
+                self.request("/v1/world/observe", method="POST",
+                             payload=payload)
+            self.assertEqual(denied.exception.code, 422)
+        self.assertEqual(observed, [])
+
     def test_duration_and_unknown_endpoints_fail_closed(self):
         for duration in (-1, 0, True, 301, "120"):
             with self.assertRaises(HTTPError) as raised:

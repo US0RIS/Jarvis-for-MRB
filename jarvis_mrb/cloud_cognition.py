@@ -273,7 +273,7 @@ _PROPOSAL_SCHEMA: dict[str, Any] = {
         "properties": {
             "response": {"type": "string"},
             "tool": {"type": ["string", "null"]},
-            "arguments": {"type": "object", "additionalProperties": True},
+            "arguments_json": {"type": "string"},
             "evidence_requests": {"type": "array", "items": {"type": "string"}},
             "assumptions": {"type": "array", "items": {"type": "string"}},
             "uncertainties": {"type": "array", "items": {"type": "string"}},
@@ -282,7 +282,7 @@ _PROPOSAL_SCHEMA: dict[str, Any] = {
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
         "required": [
-            "response", "tool", "arguments", "evidence_requests", "assumptions",
+            "response", "tool", "arguments_json", "evidence_requests", "assumptions",
             "uncertainties", "expected_outcomes", "verification_criteria", "confidence",
         ],
         "additionalProperties": False,
@@ -404,9 +404,15 @@ def _proposal_from_mapping(raw: dict[str, Any]) -> CloudProposal:
     tool = raw.get("tool")
     if tool is not None and not isinstance(tool, str):
         raise ValueError("tool must be a string or null")
-    arguments = raw.get("arguments")
+    arguments_json = raw.get("arguments_json")
+    if not isinstance(arguments_json, str):
+        raise ValueError("arguments_json must be a JSON string")
+    try:
+        arguments = json.loads(arguments_json or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("arguments_json is malformed") from exc
     if not isinstance(arguments, dict):
-        raise ValueError("arguments must be an object")
+        raise ValueError("arguments_json must decode to an object")
     confidence = float(raw.get("confidence", 0.0))
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("confidence out of range")

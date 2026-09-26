@@ -117,6 +117,35 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 scope TEXT NOT NULL,
                 PRIMARY KEY(sample_id,provider)
             );
+            CREATE TABLE IF NOT EXISTS watches (
+                id TEXT PRIMARY KEY,
+                investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                next_due_at TEXT NOT NULL,
+                interval_minutes INTEGER NOT NULL,
+                max_checks INTEGER NOT NULL,
+                check_count INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL CHECK(state IN
+                    ('active','paused','revoked','exhausted','expired','failed')),
+                lease_token TEXT,
+                lease_until TEXT,
+                last_checked_at TEXT,
+                last_outcome TEXT,
+                last_change_state TEXT,
+                CHECK(interval_minutes BETWEEN 30 AND 360),
+                CHECK(max_checks BETWEEN 1 AND 12)
+            );
+            CREATE INDEX IF NOT EXISTS ix_armor_watch_due
+                ON watches(state,next_due_at);
+            CREATE TABLE IF NOT EXISTS watch_receipts (
+                watch_id TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+                sample_id TEXT NOT NULL REFERENCES samples(id) ON DELETE CASCADE,
+                collected_at TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                change_state TEXT NOT NULL,
+                PRIMARY KEY(watch_id,sample_id)
+            );
             CREATE TABLE IF NOT EXISTS observations (
                 id TEXT PRIMARY KEY,
                 investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
@@ -143,6 +172,19 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 ON samples(investigation_id,received_at);
             """
         )
+        # Backward-compatible upgrade for operator-created early watch stores:
+        # CREATE TABLE IF NOT EXISTS does not add newly introduced fields.
+        watch_fields = {row["name"] for row in
+                        con.execute("PRAGMA table_info(watches)")}
+        if "last_change_state" not in watch_fields:
+            con.execute("ALTER TABLE watches ADD COLUMN last_change_state TEXT")
+        receipt_fields = {row["name"] for row in
+                          con.execute("PRAGMA table_info(watch_receipts)")}
+        if "change_state" not in receipt_fields:
+            con.execute(
+                "ALTER TABLE watch_receipts ADD COLUMN change_state TEXT "
+                "NOT NULL DEFAULT 'not_evaluated'"
+            )
     return con
 
 
@@ -191,7 +233,13 @@ def capabilities() -> dict[str, Any]:
              "coverage": "bounded_mag_threshold_not_all_hazards"},
         ],
         "camera_collection": False, "aircraft_collection": False,
-        "ais_collection": False, "scheduled_watches": False,
+        "ais_collection": False,
+        "scheduled_watches": (os.getenv("JARVIS_WORLD_ARMOR_WATCHES_ENABLED") == "1"
+                              and _enabled()),
+        "watch_runner_auto_started": False,
+        "watch_runner": "explicit_separate_local_process",
+        "watch_interval_minutes_min": 30,
+        "watch_checks_max": 12,
         "remote_workers": False, "actuation": False, "model_calls": 0,
         "store": "separate_local_expiring_sqlite",
     }
@@ -397,11 +445,27 @@ def ingest_fixture(investigation_id: str, conditions: dict[str, Any],
 
 def _capture(investigation_id: str, conditions: dict[str, Any],
              earthquakes: dict[str, Any], *, db_path: Path,
-             now: datetime, mode: str) -> dict[str, Any]:
+             now: datetime, mode: str, watch_id: str | None = None,
+             watch_lease: str | None = None) -> dict[str, Any]:
     instant = _clock(now)
     _require_enabled()
     with closing(_connect(db_path, create=False)) as con, con:
+        # Serialize consent checks with watch stop/revocation and sample caps.
+        con.execute("BEGIN IMMEDIATE")
         row = _record(con, investigation_id, instant)
+        if watch_id is not None:
+            watch = con.execute(
+                "SELECT state,lease_token,expires_at FROM watches "
+                "WHERE id=? AND investigation_id=?",
+                (_identifier(watch_id), investigation_id),
+            ).fetchone()
+            if (watch is None or watch["state"] != "active"
+                    or watch["lease_token"] != watch_lease
+                    or watch["expires_at"] <= instant.isoformat()):
+                raise ArmorDisabled(
+                    "Watch revoked, expired or superseded during collection; "
+                    "no sample was retained."
+                )
         if row["sample_count"] >= _MAX_SAMPLES:
             raise ValueError("Investigation reached its 20-sample collection cap.")
         collected, cover = _normalized(conditions, earthquakes,
@@ -476,7 +540,9 @@ def _capture(investigation_id: str, conditions: dict[str, Any],
     }
 
 
-def observe_once(investigation_id: str, *, db_path: Path | None = None) -> dict[str, Any]:
+def observe_once(investigation_id: str, *, db_path: Path | None = None,
+                 watch_id: str | None = None,
+                 watch_lease: str | None = None) -> dict[str, Any]:
     """One conscious action, three existing provider families, no scheduler."""
     _require_enabled()
     path = Path(db_path) if db_path is not None else STORE
@@ -484,6 +550,16 @@ def observe_once(investigation_id: str, *, db_path: Path | None = None) -> dict[
         row = _record(con, investigation_id, _clock())
         if row["sample_count"] >= _MAX_SAMPLES:
             raise ValueError("Investigation reached its 20-sample collection cap.")
+        if watch_id is not None:
+            watch = con.execute(
+                "SELECT state,lease_token,expires_at FROM watches "
+                "WHERE id=? AND investigation_id=?",
+                (_identifier(watch_id), investigation_id),
+            ).fetchone()
+            if (watch is None or watch["state"] != "active"
+                    or watch["lease_token"] != watch_lease
+                    or watch["expires_at"] <= _clock().isoformat()):
+                raise ArmorDisabled("Watch no longer authorized.")
     from jarvis_mrb.physical_conditions import physical_conditions
     from jarvis_mrb.public_incidents import regional_earthquakes
     try:
@@ -498,7 +574,8 @@ def observe_once(investigation_id: str, *, db_path: Path | None = None) -> dict[
     except Exception:
         quakes = {"status": "unavailable"}
     return _capture(investigation_id, conditions, quakes,
-                    db_path=path, now=_clock(), mode="real_adapter")
+                    db_path=path, now=_clock(), mode="real_adapter",
+                    watch_id=watch_id, watch_lease=watch_lease)
 
 
 def replay(investigation_id: str, *, as_known_at: str | None = None,

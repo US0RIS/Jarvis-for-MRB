@@ -13,10 +13,59 @@ struct ArmorCapabilities: Decodable {
     let enabled: Bool
     let mode: String
     let sourceState: String
+    let scheduledWatches: Bool?
+    let watchRunnerAutoStarted: Bool?
     let providers: [Provider]
     enum CodingKeys: String, CodingKey {
         case enabled, mode, providers
         case sourceState = "source_state"
+        case scheduledWatches = "scheduled_watches"
+        case watchRunnerAutoStarted = "watch_runner_auto_started"
+    }
+}
+
+struct ArmorWatch: Decodable, Identifiable {
+    let id: String
+    let investigationID: String
+    let createdAt: String
+    let expiresAt: String
+    let nextDueAt: String
+    let intervalMinutes: Int
+    let maxChecks: Int
+    let checkCount: Int
+    let state: String
+    let collecting: Bool
+    let lastCheckedAt: String?
+    let lastOutcome: String?
+    let lastChangeState: String?
+    let notificationsEnabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, state, collecting
+        case investigationID = "investigation_id"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case nextDueAt = "next_due_at"
+        case intervalMinutes = "interval_minutes"
+        case maxChecks = "max_checks"
+        case checkCount = "check_count"
+        case lastCheckedAt = "last_checked_at"
+        case lastOutcome = "last_outcome"
+        case lastChangeState = "last_change_state"
+        case notificationsEnabled = "notifications_enabled"
+    }
+}
+
+struct ArmorWatchForgetReceipt: Decodable {
+    let deleted: Int
+}
+
+struct ArmorWatchList: Decodable {
+    let watches: [ArmorWatch]
+    let runnerAutoStarted: Bool
+    enum CodingKeys: String, CodingKey {
+        case watches
+        case runnerAutoStarted = "runner_auto_started"
     }
 }
 
@@ -370,6 +419,10 @@ struct WorldArmorView: View {
 
     @State private var capabilities: ArmorCapabilities?
     @State private var investigations: [ArmorInvestigation] = []
+    @State private var watches: [ArmorWatch] = []
+    @State private var watchInterval = 60
+    @State private var watchChecks = 6
+    @State private var watchLifetime = 6
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -410,6 +463,7 @@ struct WorldArmorView: View {
                 if let selected {
                     selectedRegion(selected)
                     actions
+                    standingWatches
                     if let changes { changePanel(changes) }
                     temporalQueryPanel
                     if let correlations { correlationPanel(correlations) }
@@ -653,6 +707,104 @@ struct WorldArmorView: View {
 
     // The MapKit center is a user-enrolled query scope, NOT an event location.
     // These queries never fetch providers, enroll watches or operate machines.
+    private var standingWatches: some View {
+        GroupBox("4 · Explicit standing watches") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("The selected public region can be checked by the "
+                     + "separate, explicitly started Jarvis host runner. "
+                     + "Enrolling a watch does NOT start that process or "
+                     + "contact providers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if capabilities?.scheduledWatches != true {
+                    Text("Host standing-watch opt-in is OFF. Existing grants "
+                         + "remain visible for Stop or investigation Forget.")
+                        .font(.caption)
+                }
+                HStack {
+                    Picker("Every", selection: $watchInterval) {
+                        Text("30 min").tag(30)
+                        Text("60 min").tag(60)
+                        Text("2 hours").tag(120)
+                        Text("6 hours").tag(360)
+                    }
+                    .pickerStyle(.menu)
+                    Stepper("Max \(watchChecks) checks", value: $watchChecks,
+                            in: 1...12)
+                }
+                Stepper("Expire after \(watchLifetime) hours",
+                        value: $watchLifetime, in: 1...24)
+                Button("Enroll bounded watch") {
+                    Task { await enrollWatch() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || capabilities?.enabled != true
+                          || capabilities?.scheduledWatches != true)
+                Text("Host runner requires an additional local opt-in; "
+                     + "results are saved receipts, NOT live emergency alerts. "
+                     + "No push notifications or actions.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                ForEach(watches.filter { $0.investigationID == selectedID }) { item in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.state.uppercased()
+                             + " · \(item.checkCount)/\(item.maxChecks) checks"
+                             + " · every \(item.intervalMinutes) min")
+                            .font(.subheadline.weight(.medium))
+                        Text("Next scheduled: " + item.nextDueAt
+                             + " · expires " + item.expiresAt)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let outcome = item.lastOutcome {
+                            Text("Last receipt: " + outcome)
+                                .font(.caption2)
+                        }
+                        if let difference = item.lastChangeState {
+                            Text("Source comparison: " + difference
+                                 .replacingOccurrences(of: "_", with: " "))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            if item.state == "active" {
+                                Button("Pause") {
+                                    Task { await changeWatch(item.id, action: "pause") }
+                                }
+                                .disabled(busy || capabilities?.scheduledWatches != true)
+                            }
+                            if item.state == "paused" {
+                                Button("Resume") {
+                                    Task { await changeWatch(item.id, action: "resume") }
+                                }
+                                .disabled(busy || capabilities?.scheduledWatches != true)
+                            }
+                            if item.state == "active" || item.state == "paused" {
+                                Button("Stop permanently", role: .destructive) {
+                                    Task { await changeWatch(item.id, action: "stop") }
+                                }
+                                .disabled(busy)
+                            } else {
+                                Button("Forget watch", role: .destructive) {
+                                    Task { await forgetWatch(item.id) }
+                                }
+                                .disabled(busy)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial,
+                                in: RoundedRectangle(cornerRadius: 10))
+                }
+                Button("Refresh watch receipts") {
+                    Task { await refreshWatches() }
+                }
+                .disabled(busy)
+            }
+        }
+    }
+
     private var temporalQueryPanel: some View {
         GroupBox("4 · Investigate retained evidence across time") {
             VStack(alignment: .leading, spacing: 9) {
@@ -951,6 +1103,7 @@ struct WorldArmorView: View {
             // Listing and forgetting retained regions remains available after
             // collection is disabled; no new provider request is issued here.
             investigations = try await client.worldArmorInvestigations().investigations
+            watches = (try? await client.worldArmorWatches())?.watches ?? []
             if !investigations.contains(where: { $0.id == selectedID }) {
                 selectedID = nil
                 replayResult = nil
@@ -982,6 +1135,67 @@ struct WorldArmorView: View {
         }
     }
 
+    private func refreshWatches() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            watches = try await client.worldArmorWatches().watches
+            investigations = try await client.worldArmorInvestigations().investigations
+            status = "Showing persisted watch state; this is not a provider check."
+        } catch {
+            status = "Watch readback unavailable: " + error.localizedDescription
+        }
+    }
+
+    private func enrollWatch() async {
+        guard let selectedID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.worldArmorWatchCreate(
+                selectedID, intervalMinutes: watchInterval,
+                maxChecks: watchChecks, lifetimeHours: watchLifetime
+            )
+            watches = try await client.worldArmorWatches().watches
+            status = "Watch enrolled. The separate local host runner must "
+                + "be started explicitly; no provider check has happened yet."
+        } catch {
+            status = "Watch enrollment blocked: " + error.localizedDescription
+        }
+    }
+
+    private func forgetWatch(_ id: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.worldArmorWatchForget(id)
+            watches = try await client.worldArmorWatches().watches
+            status = result.deleted > 0
+                ? "Watch grant forgotten; region samples remain until region Forget."
+                : "Watch grant was already absent."
+        } catch {
+            status = "Watch Forget failed: " + error.localizedDescription
+        }
+    }
+
+    private func changeWatch(_ id: String, action: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.worldArmorWatchTransition(id, action: action)
+            watches = try await client.worldArmorWatches().watches
+            status = action == "stop"
+                ? "Watch revoked. In-flight collection cannot retain evidence "
+                    + "after revocation; past samples remain until region Forget."
+                : "Watch " + action + " confirmed by backend."
+        } catch {
+            status = "Watch transition failed: " + error.localizedDescription
+        }
+    }
+
     private func create() async {
         guard !busy else { return }
         guard let lat = Double(latitude), let lon = Double(longitude),
@@ -996,6 +1210,7 @@ struct WorldArmorView: View {
                 label: label, latitude: lat, longitude: lon, radiusKM: radiusKM
             )
             investigations = try await client.worldArmorInvestigations().investigations
+            watches = (try? await client.worldArmorWatches())?.watches ?? []
             selectedID = made.id
             correlationQueryRadiusKM = radiusKM
             replayResult = nil
@@ -1017,6 +1232,7 @@ struct WorldArmorView: View {
         do {
             let receipt = try await client.worldArmorObserve(selectedID)
             investigations = try await client.worldArmorInvestigations().investigations
+            watches = (try? await client.worldArmorWatches())?.watches ?? []
             replayResult = try await client.worldArmorReplay(
                 selectedID, asKnownAt: nil
             )

@@ -2042,11 +2042,14 @@ def world_armor_camera_inspect(
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.world_armor_cameras import inspect_camera
     try:
-        return inspect_camera(
-            request.investigation_id, camera_ref=request.camera_ref,
-            public_url=request.public_url, condition=request.condition,
-            windy_api_key=x_jarvis_windy_key,
-        )
+        kwargs = {
+            "camera_ref": request.camera_ref,
+            "public_url": request.public_url,
+            "condition": request.condition,
+        }
+        if x_jarvis_windy_key:
+            kwargs["windy_api_key"] = x_jarvis_windy_key
+        return inspect_camera(request.investigation_id, **kwargs)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
     except httpx.HTTPError as exc:

@@ -253,13 +253,39 @@ struct ArmorPlatformPlan: Decodable {
 }
 
 struct ArmorDistributedWorker: Decodable, Identifiable {
+    struct Metrics: Decodable {
+        let activeRequests: Int
+        let capacity: Int
+        let normalizedLoad: Double
+        enum CodingKeys: String, CodingKey {
+            case capacity
+            case activeRequests = "active_requests"
+            case normalizedLoad = "normalized_load"
+        }
+    }
+    struct DispatchHealth: Decodable {
+        let successCount: Int?
+        let failureCount: Int?
+        let consecutiveFailures: Int?
+        let cooldownUntil: String?
+        enum CodingKeys: String, CodingKey {
+            case successCount = "success_count"
+            case failureCount = "failure_count"
+            case consecutiveFailures = "consecutive_failures"
+            case cooldownUntil = "cooldown_until"
+        }
+    }
     let id: String
     let status: String
     let capabilities: [String]
     let observedAt: String?
+    let workerMetrics: Metrics?
+    let dispatchHealth: DispatchHealth?
     enum CodingKeys: String, CodingKey {
         case id, status, capabilities
         case observedAt = "observed_at"
+        case workerMetrics = "worker_metrics"
+        case dispatchHealth = "dispatch_health"
     }
 }
 
@@ -269,11 +295,15 @@ struct ArmorDistributedWorkers: Decodable {
     let controller: String
     let credentialDelegation: Bool
     let remoteArbitraryRPC: Bool
+    let workerRegistry: String?
+    let workerCountCap: Int?
     enum CodingKeys: String, CodingKey {
         case workers, controller
         case networkDiscovery = "network_discovery"
         case credentialDelegation = "credential_delegation"
         case remoteArbitraryRPC = "remote_arbitrary_rpc"
+        case workerRegistry = "worker_registry"
+        case workerCountCap = "worker_count_cap"
     }
 }
 
@@ -1003,8 +1033,8 @@ struct WorldArmorView: View {
                 Text("Explicitly save one region, sample three existing public "
                      + "provider families on demand, replay source receipts, "
                      + "and inspect source-qualified changes.")
-                Text("No continuous tracking, camera recording, worker, "
-                     + "autonomous action or global coverage.")
+                Text("No private-camera access, person tracking, arbitrary "
+                     + "remote commands, autonomous action or guaranteed global coverage.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let capabilities {
@@ -1405,15 +1435,26 @@ struct WorldArmorView: View {
                     .disabled(busy)
                 }
                 ForEach(distributedWorkers) { worker in
-                    Text(worker.id + " · " + worker.status + " · "
-                         + worker.capabilities.joined(separator: ", "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(worker.id + " · " + worker.status + " · "
+                             + worker.capabilities.joined(separator: ", "))
+                            .font(.caption2)
+                        if let metrics = worker.workerMetrics {
+                            Text("load "
+                                 + String(format: "%.2f", metrics.normalizedLoad)
+                                 + " · active \(metrics.activeRequests)/\(metrics.capacity)"
+                                 + (worker.dispatchHealth?.cooldownUntil != nil
+                                    ? " · cooling down" : ""))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                Text("Workers only fetch fixed read-only provider data; the "
-                     + "Windows controller owns grants, cadence, normalization "
-                     + "and evidence. Opening this app does not start the "
-                     + "distributed runner.")
+                Text("Workers only run typed read-only observation tasks. "
+                     + "The controller schedules by capability, reported load, "
+                     + "capacity and recent failures while retaining grants, "
+                     + "cadence, normalization and evidence authority. Opening "
+                     + "this app does not start the distributed runner.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text("Public aircraft and vessel state becomes typed movement "

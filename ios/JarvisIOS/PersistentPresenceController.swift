@@ -307,14 +307,22 @@ final class PersistentPresenceController: ObservableObject {
         }
         lastWorldArmorPushSync = now
         let defaults = UserDefaults.standard
+        let backendTokenKey = "jarvis.worldArmorPush.backendRegisteredToken"
         let token = defaults.string(
             forKey: WorldArmorPushAppDelegate.tokenKey
         )?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let persistedBackendToken = defaults.string(
+            forKey: backendTokenKey
+        )?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard appModel.settings.worldArmorLiveAlertsEnabled else {
-            if let token, !token.isEmpty,
-               registeredWorldArmorPushToken != nil {
-                _ = try? await client.worldArmorPushUnregister(token)
+            if let persistedBackendToken, !persistedBackendToken.isEmpty {
+                let result = try? await client.worldArmorPushUnregister(
+                    persistedBackendToken
+                )
+                if result?.disabled == true {
+                    defaults.removeObject(forKey: backendTokenKey)
+                }
             }
             registeredWorldArmorPushToken = nil
             return
@@ -340,6 +348,14 @@ final class PersistentPresenceController: ObservableObject {
         do {
             let registration = try await client.worldArmorPushRegister(token)
             if registration.enabled {
+                if let persistedBackendToken,
+                   !persistedBackendToken.isEmpty,
+                   persistedBackendToken != token {
+                    _ = try? await client.worldArmorPushUnregister(
+                        persistedBackendToken
+                    )
+                }
+                defaults.set(token, forKey: backendTokenKey)
                 registeredWorldArmorPushToken = token
             }
         } catch {

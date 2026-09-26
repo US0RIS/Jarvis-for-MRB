@@ -17,6 +17,9 @@ struct SettingsView: View {
     @State private var groqDraftKey = ""
     @State private var groqStatus = "Not checked"
     @State private var testingGroq = false
+    @State private var windyDraftKey = ""
+    @State private var windyStatus = "Not checked"
+    @State private var testingWindy = false
 
     private let fastPlannerModel = "qwen3:8b"
     private let qualityPlannerModel = "qwen3.8:27b"
@@ -164,6 +167,68 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     Text("Per-request override: start a request with “local:” or “cloud:”. Developer routing details remain available from the authenticated cloud-cognition status endpoint.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Worldwide Public Cameras / Windy") {
+                    HStack {
+                        Text("Credential")
+                        Spacer()
+                        if settings.windyKeyConfigured {
+                            Text("Configured ••••••••")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not configured")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    SecureField(
+                        settings.windyKeyConfigured ? "Paste replacement API key" : "Paste Windy Webcams API key",
+                        text: $windyDraftKey
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    HStack {
+                        Button(settings.windyKeyConfigured ? "Replace Key" : "Save Key") {
+                            settings.saveWindyAPIKey(windyDraftKey)
+                            windyDraftKey = ""
+                            windyStatus = settings.windyKeyConfigured
+                                ? "Key saved in Apple Keychain."
+                                : "No key stored."
+                        }
+                        .disabled(windyDraftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Test Connection") {
+                            Task { await testWindyConnection() }
+                        }
+                        .disabled(!settings.windyKeyConfigured || testingWindy)
+                    }
+
+                    if settings.windyKeyConfigured {
+                        Button("Delete Key", role: .destructive) {
+                            settings.deleteWindyAPIKey()
+                            windyDraftKey = ""
+                            windyStatus = "Key deleted."
+                        }
+                    }
+
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        if testingWindy { ProgressView().controlSize(.small) }
+                        Text(windyStatus)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+
+                    Text("This key enables the Windy Webcams v3 worldwide camera directory from Jarvis on this iPhone. It is stored in Apple Keychain. Interactive camera requests send the credential only when a Windy-capable lookup or inspection needs it; it is not written into Jarvis's camera evidence database.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("A key stored only on the iPhone does not give unattended Windows background camera watches a durable credential after the phone is gone. Those background watches still require a separately configured backend credential.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -502,6 +567,19 @@ struct SettingsView: View {
         defer { testingGroq = false }
         let status = await client.testGroqConnection(apiKey: key)
         groqStatus = status.state == "available"
+            ? "Available"
+            : "\(status.state): \(status.detail)"
+    }
+
+    private func testWindyConnection() async {
+        guard let key = settings.windyAPIKeyForRequest() else {
+            windyStatus = "not configured"
+            return
+        }
+        testingWindy = true
+        defer { testingWindy = false }
+        let status = await client.testWindyConnection(apiKey: key)
+        windyStatus = status.state == "available"
             ? "Available"
             : "\(status.state): \(status.detail)"
     }

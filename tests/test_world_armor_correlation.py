@@ -177,6 +177,37 @@ class WorldArmorCorrelationTests(TestCase):
         self.assertEqual(len(report["receipt_time_only_observations"]), 1)
         self.assertEqual(report["candidate_links"], [])
 
+    def test_candidate_truncation_requires_an_actual_extra_pair(self):
+        source_event = quake(at=BASE-timedelta(minutes=8))["events"][0]
+        def events(start, count):
+            return [{**source_event, "id": f"source-{idx}"}
+                    for idx in range(start, start + count)]
+        self.collect(quakes={
+            "status": "ok", "checked_at": BASE.isoformat(),
+            "events": events(0, 50),
+        })
+        self.collect(
+            at=LATER,
+            air=conditions(at=LATER, status="unavailable",
+                           nws_status="unavailable"),
+            quakes={"status": "ok", "checked_at": LATER.isoformat(),
+                    "events": events(50, 10)},
+        )
+        exact = self.query(source_ids=["openmeteo_model", "usgs_earthquakes"])
+        self.assertEqual(len(exact["candidate_links"]), 60)
+        self.assertFalse(exact["candidate_links_truncated"])
+        later = BASE + timedelta(minutes=40)
+        self.collect(
+            at=later,
+            air=conditions(at=later, status="unavailable",
+                           nws_status="unavailable"),
+            quakes={"status": "ok", "checked_at": later.isoformat(),
+                    "events": events(60, 1)},
+        )
+        overflow = self.query(source_ids=["openmeteo_model", "usgs_earthquakes"])
+        self.assertEqual(len(overflow["candidate_links"]), 60)
+        self.assertTrue(overflow["candidate_links_truncated"])
+
     def test_nws_receipt_is_not_promoted_to_source_event_time(self):
         self.collect()
         r = self.query(source_ids=["nws_point_alerts", "usgs_earthquakes"])

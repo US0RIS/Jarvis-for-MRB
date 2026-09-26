@@ -295,6 +295,76 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertIn("world-armor/v1/notices", client)
         self.assertIn("attention_cooldown_minutes",client)
 
+    def test_public_camera_routes_require_exact_private_auth_and_off_gate(self):
+        routes = {route.path for route in service.app.routes}
+        self.assertTrue({
+            "/world-armor/v1/cameras/discover",
+            "/world-armor/v1/cameras/page-media",
+            "/world-armor/v1/cameras/inspect",
+            "/world-armor/v1/cameras/receipts",
+            "/world-armor/v1/cameras/forget",
+        }.issubset(routes))
+        request = service.WorldArmorCameraInspectRequest(
+            investigation_id="a"*32,
+            public_url="https://public-camera.example/road.jpg",
+            condition="road_congestion",
+        )
+        with patch.object(service, "API_TOKEN", "test-only-private-token"), \
+             patch("jarvis_mrb.world_armor_cameras.inspect_camera",
+                   return_value={"capture_time": None,
+                                 "image_retained": False}) as inspect:
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_camera_inspect(
+                    request, Response(), authorization=None,
+                )
+            self.assertEqual(ctx.exception.status_code, 401)
+            inspect.assert_not_called()
+            response = Response()
+            receipt = service.world_armor_camera_inspect(
+                request, response,
+                authorization="Bearer test-only-private-token",
+            )
+            self.assertFalse(receipt["image_retained"])
+            self.assertEqual(response.headers["Cache-Control"],
+                             "private, no-store")
+            inspect.assert_called_once_with(
+                "a"*32, camera_ref="",
+                public_url="https://public-camera.example/road.jpg",
+                condition="road_congestion",
+            )
+        with patch.object(service, "API_TOKEN", "test-only-private-token"), \
+             patch.dict(os.environ, {
+                 "JARVIS_WORLD_ARMOR_ENABLED": "1",
+                 "JARVIS_WORLD_ARMOR_CAMERAS_ENABLED": "0",
+             }), \
+             patch("jarvis_mrb.public_camera_media.discover_public_page_media") as scan:
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_camera_page_media(
+                    service.WorldArmorPublicPageRequest(
+                        public_url="https://public-camera.example/public"
+                    ), Response(),
+                    authorization="Bearer test-only-private-token",
+                )
+            self.assertEqual(ctx.exception.status_code, 503)
+            scan.assert_not_called()
+
+    def test_world_armor_camera_native_view_wires_media_and_exact_watch(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        view = (root/"ios/JarvisIOS/WorldArmorView.swift").read_text(
+            encoding="utf-8")
+        client = (root/"ios/JarvisIOS/JarvisAPIClient.swift").read_text(
+            encoding="utf-8")
+        self.assertIn("publicCameraWorkbench", view)
+        self.assertIn("worldArmorPageMedia(", view)
+        self.assertIn("worldArmorDiscoverCameras(", view)
+        self.assertIn("worldArmorInspectCamera(", view)
+        self.assertIn("worldArmorCameraReceipts(", view)
+        self.assertIn("worldArmorForgetCameraReceipt(", view)
+        self.assertIn('kind: "camera"', view)
+        self.assertIn("world-armor/v1/cameras/inspect", client)
+        self.assertIn("world-armor/v1/cameras/page-media", client)
+
     def test_disabled_create_does_not_touch_database(self):
         request=service.WorldArmorCreateRequest(
             label="Test",latitude=34.1,longitude=-118.2)

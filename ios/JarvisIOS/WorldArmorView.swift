@@ -1790,13 +1790,15 @@ struct WorldArmorView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Reality Browser · " + fullScopeStatus.layers.realityBrowser
-                         + "\nSynthetic Senses · " + fullScopeStatus.layers.syntheticSenses
-                         + "\nCausal Debugger · " + fullScopeStatus.layers.causalDebugger
-                         + "\nParallel Existence · " + fullScopeStatus.layers.parallelExistence
-                         + "\nPresence · " + fullScopeStatus.layers.presence)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Group {
+                        Text("Reality Browser · \(fullScopeStatus.layers.realityBrowser)")
+                        Text("Synthetic Senses · \(fullScopeStatus.layers.syntheticSenses)")
+                        Text("Causal Debugger · \(fullScopeStatus.layers.causalDebugger)")
+                        Text("Parallel Existence · \(fullScopeStatus.layers.parallelExistence)")
+                        Text("Presence · \(fullScopeStatus.layers.presence)")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                     Text(fullScopeStatus.qualifier)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -1975,13 +1977,17 @@ struct WorldArmorView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 if let pushStatus {
-                    Text("Closed-app APNs: "
-                         + (pushStatus.providerConfigured ? "provider configured" : "provider not configured")
-                         + " · devices \(pushStatus.registeredDevices)"
-                         + " · pending \(pushStatus.pending)"
-                         + (pushStatus.dead > 0 ? " · dead \(pushStatus.dead)" : ""))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Group {
+                        Text(pushStatus.providerConfigured
+                             ? "Closed-app APNs · provider configured"
+                             : "Closed-app APNs · provider not configured")
+                        Text("Devices \(pushStatus.registeredDevices) · pending \(pushStatus.pending)")
+                        if pushStatus.dead > 0 {
+                            Text("Dead deliveries \(pushStatus.dead)")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 }
                 HStack {
                     Button("Start live supervisor") {

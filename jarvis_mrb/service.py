@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from typing import Annotated, Any
@@ -960,18 +964,55 @@ def acceptance_preview_batch(
     }
 
 
+def _run_acceptance_subprocess(module: str, *, compact: bool = False) -> dict[str, Any]:
+    """Run synthetic acceptance outside the live server process and deployed APPDATA."""
+    args = [sys.executable, "-m", module]
+    if compact:
+        args.append("--compact")
+    with tempfile.TemporaryDirectory(prefix="jarvis-acceptance-") as isolated_appdata:
+        env = dict(os.environ)
+        env["APPDATA"] = isolated_appdata
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "ok": False,
+                "failed_checks": [{"name": f"{module} process failed: {exc}"}],
+            }
+    try:
+        payload = json.loads(proc.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return {
+            "ok": False,
+            "failed_checks": [{
+                "name": (
+                    f"{module} returned non-JSON output"
+                    + (f": {proc.stderr[:500]}" if proc.stderr else "")
+                )
+            }],
+        }
+    if not isinstance(payload, dict):
+        return {"ok": False, "failed_checks": [{"name": f"{module} returned an invalid payload"}]}
+    return payload
+
+
 @app.post("/acceptance/synthetic")
 def acceptance_synthetic(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    """Run isolated, no-external-service acceptance harnesses and summarize them."""
+    """Run isolated acceptance in child processes; never retarget live server globals."""
     _check_auth(authorization)
-    from jarvis_mrb.world_acceptance import run_synthetic_acceptance as run_world
-    from jarvis_mrb.agency_acceptance import run_synthetic_acceptance as run_agency
     from jarvis_mrb.cognitive_benchmark import evaluate as evaluate_cognition
 
-    world = run_world()
-    agency = run_agency()
+    world = _run_acceptance_subprocess("jarvis_mrb.world_acceptance_check", compact=True)
+    agency = _run_acceptance_subprocess("jarvis_mrb.agency_acceptance_check")
     cognition = evaluate_cognition()
 
     world_criteria = world.get("criteria") or {}

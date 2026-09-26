@@ -1103,6 +1103,7 @@ def _world_armor_platform_error(exc: Exception) -> None:
     raise exc
 
 
+@app.get("/world-armor/v6/workers")
 @app.get("/world-armor/v4/workers")
 def world_armor_distributed_workers(
     response: Response,

@@ -59,6 +59,25 @@ an emergency safety system, a live source acceptance or an autonomous
 external action path. New code is a stacked draft on the watches branch,
 not deployed to the operator's machines.
 
+## World Armor v6 — worker orchestration + pooled transport (stacked draft)
+
+**[Orchestration runbook](docs/WORLD_ARMOR_ORCHESTRATION.md).**
+World Armor observers are no longer structurally limited to the MacBook Air
+and Mac mini. Additional observation-only workers can be explicitly registered
+by exact ID/private endpoint/token; there is still no network discovery.
+Authenticated workers advertise bounded concurrency and normalized load, while
+the Windows controller persists recent dispatch success/failure and cooldown
+state. Regional OpenSky and credential-free public-camera work is assigned by
+capability, free capacity, load and recent failures, with Windows fallback when
+no remote observer is eligible.
+
+Due AISStream regions now share one Windows-side WebSocket subscription per
+dispatch batch and are partitioned back into their exact enrolled source
+scopes before normal revocation/persistence. AIS credentials never leave the
+controller. The private `/world-armor/v6/workers` topology and native
+iPhone/iPad console expose worker capacity/load/cooldown state without granting
+remote action authority.
+
 ## World Armor v5 — distributed camera workers (stacked draft)
 
 **[Distributed camera worker runbook](docs/WORLD_ARMOR_DISTRIBUTED_CAMERAS.md).**

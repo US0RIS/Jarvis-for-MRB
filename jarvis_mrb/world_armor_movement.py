@@ -419,8 +419,9 @@ def _collect_provider(
                 radius_km=source["radius_km"],
             )
         raise ValueError("Unsupported movement adapter.")
-    if worker_id not in ("macbook", "macmini"):
-        raise ValueError("Choose Windows or an exact paired Mac worker.")
+    from jarvis_mrb.reality_mesh import observer_ids
+    if worker_id not in observer_ids():
+        raise ValueError("Choose Windows or an explicitly registered observer.")
     if source["kind"] != "opensky_region":
         raise ValueError(
             "Paired Mac observers currently accept only regional OpenSky work."
@@ -472,54 +473,56 @@ def _prune(con: sqlite3.Connection, source: dict[str, Any],
     )
 
 
-def collect_source(source_id: str, *, db_path: Path | None = None,
-                   scheduled: bool = False, worker_id: str = "windows",
-                   now: datetime | None = None) -> dict[str, Any]:
-    start = _instant(now)
-    path = _dbpath(db_path)
-    if worker_id not in ("windows", "macbook", "macmini"):
-        raise ValueError("Unknown World Armor movement worker.")
-    source = _lease(source_id, path=path, now=start, scheduled=scheduled)
-    try:
-        result = _collect_provider(source, worker_id=worker_id)
-    except Exception:
-        failed = _instant() if now is None else _instant(now)
-        with closing(_connect(path, create=True)) as con, con:
-            con.execute("BEGIN IMMEDIATE")
-            current = con.execute(
-                "SELECT state,lease_token FROM movement_sources WHERE id=?",
-                (source_id,),
-            ).fetchone()
-            if (current and current["state"] == "active"
-                    and current["lease_token"] == source["lease"]):
-                con.execute(
-                    "UPDATE movement_sources SET lease_token=NULL,"
-                    "lease_until=NULL,last_checked_at=?,last_outcome=?,"
-                    "check_count=check_count+1 WHERE id=?",
-                    (failed.isoformat(), "worker_or_provider_error", source_id),
-                )
-                con.execute(
-                    "INSERT INTO movement_checks"
-                    "(source_id,checked_at,provider_status,entities_seen,"
-                    "new_observations,error_type,worker_id)"
-                    "VALUES(?,?,?,?,?,?,?)",
-                    (source_id, failed.isoformat(), "unavailable", 0, 0,
-                     "worker_or_provider_error", worker_id),
-                )
-                _prune(con, source, failed)
-        raise
+def _fail_leased_source(
+    source: dict[str, Any], *, path: Path, worker_id: str,
+    now: datetime | None = None, error_type: str = "worker_or_provider_error",
+) -> None:
+    failed = _instant() if now is None else _instant(now)
+    with closing(_connect(path, create=True)) as con, con:
+        con.execute("BEGIN IMMEDIATE")
+        current = con.execute(
+            "SELECT state,lease_token FROM movement_sources WHERE id=?",
+            (source["id"],),
+        ).fetchone()
+        if (current and current["state"] == "active"
+                and current["lease_token"] == source["lease"]):
+            con.execute(
+                "UPDATE movement_sources SET lease_token=NULL,"
+                "lease_until=NULL,last_checked_at=?,last_outcome=?,"
+                "check_count=check_count+1 WHERE id=?",
+                (failed.isoformat(), "worker_or_provider_error", source["id"]),
+            )
+            con.execute(
+                "INSERT INTO movement_checks"
+                "(source_id,checked_at,provider_status,entities_seen,"
+                "new_observations,error_type,worker_id)"
+                "VALUES(?,?,?,?,?,?,?)",
+                (source["id"], failed.isoformat(), "unavailable", 0, 0,
+                 error_type, worker_id),
+            )
+            _prune(con, source, failed)
+
+
+def _persist_provider_result(
+    source: dict[str, Any], result: dict[str, Any], *,
+    path: Path, worker_id: str = "windows",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Persist one already-leased normalized provider result."""
     finish = _instant() if now is None else _instant(now)
     provider_status = str(result.get("status") or "unavailable")
     entities = result.get("entities")
     if not isinstance(entities, list):
         entities = []
         provider_status = "unavailable"
+    source_id = source["id"]
     with closing(_connect(path, create=True)) as con, con:
         con.execute("BEGIN IMMEDIATE")
         if not _still_authorized(con, source, finish):
             return {
                 "status": "revoked_or_superseded",
                 "source_id": source_id, "observations_saved": 0,
+                "worker_id": worker_id,
             }
         inserted = 0
         invalid = 0
@@ -598,10 +601,12 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
                     finish.isoformat(), lat, lon, num("altitude_m"),
                     num("velocity_mps"), num("heading_deg"),
                     num("vertical_rate_mps"),
-                    int(entity["on_ground"]) if type(entity.get("on_ground")) is bool else None,
+                    int(entity["on_ground"])
+                    if type(entity.get("on_ground")) is bool else None,
                     str(entity.get("source") or source["kind"])[:80],
                     str(category)[:80] if category is not None else None,
-                    str(position_source)[:80] if position_source is not None else None,
+                    str(position_source)[:80]
+                    if position_source is not None else None,
                     digest, worker_id,
                 ),
             )
@@ -635,6 +640,27 @@ def collect_source(source_id: str, *, db_path: Path | None = None,
         "person_identity_inference": False,
     }
 
+
+def collect_source(source_id: str, *, db_path: Path | None = None,
+                   scheduled: bool = False, worker_id: str = "windows",
+                   now: datetime | None = None) -> dict[str, Any]:
+    start = _instant(now)
+    path = _dbpath(db_path)
+    if worker_id != "windows":
+        from jarvis_mrb.reality_mesh import observer_ids
+        if worker_id not in observer_ids():
+            raise ValueError("Unknown World Armor movement worker.")
+    source = _lease(source_id, path=path, now=start, scheduled=scheduled)
+    try:
+        result = _collect_provider(source, worker_id=worker_id)
+    except Exception:
+        _fail_leased_source(
+            source, path=path, worker_id=worker_id, now=now
+        )
+        raise
+    return _persist_provider_result(
+        source, result, path=path, worker_id=worker_id, now=now
+    )
 
 def run_due(*, db_path: Path | None = None, limit: int = 4,
             now: datetime | None = None) -> dict[str, Any]:

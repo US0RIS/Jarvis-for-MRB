@@ -273,41 +273,142 @@ def opensky_state_vectors(
         }
 
 
-def aisstream_position_burst(
-    *, latitude: float,
-    longitude: float,
-    radius_km: float,
-    duration_seconds: float = 4.0,
-) -> dict[str, Any]:
-    """Collect a short server-side AIS position burst from one bounding box."""
-    lat, lon = _point(latitude, longitude)
+def _ais_duration(value: float) -> float:
     try:
-        duration = float(duration_seconds)
+        duration = float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError("AIS burst duration must be numeric.") from exc
     if not math.isfinite(duration) or not 0.5 <= duration <= 30:
         raise ValueError("AIS burst duration must be 0.5–30 seconds.")
-    lamin, lomin, lamax, lomax = _bbox(lat, lon, radius_km)
+    return duration
+
+
+def _ais_entity(message: dict[str, Any], checked: datetime) -> dict[str, Any] | None:
+    if message.get("MessageType") != "PositionReport":
+        return None
+    meta = message.get("MetaData")
+    report = (message.get("Message") or {}).get("PositionReport")
+    if not isinstance(meta, dict) or not isinstance(report, dict):
+        raise ValueError("AIS position message missing metadata/report.")
+    mmsi = meta.get("MMSI") or report.get("UserID")
+    plat = meta.get("Latitude", report.get("Latitude"))
+    plon = meta.get("Longitude", report.get("Longitude"))
+    if (
+        type(mmsi) not in (int, str)
+        or type(plat) not in (int, float)
+        or type(plon) not in (int, float)
+    ):
+        raise ValueError("AIS position message missing identity/coordinates.")
+    mmsi_text = str(mmsi).strip()
+    if (
+        not mmsi_text.isdigit()
+        or len(mmsi_text) != 9
+        or not math.isfinite(float(plat))
+        or not math.isfinite(float(plon))
+        or not -90 <= float(plat) <= 90
+        or not -180 <= float(plon) <= 180
+    ):
+        raise ValueError("AIS position message has invalid identity/coordinates.")
+    ship_name = " ".join(str(meta.get("ShipName") or "").split())[:80] or None
+
+    def num(value: Any) -> float | None:
+        if type(value) not in (int, float):
+            return None
+        x = float(value)
+        return x if math.isfinite(x) else None
+
+    sog = num(report.get("Sog"))
+    return {
+        "entity_type": "vessel",
+        "entity_id": "mmsi:" + mmsi_text,
+        "provider_identifier": mmsi_text,
+        "callsign": None,
+        "name": ship_name,
+        "latitude": round(float(plat), 6),
+        "longitude": round(float(plon), 6),
+        "altitude_m": None,
+        "on_ground": None,
+        "velocity_mps": sog * 0.514444 if sog is not None else None,
+        "speed_knots": sog,
+        "heading_deg": num(report.get("TrueHeading")),
+        "course_deg": num(report.get("Cog")),
+        "vertical_rate_mps": None,
+        "category": None,
+        "position_source": "AIS",
+        "observed_at": checked.isoformat(),
+        "provider_time": None,
+        "source": "AISStream",
+    }
+
+
+def aisstream_position_multi_burst(
+    regions: list[dict[str, Any]], *, duration_seconds: float = 4.0,
+) -> dict[str, Any]:
+    """One controller-side AISStream connection serving multiple exact regions."""
+    if not isinstance(regions, list) or not 1 <= len(regions) <= 64:
+        raise ValueError("AIS pooled burst requires 1–64 explicit regions.")
+    duration = _ais_duration(duration_seconds)
+    normalized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for region in regions:
+        if not isinstance(region, dict):
+            raise ValueError("AIS pooled region must be an object.")
+        region_id = str(region.get("id") or "")
+        if not region_id or len(region_id) > 128 or region_id in seen_ids:
+            raise ValueError("AIS pooled region IDs must be unique and bounded.")
+        seen_ids.add(region_id)
+        lat, lon = _point(region.get("latitude"), region.get("longitude"))
+        box = _bbox(lat, lon, region.get("radius_km"))
+        normalized.append({"id": region_id, "bbox": box})
+    checked = datetime.now(timezone.utc)
     key = os.getenv("AISSTREAM_API_KEY", "").strip()
+
+    def result_for(status: str, entities: list[dict[str, Any]], *,
+                   invalid: int = 0, received: int = 0,
+                   note: str) -> dict[str, Any]:
+        return {
+            "status": status,
+            "checked_at": checked.isoformat(),
+            "source_observed_at": None,
+            "entities": entities,
+            "raw_position_messages": received,
+            "invalid_records": invalid,
+            "source_url": _AIS_DOCS,
+            "source_note": note,
+            "global_scope": False,
+        }
+
     if not key:
+        note = "AISStream requires a server-side AISSTREAM_API_KEY."
         return {
             "status": "not_configured",
-            "entities": [],
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-            "source_url": _AIS_DOCS,
-            "source_note": "AISStream requires a server-side AISSTREAM_API_KEY.",
+            "checked_at": checked.isoformat(),
+            "pooled_connection": False,
+            "region_count": len(normalized),
+            "results": {
+                item["id"]: result_for(
+                    "not_configured", [], note=note
+                )
+                for item in normalized
+            },
         }
-    checked = datetime.now(timezone.utc)
-    entities_by_id: dict[str, dict[str, Any]] = {}
+
+    entities: dict[str, dict[str, dict[str, Any]]] = {
+        item["id"]: {} for item in normalized
+    }
     invalid = 0
     received = 0
     bytes_seen = 0
     try:
         from websockets.sync.client import connect
-
+        boxes = [
+            [[item["bbox"][2], item["bbox"][1]],
+             [item["bbox"][0], item["bbox"][3]]]
+            for item in normalized
+        ]
         subscription = {
             "APIKey": key,
-            "BoundingBoxes": [[[lamax, lomin], [lamin, lomax]]],
+            "BoundingBoxes": boxes,
             "FilterMessageTypes": ["PositionReport"],
         }
         deadline = time.monotonic() + duration
@@ -343,87 +444,74 @@ def aisstream_position_burst(
                 if message.get("MessageType") != "PositionReport":
                     continue
                 received += 1
-                meta = message.get("MetaData")
-                report = (message.get("Message") or {}).get("PositionReport")
-                if not isinstance(meta, dict) or not isinstance(report, dict):
+                try:
+                    entity = _ais_entity(message, checked)
+                except ValueError:
                     invalid += 1
                     continue
-                mmsi = meta.get("MMSI") or report.get("UserID")
-                plat = meta.get("Latitude", report.get("Latitude"))
-                plon = meta.get("Longitude", report.get("Longitude"))
-                if (
-                    type(mmsi) not in (int, str)
-                    or type(plat) not in (int, float)
-                    or type(plon) not in (int, float)
-                ):
-                    invalid += 1
+                if entity is None:
                     continue
-                mmsi_text = str(mmsi).strip()
-                if (
-                    not mmsi_text.isdigit()
-                    or len(mmsi_text) != 9
-                    or not math.isfinite(float(plat))
-                    or not math.isfinite(float(plon))
-                    or not -90 <= float(plat) <= 90
-                    or not -180 <= float(plon) <= 180
-                ):
-                    invalid += 1
-                    continue
-                ship_name = (
-                    " ".join(str(meta.get("ShipName") or "").split())[:80] or None
-                )
-
-                def num(value: Any) -> float | None:
-                    if type(value) not in (int, float):
-                        return None
-                    x = float(value)
-                    return x if math.isfinite(x) else None
-
-                sog = num(report.get("Sog"))
-                entity = {
-                    "entity_type": "vessel",
-                    "entity_id": "mmsi:" + mmsi_text,
-                    "provider_identifier": mmsi_text,
-                    "callsign": None,
-                    "name": ship_name,
-                    "latitude": round(float(plat), 6),
-                    "longitude": round(float(plon), 6),
-                    "altitude_m": None,
-                    "on_ground": None,
-                    "velocity_mps": sog * 0.514444 if sog is not None else None,
-                    "speed_knots": sog,
-                    "heading_deg": num(report.get("TrueHeading")),
-                    "course_deg": num(report.get("Cog")),
-                    "vertical_rate_mps": None,
-                    "category": None,
-                    "position_source": "AIS",
-                    "observed_at": checked.isoformat(),
-                    "provider_time": None,
-                    "source": "AISStream",
-                }
-                entities_by_id[entity["entity_id"]] = entity
+                lat = float(entity["latitude"])
+                lon = float(entity["longitude"])
+                for item in normalized:
+                    lamin, lomin, lamax, lomax = item["bbox"]
+                    if lamin <= lat <= lamax and lomin <= lon <= lomax:
+                        entities[item["id"]][entity["entity_id"]] = entity
+        status = "partial" if invalid else "ok"
+        note = (
+            "One controller-side AISStream subscription served this exact "
+            "enrolled region alongside other due regions. Event-driven "
+            "coverage can be incomplete; MMSI is a vessel/station identifier, "
+            "not a person identity."
+        )
         return {
-            "status": "partial" if invalid else "ok",
+            "status": status,
             "checked_at": checked.isoformat(),
-            "source_observed_at": None,
-            "entities": list(entities_by_id.values()),
+            "pooled_connection": True,
+            "region_count": len(normalized),
             "raw_position_messages": received,
-            "invalid_records": invalid,
-            "source_url": _AIS_DOCS,
-            "source_note": (
-                "Server-side AISStream position reports within the enrolled "
-                "bounding box. Event-driven coverage can be incomplete; MMSI "
-                "is a vessel/station identifier, not a person identity."
-            ),
-            "global_scope": False,
+            "results": {
+                item["id"]: result_for(
+                    status, list(entities[item["id"]].values()),
+                    invalid=invalid, received=received, note=note,
+                )
+                for item in normalized
+            },
         }
     except Exception as exc:
+        note = "AIS provider unavailable: " + type(exc).__name__
         return {
             "status": "unavailable",
             "checked_at": checked.isoformat(),
-            "source_observed_at": None,
-            "entities": [],
-            "source_url": _AIS_DOCS,
-            "source_note": "AIS provider unavailable: " + type(exc).__name__,
-            "global_scope": False,
+            "pooled_connection": True,
+            "region_count": len(normalized),
+            "results": {
+                item["id"]: result_for(
+                    "unavailable", [], note=note
+                )
+                for item in normalized
+            },
         }
+
+
+def aisstream_position_burst(
+    *, latitude: float,
+    longitude: float,
+    radius_km: float,
+    duration_seconds: float = 4.0,
+) -> dict[str, Any]:
+    """Compatibility single-region AIS burst backed by the pooled adapter."""
+    pooled = aisstream_position_multi_burst(
+        [{
+            "id": "single",
+            "latitude": latitude,
+            "longitude": longitude,
+            "radius_km": radius_km,
+        }],
+        duration_seconds=duration_seconds,
+    )
+    result = dict(pooled["results"]["single"])
+    result["pooled_connection"] = bool(pooled.get("pooled_connection"))
+    result["pooled_region_count"] = 1
+    return result
+

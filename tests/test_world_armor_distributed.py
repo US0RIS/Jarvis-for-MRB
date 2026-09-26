@@ -73,7 +73,6 @@ class DistributedObserverTests(unittest.TestCase):
         regional_a = self.source("opensky_region", "Air A")
         regional_b = self.source("opensky_region", "Air B")
         global_air = self.source("opensky_global", "Global")
-        ais = self.source("aisstream_region", "Port")
         calls = []
 
         def fake_collect(source_id, *, db_path, scheduled, worker_id, now):
@@ -92,11 +91,11 @@ class DistributedObserverTests(unittest.TestCase):
 
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_movement_adapters"]},
-                {"id": "macbook",
+                {"id": "macbook", "status": "online",
                  "capabilities": ["opensky_region_read_only"]},
-                {"id": "macmini",
+                {"id": "macmini", "status": "online",
                  "capabilities": ["opensky_region_read_only"]},
             ]
         }), patch.object(distributed, "collect_source",
@@ -110,9 +109,103 @@ class DistributedObserverTests(unittest.TestCase):
             {"macbook", "macmini"},
         )
         self.assertEqual(assignment[global_air["id"]], "windows")
-        self.assertEqual(assignment[ais["id"]], "windows")
         self.assertTrue(all(scheduled for _, _, scheduled in calls))
         self.assertFalse(result["remote_action_authority"])
+
+    def test_load_capacity_and_failure_cooldown_drive_worker_choice(self):
+        workers = [
+            {"id": "windows", "status": "online", "capabilities": []},
+            {"id": "observer-fast", "status": "online",
+             "capabilities": ["opensky_region_read_only"],
+             "worker_metrics": {
+                 "active_requests": 0, "capacity": 2, "normalized_load": 0.05
+             }, "dispatch_health": {}},
+            {"id": "observer-busy", "status": "online",
+             "capabilities": ["opensky_region_read_only"],
+             "worker_metrics": {
+                 "active_requests": 0, "capacity": 2, "normalized_load": 0.8
+             }, "dispatch_health": {}},
+        ]
+        assignments = {}
+        self.assertEqual(
+            distributed._select_remote(
+                "opensky_region_read_only", workers, assignments, self.now
+            ),
+            "observer-fast",
+        )
+        distributed._record_worker_result(
+            self.db, "observer-fast", success=False, now=self.now
+        )
+        health = distributed._health_snapshot(self.db)["observer-fast"]
+        workers[1]["dispatch_health"] = health
+        self.assertEqual(
+            distributed._select_remote(
+                "opensky_region_read_only", workers, {}, self.now
+            ),
+            "observer-busy",
+        )
+        self.assertGreater(health["consecutive_failures"], 0)
+        self.assertGreater(
+            datetime.fromisoformat(health["cooldown_until"]), self.now
+        )
+
+    def test_two_due_ais_regions_share_one_controller_connection(self):
+        a = self.source("aisstream_region", "Port A")
+        b = movement.enroll_source(
+            label="Port B", kind="aisstream_region",
+            grant_class="api_contract",
+            terms_reference="Operator-reviewed provider terms",
+            authorized_automated_access=True,
+            provider_min_interval_seconds=0,
+            cadence_seconds=60, retention_days=2,
+            latitude=40.7, longitude=-74.0, radius_km=40,
+            db_path=self.db, now=self.now,
+        )
+        calls = []
+
+        def pooled(regions):
+            calls.append(regions)
+            return {
+                "status": "ok",
+                "checked_at": self.now.isoformat(),
+                "pooled_connection": True,
+                "region_count": len(regions),
+                "results": {
+                    region["id"]: {
+                        "status": "ok",
+                        "checked_at": self.now.isoformat(),
+                        "source_observed_at": None,
+                        "entities": [],
+                        "source_note": "pooled test",
+                    }
+                    for region in regions
+                },
+            }
+
+        with patch(
+            "jarvis_mrb.public_movement.aisstream_position_multi_burst",
+            side_effect=pooled,
+        ), patch.object(distributed, "available_workers", return_value={
+            "workers": [{
+                "id": "windows", "status": "online",
+                "capabilities": ["aisstream_pooled_controller"],
+            }]
+        }):
+            result = distributed.run_due(
+                db_path=self.db, limit=10, now=self.now
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual({x["id"] for x in calls[0]}, {a["id"], b["id"]})
+        self.assertTrue(result["ais_pooled_connection"])
+        self.assertEqual(result["ais_pooled_sources"], 2)
+        self.assertEqual(len(result["checks"]), 2)
+        self.assertTrue(all(x["pooled_transport"] for x in result["checks"]))
+        self.assertEqual(
+            movement.get_source(a["id"], db_path=self.db)["check_count"], 1
+        )
+        self.assertEqual(
+            movement.get_source(b["id"], db_path=self.db)["check_count"], 1
+        )
 
     def test_due_cameras_round_robin_across_camera_capable_macs(self):
         sources = [
@@ -150,11 +243,11 @@ class DistributedObserverTests(unittest.TestCase):
 
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_camera_adapters"]},
-                {"id": "macbook",
+                {"id": "macbook", "status": "online",
                  "capabilities": ["camera_source_analysis_read_only"]},
-                {"id": "macmini",
+                {"id": "macmini", "status": "online",
                  "capabilities": ["camera_source_analysis_read_only"]},
             ]
         }), patch(
@@ -181,9 +274,9 @@ class DistributedObserverTests(unittest.TestCase):
             raise RuntimeError("worker unavailable")
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_movement_adapters"]},
-                {"id": "macbook",
+                {"id": "macbook", "status": "online",
                  "capabilities": ["opensky_region_read_only"]},
             ]
         }), patch.object(distributed, "collect_source", side_effect=fail):
@@ -203,7 +296,7 @@ class DistributedObserverTests(unittest.TestCase):
                     "worker_id": kwargs["worker_id"]}
         with patch.object(distributed, "available_workers", return_value={
             "workers": [
-                {"id": "windows",
+                {"id": "windows", "status": "online",
                  "capabilities": ["local_all_movement_adapters"]},
             ]
         }), patch.object(distributed, "collect_source",

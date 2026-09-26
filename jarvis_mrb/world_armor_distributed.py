@@ -1,27 +1,32 @@
 from __future__ import annotations
 
-"""Distributed read-only World Armor observers over trusted private Mesh nodes.
+"""Capability/load-aware World Armor orchestration over explicit Mesh observers.
 
-Windows remains authoritative for source grants, cadence, leases, retention,
-normalization and final evidence writes. Paired Macs may perform only typed
-capabilities explicitly advertised at startup. Camera tasks are restricted to
-already-enrolled Caltrans or explicit public-media sources and still pass
-through the existing public-host/DNS/media validation on the worker.
-
-No network discovery, private-network fetch, arbitrary RPC, remote shell,
-credential delegation, person tracking or action authority is added.
+Windows is the authority for source grants, cadence, leases, retention,
+normalization and final evidence. Remote workers are explicitly configured,
+identity-verified, capability-scoped and privately transported. The scheduler
+uses authenticated worker load plus controller-owned failure/cooldown history;
+it never discovers hosts, supplies arbitrary network targets or grants action
+authority.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+import sqlite3
 import time
 from typing import Any
 
 from jarvis_mrb.world_armor_movement import (
-    _connect, _dbpath, _instant, _require_enabled, collect_source,
+    _connect, _dbpath, _fail_leased_source, _instant, _lease,
+    _persist_provider_result, _require_enabled, collect_source,
 )
+
+_COOLDOWN_BASE_SECONDS = 15
+_COOLDOWN_MAX_SECONDS = 300
+_MAX_DISPATCH_THREADS = 32
 
 
 def _remote_capabilities(capabilities: dict[str, Any]) -> list[str]:
@@ -33,22 +38,136 @@ def _remote_capabilities(capabilities: dict[str, Any]) -> list[str]:
     return []
 
 
-def available_workers() -> dict[str, Any]:
+def _orchestration_schema(con: sqlite3.Connection) -> None:
+    con.executescript("""
+    CREATE TABLE IF NOT EXISTS world_worker_dispatch_health (
+      worker_id TEXT PRIMARY KEY,
+      success_count INTEGER NOT NULL DEFAULT 0,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      consecutive_failures INTEGER NOT NULL DEFAULT 0,
+      last_success_at TEXT,
+      last_failure_at TEXT,
+      cooldown_until TEXT
+    );
+    """)
+
+
+def _health_snapshot(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    try:
+        with closing(_connect(path)) as con:
+            exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='world_worker_dispatch_health'"
+            ).fetchone()
+            if not exists:
+                return {}
+            rows = con.execute(
+                "SELECT * FROM world_worker_dispatch_health"
+            ).fetchall()
+            return {str(row["worker_id"]): dict(row) for row in rows}
+    except (sqlite3.Error, KeyError):
+        return {}
+
+
+def _record_worker_result(
+    path: Path, worker_id: str, *, success: bool, now: datetime,
+) -> None:
+    if worker_id == "windows":
+        return
+    with closing(_connect(path, create=True)) as con, con:
+        _orchestration_schema(con)
+        current = con.execute(
+            "SELECT * FROM world_worker_dispatch_health WHERE worker_id=?",
+            (worker_id,),
+        ).fetchone()
+        successes = int(current["success_count"]) if current else 0
+        failures = int(current["failure_count"]) if current else 0
+        consecutive = int(current["consecutive_failures"]) if current else 0
+        if success:
+            con.execute(
+                """INSERT INTO world_worker_dispatch_health
+                   (worker_id,success_count,failure_count,consecutive_failures,
+                    last_success_at,last_failure_at,cooldown_until)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(worker_id) DO UPDATE SET
+                     success_count=excluded.success_count,
+                     failure_count=excluded.failure_count,
+                     consecutive_failures=0,
+                     last_success_at=excluded.last_success_at,
+                     cooldown_until=NULL""",
+                (
+                    worker_id, successes + 1, failures, 0,
+                    now.isoformat(),
+                    current["last_failure_at"] if current else None,
+                    None,
+                ),
+            )
+            return
+        consecutive += 1
+        delay = min(
+            _COOLDOWN_MAX_SECONDS,
+            _COOLDOWN_BASE_SECONDS * (2 ** min(consecutive - 1, 5)),
+        )
+        cooldown = (now + timedelta(seconds=delay)).isoformat()
+        con.execute(
+            """INSERT INTO world_worker_dispatch_health
+               (worker_id,success_count,failure_count,consecutive_failures,
+                last_success_at,last_failure_at,cooldown_until)
+               VALUES(?,?,?,?,?,?,?)
+               ON CONFLICT(worker_id) DO UPDATE SET
+                 success_count=excluded.success_count,
+                 failure_count=excluded.failure_count,
+                 consecutive_failures=excluded.consecutive_failures,
+                 last_failure_at=excluded.last_failure_at,
+                 cooldown_until=excluded.cooldown_until""",
+            (
+                worker_id, successes, failures + 1, consecutive,
+                current["last_success_at"] if current else None,
+                now.isoformat(), cooldown,
+            ),
+        )
+
+
+def _metrics(value: Any) -> dict[str, float | int]:
+    data = value if isinstance(value, dict) else {}
+    try:
+        active = max(0, int(data.get("active_requests", 0)))
+        capacity = max(1, min(16, int(data.get("capacity", 1))))
+        load = max(0.0, float(data.get("normalized_load", 0.0)))
+    except (TypeError, ValueError):
+        active, capacity, load = 0, 1, 0.0
+    return {
+        "active_requests": active,
+        "capacity": capacity,
+        "normalized_load": round(load, 4),
+    }
+
+
+def available_workers(*, db_path: Path | None = None) -> dict[str, Any]:
     from jarvis_mrb import reality_mesh
     fabric = reality_mesh.nodes()
+    registered = set(reality_mesh.observer_ids())
+    health = _health_snapshot(_dbpath(db_path))
     workers = [{
         "id": "windows", "status": "online",
         "capabilities": [
             "local_all_movement_adapters",
             "local_all_camera_adapters",
+            "aisstream_pooled_controller",
         ],
+        "worker_metrics": {
+            "active_requests": 0, "capacity": 1, "normalized_load": 0.0,
+        },
+        "dispatch_health": {},
     }]
     for node in fabric.get("nodes") or []:
         if not isinstance(node, dict):
             continue
-        node_id = node.get("id")
+        node_id = str(node.get("id") or "")
         capabilities = node.get("capabilities")
-        if (node_id not in ("macbook", "macmini")
+        if (node_id == "windows" or node_id not in registered
                 or node.get("status") != "online"
                 or not isinstance(capabilities, dict)):
             continue
@@ -59,6 +178,8 @@ def available_workers() -> dict[str, Any]:
             "id": node_id, "status": "online",
             "capabilities": advertised,
             "observed_at": node.get("observed_at"),
+            "worker_metrics": _metrics(node.get("worker_metrics")),
+            "dispatch_health": health.get(node_id, {}),
         })
     return {
         "workers": workers,
@@ -67,48 +188,263 @@ def available_workers() -> dict[str, Any]:
         "credential_delegation": False,
         "remote_arbitrary_rpc": False,
         "private_network_camera_fetch": False,
+        "worker_registry": "explicit_environment_configuration",
+        "worker_count_cap": None,
     }
 
 
-def _choose_worker(kind: str, workers: list[dict[str, Any]],
-                   index: int) -> tuple[str, int]:
-    # Provider-global OpenSky and AIS stay on the controller. Regional
-    # OpenSky can use an explicitly opted-in paired Mac.
+def _cooling(worker: dict[str, Any], now: datetime) -> bool:
+    until = (worker.get("dispatch_health") or {}).get("cooldown_until")
+    if not until:
+        return False
+    try:
+        return datetime.fromisoformat(str(until)) > now
+    except (TypeError, ValueError):
+        return True
+
+
+def _select_remote(
+    capability: str, workers: list[dict[str, Any]],
+    assignments: dict[str, int], now: datetime,
+) -> str | None:
+    candidates: list[tuple[float, str]] = []
+    for item in workers:
+        worker_id = str(item.get("id") or "")
+        if worker_id == "windows" or item.get("status") != "online":
+            continue
+        if capability not in (item.get("capabilities") or []):
+            continue
+        if _cooling(item, now):
+            continue
+        metrics = _metrics(item.get("worker_metrics"))
+        active = int(metrics["active_requests"])
+        capacity = int(metrics["capacity"])
+        virtual = assignments.get(worker_id, 0)
+        if active + virtual >= capacity:
+            continue
+        health = item.get("dispatch_health") or {}
+        failures = max(0, int(health.get("consecutive_failures") or 0))
+        score = (
+            float(metrics["normalized_load"])
+            + (active + virtual) / capacity
+            + min(failures, 3) * 0.35
+        )
+        candidates.append((score, worker_id))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: (pair[0], pair[1]))
+    chosen = candidates[0][1]
+    assignments[chosen] = assignments.get(chosen, 0) + 1
+    return chosen
+
+
+def _movement_worker(
+    kind: str, workers: list[dict[str, Any]],
+    assignments: dict[str, int], now: datetime,
+) -> str:
     if kind != "opensky_region":
-        return "windows", index
-    remote = [
-        item["id"] for item in workers
-        if item.get("id") in ("macbook", "macmini")
-        and "opensky_region_read_only" in (item.get("capabilities") or [])
-    ]
-    if not remote:
-        return "windows", index
-    node = remote[index % len(remote)]
-    return node, index + 1
+        return "windows"
+    return (
+        _select_remote(
+            "opensky_region_read_only", workers, assignments, now
+        )
+        or "windows"
+    )
 
 
-def _choose_camera_worker(kind: str, workers: list[dict[str, Any]],
-                          index: int) -> tuple[str, int]:
-    # Windy can require a provider credential; do not delegate credentials.
-    # Caltrans and explicit public HTTP(S) media may be fetched/processed on
-    # an opted-in Mac using the same public-network guard as Windows.
+def _camera_worker(
+    kind: str, workers: list[dict[str, Any]],
+    assignments: dict[str, int], now: datetime,
+) -> str:
+    # Windy may require a provider credential, which stays on Windows.
     if kind not in ("caltrans", "public_https", "public_http"):
-        return "windows", index
-    remote = [
-        item["id"] for item in workers
-        if item.get("id") in ("macbook", "macmini")
-        and "camera_source_analysis_read_only"
-        in (item.get("capabilities") or [])
-    ]
-    if not remote:
-        return "windows", index
-    node = remote[index % len(remote)]
-    return node, index + 1
+        return "windows"
+    return (
+        _select_remote(
+            "camera_source_analysis_read_only", workers, assignments, now
+        )
+        or "windows"
+    )
+
+
+def _mark_in_memory(
+    workers: list[dict[str, Any]], worker_id: str,
+    *, success: bool, now: datetime,
+) -> None:
+    if worker_id == "windows":
+        return
+    for worker in workers:
+        if worker.get("id") != worker_id:
+            continue
+        health = dict(worker.get("dispatch_health") or {})
+        if success:
+            health["consecutive_failures"] = 0
+            health["cooldown_until"] = None
+        else:
+            count = max(0, int(health.get("consecutive_failures") or 0)) + 1
+            delay = min(
+                _COOLDOWN_MAX_SECONDS,
+                _COOLDOWN_BASE_SECONDS * (2 ** min(count - 1, 5)),
+            )
+            health["consecutive_failures"] = count
+            health["cooldown_until"] = (
+                now + timedelta(seconds=delay)
+            ).isoformat()
+        worker["dispatch_health"] = health
+        return
+
+
+def _pooled_ais(
+    rows: list[Any], *, path: Path, now: datetime,
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """Lease due AIS sources before one controller-side multi-region session."""
+    if not rows:
+        return {}, False
+    from jarvis_mrb.public_movement import aisstream_position_multi_burst
+
+    leased: list[dict[str, Any]] = []
+    outcomes: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source_id = str(row["id"])
+        try:
+            leased.append(_lease(
+                source_id, path=path, now=now, scheduled=True
+            ))
+        except (ValueError, KeyError, RuntimeError) as exc:
+            outcomes[source_id] = {
+                "source_id": source_id, "status": "not_collected",
+                "worker_id": "windows", "error_type": type(exc).__name__,
+                "fallback_attempted": False,
+            }
+    if not leased:
+        return outcomes, False
+    regions = [{
+        "id": source["id"],
+        "latitude": source["latitude"],
+        "longitude": source["longitude"],
+        "radius_km": source["radius_km"],
+    } for source in leased]
+    try:
+        pooled = aisstream_position_multi_burst(regions)
+    except Exception:
+        for source in leased:
+            _fail_leased_source(
+                source, path=path, worker_id="windows", now=now,
+                error_type="pooled_ais_error",
+            )
+            outcomes[source["id"]] = {
+                "source_id": source["id"], "status": "not_collected",
+                "worker_id": "windows", "error_type": "pooled_ais_error",
+                "fallback_attempted": False,
+            }
+        return outcomes, True
+    results = pooled.get("results")
+    if not isinstance(results, dict):
+        results = {}
+    for source in leased:
+        result = results.get(source["id"])
+        if not isinstance(result, dict):
+            result = {
+                "status": "unavailable", "entities": [],
+                "checked_at": pooled.get("checked_at"),
+                "source_observed_at": None,
+                "source_note": "Pooled AIS result missing exact source partition.",
+            }
+        outcomes[source["id"]] = _persist_provider_result(
+            source, result, path=path, worker_id="windows", now=now
+        )
+        outcomes[source["id"]]["pooled_transport"] = True
+        outcomes[source["id"]]["pooled_region_count"] = len(leased)
+    return outcomes, bool(pooled.get("pooled_connection"))
+
+
+def _movement_job(
+    source_id: str, *, path: Path, worker: str,
+    now: datetime | None,
+) -> tuple[dict[str, Any], bool]:
+    try:
+        result = collect_source(
+            source_id, db_path=path, scheduled=True,
+            worker_id=worker, now=now,
+        )
+        return result, result.get("status") not in {
+            "unavailable", "not_collected"
+        }
+    except (ValueError, KeyError, RuntimeError) as exc:
+        return ({
+            "source_id": source_id, "status": "not_collected",
+            "worker_id": worker, "error_type": type(exc).__name__,
+            "fallback_attempted": False,
+        }, False)
+
+
+def _camera_job(
+    source_id: str, *, path: Path, worker: str,
+    now: datetime | None,
+) -> tuple[dict[str, Any], bool]:
+    from jarvis_mrb import world_armor_observe as camera_runner
+    try:
+        result = camera_runner.observe_source(
+            source_id, db_path=path, scheduled=True,
+            worker_id=worker, now=now,
+        )
+        return result, result.get("status") == "ok"
+    except (ValueError, KeyError, RuntimeError) as exc:
+        return ({
+            "source_id": source_id, "status": "not_collected",
+            "worker_id": worker, "error_type": type(exc).__name__,
+            "fallback_attempted": False,
+        }, False)
+
+
+def _run_assigned_jobs(
+    jobs: list[tuple[str, str]], *, path: Path,
+    now: datetime | None, instant: datetime,
+    workers: list[dict[str, Any]], camera: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Run remote jobs concurrently by assigned capacity; serialize Windows."""
+    execute = _camera_job if camera else _movement_job
+    outcomes: dict[str, dict[str, Any]] = {}
+    remote = [(sid, worker) for sid, worker in jobs if worker != "windows"]
+    local = [(sid, worker) for sid, worker in jobs if worker == "windows"]
+
+    # Assignments were already capped by each worker's advertised capacity.
+    if remote:
+        with ThreadPoolExecutor(max_workers=min(len(remote), _MAX_DISPATCH_THREADS)) as pool:
+            future_map = {
+                pool.submit(
+                    execute, sid, path=path, worker=worker, now=now
+                ): (sid, worker)
+                for sid, worker in remote
+            }
+            # Windows work remains serialized while remote I/O/model work runs.
+            for sid, worker in local:
+                result, success = execute(
+                    sid, path=path, worker=worker, now=now
+                )
+                outcomes[sid] = result
+            for future in as_completed(future_map):
+                sid, worker = future_map[future]
+                result, success = future.result()
+                outcomes[sid] = result
+                _record_worker_result(
+                    path, worker, success=success, now=instant
+                )
+                _mark_in_memory(
+                    workers, worker, success=success, now=instant
+                )
+    else:
+        for sid, worker in local:
+            result, _ = execute(
+                sid, path=path, worker=worker, now=now
+            )
+            outcomes[sid] = result
+    return outcomes
 
 
 def run_due(*, db_path: Path | None = None, limit: int = 8,
             now: datetime | None = None) -> dict[str, Any]:
-    """One bounded movement dispatch pass; source count itself is not capped."""
+    """One capability/load-aware movement dispatch pass."""
     _require_enabled()
     if type(limit) is not int or limit < 1:
         raise ValueError("Distributed dispatch batch size must be positive.")
@@ -116,10 +452,11 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
     if not path.exists():
         return {
             "checks": [], "due_remaining": 0,
-            "workers": available_workers()["workers"],
+            "workers": available_workers(db_path=path)["workers"],
         }
     instant = _instant(now)
-    with closing(_connect(path, create=True)) as con:
+    with closing(_connect(path, create=True)) as con, con:
+        _orchestration_schema(con)
         rows = con.execute(
             "SELECT id,kind FROM movement_sources "
             "WHERE state='active' AND authorized_automated_access=1 "
@@ -128,23 +465,34 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
             "ORDER BY next_due_at,id LIMIT ?",
             (instant.isoformat(), instant.isoformat(), limit),
         ).fetchall()
-    fabric = available_workers()
+    fabric = available_workers(db_path=path)
     workers = fabric["workers"]
-    cursor = 0
-    outcomes = []
+    assignments: dict[str, int] = {}
+    outcomes_by_id: dict[str, dict[str, Any]] = {}
+
+    ais_rows = [row for row in rows if row["kind"] == "aisstream_region"]
+    pooled_ais, pooled_connected = _pooled_ais(
+        ais_rows, path=path, now=instant
+    )
+    outcomes_by_id.update(pooled_ais)
+
+    movement_jobs: list[tuple[str, str]] = []
     for row in rows:
-        worker, cursor = _choose_worker(row["kind"], workers, cursor)
-        try:
-            outcomes.append(collect_source(
-                row["id"], db_path=path, scheduled=True,
-                worker_id=worker, now=now,
-            ))
-        except (ValueError, KeyError, RuntimeError) as exc:
-            outcomes.append({
-                "source_id": row["id"], "status": "not_collected",
-                "worker_id": worker, "error_type": type(exc).__name__,
-                "fallback_attempted": False,
-            })
+        source_id = str(row["id"])
+        if row["kind"] == "aisstream_region":
+            continue
+        worker = _movement_worker(
+            row["kind"], workers, assignments, instant
+        )
+        movement_jobs.append((source_id, worker))
+    outcomes_by_id.update(_run_assigned_jobs(
+        movement_jobs, path=path, now=now, instant=instant,
+        workers=workers, camera=False,
+    ))
+    outcomes = [
+        outcomes_by_id[str(row["id"])]
+        for row in rows if str(row["id"]) in outcomes_by_id
+    ]
     with closing(_connect(path, create=True)) as con:
         remaining = con.execute(
             "SELECT count(*) FROM movement_sources "
@@ -157,17 +505,18 @@ def run_due(*, db_path: Path | None = None, limit: int = 8,
         "checks": outcomes,
         "due_remaining": remaining,
         "workers": workers,
+        "scheduler": "capability_load_health_aware",
+        "ais_pooled_connection": pooled_connected,
+        "ais_pooled_sources": len(ais_rows),
         "controller_authority": (
             "source grants, leases, cadence, normalization and persistence"
         ),
         "remote_action_authority": False,
     }
 
-
 def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
                    now: datetime | None = None) -> dict[str, Any]:
-    """One bounded camera pass using enrolled rights-scoped source grants."""
-    from jarvis_mrb import world_armor_observe as camera_runner
+    """One capability/load-aware camera pass over enrolled source grants."""
     from jarvis_mrb import world_armor_platform as platform
 
     platform._require_enabled()
@@ -177,10 +526,11 @@ def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
     if not path.exists():
         return {
             "checks": [], "due_remaining": 0,
-            "workers": available_workers()["workers"],
+            "workers": available_workers(db_path=path)["workers"],
         }
     instant = platform._instant(now)
-    with closing(platform._connect(path, create=True)) as con:
+    with closing(platform._connect(path, create=True)) as con, con:
+        _orchestration_schema(con)
         rows = con.execute(
             "SELECT id,kind FROM source_grants WHERE state='active' "
             "AND cadence_seconds>0 AND authorized_automated_access=1 "
@@ -192,25 +542,23 @@ def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
             (instant.isoformat(), instant.isoformat(),
              instant.isoformat(), limit),
         ).fetchall()
-    fabric = available_workers()
+    fabric = available_workers(db_path=path)
     workers = fabric["workers"]
-    cursor = 0
-    outcomes = []
+    assignments: dict[str, int] = {}
+    camera_jobs: list[tuple[str, str]] = []
     for row in rows:
-        worker, cursor = _choose_camera_worker(
-            row["kind"], workers, cursor
+        worker = _camera_worker(
+            row["kind"], workers, assignments, instant
         )
-        try:
-            outcomes.append(camera_runner.observe_source(
-                row["id"], db_path=path, scheduled=True,
-                worker_id=worker, now=now,
-            ))
-        except (ValueError, KeyError, RuntimeError) as exc:
-            outcomes.append({
-                "source_id": row["id"], "status": "not_collected",
-                "worker_id": worker, "error_type": type(exc).__name__,
-                "fallback_attempted": False,
-            })
+        camera_jobs.append((str(row["id"]), worker))
+    outcomes_by_id = _run_assigned_jobs(
+        camera_jobs, path=path, now=now, instant=instant,
+        workers=workers, camera=True,
+    )
+    outcomes = [
+        outcomes_by_id[str(row["id"])]
+        for row in rows if str(row["id"]) in outcomes_by_id
+    ]
     with closing(platform._connect(path, create=True)) as con:
         remaining = con.execute(
             "SELECT count(*) FROM source_grants WHERE state='active' "
@@ -225,6 +573,7 @@ def run_camera_due(*, db_path: Path | None = None, limit: int = 4,
         "checks": outcomes,
         "due_remaining": remaining,
         "workers": workers,
+        "scheduler": "capability_load_health_aware",
         "controller_authority": (
             "source grants, terms, leases, cadence, revocation and persistence"
         ),

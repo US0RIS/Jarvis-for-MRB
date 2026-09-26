@@ -51,7 +51,8 @@ class NodeState:
     def __init__(self, *, token: str, device_id: str, label: str,
                  allow_screen: bool = False,
                  allow_app_launch: bool = False,
-                 allow_world_observer: bool = False) -> None:
+                 allow_world_observer: bool = False,
+                 world_capacity: int = 1) -> None:
         if len(token) < 32:
             raise ValueError("Node bearer token must be at least 32 random characters.")
         if not device_id or not device_id.replace("-", "").replace("_", "").isalnum():
@@ -61,7 +62,11 @@ class NodeState:
         self.label = label[:100]
         self.allow_screen = bool(allow_screen)
         self.allow_app_launch = bool(allow_app_launch)
+        if type(world_capacity) is not int or not 1 <= world_capacity <= 16:
+            raise ValueError("World observer capacity must be 1–16.")
         self.allow_world_observer = bool(allow_world_observer)
+        self.world_capacity = world_capacity
+        self.world_active_requests = 0
         self.last_app_request_at = 0.0
         self.last_world_request_at = 0.0
         self.session_expiry: datetime | None = None
@@ -92,9 +97,33 @@ class NodeState:
             )
         with self.lock:
             now = time.monotonic()
-            if now - self.last_world_request_at < 1.0:
+            if self.world_active_requests >= self.world_capacity:
+                raise RuntimeError("Mac world-observer capacity is currently full.")
+            if now - self.last_world_request_at < 0.05:
                 raise RuntimeError("Mac world-observer request rate limited.")
             self.last_world_request_at = now
+            self.world_active_requests += 1
+
+    def finish_world_observation(self) -> None:
+        with self.lock:
+            self.world_active_requests = max(0, self.world_active_requests - 1)
+
+    def worker_metrics(self) -> dict[str, Any]:
+        with self.lock:
+            active = self.world_active_requests
+            capacity = self.world_capacity
+        cpus = max(1, int(os.cpu_count() or 1))
+        try:
+            load = float(os.getloadavg()[0])
+        except (AttributeError, OSError):
+            load = 0.0
+        return {
+            "active_requests": active,
+            "capacity": capacity,
+            "cpu_count": cpus,
+            "load_1m": round(load, 3),
+            "normalized_load": round(max(0.0, load) / cpus, 4),
+        }
 
     def authorize_exact_app(self, name: str) -> None:
         if name not in _EXACT_APPS:
@@ -409,6 +438,7 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                         if state.allow_world_observer else []
                     ),
                 },
+                "worker_metrics": state.worker_metrics(),
                 "screen_session_active": state.active(),
                 "host": platform.node()[:100],
                 "macos_screen_recording_permission": "not_probed",
@@ -465,10 +495,13 @@ def handler_for(state: NodeState) -> type[BaseHTTPRequestHandler]:
                 if self.path == "/v1/world/observe":
                     _validate_world_task(payload)
                     state.authorize_world_observation()
-                    result = _observe_public_world(payload)
-                    self._json(200, {
-                        **result, "device_id": state.device_id,
-                    })
+                    try:
+                        result = _observe_public_world(payload)
+                        self._json(200, {
+                            **result, "device_id": state.device_id,
+                        })
+                    finally:
+                        state.finish_world_observation()
                     return
                 if self.path == "/v1/app/open":
                     name = payload.get("app_name")
@@ -517,8 +550,11 @@ def main() -> None:
     parser.add_argument("--bind", default="127.0.0.1",
                         help="127.0.0.1, or this Mac's own Tailscale 100.64.0.0/10 IPv4")
     parser.add_argument("--port", type=int, default=8766)
-    parser.add_argument("--device-id", required=True, help="macbook or macmini")
+    parser.add_argument("--device-id", required=True,
+                        help="Explicit registered observer ID, e.g. macbook, macmini, observer-3")
     parser.add_argument("--label", default="Jarvis Mac")
+    parser.add_argument("--world-capacity", type=int, default=1,
+                        help="Maximum concurrent typed World Armor observations (1–16)")
     parser.add_argument("--allow-screen", action="store_true",
                         help="Explicitly allow 15–300s phone-initiated screenshot sessions")
     parser.add_argument("--allow-app-launch", action="store_true",
@@ -534,6 +570,7 @@ def main() -> None:
         allow_screen=args.allow_screen,
         allow_app_launch=args.allow_app_launch,
         allow_world_observer=args.allow_world_observer,
+        world_capacity=args.world_capacity,
     )
     host = _bind_address(args.bind)
     server = ThreadingHTTPServer((host, args.port), handler_for(state))

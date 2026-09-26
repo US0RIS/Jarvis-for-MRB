@@ -127,7 +127,7 @@ class ProposalTests(unittest.TestCase):
         return {
             "response": "Answer",
             "tool": None,
-            "arguments": {},
+            "arguments_json": "{}",
             "evidence_requests": [],
             "assumptions": [],
             "uncertainties": [],
@@ -142,14 +142,14 @@ class ProposalTests(unittest.TestCase):
 
     def test_malformed_proposal_rejected(self):
         raw = self.good()
-        raw["arguments"] = "not an object"
+        raw["arguments_json"] = "not json"
         with self.assertRaises(ValueError):
             validate_proposal(raw)
 
     def test_unauthorized_proposal_is_only_a_proposal(self):
         raw = self.good()
         raw["tool"] = "pc.launch_app"
-        raw["arguments"] = {"name": "Example"}
+        raw["arguments_json"] = "{\"name\": \"Example\"}"
         proposal = validate_proposal(raw)
         self.assertEqual(proposal.tool, "pc.launch_app")
         # Validation never executes the proposed tool.

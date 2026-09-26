@@ -68,8 +68,21 @@ def combined_evidence(investigation_id: str, *,
         e for e in events["observations"] if e["source_id"] in eligible
     ]
     source_time = report["observations"]
+    try:
+        from jarvis_mrb.world_armor_movement import nearby as movement_nearby
+        movement = movement_nearby(
+            region["latitude"], region["longitude"],
+            radius_km=region["radius_km"], page_size=200,
+            db_path=platform_db_path,
+        )
+    except (ValueError, KeyError, RuntimeError):
+        movement = {
+            "entities": [], "next_after_seq": None,
+            "coverage": "movement store unavailable",
+            "absence_means_clear": False,
+        }
     return {
-        "schema": "world_armor.combined_evidence.v1",
+        "schema": "world_armor.combined_evidence.v2",
         "investigation_id": region["id"],
         "region": {
             "latitude": region["latitude"], "longitude": region["longitude"],
@@ -79,6 +92,10 @@ def combined_evidence(investigation_id: str, *,
         "environmental_coverage": report["coverage"],
         "camera_observations": selected,
         "nearby_camera_sources": list(eligible.values()),
+        "nearby_movement_entities": movement["entities"],
+        "movement_next_after_seq": movement.get("next_after_seq"),
+        "movement_coverage": movement.get("coverage"),
+        "movement_absence_means_clear": False,
         "enrolled_camera_location_unknown_source_ids": unknown,
         "next_camera_after_seq": events["next_after_seq"],
         "source_catalog_next_offset": None,
@@ -112,4 +129,5 @@ def timeline(*, source_ids: list[str] | None = None,
         "time_axis": "local_receipt_only",
         "all_sources_geolocated": False,
         "automatic_identity_tracking": False,
+        "transport_entity_ids_are_person_ids": False,
     }

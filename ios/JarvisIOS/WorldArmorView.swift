@@ -37,6 +37,7 @@ struct ArmorWatch: Decodable, Identifiable {
     let collecting: Bool
     let lastCheckedAt: String?
     let lastOutcome: String?
+    let lastChangeState: String?
     let notificationsEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -50,6 +51,7 @@ struct ArmorWatch: Decodable, Identifiable {
         case checkCount = "check_count"
         case lastCheckedAt = "last_checked_at"
         case lastOutcome = "last_outcome"
+        case lastChangeState = "last_change_state"
         case notificationsEnabled = "notifications_enabled"
     }
 }
@@ -753,6 +755,12 @@ struct WorldArmorView: View {
                         if let outcome = item.lastOutcome {
                             Text("Last receipt: " + outcome)
                                 .font(.caption2)
+                        }
+                        if let difference = item.lastChangeState {
+                            Text("Source comparison: " + difference
+                                 .replacingOccurrences(of: "_", with: " "))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                         HStack {
                             if item.state == "active" {

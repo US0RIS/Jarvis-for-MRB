@@ -102,8 +102,9 @@ def _prune(con: sqlite3.Connection, row: dict[str, Any], now: datetime) -> None:
 
 
 def _finish_error(row: dict[str, Any], *, path: Path,
-                  error: Exception) -> dict[str, Any]:
-    now = _instant()
+                  error: Exception,
+                  now: datetime | None = None) -> dict[str, Any]:
+    now = _instant(now)
     with closing(_connect(path)) as con, con:
         con.execute("BEGIN IMMEDIATE")
         if not _current(con, row, now):
@@ -150,7 +151,7 @@ def observe_source(source_id: str, *, db_path: Path | None = None,
                 frame, row["scene_goal"],
             )
     except Exception as exc:
-        return _finish_error(row, path=path, error=exc)
+        return _finish_error(row, path=path, error=exc, now=now)
     finally:
         # Nothing persists the model image bytes. Wipe the only local binding.
         frame = None

@@ -98,6 +98,8 @@ class FeatureAcceptanceIOSSourceTests(unittest.TestCase):
         self.assertIn("state: unexpectedlyHealthy ? .fail : .expectedFail", self.guide)
         self.assertIn("state: wronglyAccepted ? .fail : .expectedFail", self.guide)
         self.assertIn('case expectedFail = "EXPECTED FAIL"', self.guide)
+        self.assertIn("Acceptance harness integrity", self.guide)
+        self.assertIn("badControls.isEmpty ? .pass : .fail", self.guide.replace("!activeControls.isEmpty && ", ""))
 
 
 if __name__ == "__main__":

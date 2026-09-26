@@ -71,6 +71,7 @@ _tts_start_attempted = False
 _knowledge_started = False
 _proactive_started = False
 _world_armor_live_started = False
+_world_armor_push_started = False
 
 
 class CommandRequest(BaseModel):
@@ -332,6 +333,10 @@ class WorldArmorCorrelationRequest(BaseModel):
     as_known_at: str | None = None
     source_ids: list[str] | None = None
     query_radius_km: float | None = None
+
+
+class WorldArmorPushTokenRequest(BaseModel):
+    device_token: str
 
 
 class WorldArmorFullBrowserRequest(BaseModel):
@@ -704,6 +709,19 @@ def _ensure_world_armor_live_supervisor() -> None:
         record_runtime_success("world_armor_live")
 
 
+def _ensure_world_armor_push_worker() -> None:
+    global _world_armor_push_started
+    from jarvis_mrb.world_armor_push import enabled, start_worker, worker_alive
+    if not enabled():
+        return
+    if worker_alive():
+        _world_armor_push_started = True
+        return
+    if start_worker():
+        _world_armor_push_started = True
+        record_runtime_success("world_armor_push")
+
+
 def _installed_ollama_models() -> set[str]:
     try:
         with httpx.Client(timeout=2.0) as client:
@@ -808,6 +826,10 @@ def startup() -> None:
         _ensure_world_armor_live_supervisor()
     except Exception as exc:
         record_runtime_failure("world_armor_live", exc)
+    try:
+        _ensure_world_armor_push_worker()
+    except Exception as exc:
+        record_runtime_failure("world_armor_push", exc)
     _start_tts_in_background()
     start_proactive_monitor()
     _proactive_started = True
@@ -1168,6 +1190,49 @@ def _world_armor_platform_error(exc: Exception) -> None:
     if isinstance(exc, RuntimeError):
         raise HTTPException(status_code=503, detail=str(exc)[:240]) from exc
     raise exc
+
+
+@app.get("/world-armor/v8/push/status")
+def world_armor_push_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_push import status
+    return status()
+
+
+@app.post("/world-armor/v8/push/register")
+def world_armor_push_register(
+    request: WorldArmorPushTokenRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_push import register_device
+    try:
+        result = register_device(request.device_token)
+        _ensure_world_armor_push_worker()
+        return result
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/push/unregister")
+def world_armor_push_unregister(
+    request: WorldArmorPushTokenRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_push import unregister_device
+    try:
+        return unregister_device(request.device_token)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
 
 
 @app.get("/world-armor/v8/status")

@@ -1008,6 +1008,15 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorCreated.self, from: data)
     }
 
+    func worldArmorPageMedia(_ url: String) async throws -> ArmorPublicPageMedia {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/cameras/page-media",
+            body: ["public_url": url]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPublicPageMedia.self, from: data)
+    }
+
     func worldArmorDiscoverCameras(
         latitude: Double, longitude: Double,
         radiusKM: Double, limit: Int = 30

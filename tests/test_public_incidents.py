@@ -32,8 +32,27 @@ class OfficialEarthquakeTests(unittest.TestCase):
         self.assertEqual(answer["events"][0]["magnitude"], 3.4)
         self.assertTrue(answer["events"][0]["reviewed"])
         self.assertLessEqual(params["maxradiuskm"], 300)
-        self.assertEqual(params["limit"], 50)
+        self.assertEqual(params["limit"], 51)
         self.assertIn("not all local emergencies", answer["source_note"])
+
+    def test_usgs_result_limit_reports_partial_coverage(self) -> None:
+        now_ms = int(time.time() * 1000)
+        payload = {"features": [
+            {"id": f"us{index}", "properties": {
+                "mag": 3.1, "time": now_ms, "place": "reported region"
+            }}
+            for index in range(51)
+        ]}
+        with patch("jarvis_mrb.public_incidents.httpx.Client") as client:
+            stream = client.return_value.__enter__.return_value.stream.return_value.__enter__.return_value
+            stream.iter_bytes.return_value = [json.dumps(payload).encode()]
+            answer = regional_earthquakes(34.12, -118.16)
+            params = client.return_value.__enter__.return_value.stream.call_args.kwargs["params"]
+        self.assertEqual(params["limit"], 51)
+        self.assertEqual(answer["status"], "partial")
+        self.assertEqual(len(answer["events"]), 50)
+        self.assertTrue(answer["source_limit_reached"])
+        self.assertEqual(answer["source_result_limit"], 50)
 
     def test_usgs_geojson_epicenter_is_publisher_location_not_query_center(self) -> None:
         now_ms = int(time.time() * 1000)

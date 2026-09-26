@@ -173,6 +173,13 @@ def publish_event(
     event = _present(row)
     if fanout:
         try:
+            from jarvis_mrb.world_armor_push import enqueue_world_event
+            enqueue_world_event(event)
+        except Exception:
+            # Push is a secondary transport; durable live history must survive
+            # missing credentials, network failures and APNs backpressure.
+            pass
+        try:
             from jarvis_mrb.event_bus import companion_events
             companion_events.publish({
                 "type": "world_armor_event",

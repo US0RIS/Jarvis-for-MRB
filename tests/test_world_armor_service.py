@@ -198,6 +198,101 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertIn("world-armor/v1/watches/", client)
         self.assertIn("Enrolling a watch does NOT start", view)
 
+    def test_attention_contract_has_no_freeform_destination_and_requires_auth(self):
+        fields = set(service.WorldArmorWatchCreateRequest.model_fields)
+        self.assertEqual(fields, {
+            "investigation_id", "interval_minutes", "max_checks",
+            "lifetime_hours", "attention_kind", "attention_threshold",
+            "attention_cooldown_minutes",
+        })
+        self.assertNotIn("recipient", fields)
+        self.assertNotIn("prompt", fields)
+        self.assertNotIn("url", fields)
+        routes = {r.path for r in service.app.routes}
+        self.assertTrue({
+            "/world-armor/v1/notices",
+            "/world-armor/v1/notices/read",
+            "/world-armor/v1/notices/forget",
+        }.issubset(routes))
+        request = service.WorldArmorWatchCreateRequest(
+            investigation_id="a"*32, attention_kind="new_nws_alert",
+        )
+        with patch.object(service, "API_TOKEN", "private-secret"), \
+             patch("jarvis_mrb.world_armor_watches.create_watch",
+                   return_value={"attention_kind":"new_nws_alert"}) as create:
+            with self.assertRaises(HTTPException) as ctx:
+                service.world_armor_watch_create(
+                    request, Response(), authorization=None,
+                )
+            self.assertEqual(ctx.exception.status_code, 401)
+            create.assert_not_called()
+            response=Response()
+            result=service.world_armor_watch_create(
+                request, response, authorization="Bearer private-secret"
+            )
+            self.assertEqual(result["attention_kind"], "new_nws_alert")
+            self.assertEqual(response.headers["Cache-Control"], "private, no-store")
+            create.assert_called_once_with(
+                "a"*32, interval_minutes=60, max_checks=6, lifetime_hours=6,
+                attention_kind="new_nws_alert",
+                attention_threshold=None, attention_cooldown_minutes=60,
+            )
+
+    def test_notice_inbox_and_lifecycle_auth_still_apply_when_world_off(self):
+        request=service.WorldArmorNoticeIdRequest(notice_id="f"*32)
+        with patch.object(service, "API_TOKEN", "private-secret"), \
+             patch.dict(os.environ, {
+                 "JARVIS_WORLD_ARMOR_ENABLED": "0",
+                 "JARVIS_WORLD_ARMOR_WATCHES_ENABLED": "0",
+             }), \
+             patch("jarvis_mrb.world_armor_attention.list_notices",
+                   return_value={"notices": [], "unread_count": 0}) as listed, \
+             patch("jarvis_mrb.world_armor_attention.mark_read",
+                   return_value={"read_at": "known"}) as read, \
+             patch("jarvis_mrb.world_armor_attention.forget_notice",
+                   return_value={"deleted": 1}) as forget:
+            for action in (service.world_armor_notice_read,
+                           service.world_armor_notice_forget):
+                with self.assertRaises(HTTPException) as context:
+                    action(request, Response(), authorization=None)
+                self.assertEqual(context.exception.status_code, 401)
+            response=Response()
+            inbox=service.world_armor_notice_list(
+                response, investigation_id="a"*32,
+                authorization="Bearer private-secret",
+            )
+            self.assertEqual(inbox["unread_count"], 0)
+            self.assertEqual(response.headers["Cache-Control"],"private, no-store")
+            listed.assert_called_once_with(
+                investigation_id="a"*32, watch_id=None, unread_only=False,
+            )
+            self.assertEqual(service.world_armor_notice_read(
+                request, Response(),
+                authorization="Bearer private-secret",
+            )["read_at"],"known")
+            self.assertEqual(service.world_armor_notice_forget(
+                request, Response(),
+                authorization="Bearer private-secret",
+            )["deleted"],1)
+            read.assert_called_once_with("f"*32)
+            forget.assert_called_once_with("f"*32)
+
+    def test_ios_foreground_attention_wired_without_claimed_push(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        view = (root/"ios/JarvisIOS/WorldArmorView.swift").read_text(encoding="utf-8")
+        client = (root/"ios/JarvisIOS/JarvisAPIClient.swift").read_text(encoding="utf-8")
+        self.assertIn("worldArmorNotices(", view)
+        self.assertIn("pollAttentionInbox()", view)
+        self.assertIn("foregroundAttentionOptIn", view)
+        self.assertIn("worldArmorNoticeRead(", view)
+        self.assertIn("worldArmorNoticeForget(", view)
+        self.assertIn("private_inbox_only_no_remote_push",
+                      (root/"jarvis_mrb/world_armor_attention.py").read_text(
+                          encoding="utf-8"))
+        self.assertIn("world-armor/v1/notices", client)
+        self.assertIn("attention_cooldown_minutes",client)
+
     def test_disabled_create_does_not_touch_database(self):
         request=service.WorldArmorCreateRequest(
             label="Test",latitude=34.1,longitude=-118.2)

@@ -69,7 +69,7 @@ class WorldArmorStandingWatchTests(TestCase):
                 self.enroll()
             with self.assertRaises(armor.ArmorDisabled):
                 watches.run_due_once(db_path=self.db, now=NOW)
-        self.assertEqual(watches.list_watches(db_path=self.db)["watches"], [])
+        self.assertEqual(watches.list_watches(db_path=self.db,now=NOW)["watches"], [])
 
     def test_typed_limits_expiry_and_remaining_investigation_budget(self):
         for interval in (0, 29, 361, True, "60"):
@@ -81,7 +81,7 @@ class WorldArmorStandingWatchTests(TestCase):
         for lifetime in (0, 73, True, "4"):
             with self.subTest(lifetime=lifetime), self.assertRaises(ValueError):
                 self.enroll(lifetime_hours=lifetime)
-        self.assertEqual(watches.list_watches(db_path=self.db)["watches"], [])
+        self.assertEqual(watches.list_watches(db_path=self.db,now=NOW)["watches"], [])
         bounded = self.enroll(lifetime_hours=72)
         self.assertEqual(bounded["expires_at"],
                          (NOW + timedelta(hours=6)).isoformat())
@@ -162,9 +162,10 @@ class WorldArmorStandingWatchTests(TestCase):
             "JARVIS_WORLD_ARMOR_WATCHES_ENABLED": "0",
         }):
             self.assertEqual(len(watches.list_watches(
-                db_path=self.db, investigation_id=self.region
+                db_path=self.db, investigation_id=self.region, now=NOW
             )["watches"]), 1)
-            stopped = watches.stop_watch(watch["id"], db_path=self.db)
+            stopped = watches.stop_watch(watch["id"], db_path=self.db,
+                                         now=NOW+timedelta(minutes=2))
             self.assertEqual(stopped["state"], "revoked")
             with self.assertRaises(armor.ArmorDisabled):
                 watches.resume_watch(watch["id"], db_path=self.db)
@@ -189,7 +190,7 @@ class WorldArmorStandingWatchTests(TestCase):
         self.tick()
         self.assertEqual(armor.forget(self.region, db_path=self.db)["deleted"],
                          1)
-        self.assertEqual(watches.list_watches(db_path=self.db)["watches"], [])
+        self.assertEqual(watches.list_watches(db_path=self.db,now=NOW)["watches"], [])
         with closing(sqlite3.connect(self.db)) as con:
             self.assertEqual(con.execute(
                 "SELECT COUNT(*) FROM watch_receipts WHERE watch_id=?",
@@ -202,7 +203,7 @@ class WorldArmorStandingWatchTests(TestCase):
             watch = self.enroll(max_checks=1)
             self.assertFalse(watch["notifications_enabled"])
             self.assertFalse(watches.list_watches(
-                db_path=self.db
+                db_path=self.db, now=NOW
             )["runner_auto_started"])
 
 

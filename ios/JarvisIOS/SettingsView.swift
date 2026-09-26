@@ -26,7 +26,8 @@ struct SettingsView: View {
             baseURL: settings.baseURL,
             fallbackBaseURL: settings.fallbackBaseURL,
             apiToken: settings.apiToken,
-            sessionID: settings.conversationSessionID
+            sessionID: settings.conversationSessionID,
+            windyAPIKey: settings.windyAPIKeyForRequest() ?? ""
         )
     }
 

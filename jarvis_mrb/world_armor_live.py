@@ -591,6 +591,11 @@ def start_supervisor(
     return True
 
 
+def supervisor_alive() -> bool:
+    with _runner_lock:
+        return bool(_runner_thread and _runner_thread.is_alive())
+
+
 def stop_supervisor(*, db_path: Path | None = None) -> None:
     global _runner_thread
     path = Path(db_path) if db_path is not None else LIVE_STORE

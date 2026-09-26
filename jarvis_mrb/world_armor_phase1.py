@@ -558,7 +558,17 @@ def replay(investigation_id: str, *, as_known_at: str | None = None,
         "as_known_at":cutoff, "samples_retained":len(samples),
         "sample_timeline":[
             {"id":row["id"],"received_at":row["received_at"],
-             "adapter_mode":row["adapter_mode"]} for row in samples
+             "adapter_mode":row["adapter_mode"],
+             "source_coverage":{
+                 source:{
+                     "status":coverage_by_sample[(row["id"],source)]["status"],
+                     "checked_at":coverage_by_sample[(row["id"],source)]["checked_at"],
+                     "reported_count":coverage_by_sample[(row["id"],source)]["observation_count"],
+                     "scope":coverage_by_sample[(row["id"],source)]["scope"],
+                 }
+                 for source in _PROVIDERS
+                 if (row["id"],source) in coverage_by_sample
+             }} for row in samples
         ],
         "observation_count":len(observations),"observations":observations,
         "observation_history":observation_history[:1200],

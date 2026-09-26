@@ -70,6 +70,7 @@ _external_watches_started = False
 _tts_start_attempted = False
 _knowledge_started = False
 _proactive_started = False
+_world_armor_live_started = False
 
 
 class CommandRequest(BaseModel):
@@ -642,6 +643,18 @@ def _start_tts_in_background() -> None:
     threading.Thread(target=start, name="jarvis-tts-start", daemon=True).start()
 
 
+def _ensure_world_armor_live_supervisor() -> None:
+    global _world_armor_live_started
+    if _world_armor_live_started:
+        return
+    from jarvis_mrb.world_armor_live import autostart_enabled, start_supervisor
+    if not autostart_enabled():
+        return
+    if start_supervisor():
+        _world_armor_live_started = True
+        record_runtime_success("world_armor_live")
+
+
 def _installed_ollama_models() -> set[str]:
     try:
         with httpx.Client(timeout=2.0) as client:
@@ -742,6 +755,10 @@ def startup() -> None:
     _ensure_scheduler()
     _ensure_external_watch_runner()
     _ensure_knowledge_refresh()
+    try:
+        _ensure_world_armor_live_supervisor()
+    except Exception as exc:
+        record_runtime_failure("world_armor_live", exc)
     _start_tts_in_background()
     start_proactive_monitor()
     _proactive_started = True
@@ -796,6 +813,7 @@ def health() -> dict[str, Any]:
         "model_free_routing": __import__("jarvis_mrb.deterministic_dispatch", fromlist=["routing_status"]).routing_status(),
         "knowledge_refresh": "running" if _knowledge_started else "stopped",
         "proactive_monitor": "running" if _proactive_started else "stopped",
+        "world_armor_live": "running" if _world_armor_live_started else "stopped",
         "agency": "ready" if bool(agency.get("ready")) else "degraded",
         "agency_mode": str(agency.get("mode") or "unknown"),
         "agency_desired_states": agency.get("desired_states") or {},
@@ -1101,6 +1119,63 @@ def _world_armor_platform_error(exc: Exception) -> None:
     if isinstance(exc, RuntimeError):
         raise HTTPException(status_code=503, detail=str(exc)[:240]) from exc
     raise exc
+
+
+@app.get("/world-armor/v7/live/status")
+def world_armor_live_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_live import status
+    return status()
+
+
+@app.get("/world-armor/v7/live/events")
+def world_armor_live_events(
+    response: Response,
+    after_seq: int = 0,
+    limit: int = 100,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_live import events
+    try:
+        return events(after_seq=after_seq, limit=limit)
+    except ValueError as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v7/live/start")
+def world_armor_live_start(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    global _world_armor_live_started
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_live import start_supervisor, status
+    try:
+        _world_armor_live_started = bool(start_supervisor())
+        return status()
+    except (ValueError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v7/live/stop")
+def world_armor_live_stop(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    global _world_armor_live_started
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_live import stop_supervisor, status
+    stop_supervisor()
+    _world_armor_live_started = False
+    return status()
 
 
 @app.get("/world-armor/v6/workers")

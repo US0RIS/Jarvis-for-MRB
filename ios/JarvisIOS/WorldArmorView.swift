@@ -3054,7 +3054,7 @@ struct WorldArmorView: View {
                 grantID: grant.id,
                 desiredOn: desiredOn
             )
-            status = "Presence request #" + dispatch.requestID.prefix(8)
+            status = "Presence request #" + String(dispatch.requestID.prefix(8))
                 + " dispatched; awaiting separate HomeKit readback."
             try? await Task.sleep(for: .milliseconds(500))
             presenceState = try? await client.worldArmorPresence()

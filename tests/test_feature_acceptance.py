@@ -82,6 +82,16 @@ class FeatureAcceptanceIOSSourceTests(unittest.TestCase):
         self.assertIn("func acceptancePreviewBatch", self.api)
         self.assertIn("func syntheticAcceptance", self.api)
 
+    def test_generic_model_planner_fallback_is_not_counted_as_sim_pass(self):
+        self.assertIn('case unverified = "UNVERIFIED"', self.guide)
+        self.assertIn('state: row.mode == "deterministic" ? .simulated : .unverified', self.guide)
+        self.assertIn("this is not evidence that the cataloged feature works", self.guide)
+
+    def test_deployed_backend_features_are_not_still_labeled_pending_deployment(self):
+        self.assertIn('"The backend fix is now deployed, but real camera/model acceptance is still required."', self.guide)
+        self.assertIn('"Backend Planner"', self.guide)
+        self.assertNotIn('"Backend Update Pending"', self.guide)
+
     def test_negative_control_canaries_are_present(self):
         self.assertIn("Impossible iPhone route expectation", self.guide)
         self.assertIn("Impossible backend route expectation", self.guide)

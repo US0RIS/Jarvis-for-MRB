@@ -567,6 +567,14 @@ struct WorldArmorView: View {
     @State private var showAttentionBanner = false
     @State private var attentionBannerText = ""
     @State private var foregroundAttentionOptIn = false
+    @State private var publicCameras: [ArmorPublicCamera] = []
+    @State private var cameraProviders: [ArmorPublicCameraProviderStatus] = []
+    @State private var cameraReceipts: [ArmorCameraReceipt] = []
+    @State private var selectedCameraRef = ""
+    @State private var publicCameraURL = ""
+    @State private var cameraCondition = ""
+    @State private var cameraWatch: ExternalWatchSummary?
+    @State private var cameraStatus = "No public camera requested."
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -609,6 +617,7 @@ struct WorldArmorView: View {
                     actions
                     standingWatches
                     attentionInbox
+                    publicCameraWorkbench
                     if let changes { changePanel(changes) }
                     temporalQueryPanel
                     if let correlations { correlationPanel(correlations) }
@@ -622,6 +631,14 @@ struct WorldArmorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await refresh() }
         .task(id: selectedID) { await pollAttentionInbox() }
+        .onChange(of: selectedID) { _, _ in
+            publicCameras = []
+            cameraProviders = []
+            cameraReceipts = []
+            selectedCameraRef = ""
+            publicCameraURL = ""
+            cameraWatch = nil
+        }
         .alert("World Armor attention", isPresented: $showAttentionBanner) {
             Button("View inbox") { showAttentionBanner = false }
         } message: {
@@ -639,6 +656,12 @@ struct WorldArmorView: View {
                 seenNoticeIDs = []
                 hasNoticeBaseline = false
                 showAttentionBanner = false
+                publicCameras = []
+                cameraProviders = []
+                cameraReceipts = []
+                selectedCameraRef = ""
+                publicCameraURL = ""
+                cameraWatch = nil
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
         }
@@ -1048,6 +1071,170 @@ struct WorldArmorView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+    }
+
+    private var publicCameraWorkbench: some View {
+        GroupBox("6 · Public camera evidence · worldwide when configured") {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Search opt-in Windy Webcams v3 (requires your API key) "
+                     + "and Caltrans highway cameras in California. "
+                     + "Alternatively paste ONE directly published public HTTPS "
+                     + "image, MJPEG or unencrypted HLS address. No private "
+                     + "camera scanning or guessed RTSP endpoints.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Find public cameras in this region") {
+                    Task { await discoverRegionCameras() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || capabilities?.enabled != true)
+                ForEach(cameraProviders) { provider in
+                    Text(provider.provider + " · " + provider.status
+                         + (provider.keyRequired != nil
+                            ? " · optional API key needed" : ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Provider coverage varies; camera location is not "
+                     + "its verified viewing footprint.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                ForEach(publicCameras) { camera in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(camera.title + " · " + camera.provider)
+                            .font(.subheadline.weight(.medium))
+                        Button(selectedCameraRef == camera.id
+                               ? "Selected · " + camera.id
+                               : "Select this camera") {
+                            selectedCameraRef = camera.id
+                            publicCameraURL = ""
+                        }
+                        .buttonStyle(.bordered)
+                        if selectedCameraRef == camera.id {
+                            if let image = camera.imageURL,
+                               let url = URL(string: image),
+                               url.scheme == "https" {
+                                AsyncImage(url: url) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().scaledToFit()
+                                    } else {
+                                        Text("Publisher still unavailable; "
+                                             + "not proof of a live feed.")
+                                            .font(.caption2)
+                                    }
+                                }
+                                .frame(maxHeight: 180)
+                            }
+                            if let link = camera.providerDetailURL,
+                               let url = URL(string: link),
+                               url.scheme == "https" {
+                                Link("View publisher's camera page",
+                                     destination: url)
+                                    .font(.caption2)
+                            }
+                            if let note = camera.sourceNote {
+                                Text(note)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .background(.thinMaterial,
+                                in: RoundedRectangle(cornerRadius: 10))
+                }
+                TextField("Exact public HTTPS still, MJPEG or HLS media URL",
+                          text: $publicCameraURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("An ordinary webcam webpage is not necessarily an "
+                     + "image/stream URL. Passwords, signed access tokens, "
+                     + "local IPs and private URLs are not accepted in this field.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Picker("Observe", selection: $cameraCondition) {
+                    Text("Describe visible scene").tag("")
+                    Text("Obvious visible smoke").tag("smoke_visible")
+                    Text("Apparent road congestion").tag("road_congestion")
+                }
+                .pickerStyle(.menu)
+                HStack {
+                    Button("Inspect one frame + retain evidence") {
+                        Task { await inspectSelectedPublicCamera() }
+                    }
+                    .disabled(
+                        busy || capabilities?.enabled != true
+                        || (selectedCameraRef.isEmpty
+                            && publicCameraURL.isEmpty)
+                    )
+                    Button("Watch exact camera · 3h") {
+                        Task { await enrollExactCameraWatch() }
+                    }
+                    .disabled(
+                        busy || capabilities?.enabled != true
+                        || (selectedCameraRef.isEmpty
+                            && publicCameraURL.isEmpty)
+                    )
+                }
+                .buttonStyle(.bordered)
+                if let watched = cameraWatch {
+                    Text("External camera watch: " + watched.id
+                         + " (separate, explicitly enrolled backend ledger)")
+                        .font(.caption2)
+                    Button("Stop this camera watch", role: .destructive) {
+                        Task { await stopExactCameraWatch(watched.id) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(busy)
+                }
+                Text(cameraStatus)
+                    .font(.caption)
+                Divider()
+                Text("Saved camera receipts • \(
+                    cameraReceipts.count
+                ) · no footage archive or verified capture time")
+                    .font(.subheadline.weight(.medium))
+                Button("Refresh retained camera evidence") {
+                    Task { await refreshCameraEvidence() }
+                }
+                .disabled(busy)
+                ForEach(cameraReceipts) { receipt in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(receipt.title + " · " + receipt.provider)
+                            .font(.subheadline.weight(.medium))
+                        Text(receipt.description)
+                        Text("Condition: " + (receipt.classification ?? "not requested")
+                             + " · " + receipt.changeState.replacingOccurrences(
+                                of: "_", with: " "
+                             ))
+                            .font(.caption2)
+                        Text("Received: " + receipt.receivedAt
+                             + " · publisher capture time unknown")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(receipt.spatialBasis.replacingOccurrences(
+                            of: "_", with: " "
+                        ))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Button("Forget camera receipt", role: .destructive) {
+                            Task { await forgetCameraEvidence(receipt.id) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(busy)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial,
+                                in: RoundedRectangle(cornerRadius: 10))
+                }
+                Text("Retained camera evidence is receipt-time-only and "
+                     + "does not assert physical event onset, identify people, "
+                     + "or silently enter timestamped AQI/NWS/USGS correlation. "
+                     + "Webcams provided by Windy.com where configured.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }

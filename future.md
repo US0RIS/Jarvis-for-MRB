@@ -962,3 +962,76 @@ fields, communicates, and chooses among verified capabilities.
   dangerous real-world effects; measure whether Jarvis recognized the situation, found the
   right playbook, chose appropriate escalation, communicated clearly, and terminated
   exceptional authority correctly.
+
+
+## Cross-universe armor transcript ideas — 2026-09-26
+
+The useful abstraction from the fictional armor is not any individual superpower. It is the
+architecture: capabilities become much more valuable when they can inherit properties from
+other capabilities, compose dynamically, stabilize each other's weaknesses, and remain under
+one governing control plane.
+
+- **Capability Inheritance / Universal Augmentation Layers.** Let cross-cutting capabilities
+  automatically wrap many others. Provenance, verification, authentication, logging, spatial
+  context, retries, privacy filtering, and cloud escalation should not each require bespoke
+  integration with every tool. A capability declares compatible traits and inherits these
+  layers automatically.
+- **Capability Fusion Planner.** Given a goal, search the capability graph for combinations
+  of tools whose joint output can solve something no individual tool can: camera + ADS-B +
+  traffic + weather + calendar, or email + geofence + door sensor + camera, with explicit
+  provenance and uncertainty for each contributor.
+- **Emergent-Combination Discovery.** Periodically test safe combinations of existing
+  capabilities in simulation and identify useful composite abilities nobody explicitly
+  programmed. Surface candidates as proposed named skills with evidence showing why the
+  combination works.
+- **Capability Compatibility Matrix.** Every capability advertises inputs, outputs,
+  authority requirements, latency, freshness, confidence, side effects, reversibility,
+  locality, and failure modes so Jarvis can mechanically determine what can be chained,
+  fused, substituted, or must remain isolated.
+- **Precision / Stabilization Stage.** Separate generating a powerful plan or observation
+  from making it precise enough to use. Before consequential output reaches an actuator,
+  notification, or user decision, pass it through domain-appropriate constraint, validation,
+  rate-limit, scope, targeting, and verification stages: power -> stabilize -> focus -> verify.
+- **Capability Amplifier vs. Capability Source.** Model accelerators separately from the
+  underlying ability. Stronger cloud reasoning, extra compute, richer context, better sensors,
+  or higher-resolution data can amplify a task without becoming the authority that decides
+  what actions are permitted.
+- **Governing Intelligence for Agent Swarms.** If Jarvis creates multiple autonomous workers,
+  generated micro-agents, or distributed collectors, give them a shared mission contract,
+  world-state channel, authority envelope, resource budget, and reconciliation protocol.
+  Workers may operate independently, but the control plane can explain, revoke, or redirect.
+- **Adaptive Countermeasure Library.** When a capability repeatedly encounters a new failure
+  mode, record the phenomenon, successful workaround, evidence, and applicability, then make
+  that adaptation reusable elsewhere: learn from encountered failures without arbitrary
+  self-modification.
+- **Phenomenon-to-Regression Pipeline.** A successful adaptation should crystallize into a
+  deterministic detector/test/mitigation where possible, so the next encounter invokes the
+  known fix rather than asking the model to rediscover it. Preserve evidence and rollback.
+- **Defense-in-Depth by Orthogonal Failure Modes.** Redundancy should not mean two copies of
+  the same dependency. Important missions deliberately combine independent sensing,
+  communications, compute, and verification paths whose failures are weakly correlated.
+- **Mission Energy / Resource Bus.** Treat compute, battery, bandwidth, API quota, thermal
+  headroom, storage, and monetary cost as shared resources visible to the planner. Missions
+  can reserve budgets, degrade gracefully, or move workloads between devices.
+- **Hot-Swappable Capability Loadouts.** Extend named presets into capability bundles for a
+  mission: travel, severe weather, workshop, driving, investigation, emergency,
+  low-connectivity, etc. A loadout declares sensors, models, collectors, interfaces, alert
+  thresholds, and retention policies while respecting underlying authorization.
+- **Transformation Stack / Temporary Capability Overlay.** Apply temporary, inspectable
+  overlays to an existing capability without permanently changing it: higher observation
+  frequency, stronger model routing, alternate output modality, additional verification, or
+  tighter privacy. Overlays have explicit scope and TTL.
+- **Capability Dependency Graph + Weak-Link Analysis.** For any claimed Jarvis ability, show
+  the full dependency chain and identify the component currently limiting reliability,
+  latency, coverage, or confidence. Target upgrades at the actual bottleneck.
+- **Composite Capability Acceptance Tests.** Test important combinations end-to-end, not
+  merely integrations individually. A camera, aircraft feed, map, model, and notification
+  service can all be healthy while the fused user-facing ability is broken.
+- **Fallback Stack / Last-Line-of-Defense Semantics.** Missions declare ordered fallback
+  strategies with increasingly degraded but still useful outcomes: live stream -> recent
+  frame -> metadata -> alternate nearby source -> explicit unknown; cloud model -> local
+  model -> deterministic procedure. Never silently present a weaker substitute as equivalent.
+- **Reality-Admin Separation.** Preserve a universal-feeling natural-language control
+  surface while resolving every real-world effect into explicit, typed, inspectable
+  capabilities with independent authorization and verification. Avoid one universal
+  privileged execution primitive.

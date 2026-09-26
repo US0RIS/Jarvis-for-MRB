@@ -5,6 +5,7 @@ from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
 import runpy
+import time
 from threading import Thread
 import unittest
 from unittest.mock import patch
@@ -369,6 +370,49 @@ class MeshCoordinatorTests(unittest.TestCase):
                 mesh.frame("macbook")
             with self.assertRaises(ValueError):
                 mesh._request("macbook", "POST", "/v1/execute")
+
+    def test_controller_routes_only_typed_world_task_to_matching_live_mac(self):
+        module = runpy.run_path(str(MAC), run_name="mesh_world_controller")
+        state = module["NodeState"](
+            token="b" * 48, device_id="macbook", label="MacBook",
+            allow_world_observer=True,
+        )
+        handler = module["handler_for"](state)
+        handler.do_POST.__globals__["_observe_public_world"] = lambda payload: {
+            "status": "ok", "provider": "opensky",
+            "worker_observed_at": datetime.now(timezone.utc).isoformat(),
+            "provider_payload": {"time": time.time(), "states": []},
+            "source": "fixed OpenSky fixture",
+        }
+        host = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = Thread(target=host.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(host.server_close)
+        self.addCleanup(host.shutdown)
+        with patch.dict("os.environ", {
+            "JARVIS_MESH_MACBOOK_URL":
+                "http://127.0.0.1:" + str(host.server_port),
+            "JARVIS_MESH_MACBOOK_TOKEN": "b" * 48,
+        }):
+            receipt = mesh.world_observe("macbook", {
+                "kind": "opensky_region", "latitude": 34.05,
+                "longitude": -118.25, "radius_km": 50,
+            })
+            self.assertEqual(receipt["provider"], "opensky")
+            self.assertEqual(receipt["device_id"], "macbook")
+            for bad in (
+                {"kind": "opensky_global"},
+                {"kind": "opensky_region", "latitude": 34,
+                 "longitude": -118, "radius_km": 50,
+                 "url": "https://example.com"},
+            ):
+                with self.assertRaises(ValueError):
+                    mesh.world_observe("macbook", bad)
+            with self.assertRaises(ValueError):
+                mesh.world_observe("windows", {
+                    "kind": "opensky_region", "latitude": 34,
+                    "longitude": -118, "radius_km": 10,
+                })
 
     def test_public_sensor_coverage_never_asserts_live_or_global_camera(self):
         manifest = mesh.public_sources()

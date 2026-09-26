@@ -6,6 +6,18 @@ The project is not intended to be “a chatbot with lots of plugins.” The desi
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
 
+## World Armor — proposed planetary-scale extension
+
+**[Full design specification](docs/WORLD_ARMOR_SPEC.md)** for the Planetary Event
+Fabric and Distributed Agency: source-qualified infrastructure OSINT, spatial
+and temporal correlation, uncertainty-aware event investigations, explicit
+regional watches, and tightly scoped computation across authorized paired
+devices. **Design only / Roadmap:** no World Armor collector, event store, new
+API endpoint, RF sensor, global AIS service, trading service, or cloud worker
+was implemented or deployed by this document. The Reality Browser, Presence,
+Causal Debugger, Synthetic Senses and Parallel Existence ideas are preserved
+and remain on hold.
+
 ## Meeting prebrief convergence — read-only source-qualified evidence
 
 On the stacked `jarvis/situation-evidence-unification` branch,

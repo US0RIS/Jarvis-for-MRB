@@ -301,6 +301,7 @@ class WorldArmorServiceBoundaryTests(TestCase):
             "/world-armor/v1/cameras/discover",
             "/world-armor/v1/cameras/page-media",
             "/world-armor/v1/cameras/inspect",
+            "/world-armor/v1/cameras/import-watch",
             "/world-armor/v1/cameras/receipts",
             "/world-armor/v1/cameras/forget",
         }.issubset(routes))
@@ -359,6 +360,7 @@ class WorldArmorServiceBoundaryTests(TestCase):
         self.assertIn("worldArmorPageMedia(", view)
         self.assertIn("worldArmorDiscoverCameras(", view)
         self.assertIn("worldArmorInspectCamera(", view)
+        self.assertIn("worldArmorImportCameraWatch(", view)
         self.assertIn("worldArmorCameraReceipts(", view)
         self.assertIn("worldArmorForgetCameraReceipt(", view)
         self.assertIn('kind: "camera"', view)

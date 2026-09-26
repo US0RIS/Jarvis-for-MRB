@@ -1152,6 +1152,42 @@ struct JarvisAPIClient {
         return report
     }
 
+    func worldArmorLiveStatus() async throws -> ArmorLiveStatus {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v7/live/status"
+        )
+        return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
+    }
+
+    func worldArmorLiveEvents(
+        afterSeq: Int, limit: Int = 100
+    ) async throws -> ArmorLiveEventsPage {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v7/live/events",
+            query: [
+                URLQueryItem(name: "after_seq", value: String(max(0, afterSeq))),
+                URLQueryItem(name: "limit", value: String(min(max(limit, 1), 500))),
+            ]
+        )
+        return try JSONDecoder().decode(ArmorLiveEventsPage.self, from: data)
+    }
+
+    func worldArmorLiveStart() async throws -> ArmorLiveStatus {
+        let (data, response) = try await postData(
+            path: "world-armor/v7/live/start", body: [:]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
+    }
+
+    func worldArmorLiveStop() async throws -> ArmorLiveStatus {
+        let (data, response) = try await postData(
+            path: "world-armor/v7/live/stop", body: [:]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
+    }
+
     func worldArmorDistributedWorkers() async throws -> ArmorDistributedWorkers {
         let data = try await worldArmorPlatformGet(
             path: "world-armor/v6/workers"

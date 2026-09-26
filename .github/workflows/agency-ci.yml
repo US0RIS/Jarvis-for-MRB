@@ -15,6 +15,7 @@ on:
       - jarvis/world-armor-distributed-observers
       - jarvis/world-armor-distributed-camera-workers
       - jarvis/world-armor-worker-orchestration
+      - jarvis/world-armor-live-fabric
   pull_request:
     branches:
       - main

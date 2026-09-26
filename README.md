@@ -59,6 +59,26 @@ an emergency safety system, a live source acceptance or an autonomous
 external action path. New code is a stacked draft on the watches branch,
 not deployed to the operator's machines.
 
+## World Armor v7 — persistent live fabric (stacked draft)
+
+**[Live fabric runbook](docs/WORLD_ARMOR_LIVE_FABRIC.md).**
+An explicitly enabled controller supervisor can now keep already-authorized
+movement, public-camera and standing-watch collectors running as one persistent
+fabric. Collection receipts enter a separate bounded 14-day / 10,000-event
+journal with monotonically increasing sequence numbers and explicit replay-gap
+reporting. Events also fan out over the existing authenticated companion socket;
+the iPhone remembers its sequence cursor and replays missed events after
+reconnect. Warning/urgent events can reach MemoMind and opt-in local
+notifications without turning informational polling into alert spam.
+
+The supervisor still cannot create source grants, discover private sources,
+expand rights, identify/track people, or gain action authority. True closed-app
+APNs delivery is not claimed yet.
+
+The original full World Armor scope remains intact: Reality Browser, Presence,
+Causal Debugger, Synthetic Senses and Parallel Existence are later full-scope
+layers, not removed ideas.
+
 ## World Armor v6 — worker orchestration + pooled transport (stacked draft)
 
 **[Orchestration runbook](docs/WORLD_ARMOR_ORCHESTRATION.md).**

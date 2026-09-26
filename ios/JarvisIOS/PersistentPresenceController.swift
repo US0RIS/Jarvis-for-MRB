@@ -137,6 +137,7 @@ final class PersistentPresenceController: ObservableObject {
     private var lastObservedResponse = ""
     private var responseCompletionPending = false
     private let worldArmorLiveSeqKey = "jarvis.worldArmorLive.lastSeq"
+    private var processedWorldArmorPresence: Set<String> = []
 
     init(appModel: JarvisAppModel) {
         self.appModel = appModel
@@ -732,6 +733,57 @@ final class PersistentPresenceController: ObservableObject {
                ) {
                 await handleWorldArmorEvent(worldEvent, replayed: false)
             }
+            return
+        }
+
+        if type == "world_armor_presence_request" {
+            let requestID = String(describing: event["request_id"] ?? "")
+            guard requestID.count == 32,
+                  !processedWorldArmorPresence.contains(requestID) else { return }
+            processedWorldArmorPresence.insert(requestID)
+            if processedWorldArmorPresence.count > 100 {
+                processedWorldArmorPresence.removeAll(keepingCapacity: true)
+                processedWorldArmorPresence.insert(requestID)
+            }
+
+            let actuator = String(describing: event["actuator_kind"] ?? "")
+            let action = String(describing: event["action"] ?? "")
+            let targetText = String(describing: event["target_id"] ?? "")
+            let desired = event["desired_on"] as? Bool
+            let expiryText = String(describing: event["expires_at"] ?? "")
+            var receiptStatus = "blocked"
+            var receiptMessage = "Presence request was not executed."
+
+            if let expiry = ISO8601DateFormatter().date(from: expiryText),
+               expiry < Date() {
+                receiptMessage = "Presence request expired before iPhone execution."
+            } else if actuator != "homekit_light" || action != "set_light" {
+                receiptMessage = "Presence request used an unsupported actuator/action."
+            } else if let target = UUID(uuidString: targetText),
+                      let desired {
+                let result = await appModel.homeEnvironment.setLight(
+                    target, on: desired
+                )
+                receiptMessage = result
+                if result.hasPrefix("Verified in Apple Home:") {
+                    receiptStatus = "verified_reported_state"
+                } else if result.localizedCaseInsensitiveContains("rejected") {
+                    receiptStatus = "failed"
+                } else if result.localizedCaseInsensitiveContains("unreachable")
+                            || result.localizedCaseInsensitiveContains("not available") {
+                    receiptStatus = "blocked"
+                } else {
+                    receiptStatus = "unverified"
+                }
+            } else {
+                receiptMessage = "Presence request target or desired state was invalid."
+            }
+
+            _ = try? await client.worldArmorPresenceReceipt(
+                requestID: requestID,
+                status: receiptStatus,
+                message: receiptMessage
+            )
             return
         }
 

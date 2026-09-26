@@ -59,17 +59,22 @@ def regional_earthquakes(
         if not isinstance(data, dict) or not isinstance(data.get("features"), list):
             raise ValueError("USGS earthquake response has unexpected shape.")
         source_limit_reached = len(data["features"]) > 50
+        invalid_items = False
         events = []
         for item in data["features"][:50]:
             props = item.get("properties") if isinstance(item, dict) else None
             if not isinstance(props, dict):
+                invalid_items = True
                 continue
             identifier = str(item.get("id") or "")[:70]
             if not identifier or not identifier.replace("_", "").replace("-", "").isalnum():
+                invalid_items = True
                 continue
             magnitude = props.get("mag")
             epoch = props.get("time")
-            if not isinstance(magnitude, (float, int)) or not isinstance(epoch, (float, int)):
+            if (type(magnitude) not in (float, int) or type(epoch) not in (float, int)
+                    or not math.isfinite(magnitude) or not math.isfinite(epoch)):
+                invalid_items = True
                 continue
             moment = datetime.fromtimestamp(epoch / 1000, timezone.utc)
             url = str(props.get("url") or "")
@@ -96,9 +101,10 @@ def regional_earthquakes(
                 "reviewed": props.get("status") == "reviewed",
             })
         return {
-            "status": "partial" if source_limit_reached else "ok",
+            "status": "partial" if source_limit_reached or invalid_items else "ok",
             "events": events,
             "source_limit_reached": source_limit_reached,
+            "source_records_discarded": invalid_items,
             "source_result_limit": 50,
             "checked_at": checked.isoformat(), "source_url": _DOCS,
             "source_note": (

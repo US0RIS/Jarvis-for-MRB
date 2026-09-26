@@ -130,6 +130,110 @@ def _opensky_request(params: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def normalize_opensky_payload(
+    data: dict[str, Any], *, checked_at: str | datetime | None = None,
+    global_scope: bool = False, authenticated: bool = False,
+) -> dict[str, Any]:
+    """Normalize one provider payload, including responses fetched by a mesh worker."""
+    checked = (
+        checked_at if isinstance(checked_at, datetime)
+        else datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))
+        if checked_at else datetime.now(timezone.utc)
+    )
+    if checked.tzinfo is None:
+        raise ValueError("OpenSky receipt time must be offset-aware.")
+    checked = checked.astimezone(timezone.utc)
+    if not isinstance(data, dict) or not isinstance(
+        data.get("states"), (list, type(None))
+    ):
+        raise ValueError("OpenSky returned an unsupported state-vector payload.")
+    stamp = data.get("time")
+    if type(stamp) not in (int, float) or not math.isfinite(float(stamp)):
+        raise ValueError("OpenSky payload missing source timestamp.")
+    source_time = datetime.fromtimestamp(float(stamp), timezone.utc)
+    age = (checked - source_time).total_seconds()
+    if age < -60 or age > 300:
+        return {
+            "status": "stale", "checked_at": checked.isoformat(),
+            "source_observed_at": source_time.isoformat(),
+            "entities": [], "source_url": _OPENSKY_DOCS,
+            "source_note": (
+                "OpenSky source timestamp is stale; "
+                "no current entity state is asserted."
+            ),
+            "authenticated": authenticated,
+            "global_scope": global_scope,
+        }
+    entities = []
+    invalid = 0
+    for row in data.get("states") or []:
+        if not isinstance(row, list) or len(row) < 17:
+            invalid += 1
+            continue
+        icao = str(row[0] or "").strip().lower()
+        lon, lat = row[5], row[6]
+        if (
+            not icao or len(icao) > 16
+            or type(lat) not in (int, float)
+            or type(lon) not in (int, float)
+            or not math.isfinite(float(lat))
+            or not math.isfinite(float(lon))
+            or not -90 <= float(lat) <= 90
+            or not -180 <= float(lon) <= 180
+        ):
+            invalid += 1
+            continue
+        position_time = row[3] if type(row[3]) in (int, float) else None
+        last_contact = row[4] if type(row[4]) in (int, float) else None
+        observed_epoch = position_time or last_contact or stamp
+        observed_at = datetime.fromtimestamp(
+            float(observed_epoch), timezone.utc
+        ).isoformat()
+        callsign = " ".join(str(row[1] or "").split())[:20] or None
+
+        def number(index: int) -> float | None:
+            if len(row) <= index or type(row[index]) not in (int, float):
+                return None
+            value = float(row[index])
+            return value if math.isfinite(value) else None
+
+        category = row[17] if len(row) > 17 and type(row[17]) is int else None
+        entities.append({
+            "entity_type": "aircraft",
+            "entity_id": "icao24:" + icao,
+            "provider_identifier": icao,
+            "callsign": callsign,
+            "name": None,
+            "latitude": round(float(lat), 6),
+            "longitude": round(float(lon), 6),
+            "altitude_m": number(7),
+            "on_ground": bool(row[8]) if type(row[8]) is bool else None,
+            "velocity_mps": number(9),
+            "heading_deg": number(10),
+            "vertical_rate_mps": number(11),
+            "category": category,
+            "position_source": row[16] if type(row[16]) is int else None,
+            "observed_at": observed_at,
+            "provider_time": source_time.isoformat(),
+            "source": "OpenSky Network",
+        })
+    return {
+        "status": "partial" if invalid else "ok",
+        "checked_at": checked.isoformat(),
+        "source_observed_at": source_time.isoformat(),
+        "entities": entities,
+        "invalid_records": invalid,
+        "source_url": _OPENSKY_DOCS,
+        "source_note": (
+            "Public ADS-B/MLAT/etc. state vectors. Coverage is incomplete "
+            "and provider-limited. Vehicle identifiers/callsigns are not "
+            "person identities, ownership records, passenger data, or schedules."
+        ),
+        "authenticated": authenticated,
+        "global_scope": global_scope,
+    }
+
+
 def opensky_state_vectors(
     *, latitude: float | None = None,
     longitude: float | None = None,
@@ -137,11 +241,7 @@ def opensky_state_vectors(
     global_scope: bool = False,
     extended: bool = True,
 ) -> dict[str, Any]:
-    """Current publicly broadcast aircraft states, source IDs preserved.
-
-    global_scope=True intentionally permits a provider-global request. The
-    provider's actual credit/rate limits are the controlling restriction.
-    """
+    """Current publicly broadcast aircraft states, source IDs preserved."""
     if global_scope:
         if latitude is not None or longitude is not None or radius_km is not None:
             raise ValueError("Global OpenSky scope cannot also specify a local region.")
@@ -151,110 +251,22 @@ def opensky_state_vectors(
             raise ValueError("Regional OpenSky scope needs latitude, longitude and radius.")
         lamin, lomin, lamax, lomax = _bbox(latitude, longitude, radius_km)
         params = {
-            "lamin": round(lamin, 5),
-            "lomin": round(lomin, 5),
-            "lamax": round(lamax, 5),
-            "lomax": round(lomax, 5),
+            "lamin": round(lamin, 5), "lomin": round(lomin, 5),
+            "lamax": round(lamax, 5), "lomax": round(lomax, 5),
         }
     if extended:
         params["extended"] = 1
     checked = datetime.now(timezone.utc)
     try:
         data = _opensky_request(params)
-        stamp = data.get("time")
-        if type(stamp) not in (int, float) or not math.isfinite(float(stamp)):
-            raise ValueError("OpenSky payload missing source timestamp.")
-        source_time = datetime.fromtimestamp(float(stamp), timezone.utc)
-        age = (checked - source_time).total_seconds()
-        if age < -60 or age > 300:
-            return {
-                "status": "stale",
-                "checked_at": checked.isoformat(),
-                "source_observed_at": source_time.isoformat(),
-                "entities": [],
-                "source_url": _OPENSKY_DOCS,
-                "source_note": (
-                    "OpenSky source timestamp is stale; "
-                    "no current entity state is asserted."
-                ),
-            }
-        entities = []
-        invalid = 0
-        for row in data.get("states") or []:
-            if not isinstance(row, list) or len(row) < 17:
-                invalid += 1
-                continue
-            icao = str(row[0] or "").strip().lower()
-            lon, lat = row[5], row[6]
-            if (
-                not icao
-                or len(icao) > 16
-                or type(lat) not in (int, float)
-                or type(lon) not in (int, float)
-                or not math.isfinite(float(lat))
-                or not math.isfinite(float(lon))
-                or not -90 <= float(lat) <= 90
-                or not -180 <= float(lon) <= 180
-            ):
-                invalid += 1
-                continue
-            position_time = row[3] if type(row[3]) in (int, float) else None
-            last_contact = row[4] if type(row[4]) in (int, float) else None
-            observed_epoch = position_time or last_contact or stamp
-            observed_at = datetime.fromtimestamp(
-                float(observed_epoch), timezone.utc
-            ).isoformat()
-            callsign = " ".join(str(row[1] or "").split())[:20] or None
-
-            def number(index: int) -> float | None:
-                if len(row) <= index or type(row[index]) not in (int, float):
-                    return None
-                value = float(row[index])
-                return value if math.isfinite(value) else None
-
-            category = None
-            if len(row) > 17 and type(row[17]) is int:
-                category = row[17]
-            entities.append({
-                "entity_type": "aircraft",
-                "entity_id": "icao24:" + icao,
-                "provider_identifier": icao,
-                "callsign": callsign,
-                "name": None,
-                "latitude": round(float(lat), 6),
-                "longitude": round(float(lon), 6),
-                "altitude_m": number(7),
-                "on_ground": bool(row[8]) if type(row[8]) is bool else None,
-                "velocity_mps": number(9),
-                "heading_deg": number(10),
-                "vertical_rate_mps": number(11),
-                "category": category,
-                "position_source": row[16] if type(row[16]) is int else None,
-                "observed_at": observed_at,
-                "provider_time": source_time.isoformat(),
-                "source": "OpenSky Network",
-            })
-        return {
-            "status": "partial" if invalid else "ok",
-            "checked_at": checked.isoformat(),
-            "source_observed_at": source_time.isoformat(),
-            "entities": entities,
-            "invalid_records": invalid,
-            "source_url": _OPENSKY_DOCS,
-            "source_note": (
-                "Public ADS-B/MLAT/etc. state vectors. Coverage is incomplete "
-                "and provider-limited. Vehicle identifiers/callsigns are not "
-                "person identities, ownership records, passenger data, or schedules."
-            ),
-            "authenticated": bool(os.getenv("OPENSKY_CLIENT_ID")),
-            "global_scope": global_scope,
-        }
+        return normalize_opensky_payload(
+            data, checked_at=checked, global_scope=global_scope,
+            authenticated=bool(os.getenv("OPENSKY_CLIENT_ID")),
+        )
     except (httpx.HTTPError, ValueError, TypeError, OverflowError) as exc:
         return {
-            "status": "unavailable",
-            "checked_at": checked.isoformat(),
-            "source_observed_at": None,
-            "entities": [],
+            "status": "unavailable", "checked_at": checked.isoformat(),
+            "source_observed_at": None, "entities": [],
             "source_url": _OPENSKY_DOCS,
             "source_note": "OpenSky unavailable: " + type(exc).__name__,
             "global_scope": global_scope,

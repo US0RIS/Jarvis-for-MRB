@@ -8,6 +8,7 @@ on:
       - jarvis/world-armor-phase1-kernel
       - jarvis/world-armor-correlation-workbench
       - jarvis/world-armor-standing-watches
+      - jarvis/world-armor-attention-inbox
   pull_request:
     branches:
       - main

@@ -45,6 +45,20 @@ installation/startup, notifications, predicate alerts, third-party actions,
 camera feed collection, or worker network. CI success is not physical-device
 or live-source acceptance; PR #12 remains draft and stacked on PR #9.
 
+## World Armor Phase 3B — opt-in evidence attention inbox (stacked draft)
+
+**[Attention runbook](docs/WORLD_ARMOR_ATTENTION.md)** implements four
+typed per-watch attention rules (off by default, modelled AQI upward
+threshold crossing, newly received USGS report by magnitude, newly received
+NWS point alert) with sample/observation provenance, deterministic source
+coverage checks, a baseline requirement, cooldown and idempotent private
+inbox receipts. The native iPhone/iPad view supports rule enrollment,
+notice read/forget and explicitly opted-in **foreground-only in-app banners**
+while the view is open. This is NOT APNs, closed-app notification delivery,
+an emergency safety system, a live source acceptance or an autonomous
+external action path. New code is a stacked draft on the watches branch,
+not deployed to the operator's machines.
+
 ## World Armor — proposed planetary-scale extension
 
 **[Full design specification](docs/WORLD_ARMOR_SPEC.md)** for the Planetary Event

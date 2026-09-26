@@ -1018,17 +1018,59 @@ struct JarvisAPIClient {
 
     func worldArmorWatchCreate(
         _ investigationID: String, intervalMinutes: Int,
-        maxChecks: Int, lifetimeHours: Int
+        maxChecks: Int, lifetimeHours: Int,
+        attentionKind: String, attentionThreshold: Double?,
+        attentionCooldownMinutes: Int
     ) async throws -> ArmorWatch {
         let (data, response) = try await postData(
             path: "world-armor/v1/watches",
-            body: ["investigation_id": investigationID,
-                   "interval_minutes": intervalMinutes,
-                   "max_checks": maxChecks,
-                   "lifetime_hours": lifetimeHours]
+            body: [
+                "investigation_id": investigationID,
+                "interval_minutes": intervalMinutes,
+                "max_checks": maxChecks,
+                "lifetime_hours": lifetimeHours,
+                "attention_kind": attentionKind,
+                "attention_threshold": attentionThreshold as Any? ?? NSNull(),
+                "attention_cooldown_minutes": attentionCooldownMinutes
+            ]
         )
         try validate(response: response, data: data)
         return try JSONDecoder().decode(ArmorWatch.self, from: data)
+    }
+
+    func worldArmorNotices(investigationID: String) async throws -> ArmorNoticeList {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent(
+            "world-armor/v1/notices"
+        ), var components = URLComponents(
+            url: url, resolvingAgainstBaseURL: false
+        ) else { throw JarvisAPIError.badURL }
+        components.queryItems = [
+            URLQueryItem(name: "investigation_id", value: investigationID)
+        ]
+        guard let endpoint = components.url else { throw JarvisAPIError.badURL }
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 10
+        addAuthorization(to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorNoticeList.self, from: data)
+    }
+
+    func worldArmorNoticeRead(_ id: String) async throws -> ArmorNotice {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/notices/read", body: ["notice_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorNotice.self, from: data)
+    }
+
+    func worldArmorNoticeForget(_ id: String) async throws -> ArmorNoticeForgetReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v1/notices/forget", body: ["notice_id": id]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorNoticeForgetReceipt.self, from: data)
     }
 
     func worldArmorWatchForget(_ id: String) async throws -> ArmorWatchForgetReceipt {

@@ -38,6 +38,9 @@ struct ArmorWatch: Decodable, Identifiable {
     let lastCheckedAt: String?
     let lastOutcome: String?
     let lastChangeState: String?
+    let attentionKind: String?
+    let attentionThreshold: Double?
+    let attentionCooldownMinutes: Int?
     let notificationsEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -52,8 +55,53 @@ struct ArmorWatch: Decodable, Identifiable {
         case lastCheckedAt = "last_checked_at"
         case lastOutcome = "last_outcome"
         case lastChangeState = "last_change_state"
+        case attentionKind = "attention_kind"
+        case attentionThreshold = "attention_threshold"
+        case attentionCooldownMinutes = "attention_cooldown_minutes"
         case notificationsEnabled = "notifications_enabled"
     }
+}
+
+struct ArmorNotice: Decodable, Identifiable {
+    let id: String
+    let watchID: String
+    let investigationID: String
+    let sampleID: String
+    let source: String
+    let kind: String
+    let sourceKey: String
+    let observedAt: String?
+    let receivedAt: String
+    let createdAt: String
+    let summary: String
+    let observationID: String?
+    let readAt: String?
+    enum CodingKeys: String, CodingKey {
+        case id, source, kind, summary
+        case watchID = "watch_id"
+        case investigationID = "investigation_id"
+        case sampleID = "sample_id"
+        case sourceKey = "source_key"
+        case observedAt = "observed_at"
+        case receivedAt = "received_at"
+        case createdAt = "created_at"
+        case observationID = "observation_id"
+        case readAt = "read_at"
+    }
+}
+
+struct ArmorNoticeList: Decodable {
+    let notices: [ArmorNotice]
+    let unreadCount: Int
+    let delivery: String
+    enum CodingKeys: String, CodingKey {
+        case notices, delivery
+        case unreadCount = "unread_count"
+    }
+}
+
+struct ArmorNoticeForgetReceipt: Decodable {
+    let deleted: Int
 }
 
 struct ArmorWatchForgetReceipt: Decodable {
@@ -423,6 +471,17 @@ struct WorldArmorView: View {
     @State private var watchInterval = 60
     @State private var watchChecks = 6
     @State private var watchLifetime = 6
+    @State private var attentionKind = "off"
+    @State private var attentionAQI = 100.0
+    @State private var attentionMagnitude = 4.0
+    @State private var attentionCooldown = 60
+    @State private var notices: [ArmorNotice] = []
+    @State private var unreadNotices = 0
+    @State private var hasNoticeBaseline = false
+    @State private var seenNoticeIDs: Set<String> = []
+    @State private var showAttentionBanner = false
+    @State private var attentionBannerText = ""
+    @State private var foregroundAttentionOptIn = false
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
     @State private var latitude = "34.12000"
@@ -464,6 +523,7 @@ struct WorldArmorView: View {
                     selectedRegion(selected)
                     actions
                     standingWatches
+                    attentionInbox
                     if let changes { changePanel(changes) }
                     temporalQueryPanel
                     if let correlations { correlationPanel(correlations) }
@@ -476,6 +536,12 @@ struct WorldArmorView: View {
         .navigationTitle("World Armor")
         .navigationBarTitleDisplayMode(.inline)
         .task { await refresh() }
+        .task(id: selectedID) { await pollAttentionInbox() }
+        .alert("World Armor attention", isPresented: $showAttentionBanner) {
+            Button("View inbox") { showAttentionBanner = false }
+        } message: {
+            Text(attentionBannerText)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 replayResult = nil
@@ -483,6 +549,11 @@ struct WorldArmorView: View {
                 correlations = nil
                 evidenceGraph = nil
                 sampleTimes = []
+                notices = []
+                unreadNotices = 0
+                seenNoticeIDs = []
+                hasNoticeBaseline = false
+                showAttentionBanner = false
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
         }
@@ -734,15 +805,41 @@ struct WorldArmorView: View {
                 }
                 Stepper("Expire after \(watchLifetime) hours",
                         value: $watchLifetime, in: 1...24)
+                Picker("Evidence attention", selection: $attentionKind) {
+                    Text("No notices").tag("off")
+                    Text("Modelled AQI threshold crossing")
+                        .tag("modelled_aqi_threshold_crossed")
+                    Text("New USGS report").tag("new_usgs_report")
+                    Text("New NWS alert").tag("new_nws_alert")
+                }
+                .pickerStyle(.menu)
+                if attentionKind == "modelled_aqi_threshold_crossed" {
+                    Stepper("Modelled AQI: \(Int(attentionAQI))",
+                            value: $attentionAQI, in: 50...300, step: 25)
+                }
+                if attentionKind == "new_usgs_report" {
+                    Stepper("Reported magnitude: \(attentionMagnitude.formatted())",
+                            value: $attentionMagnitude, in: 2.5...8, step: 0.5)
+                }
+                if attentionKind != "off" {
+                    Picker("Notice cooldown", selection: $attentionCooldown) {
+                        Text("30 minutes").tag(30)
+                        Text("60 minutes").tag(60)
+                        Text("2 hours").tag(120)
+                        Text("6 hours").tag(360)
+                    }
+                    .pickerStyle(.menu)
+                }
                 Button("Enroll bounded watch") {
                     Task { await enrollWatch() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(busy || capabilities?.enabled != true
                           || capabilities?.scheduledWatches != true)
-                Text("Host runner requires an additional local opt-in; "
-                     + "results are saved receipts, NOT live emergency alerts. "
-                     + "No push notifications or actions.")
+                Text("Host runner requires separate local opt-in. Typed "
+                     + "rules save source-qualified INBOX notices, NOT "
+                     + "remote push or emergency alerts. First sampled "
+                     + "evidence establishes the baseline; no external actions.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -759,6 +856,13 @@ struct WorldArmorView: View {
                         if let outcome = item.lastOutcome {
                             Text("Last receipt: " + outcome)
                                 .font(.caption2)
+                        }
+                        if let kind = item.attentionKind, kind != "off" {
+                            Text("Attention: " + kind.replacingOccurrences(
+                                of: "_", with: " "
+                            ) + " · cooldown \(item.attentionCooldownMinutes ?? 60) min")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                         if let difference = item.lastChangeState {
                             Text("Source comparison: " + difference
@@ -801,6 +905,64 @@ struct WorldArmorView: View {
                     Task { await refreshWatches() }
                 }
                 .disabled(busy)
+            }
+        }
+    }
+
+    private var attentionInbox: some View {
+        GroupBox("5 · Evidence attention inbox · \(unreadNotices) unread") {
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle("In-app banners while World Armor is open",
+                       isOn: $foregroundAttentionOptIn)
+                Text("Private inbox only. In-app banners require this view "
+                     + "to be open and active. No remote push, background "
+                     + "wake, emergency dispatch or all-clear.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("Refresh attention inbox") {
+                    Task { await refreshNotices(alertOnNew: false) }
+                }
+                .disabled(busy)
+                ForEach(notices) { notice in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(notice.summary)
+                            .font(.subheadline.weight(
+                                notice.readAt == nil ? .semibold : .regular
+                            ))
+                        Text(notice.source + " · received " + notice.receivedAt)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let observed = notice.observedAt {
+                            Text("Source/model time: " + observed)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Source event time unavailable; receipt only.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            if notice.readAt == nil {
+                                Button("Mark read") {
+                                    Task { await changeNotice(notice.id, action: "read") }
+                                }
+                            }
+                            Button("Forget notice", role: .destructive) {
+                                Task { await changeNotice(notice.id, action: "forget") }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(busy)
+                    }
+                    .padding(8)
+                    .background(.thinMaterial,
+                                in: RoundedRectangle(cornerRadius: 10))
+                }
+                if notices.isEmpty {
+                    Text("No retained notices. This does not establish safety.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -1104,6 +1266,15 @@ struct WorldArmorView: View {
             // collection is disabled; no new provider request is issued here.
             investigations = try await client.worldArmorInvestigations().investigations
             watches = (try? await client.worldArmorWatches())?.watches ?? []
+            if let current = selectedID {
+                let response = try? await client.worldArmorNotices(
+                    investigationID: current
+                )
+                notices = response?.notices ?? []
+                unreadNotices = response?.unreadCount ?? 0
+                seenNoticeIDs = Set(notices.map { $0.id })
+                hasNoticeBaseline = true
+            }
             if !investigations.contains(where: { $0.id == selectedID }) {
                 selectedID = nil
                 replayResult = nil
@@ -1111,6 +1282,10 @@ struct WorldArmorView: View {
                 correlations = nil
                 evidenceGraph = nil
                 sampleTimes = []
+                notices = []
+                unreadNotices = 0
+                seenNoticeIDs = []
+                hasNoticeBaseline = false
             }
             if capabilities?.enabled == true {
                 status = "Source registry integrated, not proof that live "
@@ -1135,6 +1310,65 @@ struct WorldArmorView: View {
         }
     }
 
+    private func pollAttentionInbox() async {
+        guard let current = selectedID else { return }
+        while !Task.isCancelled && selectedID == current {
+            if scenePhase == .active && !busy {
+                await refreshNotices(alertOnNew: true)
+            }
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                break
+            }
+        }
+    }
+
+    private func refreshNotices(alertOnNew: Bool) async {
+        guard let current = selectedID else { return }
+        do {
+            let response = try await client.worldArmorNotices(
+                investigationID: current
+            )
+            guard selectedID == current, scenePhase == .active else { return }
+            let newItems = response.notices.filter {
+                !seenNoticeIDs.contains($0.id) && $0.readAt == nil
+            }
+            notices = response.notices
+            unreadNotices = response.unreadCount
+            seenNoticeIDs = Set(response.notices.map { $0.id })
+            if hasNoticeBaseline && alertOnNew && foregroundAttentionOptIn,
+               let first = newItems.first {
+                attentionBannerText = first.summary
+                showAttentionBanner = true
+            }
+            hasNoticeBaseline = true
+        } catch {
+            // Offline/unknown never means all-clear. Keep the prior inbox
+            // and prior seen IDs instead of pretending delivery succeeded.
+            if hasNoticeBaseline {
+                status = "Attention inbox unavailable: "
+                    + error.localizedDescription
+            }
+        }
+    }
+
+    private func changeNotice(_ id: String, action: String) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            if action == "read" {
+                _ = try await client.worldArmorNoticeRead(id)
+            } else {
+                _ = try await client.worldArmorNoticeForget(id)
+            }
+            await refreshNotices(alertOnNew: false)
+        } catch {
+            status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
     private func refreshWatches() async {
         guard !busy else { return }
         busy = true
@@ -1155,7 +1389,12 @@ struct WorldArmorView: View {
         do {
             _ = try await client.worldArmorWatchCreate(
                 selectedID, intervalMinutes: watchInterval,
-                maxChecks: watchChecks, lifetimeHours: watchLifetime
+                maxChecks: watchChecks, lifetimeHours: watchLifetime,
+                attentionKind: attentionKind,
+                attentionThreshold: attentionKind == "modelled_aqi_threshold_crossed"
+                    ? attentionAQI : attentionKind == "new_usgs_report"
+                        ? attentionMagnitude : nil,
+                attentionCooldownMinutes: attentionCooldown
             )
             watches = try await client.worldArmorWatches().watches
             status = "Watch enrolled. The separate local host runner must "

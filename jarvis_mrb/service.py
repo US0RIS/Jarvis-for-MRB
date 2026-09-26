@@ -231,10 +231,17 @@ class WorldArmorWatchCreateRequest(BaseModel):
     interval_minutes: int = 60
     max_checks: int = 6
     lifetime_hours: int = 6
+    attention_kind: str = "off"
+    attention_threshold: float | None = None
+    attention_cooldown_minutes: int = 60
 
 
 class WorldArmorWatchIdRequest(BaseModel):
     watch_id: str
+
+
+class WorldArmorNoticeIdRequest(BaseModel):
+    notice_id: str
 
 class WorldArmorCorrelationRequest(BaseModel):
     investigation_id: str
@@ -872,6 +879,9 @@ def world_armor_watch_create(
             interval_minutes=request.interval_minutes,
             max_checks=request.max_checks,
             lifetime_hours=request.lifetime_hours,
+            attention_kind=request.attention_kind,
+            attention_threshold=request.attention_threshold,
+            attention_cooldown_minutes=request.attention_cooldown_minutes,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
@@ -948,6 +958,56 @@ def world_armor_watch_resume(
     from jarvis_mrb.world_armor_watches import resume_watch
     try:
         return resume_watch(request.watch_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.get("/world-armor/v1/notices")
+def world_armor_notice_list(
+    response: Response,
+    investigation_id: str | None = None,
+    watch_id: str | None = None,
+    unread_only: bool = False,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_attention import list_notices
+    try:
+        return list_notices(
+            investigation_id=investigation_id, watch_id=watch_id,
+            unread_only=unread_only,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/notices/read")
+def world_armor_notice_read(
+    request: WorldArmorNoticeIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_attention import mark_read
+    try:
+        return mark_read(request.notice_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _armor_error(exc)
+
+
+@app.post("/world-armor/v1/notices/forget")
+def world_armor_notice_forget(
+    request: WorldArmorNoticeIdRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_attention import forget_notice
+    try:
+        return forget_notice(request.notice_id)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
 

@@ -133,6 +133,10 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 last_checked_at TEXT,
                 last_outcome TEXT,
                 last_change_state TEXT,
+                attention_kind TEXT NOT NULL DEFAULT 'off',
+                attention_threshold REAL,
+                attention_cooldown_minutes INTEGER NOT NULL DEFAULT 60,
+                last_notice_at TEXT,
                 CHECK(interval_minutes BETWEEN 30 AND 360),
                 CHECK(max_checks BETWEEN 1 AND 12)
             );
@@ -146,6 +150,24 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                 change_state TEXT NOT NULL,
                 PRIMARY KEY(watch_id,sample_id)
             );
+            CREATE TABLE IF NOT EXISTS armor_notices (
+                id TEXT PRIMARY KEY,
+                watch_id TEXT NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+                investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
+                sample_id TEXT NOT NULL REFERENCES samples(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                observed_at TEXT,
+                received_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                observation_id TEXT,
+                read_at TEXT,
+                UNIQUE(watch_id,kind,source_key)
+            );
+            CREATE INDEX IF NOT EXISTS ix_armor_notices_region
+                ON armor_notices(investigation_id,created_at);
             CREATE TABLE IF NOT EXISTS observations (
                 id TEXT PRIMARY KEY,
                 investigation_id TEXT NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
@@ -178,6 +200,14 @@ def _connect(path: Path, *, create: bool) -> sqlite3.Connection:
                         con.execute("PRAGMA table_info(watches)")}
         if "last_change_state" not in watch_fields:
             con.execute("ALTER TABLE watches ADD COLUMN last_change_state TEXT")
+        for field, definition in (
+            ("attention_kind", "TEXT NOT NULL DEFAULT 'off'"),
+            ("attention_threshold", "REAL"),
+            ("attention_cooldown_minutes", "INTEGER NOT NULL DEFAULT 60"),
+            ("last_notice_at", "TEXT"),
+        ):
+            if field not in watch_fields:
+                con.execute(f"ALTER TABLE watches ADD COLUMN {field} {definition}")
         receipt_fields = {row["name"] for row in
                           con.execute("PRAGMA table_info(watch_receipts)")}
         if "change_state" not in receipt_fields:
@@ -240,6 +270,12 @@ def capabilities() -> dict[str, Any]:
         "watch_runner": "explicit_separate_local_process",
         "watch_interval_minutes_min": 30,
         "watch_checks_max": 12,
+        "attention_inbox": True,
+        "remote_push_delivery": False,
+        "attention_rule_types": [
+            "off", "modelled_aqi_threshold_crossed",
+            "new_usgs_report", "new_nws_alert",
+        ],
         "remote_workers": False, "actuation": False, "model_calls": 0,
         "store": "separate_local_expiring_sqlite",
     }

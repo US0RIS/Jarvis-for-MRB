@@ -59,6 +59,27 @@ an emergency safety system, a live source acceptance or an autonomous
 external action path. New code is a stacked draft on the watches branch,
 not deployed to the operator's machines.
 
+## World Armor v4 — distributed public-world observers (stacked draft)
+
+**[Distributed observer runbook](docs/WORLD_ARMOR_DISTRIBUTED.md).**
+The Windows controller can now dispatch **regional OpenSky read-only fetches**
+to the exact paired MacBook Air / Mac mini nodes that are online,
+identity-verified and separately started with `--allow-world-observer`.
+Macs cannot supply arbitrary URLs or commands: the node constructs one fixed
+OpenSky request from a typed latitude/longitude/radius task. Windows retains
+source grants, cadence, leases, normalization, retention and all database
+writes. Movement evidence records its `worker_id`. Pause/stop during remote
+I/O vetoes late persistence; worker failures release the lease and are not
+silently retried through a second machine in the same source interval.
+`jarvis-world-distributed` is an explicit local controller process; merely
+opening the iPhone/iPad app does not start it. The app exposes read-only live
+worker topology through `/world-armor/v4/workers`.
+
+This is the first distributed observation capability, not a general compute
+cluster: provider-global OpenSky, AISStream, camera vision, raw video,
+arbitrary remote RPC, general Mac network access and automatic failover are
+not delegated in this increment.
+
 ## World Armor v2 — open observation platform (stacked draft)
 
 **[Source access, collector, evidence and host setup](docs/WORLD_ARMOR_OPEN_PLATFORM.md).**
@@ -73,8 +94,9 @@ camera receipts with existing environmental reports, preserving **unknown
 camera capture times and viewing footprints**. Source consent revoke/forget
 remains available while collection is disabled. This is NOT a merger of all
 previous v1 limited-region capabilities or a claim that unconfigured global
-webcams, remote Mac workers, RTSP/WebRTC/DRM, raw footage archives and
-closed-app push are operational.
+webcams, generic remote Mac workers, RTSP/WebRTC/DRM, raw footage archives
+or closed-app push are operational. The later v4 stack adds one exact
+OpenSky regional read-only Mac worker capability without widening v2 source rights.
 
 ## World Armor public cameras — wider-world media slice (stacked draft)
 

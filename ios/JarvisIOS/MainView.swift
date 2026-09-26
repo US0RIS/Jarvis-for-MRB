@@ -11,6 +11,7 @@ struct MainView: View {
     @EnvironmentObject private var localPower: LocalPowerFeaturesController
     @ObservedObject private var personalNotecard = PersonalNotecardStore.shared
     @State private var showingSettings = false
+    @FocusState private var commandFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -28,6 +29,7 @@ struct MainView: View {
                 }
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Jarvis")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -60,6 +62,12 @@ struct MainView: View {
                     .accessibilityLabel("Jarvis Feature Guide")
 
                     Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        commandFieldFocused = false
+                    }
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -131,9 +139,16 @@ struct MainView: View {
                 HStack {
                     TextField("Ask Jarvis to do something…", text: $appModel.commandText, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .focused($commandFieldFocused)
                         .submitLabel(.send)
-                        .onSubmit { Task { await appModel.sendCurrentCommand() } }
-                    Button { Task { await appModel.sendCurrentCommand() } } label: {
+                        .onSubmit {
+                            commandFieldFocused = false
+                            Task { await appModel.sendCurrentCommand() }
+                        }
+                    Button {
+                        commandFieldFocused = false
+                        Task { await appModel.sendCurrentCommand() }
+                    } label: {
                         Image(systemName: "arrow.up.circle.fill").font(.title2)
                     }
                     .disabled(appModel.commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.isSending)

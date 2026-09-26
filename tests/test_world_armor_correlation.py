@@ -148,6 +148,21 @@ class WorldArmorCorrelationTests(TestCase):
         )
         self.assertEqual(report["candidate_links"],[])
 
+    def test_truncated_usgs_sample_is_visible_but_not_candidate_support(self):
+        base = quake(at=BASE - timedelta(minutes=8))["events"][0]
+        many = [{**base, "id": f"usgs-{idx}"} for idx in range(51)]
+        self.collect(quakes={"status": "ok", "checked_at": BASE.isoformat(),
+                             "events": many})
+        result = self.query()
+        self.assertEqual(result["source_coverage"]["usgs_earthquakes"]["status"],
+                         "partial")
+        self.assertEqual(len([
+            x for x in result["timed_observations"]
+            if x["source"] == "usgs_earthquakes"
+        ]), 50)
+        self.assertEqual(len(result["degraded_observations"]), 50)
+        self.assertEqual(result["candidate_links"], [])
+
     def test_nws_receipt_is_not_promoted_to_source_event_time(self):
         self.collect()
         r = self.query(source_ids=["nws_point_alerts", "usgs_earthquakes"])

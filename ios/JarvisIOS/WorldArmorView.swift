@@ -1811,6 +1811,61 @@ struct WorldArmorView: View {
         }
     }
 
+    private func checkAndImportCameraWatch() async {
+        guard let regionID = selectedID, !busy else { return }
+        let id = cameraWatchImportID.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !id.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let checked = try await client.checkExternalWatch(
+                id, scope: "personal"
+            )
+            guard checked.status == "ok" else {
+                cameraStatus = "Camera watch source check: " + checked.status
+                    + ". No evidence imported."
+                return
+            }
+            let imported = try await client.worldArmorImportCameraWatch(
+                investigationID: regionID, watchID: id
+            )
+            let history = try await client.worldArmorCameraReceipts(
+                investigationID: regionID
+            )
+            cameraReceipts = history.cameraReceipts
+            cameraStatus = "Imported one exact watch source report at "
+                + imported.retrievedAt + ". Publisher capture time unknown."
+        } catch {
+            cameraStatus = "Check/import unavailable: " + error.localizedDescription
+        }
+    }
+
+    private func importSavedCameraWatch() async {
+        guard let regionID = selectedID, !busy else { return }
+        let id = cameraWatchImportID.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !id.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let imported = try await client.worldArmorImportCameraWatch(
+                investigationID: regionID, watchID: id
+            )
+            let history = try await client.worldArmorCameraReceipts(
+                investigationID: regionID
+            )
+            cameraReceipts = history.cameraReceipts
+            cameraStatus = "Imported one prior exact watch report at "
+                + imported.retrievedAt + ". No new provider request."
+        } catch {
+            cameraStatus = "Saved watch import unavailable: "
+                + error.localizedDescription
+        }
+    }
+
     private func refreshCameraEvidence() async {
         guard let regionID = selectedID, !busy else { return }
         busy = true

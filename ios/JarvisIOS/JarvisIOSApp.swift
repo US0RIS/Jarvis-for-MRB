@@ -1,10 +1,35 @@
 import CryptoKit
 import Foundation
 import SwiftUI
+import UIKit
 import MWDATCore
+
+final class WorldArmorPushAppDelegate: NSObject, UIApplicationDelegate {
+    static let tokenKey = "jarvis.worldArmorPush.deviceToken"
+    static let errorKey = "jarvis.worldArmorPush.registrationError"
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        UserDefaults.standard.set(token, forKey: Self.tokenKey)
+        UserDefaults.standard.removeObject(forKey: Self.errorKey)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        UserDefaults.standard.set(
+            error.localizedDescription, forKey: Self.errorKey
+        )
+    }
+}
 
 @main
 struct JarvisIOSApp: App {
+    @UIApplicationDelegateAdaptor(WorldArmorPushAppDelegate.self) private var appDelegate
     @StateObject private var appModel: JarvisAppModel
     @StateObject private var persistentPresence: PersistentPresenceController
     @StateObject private var meetingCapture: MeetingCaptureController

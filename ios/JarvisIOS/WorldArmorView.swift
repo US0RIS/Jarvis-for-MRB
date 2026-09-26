@@ -905,6 +905,290 @@ struct ArmorForgetReceipt: Decodable {
     let qualifier: String?
 }
 
+struct ArmorPushStatus: Decodable {
+    let enabled: Bool
+    let providerConfigured: Bool
+    let registeredDevices: Int
+    let pending: Int
+    let dead: Int
+    let sentRetained: Int
+    let oldestPendingAt: String?
+    let maxPending: Int
+    let maxAttempts: Int
+    let deliverySemantics: String
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, pending, dead
+        case providerConfigured = "provider_configured"
+        case registeredDevices = "registered_devices"
+        case sentRetained = "sent_retained"
+        case oldestPendingAt = "oldest_pending_at"
+        case maxPending = "max_pending"
+        case maxAttempts = "max_attempts"
+        case deliverySemantics = "delivery_semantics"
+    }
+}
+
+struct ArmorPushRegistration: Decodable {
+    let deviceID: String
+    let tokenHash: String
+    let enabled: Bool
+    let pushTransportEnabled: Bool
+    let providerConfigured: Bool
+    let tokenReflected: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case deviceID = "device_id"
+        case tokenHash = "token_hash"
+        case pushTransportEnabled = "push_transport_enabled"
+        case providerConfigured = "provider_configured"
+        case tokenReflected = "token_reflected"
+    }
+}
+
+struct ArmorPushUnregister: Decodable {
+    let disabled: Bool
+}
+
+struct ArmorFullStatus: Decodable {
+    struct Layers: Decodable {
+        let realityBrowser: String
+        let syntheticSenses: String
+        let causalDebugger: String
+        let parallelExistence: String
+        let presence: String
+
+        enum CodingKeys: String, CodingKey {
+            case realityBrowser = "reality_browser"
+            case syntheticSenses = "synthetic_senses"
+            case causalDebugger = "causal_debugger"
+            case parallelExistence = "parallel_existence"
+            case presence
+        }
+    }
+
+    let enabled: Bool
+    let layers: Layers
+    let registeredWorkers: Int
+    let activePresenceGrants: Int
+    let pendingPresenceReceipts: Int
+    let qualifier: String
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, layers, qualifier
+        case registeredWorkers = "registered_workers"
+        case activePresenceGrants = "active_presence_grants"
+        case pendingPresenceReceipts = "pending_presence_receipts"
+    }
+}
+
+struct ArmorRealityBrowser: Decodable {
+    struct Item: Decodable, Identifiable {
+        let id: String
+        let time: String?
+        let timeBasis: String
+        let kind: String?
+        let subsystem: String
+        let sourceID: String?
+        let status: String?
+        let priority: String
+        let summary: String
+        let synthetic: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case id, time, kind, subsystem, status, priority, summary, synthetic
+            case timeBasis = "time_basis"
+            case sourceID = "source_id"
+        }
+    }
+
+    let timeline: [Item]
+    let nextSeq: Int
+    let latestSeq: Int
+    let replayGap: Bool
+    let missingTimeIsUnknown: Bool
+    let interpolationPerformed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case timeline
+        case nextSeq = "next_seq"
+        case latestSeq = "latest_seq"
+        case replayGap = "replay_gap"
+        case missingTimeIsUnknown = "missing_time_is_unknown"
+        case interpolationPerformed = "interpolation_performed"
+    }
+}
+
+struct ArmorSyntheticSenses: Decodable {
+    struct Signal: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let value: Double
+        let unit: String
+        let derived: Bool
+        let worldFact: Bool
+        let interpretation: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, label, value, unit, derived, interpretation
+            case worldFact = "world_fact"
+        }
+    }
+
+    let signals: [Signal]
+    let eventCount: Int
+    let replayGap: Bool
+    let derivedOnly: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case signals
+        case eventCount = "event_count"
+        case replayGap = "replay_gap"
+        case derivedOnly = "derived_only"
+    }
+}
+
+struct ArmorCausalDebugger: Decodable {
+    struct Report: Decodable, Identifiable {
+        var id: String { hypothesisID }
+        let hypothesisID: String
+        let claimUnderTest: String
+        let status: String
+        let supportingObservationIDs: [String]
+        let contradictingObservationIDs: [String]
+        let independentLineageCount: Int
+        let missingEvidence: [String]
+        let alternativeExplanations: [String]
+        let causalConclusion: Bool
+        let interventionPerformed: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case hypothesisID = "hypothesis_id"
+            case claimUnderTest = "claim_under_test"
+            case status
+            case supportingObservationIDs = "supporting_observation_ids"
+            case contradictingObservationIDs = "contradicting_observation_ids"
+            case independentLineageCount = "independent_lineage_count"
+            case missingEvidence = "missing_evidence"
+            case alternativeExplanations = "alternative_explanations"
+            case causalConclusion = "causal_conclusion"
+            case interventionPerformed = "intervention_performed"
+        }
+    }
+
+    let reports: [Report]
+    let causalClaims: Int
+    let externalActions: Int
+    let qualifier: String
+
+    enum CodingKeys: String, CodingKey {
+        case reports, qualifier
+        case causalClaims = "causal_claims"
+        case externalActions = "external_actions"
+    }
+}
+
+struct ArmorParallelExistence: Decodable {
+    let runID: String
+    let durationMS: Int
+    let parallelTaskCount: Int
+    let okCount: Int
+    let degradedCount: Int
+    let remoteAuthorityExpansion: Bool
+    let externalActions: Int
+
+    enum CodingKeys: String, CodingKey {
+        case runID = "run_id"
+        case durationMS = "duration_ms"
+        case parallelTaskCount = "parallel_task_count"
+        case okCount = "ok_count"
+        case degradedCount = "degraded_count"
+        case remoteAuthorityExpansion = "remote_authority_expansion"
+        case externalActions = "external_actions"
+    }
+}
+
+struct ArmorPresenceGrant: Decodable, Identifiable {
+    let id: String
+    let actuatorKind: String
+    let targetID: String
+    let targetLabel: String
+    let createdAt: String
+    let expiresAt: String
+    let state: String
+    let maxUses: Int
+    let useCount: Int
+    let remainingUses: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, state
+        case actuatorKind = "actuator_kind"
+        case targetID = "target_id"
+        case targetLabel = "target_label"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+        case maxUses = "max_uses"
+        case useCount = "use_count"
+        case remainingUses = "remaining_uses"
+    }
+}
+
+struct ArmorPresenceReceipt: Decodable, Identifiable {
+    let id: String
+    let grantID: String
+    let requestedAt: String
+    let completedAt: String?
+    let requestedState: Int
+    let status: String
+    let verificationBasis: String
+    let message: String
+    let physicalEffectVerified: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, message
+        case grantID = "grant_id"
+        case requestedAt = "requested_at"
+        case completedAt = "completed_at"
+        case requestedState = "requested_state"
+        case verificationBasis = "verification_basis"
+        case physicalEffectVerified = "physical_effect_verified"
+    }
+}
+
+struct ArmorPresenceState: Decodable {
+    let grants: [ArmorPresenceGrant]
+    let receipts: [ArmorPresenceReceipt]
+}
+
+struct ArmorPresenceDispatchReceipt: Decodable {
+    let requestID: String
+    let grantID: String
+    let status: String
+    let verificationBasis: String
+    let physicalEffectVerified: Bool
+    let requestedState: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case requestID = "request_id"
+        case grantID = "grant_id"
+        case verificationBasis = "verification_basis"
+        case physicalEffectVerified = "physical_effect_verified"
+        case requestedState = "requested_state"
+    }
+}
+
+struct ArmorPresenceRevoke: Decodable {
+    let grantID: String
+    let revoked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case grantID = "grant_id"
+        case revoked
+    }
+}
+
 struct WorldArmorView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
     @Environment(\.scenePhase) private var scenePhase
@@ -974,6 +1258,13 @@ struct WorldArmorView: View {
     @State private var movementEntityType = ""
     @State private var movementStatus = "No movement source queried."
     @State private var distributedWorkers: [ArmorDistributedWorker] = []
+    @State private var pushStatus: ArmorPushStatus?
+    @State private var fullScopeStatus: ArmorFullStatus?
+    @State private var realityBrowser: ArmorRealityBrowser?
+    @State private var syntheticSenses: ArmorSyntheticSenses?
+    @State private var causalDebugger: ArmorCausalDebugger?
+    @State private var parallelExistence: ArmorParallelExistence?
+    @State private var presenceState: ArmorPresenceState?
     @State private var liveFabricStatus: ArmorLiveStatus?
     @State private var liveEvents: [ArmorLiveEvent] = []
     @State private var selectedID: String?
@@ -1012,6 +1303,7 @@ struct WorldArmorView: View {
             VStack(alignment: .leading, spacing: 15) {
                 heading
                 sourceConsole
+                fullScopeConsole
                 liveFabricConsole
                 movementConsole
                 enrollment
@@ -1486,6 +1778,164 @@ struct WorldArmorView: View {
         }
     }
 
+    private var fullScopeConsole: some View {
+        GroupBox("World Armor v8 · full suit") {
+            VStack(alignment: .leading, spacing: 10) {
+                if let fullScopeStatus {
+                    HStack {
+                        Text(fullScopeStatus.enabled ? "Full-scope layer enabled" : "Full-scope layer disabled")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(fullScopeStatus.registeredWorkers) workers")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Group {
+                        Text("Reality Browser · \(fullScopeStatus.layers.realityBrowser)")
+                        Text("Synthetic Senses · \(fullScopeStatus.layers.syntheticSenses)")
+                        Text("Causal Debugger · \(fullScopeStatus.layers.causalDebugger)")
+                        Text("Parallel Existence · \(fullScopeStatus.layers.parallelExistence)")
+                        Text("Presence · \(fullScopeStatus.layers.presence)")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    Text(fullScopeStatus.qualifier)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Full-scope status not checked.")
+                        .font(.headline)
+                }
+
+                HStack {
+                    Button("Refresh full suit") {
+                        Task { await refreshFullScope(runAnalysis: false) }
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Run parallel analysis") {
+                        Task { await refreshFullScope(runAnalysis: true) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .disabled(busy)
+
+                if let parallelExistence {
+                    Text("Parallel Existence: \(parallelExistence.okCount)/\(parallelExistence.parallelTaskCount) "
+                         + "tasks healthy · \(parallelExistence.durationMS) ms"
+                         + (parallelExistence.degradedCount > 0
+                            ? " · \(parallelExistence.degradedCount) degraded" : ""))
+                        .font(.caption)
+                }
+
+                if let syntheticSenses {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Synthetic Senses")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(syntheticSenses.signals.prefix(5)) { signal in
+                            Text(signal.label + ": "
+                                 + String(format: "%.2f", signal.value)
+                                 + " " + signal.unit)
+                                .font(.caption)
+                        }
+                        Text("Derived signals are explicitly synthetic; they are not direct world facts.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let realityBrowser {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Reality Browser")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(realityBrowser.timeline.suffix(8).reversed()) { item in
+                            Text((item.time ?? "time unknown") + " · " + item.summary)
+                                .font(.caption2)
+                                .lineLimit(2)
+                        }
+                        if realityBrowser.replayGap {
+                            Text("Replay gap: retained history does not cover the saved cursor.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let causalDebugger {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Causal Debugger")
+                            .font(.subheadline.weight(.semibold))
+                        if causalDebugger.reports.isEmpty {
+                            Text("No bounded candidate hypothesis in the selected window.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(causalDebugger.reports.prefix(3)) { report in
+                            Text(report.claimUnderTest)
+                                .font(.caption)
+                            Text("Mechanism: " + report.status
+                                 + " · causal conclusion: "
+                                 + (report.causalConclusion ? "yes" : "no"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Divider()
+                Text("Presence · authorized physical embodiment")
+                    .font(.subheadline.weight(.semibold))
+                Text("Each tap creates a short-lived one-use World Armor grant for one exact Apple Home light. "
+                     + "The iPhone performs the HomeKit write and posts fresh accessory readback separately.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if appModel.homeEnvironment.lights.isEmpty {
+                    Button("Discover Apple Home lights") {
+                        appModel.homeEnvironment.discover()
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    ForEach(appModel.homeEnvironment.lights.prefix(8)) { light in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(light.name)
+                                    .font(.caption)
+                                Text(light.room + (light.reachable ? "" : " · unreachable"))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("On") {
+                                Task {
+                                    await runPresence(
+                                        lightID: light.id,
+                                        label: light.name,
+                                        desiredOn: true
+                                    )
+                                }
+                            }
+                            Button("Off") {
+                                Task {
+                                    await runPresence(
+                                        lightID: light.id,
+                                        label: light.name,
+                                        desiredOn: false
+                                    )
+                                }
+                            }
+                            .disabled(!light.reachable || busy)
+                        }
+                    }
+                }
+                if let recent = presenceState?.receipts.first {
+                    Text("Latest Presence receipt: " + recent.status
+                         + " · " + recent.message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var liveFabricConsole: some View {
         GroupBox("World Armor v7 · live fabric") {
             VStack(alignment: .leading, spacing: 9) {
@@ -1517,17 +1967,31 @@ struct WorldArmorView: View {
                     }
                 }
                 Toggle(
-                    "Local notifications for warning/urgent World Armor events",
+                    "Notifications for warning/urgent World Armor events",
                     isOn: Binding(
                         get: { appModel.settings.worldArmorLiveAlertsEnabled },
                         set: { appModel.settings.worldArmorLiveAlertsEnabled = $0 }
                     )
                 )
                 Text("The durable journal replays missed events after reconnect. "
-                     + "Local notifications require iOS permission and an active "
-                     + "Jarvis connection; closed-app remote APNs is not yet claimed.")
+                     + "When APNs credentials and this signed app's push entitlement "
+                     + "are configured, warning/urgent events can also arrive while "
+                     + "the app is closed. In-app/local delivery remains a fallback.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let pushStatus {
+                    Group {
+                        Text(pushStatus.providerConfigured
+                             ? "Closed-app APNs · provider configured"
+                             : "Closed-app APNs · provider not configured")
+                        Text("Devices \(pushStatus.registeredDevices) · pending \(pushStatus.pending)")
+                        if pushStatus.dead > 0 {
+                            Text("Dead deliveries \(pushStatus.dead)")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("Start live supervisor") {
                         Task { await setLiveSupervisor(running: true) }
@@ -2505,6 +2969,109 @@ struct WorldArmorView: View {
         }
     }
 
+    private func fullScopeWindow() -> (String, String) {
+        let end = correlationEnd
+        let start = end.addingTimeInterval(
+            -Double(correlationWindowHours) * 3_600
+        )
+        let formatter = ISO8601DateFormatter()
+        return (formatter.string(from: start), formatter.string(from: end))
+    }
+
+    private func refreshFullScope(runAnalysis: Bool) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            async let fullStatusRequest = client.worldArmorFullStatus()
+            async let presenceRequest = client.worldArmorPresence()
+            async let browserRequest = client.worldArmorRealityBrowser(
+                afterSeq: max(0, (liveFabricStatus?.latestSeq ?? 0) - 100),
+                limit: 100
+            )
+            async let sensesRequest = client.worldArmorSyntheticSenses(
+                afterSeq: max(0, (liveFabricStatus?.latestSeq ?? 0) - 100),
+                limit: 100
+            )
+            let (newStatus, newPresence, newBrowser, newSenses) = try await (
+                fullStatusRequest, presenceRequest, browserRequest, sensesRequest
+            )
+            fullScopeStatus = newStatus
+            presenceState = newPresence
+            realityBrowser = newBrowser
+            syntheticSenses = newSenses
+
+            if runAnalysis {
+                let cutoff = asKnownAt.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let selectedID {
+                    let (start, end) = fullScopeWindow()
+                    async let causalRequest = client.worldArmorCausalDebugger(
+                        investigationID: selectedID,
+                        startAt: start,
+                        endAt: end,
+                        asKnownAt: cutoff.isEmpty ? nil : cutoff
+                    )
+                    async let parallelRequest = client.worldArmorParallelExistence(
+                        afterSeq: max(0, (liveFabricStatus?.latestSeq ?? 0) - 100),
+                        startAt: start,
+                        endAt: end,
+                        investigationID: selectedID,
+                        asKnownAt: cutoff.isEmpty ? nil : cutoff
+                    )
+                    let (newCausal, newParallel) = try await (
+                        causalRequest, parallelRequest
+                    )
+                    causalDebugger = newCausal
+                    parallelExistence = newParallel
+                    realityBrowser = try await client.worldArmorRealityBrowser(
+                        afterSeq: max(0, (liveFabricStatus?.latestSeq ?? 0) - 100),
+                        limit: 200,
+                        startAt: start,
+                        endAt: end,
+                        investigationID: selectedID,
+                        asKnownAt: cutoff.isEmpty ? nil : cutoff
+                    )
+                } else {
+                    causalDebugger = nil
+                    parallelExistence = try await client.worldArmorParallelExistence(
+                        afterSeq: max(0, (liveFabricStatus?.latestSeq ?? 0) - 100)
+                    )
+                }
+            }
+            status = runAnalysis
+                ? "Full World Armor analysis completed."
+                : "Full World Armor interfaces refreshed."
+        } catch {
+            status = "Full World Armor unavailable: " + error.localizedDescription
+        }
+    }
+
+    private func runPresence(
+        lightID: UUID, label: String, desiredOn: Bool
+    ) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let grant = try await client.worldArmorPresenceGrant(
+                targetID: lightID,
+                targetLabel: label,
+                lifetimeSeconds: 120,
+                maxUses: 1
+            )
+            let dispatch = try await client.worldArmorPresenceDispatch(
+                grantID: grant.id,
+                desiredOn: desiredOn
+            )
+            status = "Presence request #" + String(dispatch.requestID.prefix(8))
+                + " dispatched; awaiting separate HomeKit readback."
+            try? await Task.sleep(for: .milliseconds(500))
+            presenceState = try? await client.worldArmorPresence()
+        } catch {
+            status = "Presence blocked: " + error.localizedDescription
+        }
+    }
+
     private func refresh() async {
         guard !busy else { return }
         busy = true
@@ -2528,6 +3095,7 @@ struct WorldArmorView: View {
             if let fabric = try? await client.worldArmorDistributedWorkers() {
                 distributedWorkers = fabric.workers
             }
+            pushStatus = try? await client.worldArmorPushStatus()
             if let live = try? await client.worldArmorLiveStatus() {
                 liveFabricStatus = live
                 if let page = try? await client.worldArmorLiveEvents(
@@ -2591,6 +3159,7 @@ struct WorldArmorView: View {
                 afterSeq: max(0, live.latestSeq - 25), limit: 25
             )
             liveEvents = Array(page.events.reversed())
+            pushStatus = try? await client.worldArmorPushStatus()
         } catch {
             status = "Live fabric unavailable: " + error.localizedDescription
         }

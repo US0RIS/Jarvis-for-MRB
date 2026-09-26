@@ -71,6 +71,8 @@ _tts_start_attempted = False
 _knowledge_started = False
 _proactive_started = False
 _world_armor_live_started = False
+_world_armor_push_started = False
+_world_armor_guard_started = False
 
 
 class CommandRequest(BaseModel):
@@ -332,6 +334,59 @@ class WorldArmorCorrelationRequest(BaseModel):
     as_known_at: str | None = None
     source_ids: list[str] | None = None
     query_radius_km: float | None = None
+
+
+class WorldArmorPushTokenRequest(BaseModel):
+    device_token: str
+
+
+class WorldArmorFullBrowserRequest(BaseModel):
+    after_seq: int = 0
+    limit: int = 200
+    start_at: str | None = None
+    end_at: str | None = None
+    investigation_id: str | None = None
+    as_known_at: str | None = None
+
+
+class WorldArmorFullCausalRequest(BaseModel):
+    investigation_id: str
+    start_at: str
+    end_at: str
+    hypothesis_id: str | None = None
+    as_known_at: str | None = None
+
+
+class WorldArmorFullParallelRequest(BaseModel):
+    after_seq: int = 0
+    start_at: str | None = None
+    end_at: str | None = None
+    investigation_id: str | None = None
+    hypothesis_id: str | None = None
+    as_known_at: str | None = None
+
+
+class WorldArmorPresenceGrantRequest(BaseModel):
+    actuator_kind: str
+    target_id: str
+    target_label: str
+    lifetime_seconds: int = 120
+    max_uses: int = 1
+
+
+class WorldArmorPresenceGrantIDRequest(BaseModel):
+    grant_id: str
+
+
+class WorldArmorPresenceDispatchRequest(BaseModel):
+    grant_id: str
+    desired_on: bool
+
+
+class WorldArmorPresenceReceiptRequest(BaseModel):
+    request_id: str
+    status: str
+    message: str
 
 
 class RealityLensRequest(BaseModel):
@@ -645,14 +700,57 @@ def _start_tts_in_background() -> None:
 
 def _ensure_world_armor_live_supervisor() -> None:
     global _world_armor_live_started
-    if _world_armor_live_started:
-        return
-    from jarvis_mrb.world_armor_live import autostart_enabled, start_supervisor
+    from jarvis_mrb.world_armor_live import (
+        autostart_enabled, start_supervisor, supervisor_alive,
+    )
     if not autostart_enabled():
         return
+    if supervisor_alive():
+        _world_armor_live_started = True
+        return
+    _world_armor_live_started = False
     if start_supervisor():
         _world_armor_live_started = True
         record_runtime_success("world_armor_live")
+
+
+def _world_armor_guard_loop() -> None:
+    while True:
+        try:
+            _ensure_world_armor_live_supervisor()
+            _ensure_world_armor_push_worker()
+        except Exception as exc:
+            record_runtime_failure("world_armor_guard", exc)
+        time.sleep(15)
+
+
+def _ensure_world_armor_guard() -> None:
+    global _world_armor_guard_started
+    if _world_armor_guard_started:
+        return
+    from jarvis_mrb.world_armor_live import autostart_enabled
+    from jarvis_mrb.world_armor_push import enabled as push_enabled
+    if not autostart_enabled() and not push_enabled():
+        return
+    _world_armor_guard_started = True
+    threading.Thread(
+        target=_world_armor_guard_loop,
+        name="world-armor-runtime-guard",
+        daemon=True,
+    ).start()
+
+
+def _ensure_world_armor_push_worker() -> None:
+    global _world_armor_push_started
+    from jarvis_mrb.world_armor_push import enabled, start_worker, worker_alive
+    if not enabled():
+        return
+    if worker_alive():
+        _world_armor_push_started = True
+        return
+    if start_worker():
+        _world_armor_push_started = True
+        record_runtime_success("world_armor_push")
 
 
 def _installed_ollama_models() -> set[str]:
@@ -759,6 +857,14 @@ def startup() -> None:
         _ensure_world_armor_live_supervisor()
     except Exception as exc:
         record_runtime_failure("world_armor_live", exc)
+    try:
+        _ensure_world_armor_push_worker()
+    except Exception as exc:
+        record_runtime_failure("world_armor_push", exc)
+    try:
+        _ensure_world_armor_guard()
+    except Exception as exc:
+        record_runtime_failure("world_armor_guard", exc)
     _start_tts_in_background()
     start_proactive_monitor()
     _proactive_started = True
@@ -1119,6 +1225,229 @@ def _world_armor_platform_error(exc: Exception) -> None:
     if isinstance(exc, RuntimeError):
         raise HTTPException(status_code=503, detail=str(exc)[:240]) from exc
     raise exc
+
+
+@app.get("/world-armor/v8/push/status")
+def world_armor_push_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_push import status
+    return status()
+
+
+@app.post("/world-armor/v8/push/register")
+def world_armor_push_register(
+    request: WorldArmorPushTokenRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_push import register_device
+    try:
+        result = register_device(request.device_token)
+        _ensure_world_armor_push_worker()
+        return result
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/push/unregister")
+def world_armor_push_unregister(
+    request: WorldArmorPushTokenRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_push import unregister_device
+    try:
+        return unregister_device(request.device_token)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v8/status")
+def world_armor_full_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import full_status
+    return full_status()
+
+
+@app.post("/world-armor/v8/reality-browser")
+def world_armor_reality_browser(
+    request: WorldArmorFullBrowserRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import reality_browser
+    try:
+        return reality_browser(
+            after_seq=request.after_seq,
+            limit=request.limit,
+            start_at=request.start_at,
+            end_at=request.end_at,
+            investigation_id=request.investigation_id,
+            as_known_at=request.as_known_at,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/synthetic-senses")
+def world_armor_synthetic_senses(
+    request: WorldArmorFullBrowserRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import synthetic_senses
+    try:
+        return synthetic_senses(
+            after_seq=request.after_seq,
+            limit=request.limit,
+            start_at=request.start_at,
+            end_at=request.end_at,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/causal-debugger")
+def world_armor_causal_debugger(
+    request: WorldArmorFullCausalRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import causal_debugger
+    try:
+        return causal_debugger(
+            request.investigation_id,
+            start_at=request.start_at,
+            end_at=request.end_at,
+            hypothesis_id=request.hypothesis_id,
+            as_known_at=request.as_known_at,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/parallel-existence")
+def world_armor_parallel_existence(
+    request: WorldArmorFullParallelRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import parallel_existence
+    try:
+        return parallel_existence(
+            after_seq=request.after_seq,
+            start_at=request.start_at,
+            end_at=request.end_at,
+            investigation_id=request.investigation_id,
+            hypothesis_id=request.hypothesis_id,
+            as_known_at=request.as_known_at,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.get("/world-armor/v8/presence")
+def world_armor_presence_list(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import list_presence_grants
+    return list_presence_grants()
+
+
+@app.post("/world-armor/v8/presence/grants")
+def world_armor_presence_grant(
+    request: WorldArmorPresenceGrantRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import create_presence_grant
+    try:
+        return create_presence_grant(
+            actuator_kind=request.actuator_kind,
+            target_id=request.target_id,
+            target_label=request.target_label,
+            lifetime_seconds=request.lifetime_seconds,
+            max_uses=request.max_uses,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/presence/revoke")
+def world_armor_presence_revoke(
+    request: WorldArmorPresenceGrantIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import revoke_presence_grant
+    try:
+        return revoke_presence_grant(request.grant_id)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/presence/dispatch")
+def world_armor_presence_dispatch(
+    request: WorldArmorPresenceDispatchRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import dispatch_presence
+    try:
+        return dispatch_presence(
+            request.grant_id,
+            desired_on=request.desired_on,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/presence/receipt")
+def world_armor_presence_receipt(
+    request: WorldArmorPresenceReceiptRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_armor_full import record_presence_receipt
+    try:
+        return record_presence_receipt(
+            request.request_id,
+            status=request.status,
+            message=request.message,
+        )
+    except (ValueError, KeyError, RuntimeError) as exc:
+        _world_armor_platform_error(exc)
 
 
 @app.get("/world-armor/v7/live/status")

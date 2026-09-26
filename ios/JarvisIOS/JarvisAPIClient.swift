@@ -1188,6 +1188,192 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
     }
 
+    func worldArmorPushStatus() async throws -> ArmorPushStatus {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v8/push/status"
+        )
+        return try JSONDecoder().decode(ArmorPushStatus.self, from: data)
+    }
+
+    func worldArmorPushRegister(_ token: String) async throws -> ArmorPushRegistration {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/push/register",
+            body: ["device_token": token]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPushRegistration.self, from: data)
+    }
+
+    func worldArmorPushUnregister(_ token: String) async throws -> ArmorPushUnregister {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/push/unregister",
+            body: ["device_token": token]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPushUnregister.self, from: data)
+    }
+
+    func worldArmorFullStatus() async throws -> ArmorFullStatus {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v8/status"
+        )
+        return try JSONDecoder().decode(ArmorFullStatus.self, from: data)
+    }
+
+    func worldArmorRealityBrowser(
+        afterSeq: Int = 0,
+        limit: Int = 200,
+        startAt: String? = nil,
+        endAt: String? = nil,
+        investigationID: String? = nil,
+        asKnownAt: String? = nil
+    ) async throws -> ArmorRealityBrowser {
+        var body: [String: Any] = [
+            "after_seq": max(0, afterSeq),
+            "limit": min(max(limit, 1), 500),
+        ]
+        if let startAt, !startAt.isEmpty { body["start_at"] = startAt }
+        if let endAt, !endAt.isEmpty { body["end_at"] = endAt }
+        if let investigationID, !investigationID.isEmpty {
+            body["investigation_id"] = investigationID
+        }
+        if let asKnownAt, !asKnownAt.isEmpty { body["as_known_at"] = asKnownAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v8/reality-browser", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorRealityBrowser.self, from: data)
+    }
+
+    func worldArmorSyntheticSenses(
+        afterSeq: Int = 0,
+        limit: Int = 300,
+        startAt: String? = nil,
+        endAt: String? = nil
+    ) async throws -> ArmorSyntheticSenses {
+        var body: [String: Any] = [
+            "after_seq": max(0, afterSeq),
+            "limit": min(max(limit, 1), 500),
+        ]
+        if let startAt, !startAt.isEmpty { body["start_at"] = startAt }
+        if let endAt, !endAt.isEmpty { body["end_at"] = endAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v8/synthetic-senses", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorSyntheticSenses.self, from: data)
+    }
+
+    func worldArmorCausalDebugger(
+        investigationID: String,
+        startAt: String,
+        endAt: String,
+        hypothesisID: String? = nil,
+        asKnownAt: String? = nil
+    ) async throws -> ArmorCausalDebugger {
+        var body: [String: Any] = [
+            "investigation_id": investigationID,
+            "start_at": startAt,
+            "end_at": endAt,
+        ]
+        if let hypothesisID, !hypothesisID.isEmpty {
+            body["hypothesis_id"] = hypothesisID
+        }
+        if let asKnownAt, !asKnownAt.isEmpty { body["as_known_at"] = asKnownAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v8/causal-debugger", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorCausalDebugger.self, from: data)
+    }
+
+    func worldArmorParallelExistence(
+        afterSeq: Int = 0,
+        startAt: String? = nil,
+        endAt: String? = nil,
+        investigationID: String? = nil,
+        hypothesisID: String? = nil,
+        asKnownAt: String? = nil
+    ) async throws -> ArmorParallelExistence {
+        var body: [String: Any] = ["after_seq": max(0, afterSeq)]
+        if let startAt, !startAt.isEmpty { body["start_at"] = startAt }
+        if let endAt, !endAt.isEmpty { body["end_at"] = endAt }
+        if let investigationID, !investigationID.isEmpty {
+            body["investigation_id"] = investigationID
+        }
+        if let hypothesisID, !hypothesisID.isEmpty {
+            body["hypothesis_id"] = hypothesisID
+        }
+        if let asKnownAt, !asKnownAt.isEmpty { body["as_known_at"] = asKnownAt }
+        let (data, response) = try await postData(
+            path: "world-armor/v8/parallel-existence", body: body
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorParallelExistence.self, from: data)
+    }
+
+    func worldArmorPresence() async throws -> ArmorPresenceState {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v8/presence"
+        )
+        return try JSONDecoder().decode(ArmorPresenceState.self, from: data)
+    }
+
+    func worldArmorPresenceGrant(
+        targetID: UUID,
+        targetLabel: String,
+        lifetimeSeconds: Int = 120,
+        maxUses: Int = 1
+    ) async throws -> ArmorPresenceGrant {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/presence/grants",
+            body: [
+                "actuator_kind": "homekit_light",
+                "target_id": targetID.uuidString,
+                "target_label": targetLabel,
+                "lifetime_seconds": lifetimeSeconds,
+                "max_uses": maxUses,
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPresenceGrant.self, from: data)
+    }
+
+    func worldArmorPresenceDispatch(
+        grantID: String, desiredOn: Bool
+    ) async throws -> ArmorPresenceDispatchReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/presence/dispatch",
+            body: ["grant_id": grantID, "desired_on": desiredOn]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPresenceDispatchReceipt.self, from: data)
+    }
+
+    func worldArmorPresenceReceipt(
+        requestID: String, status: String, message: String
+    ) async throws -> ArmorPresenceReceipt {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/presence/receipt",
+            body: [
+                "request_id": requestID,
+                "status": status,
+                "message": message,
+            ]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPresenceReceipt.self, from: data)
+    }
+
+    func worldArmorPresenceRevoke(_ grantID: String) async throws -> ArmorPresenceRevoke {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/presence/revoke",
+            body: ["grant_id": grantID]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPresenceRevoke.self, from: data)
+    }
+
     func worldArmorDistributedWorkers() async throws -> ArmorDistributedWorkers {
         let data = try await worldArmorPlatformGet(
             path: "world-armor/v6/workers"

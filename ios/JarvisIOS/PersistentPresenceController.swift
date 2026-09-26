@@ -137,6 +137,9 @@ final class PersistentPresenceController: ObservableObject {
     private var lastObservedResponse = ""
     private var responseCompletionPending = false
     private let worldArmorLiveSeqKey = "jarvis.worldArmorLive.lastSeq"
+    private var processedWorldArmorPresence: Set<String> = []
+    private var lastWorldArmorPushSync = Date.distantPast
+    private var registeredWorldArmorPushToken: String?
 
     init(appModel: JarvisAppModel) {
         self.appModel = appModel
@@ -297,6 +300,70 @@ final class PersistentPresenceController: ObservableObject {
         )
     }
 
+    private func syncWorldArmorRemotePushIfNeeded(force: Bool = false) async {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastWorldArmorPushSync) >= 30 else {
+            return
+        }
+        lastWorldArmorPushSync = now
+        let defaults = UserDefaults.standard
+        let backendTokenKey = "jarvis.worldArmorPush.backendRegisteredToken"
+        let token = defaults.string(
+            forKey: WorldArmorPushAppDelegate.tokenKey
+        )?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let persistedBackendToken = defaults.string(
+            forKey: backendTokenKey
+        )?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard appModel.settings.worldArmorLiveAlertsEnabled else {
+            if let persistedBackendToken, !persistedBackendToken.isEmpty {
+                let result = try? await client.worldArmorPushUnregister(
+                    persistedBackendToken
+                )
+                if result?.disabled == true {
+                    defaults.removeObject(forKey: backendTokenKey)
+                }
+            }
+            registeredWorldArmorPushToken = nil
+            return
+        }
+
+        let center = UNUserNotificationCenter.current()
+        var settings = await center.notificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(
+                options: [.alert, .sound, .badge]
+            )
+            settings = await center.notificationSettings()
+        }
+        guard settings.authorizationStatus == .authorized
+                || settings.authorizationStatus == .provisional
+                || settings.authorizationStatus == .ephemeral else {
+            return
+        }
+
+        UIApplication.shared.registerForRemoteNotifications()
+        guard let token, !token.isEmpty else { return }
+        guard force || registeredWorldArmorPushToken != token else { return }
+        do {
+            let registration = try await client.worldArmorPushRegister(token)
+            if registration.enabled {
+                if let persistedBackendToken,
+                   !persistedBackendToken.isEmpty,
+                   persistedBackendToken != token {
+                    _ = try? await client.worldArmorPushUnregister(
+                        persistedBackendToken
+                    )
+                }
+                defaults.set(token, forKey: backendTokenKey)
+                registeredWorldArmorPushToken = token
+            }
+        } catch {
+            // Reconnect loop retries. Local/live-socket notification delivery
+            // remains available and the durable event journal is authoritative.
+        }
+    }
+
     private var usingRemotePath: Bool {
         guard !companion.activeServerURL.isEmpty else { return false }
         return companion.activeServerURL != appModel.settings.baseURL
@@ -320,6 +387,7 @@ final class PersistentPresenceController: ObservableObject {
         companionStatus = "Connecting"
         lastObservedResponse = appModel.lastResponse
         responseCompletionPending = false
+        await syncWorldArmorRemotePushIfNeeded(force: true)
 
         reconnectTask = Task { [weak self] in
             guard let self else { return }
@@ -407,6 +475,7 @@ final class PersistentPresenceController: ObservableObject {
     private func reconnectLoop() async {
         while !Task.isCancelled && started {
             await healthContext.refreshIfEnabled(appModel.settings.healthContextEnabled)
+            await syncWorldArmorRemotePushIfNeeded()
             if !companion.isConnected {
                 do {
                     try await companion.connect(client: client)
@@ -732,6 +801,57 @@ final class PersistentPresenceController: ObservableObject {
                ) {
                 await handleWorldArmorEvent(worldEvent, replayed: false)
             }
+            return
+        }
+
+        if type == "world_armor_presence_request" {
+            let requestID = String(describing: event["request_id"] ?? "")
+            guard requestID.count == 32,
+                  !processedWorldArmorPresence.contains(requestID) else { return }
+            processedWorldArmorPresence.insert(requestID)
+            if processedWorldArmorPresence.count > 100 {
+                processedWorldArmorPresence.removeAll(keepingCapacity: true)
+                processedWorldArmorPresence.insert(requestID)
+            }
+
+            let actuator = String(describing: event["actuator_kind"] ?? "")
+            let action = String(describing: event["action"] ?? "")
+            let targetText = String(describing: event["target_id"] ?? "")
+            let desired = event["desired_on"] as? Bool
+            let expiryText = String(describing: event["expires_at"] ?? "")
+            var receiptStatus = "blocked"
+            var receiptMessage = "Presence request was not executed."
+
+            if let expiry = ISO8601DateFormatter().date(from: expiryText),
+               expiry < Date() {
+                receiptMessage = "Presence request expired before iPhone execution."
+            } else if actuator != "homekit_light" || action != "set_light" {
+                receiptMessage = "Presence request used an unsupported actuator/action."
+            } else if let target = UUID(uuidString: targetText),
+                      let desired {
+                let result = await appModel.homeEnvironment.setLight(
+                    target, on: desired
+                )
+                receiptMessage = result
+                if result.hasPrefix("Verified in Apple Home:") {
+                    receiptStatus = "verified_reported_state"
+                } else if result.localizedCaseInsensitiveContains("rejected") {
+                    receiptStatus = "failed"
+                } else if result.localizedCaseInsensitiveContains("unreachable")
+                            || result.localizedCaseInsensitiveContains("not available") {
+                    receiptStatus = "blocked"
+                } else {
+                    receiptStatus = "unverified"
+                }
+            } else {
+                receiptMessage = "Presence request target or desired state was invalid."
+            }
+
+            _ = try? await client.worldArmorPresenceReceipt(
+                requestID: requestID,
+                status: receiptStatus,
+                message: receiptMessage
+            )
             return
         }
 

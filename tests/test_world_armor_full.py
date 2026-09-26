@@ -209,6 +209,50 @@ class WorldArmorFullScopeTests(unittest.TestCase):
             full.dispatch_presence(
                 grant["id"], desired_on=True, db_path=self.db, now=NOW
             )
+        expiring = full.create_presence_grant(
+            actuator_kind="homekit_light",
+            target_id=str(uuid4()),
+            target_label="Porch light",
+            lifetime_seconds=15,
+            db_path=self.db,
+            now=NOW,
+        )
+        with self.assertRaises(ValueError):
+            full.dispatch_presence(
+                expiring["id"], desired_on=True, db_path=self.db,
+                now=NOW + timedelta(seconds=16),
+            )
+        lapsed = full.get_presence_grant(
+            expiring["id"], db_path=self.db,
+            now=NOW + timedelta(seconds=16),
+        )
+        self.assertEqual(lapsed["state"], "expired")
+
+    def test_presence_grant_use_budget_is_exhausted_after_max_uses(self):
+        grant = full.create_presence_grant(
+            actuator_kind="homekit_light",
+            target_id=str(uuid4()),
+            target_label="Hallway light",
+            lifetime_seconds=120,
+            max_uses=2,
+            db_path=self.db,
+            now=NOW,
+        )
+        with patch("jarvis_mrb.event_bus.companion_events.publish"):
+            first = full.dispatch_presence(
+                grant["id"], desired_on=True, db_path=self.db, now=NOW
+            )
+            second = full.dispatch_presence(
+                grant["id"], desired_on=False, db_path=self.db, now=NOW
+            )
+            self.assertNotEqual(first["request_id"], second["request_id"])
+            with self.assertRaises(ValueError):
+                full.dispatch_presence(
+                    grant["id"], desired_on=True, db_path=self.db, now=NOW
+                )
+        exhausted = full.get_presence_grant(grant["id"], db_path=self.db, now=NOW)
+        self.assertEqual(exhausted["remaining_uses"], 0)
+        self.assertEqual(exhausted["use_count"], 2)
 
     def test_parallel_existence_runs_bounded_read_only_tasks(self):
         with patch.object(

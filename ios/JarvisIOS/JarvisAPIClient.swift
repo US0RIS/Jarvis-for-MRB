@@ -1188,6 +1188,31 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorLiveStatus.self, from: data)
     }
 
+    func worldArmorPushStatus() async throws -> ArmorPushStatus {
+        let data = try await worldArmorPlatformGet(
+            path: "world-armor/v8/push/status"
+        )
+        return try JSONDecoder().decode(ArmorPushStatus.self, from: data)
+    }
+
+    func worldArmorPushRegister(_ token: String) async throws -> ArmorPushRegistration {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/push/register",
+            body: ["device_token": token]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPushRegistration.self, from: data)
+    }
+
+    func worldArmorPushUnregister(_ token: String) async throws -> ArmorPushUnregister {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/push/unregister",
+            body: ["device_token": token]
+        )
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ArmorPushUnregister.self, from: data)
+    }
+
     func worldArmorFullStatus() async throws -> ArmorFullStatus {
         let data = try await worldArmorPlatformGet(
             path: "world-armor/v8/status"

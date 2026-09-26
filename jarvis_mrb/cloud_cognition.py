@@ -111,6 +111,27 @@ def _history_item(item: Any) -> tuple[str, str]:
     return str(getattr(item, "role", "")), str(getattr(item, "content", ""))
 
 
+def _relevance_terms(value: str) -> set[str]:
+    stop = {
+        "the", "and", "that", "this", "with", "from", "have", "what", "when",
+        "where", "which", "would", "could", "should", "about", "into", "your",
+        "you", "for", "are", "was", "were", "will", "just", "then", "than",
+    }
+    return {
+        token for token in re.findall(r"[a-z0-9][a-z0-9_-]{2,}", value.lower())
+        if token not in stop
+    }
+
+
+def _history_relevant(request_terms: set[str], body: str, *, is_recent: bool) -> bool:
+    if is_recent:
+        return True
+    terms = _relevance_terms(body)
+    if not request_terms or not terms:
+        return False
+    return bool(request_terms.intersection(terms))
+
+
 def compile_cloud_context(
     text: str,
     history: Sequence[Any] | None = None,
@@ -127,9 +148,11 @@ def compile_cloud_context(
     pieces.append("CURRENT REQUEST:\n" + clean_text[:8000])
     classifications["minimized"] += 1
 
-    candidates = list(history or ())[-_MAX_HISTORY_MESSAGES:]
+    all_history = list(history or ())
+    candidates = all_history[-_MAX_HISTORY_MESSAGES:]
+    request_terms = _relevance_terms(text)
     included = 0
-    for item in candidates:
+    for index, item in enumerate(candidates):
         role, body = _history_item(item)
         if role not in {"user", "assistant"} or not body.strip():
             omitted += 1
@@ -139,13 +162,30 @@ def compile_cloud_context(
             classifications["local_only"] += 1
             omitted += 1
             continue
+        if "[sensitive]" in lowered and "[cloud-ok]" not in lowered:
+            classifications["sensitive"] += 1
+            omitted += 1
+            continue
+
+        # Preserve the immediately preceding exchange for follow-up resolution;
+        # older nearby messages need lexical relevance to the current request.
+        is_recent = index >= max(0, len(candidates) - 2)
+        if not _history_relevant(request_terms, body, is_recent=is_recent):
+            classifications["minimized"] += 1
+            omitted += 1
+            continue
+
         clean, n = redact_secrets(body)
         redactions += n
-        if n:
-            classifications["sensitive"] += 1
+        if "[cloud-safe]" in lowered:
+            classifications["cloud_safe"] += 1
+        elif n or "[cloud-minimize]" in lowered or "[cloud-ok]" in lowered:
+            classifications["sensitive" if n else "minimized"] += 1
         else:
             classifications["minimized"] += 1
-        pieces.append(f"{role.upper()}:\n{clean[:3500]}")
+        # Explicit minimization markers receive a smaller character budget.
+        budget = 1800 if "[cloud-minimize]" in lowered or "[cloud-ok]" in lowered else 3500
+        pieces.append(f"{role.upper()}:\n{clean[:budget]}")
         included += 1
 
     for row in list(evidence or ())[:12]:

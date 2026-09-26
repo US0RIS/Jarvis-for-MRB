@@ -175,6 +175,7 @@ def _store_observation(
     _authorize_camera()
     path = _path(db_path)
     with closing(_connect(path, create=False)) as con, con:
+        _schema(con)
         con.execute("BEGIN IMMEDIATE")
         record = _record(con, investigation_id, instant)
         if point is not None and _km(
@@ -183,7 +184,6 @@ def _store_observation(
             raise ValueError(
                 "Publisher-reported camera location lies outside the selected region."
             )
-        _schema(con)
         count = con.execute(
             "SELECT COUNT(*) FROM armor_camera_receipts WHERE investigation_id=?",
             (investigation_id,),

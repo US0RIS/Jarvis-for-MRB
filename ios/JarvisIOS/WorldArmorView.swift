@@ -592,6 +592,7 @@ struct WorldArmorView: View {
     @State private var publicPageMedia: [ArmorPublicPageMediaCandidate] = []
     @State private var cameraCondition = ""
     @State private var cameraWatch: ExternalWatchSummary?
+    @State private var cameraWatchImportID = ""
     @State private var cameraStatus = "No public camera requested."
     @State private var selectedID: String?
     @State private var label = "Selected corridor"
@@ -1224,6 +1225,20 @@ struct WorldArmorView: View {
                     .buttonStyle(.bordered)
                     .disabled(busy)
                 }
+                TextField("Personal camera watch ID to import",
+                          text: $cameraWatchImportID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                HStack {
+                    Button("Check exact watch now + import one frame") {
+                        Task { await checkAndImportCameraWatch() }
+                    }
+                    Button("Import saved watch frame (no network)") {
+                        Task { await importSavedCameraWatch() }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy || cameraWatchImportID.isEmpty)
                 Text(cameraStatus)
                     .font(.caption)
                 Divider()
@@ -1772,6 +1787,7 @@ struct WorldArmorView: View {
                 expiresHours: 3
             )
             cameraWatch = created
+            cameraWatchImportID = created.id
             cameraStatus = "Separate exact camera watch enrolled for "
                 + "3 hours; host must run. Its history does not "
                 + "automatically enter this World Armor region."

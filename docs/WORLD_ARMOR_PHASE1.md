@@ -78,10 +78,16 @@ not inferred continuous monitoring.
 
 An adapter returning more than the explicit normalization cap (15 NWS alert
 rows or 50 USGS earthquake rows) produces `partial` coverage even when the
-upstream request itself succeeded. The saved rows remain reviewable, but cannot
-corroborate a second source in an evidence candidate; `ok` must not imply that
-the entire response was retained. Counts refer to normalized records before
-deduplication, not necessarily new SQLite observations.
+upstream request itself succeeded. The fixed NWS adapter now reads enough of
+the approved response to detect a 16th eligible alert; the fixed USGS adapter
+requests at most 51 source items to detect whether its retained 50-item result
+is incomplete. Both emit `source_limit_reached`, while World Armor retains
+only the original per-source cap. A `partial` receipt's saved rows remain
+reviewable but cannot corroborate a second source in an evidence candidate;
+`ok` must not imply that the entire response was retained. These flags cannot
+detect omissions upstream of the approved adapter itself. Counts refer to
+normalized records before deduplication, not necessarily new SQLite
+observations.
 
 A revision fingerprint covers a source assertion's event time, publish time,
 kind, lineage, geometry basis and normalized values. Correcting a USGS

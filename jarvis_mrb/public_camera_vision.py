@@ -200,7 +200,7 @@ def analyze_official_still(camera_id: str, *, condition: str = "") -> dict[str, 
 
 def analyze_public_camera(
     *, camera_ref: str = "", public_url: str = "",
-    condition: str = "",
+    condition: str = "", windy_api_key: str | None = None,
 ) -> dict[str, Any]:
     """One opt-in still from Caltrans, Windy or a user-supplied public URL.
 
@@ -216,7 +216,7 @@ def analyze_public_camera(
     from jarvis_mrb.public_camera_media import snapshot_public_media
     if camera_ref:
         from jarvis_mrb.public_camera_windy import snapshot_windy_camera
-        selected = snapshot_windy_camera(camera_ref)
+        selected = snapshot_windy_camera(camera_ref, api_key=windy_api_key)
     else:
         selected = snapshot_public_media(public_url)
     # The raw frame is never returned to the caller nor stored in World Armor.

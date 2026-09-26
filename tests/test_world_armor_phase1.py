@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
+import hashlib
+import json
 import os
 import sqlite3
 
@@ -238,6 +240,32 @@ class WorldArmorKernelTests(TestCase):
             and row["kind"] == "source_record_revision"
             for row in changes["source_record_changes"]
         ))
+
+    def test_legacy_values_only_digests_do_not_fabricate_revisions(self):
+        key = self.new()
+        self.ingest(key)
+        with closing(sqlite3.connect(self.db)) as con, con:
+            rows = con.execute(
+                "SELECT id,values_json FROM observations WHERE investigation_id=?",
+                (key,),
+            ).fetchall()
+            for observation_id, values_json in rows:
+                legacy = hashlib.sha256(
+                    json.dumps(
+                        json.loads(values_json), sort_keys=True,
+                        separators=(",", ":"), ensure_ascii=False,
+                        allow_nan=False,
+                    ).encode("utf-8")
+                ).hexdigest()
+                con.execute("UPDATE observations SET digest=? WHERE id=?",
+                            (legacy, observation_id))
+        identical = self.ingest(
+            key, time=NOW + timedelta(minutes=5)
+        )
+        self.assertEqual(identical["new_observations"], 0)
+        current = self.replay(key)
+        self.assertEqual(current["observation_count"], 3)
+        self.assertEqual(current["revisions"], [])
 
     def test_source_result_caps_report_partial_not_complete_coverage(self):
         key = self.new()

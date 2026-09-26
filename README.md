@@ -3074,6 +3074,26 @@ Future self-improvement is plausible only if the evaluator and safety constraint
 
 ---
 
+# Cloud cognitive escalation
+
+Jarvis now supports an optional third reasoning tier without replacing its deterministic or local paths:
+
+```text
+deterministic / hardcoded capability -> local Qwen -> Groq GPT-OSS 120B
+```
+
+`jarvis_mrb.cloud_cognition` makes the escalation decision from deterministic signals such as complexity, uncertainty/conflicting evidence, context size, dependency count, prior local-model failures, source diversity, consequence severity and whether an existing deterministic capability already resolves the request. Ordinary requests remain local; genuinely difficult harmless reasoning can escalate. Authoritative retrieval is preferred over simply asking a larger model to invent high-consequence facts.
+
+The normal credential flow is **Jarvis -> Settings -> Cloud Intelligence / Groq** on iPhone/iPad. The Groq key is device-only Apple Keychain state, not UserDefaults or Reality Graph state. The phone asks the authenticated backend to compile the minimum relevant, secret-redacted context, calls Groq directly, then returns only the structured reasoning proposal to Jarvis. Tool proposals still enter the existing permission/confirmation/audit/verification path and are not cloud-granted authority. A trusted server may alternatively use `GROQ_API_KEY` for CLI/developer operation.
+
+Cloud failure, missing credentials, rate limiting or malformed output falls back to local Jarvis. No current free-tier quota is hard-coded. See **`docs/CLOUD_COGNITION.md`** for the routing, privacy, reliability, debugging and acceptance contract.
+
+Run the routing benchmark with:
+
+```powershell
+py -3.14 -m jarvis_mrb.cognitive_benchmark
+```
+
 # Deterministic routing / smaller local model
 
 The `jarvis/memomind-prep` branch now routes dozens of exact read/action patterns **without** invoking the Ollama Qwen planner. Shared streaming and non-streaming dispatch preserves existing approval gates; common calendar/Gmail/PC/browser/system/world operations, explicit structured writes, selected read-only workflows, routine briefings, daily journals, web-query cleanup, eight-family audited research plans and simple achieved-state goal contracts have deterministic paths. Nuanced open-ended language, semantic synthesis, novel workflows and model-based perception still use the appropriate model. `MODEL_FREE_OPERATIONS.md` documents the call-site inventory, default/opt-in model settings, tests and authenticated `/routing/status` telemetry.

@@ -80,6 +80,25 @@ class CommandRequest(BaseModel):
     session_id: str | None = None
 
 
+class CloudCognitionPrepareRequest(BaseModel):
+    text: str
+    session_id: str | None = None
+    mode: str = "auto"
+
+
+class CloudCognitionResolveRequest(BaseModel):
+    task_id: str
+    proposal: dict[str, Any]
+    metadata: dict[str, Any] | None = None
+
+
+class CloudCognitionFeedbackRequest(BaseModel):
+    request_fingerprint: str
+    user_corrected: bool = False
+    cloud_materially_changed_result: bool | None = None
+    note: str = ""
+
+
 class ExternalWatchCreateRequest(BaseModel):
     scope: str = "personal"
     kind: str
@@ -2931,6 +2950,81 @@ def agency_command_view(authorization: Annotated[str | None, Header()] = None) -
     _check_auth(authorization)
     from jarvis_mrb.agency_command_view import build_command_view
     return build_command_view()
+
+
+@app.get("/cloud-cognition/status")
+def cloud_cognition_status(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import telemetry_snapshot
+    return telemetry_snapshot()
+
+
+@app.post("/cloud-cognition/prepare")
+def cloud_cognition_prepare(
+    request: CloudCognitionPrepareRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import prepare_cloud_task
+
+    session_id = request.session_id or "default"
+    effective_text = _command_alias(request.text)
+    history = _contextual_history(session_id, effective_text, limit=12)
+    return prepare_cloud_task(
+        effective_text,
+        session_id=session_id,
+        history=history,
+        force=request.mode,
+    )
+
+
+@app.post("/cloud-cognition/resolve", response_model=CommandResponse)
+def cloud_cognition_resolve(
+    request: CloudCognitionResolveRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CommandResponse:
+    _check_auth(authorization)
+    from jarvis_mrb.agent import execute_tool
+    from jarvis_mrb.cloud_cognition import (
+        consume_cloud_task,
+        record_cloud_result,
+        record_execution_outcome,
+        validate_proposal,
+    )
+
+    task = consume_cloud_task(request.task_id)
+    proposal = validate_proposal(request.proposal)
+    record_cloud_result(task, proposal, request.metadata)
+
+    # Cloud output is a proposal, never authority. Existing deterministic tool
+    # dispatch remains the only execution path and therefore keeps the normal
+    # permissions, confirmations, audit and verification semantics.
+    if proposal.tool:
+        reply = execute_tool(proposal.tool, proposal.arguments)
+        message = _voice_safe_confirmation(reply.message)
+        record_execution_outcome(task, proposal, ok=reply.ok, outcome=message)
+        return CommandResponse(ok=reply.ok, message=message)
+    message = proposal.response or "I could not form a useful cloud answer."
+    record_execution_outcome(task, proposal, ok=True, outcome=message)
+    return CommandResponse(ok=True, message=message)
+
+
+@app.post("/cloud-cognition/feedback")
+def cloud_cognition_feedback(
+    request: CloudCognitionFeedbackRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import record_routing_feedback
+    record_routing_feedback(
+        request_fingerprint=request.request_fingerprint,
+        user_corrected=request.user_corrected,
+        cloud_materially_changed_result=request.cloud_materially_changed_result,
+        note=request.note,
+    )
+    return {"ok": True}
 
 
 @app.post("/command", response_model=CommandResponse)

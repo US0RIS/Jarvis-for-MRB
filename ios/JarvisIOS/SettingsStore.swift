@@ -5,6 +5,9 @@ final class SettingsStore: ObservableObject {
     @Published var baseURL: String { didSet { defaults.set(baseURL, forKey: "jarvis.baseURL") } }
     @Published var fallbackBaseURL: String { didSet { defaults.set(fallbackBaseURL, forKey: "jarvis.fallbackBaseURL") } }
     @Published var apiToken: String { didSet { KeychainStore.save(apiToken, account: "jarvis.apiToken") } }
+    @Published var cloudCognitionEnabled: Bool { didSet { defaults.set(cloudCognitionEnabled, forKey: "jarvis.cloudCognitionEnabled") } }
+    @Published var cognitionMode: String { didSet { defaults.set(cognitionMode, forKey: "jarvis.cognitionMode") } }
+    @Published private(set) var groqKeyConfigured: Bool
     @Published var homeLatitude: Double { didSet { defaults.set(homeLatitude, forKey: "jarvis.homeLatitude") } }
     @Published var homeLongitude: Double { didSet { defaults.set(homeLongitude, forKey: "jarvis.homeLongitude") } }
     @Published var homeRadius: Double { didSet { defaults.set(homeRadius, forKey: "jarvis.homeRadius") } }
@@ -87,6 +90,9 @@ final class SettingsStore: ObservableObject {
         baseURL = defaults.string(forKey: "jarvis.baseURL") ?? "http://127.0.0.1:8765"
         fallbackBaseURL = defaults.string(forKey: "jarvis.fallbackBaseURL") ?? ""
         apiToken = KeychainStore.read("jarvis.apiToken") ?? ""
+        cloudCognitionEnabled = defaults.object(forKey: "jarvis.cloudCognitionEnabled") as? Bool ?? false
+        cognitionMode = defaults.string(forKey: "jarvis.cognitionMode") ?? "auto"
+        groqKeyConfigured = !(KeychainStore.read("jarvis.groqAPIKey") ?? "").isEmpty
         homeLatitude = defaults.object(forKey: "jarvis.homeLatitude") as? Double ?? 0
         homeLongitude = defaults.object(forKey: "jarvis.homeLongitude") as? Double ?? 0
         homeRadius = defaults.object(forKey: "jarvis.homeRadius") as? Double ?? 150
@@ -140,5 +146,26 @@ final class SettingsStore: ObservableObject {
         offlineAppleBrainEnabled = defaults.object(forKey: "jarvis.offlineAppleBrainEnabled") as? Bool ?? true
         speakContextualRemindersEnabled = defaults.object(forKey: "jarvis.speakContextualRemindersEnabled") as? Bool ?? true
         frontendAutoRecoveryEnabled = defaults.object(forKey: "jarvis.frontendAutoRecoveryEnabled") as? Bool ?? true
+    }
+
+    func saveGroqAPIKey(_ rawValue: String) {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            deleteGroqAPIKey()
+            return
+        }
+        KeychainStore.save(value, account: "jarvis.groqAPIKey")
+        groqKeyConfigured = true
+    }
+
+    func deleteGroqAPIKey() {
+        KeychainStore.delete("jarvis.groqAPIKey")
+        groqKeyConfigured = false
+        cloudCognitionEnabled = false
+    }
+
+    func groqAPIKeyForRequest() -> String? {
+        let value = KeychainStore.read("jarvis.groqAPIKey")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
     }
 }

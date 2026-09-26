@@ -655,6 +655,7 @@ struct WorldArmorView: View {
             cameraReceipts = []
             selectedCameraRef = ""
             publicCameraURL = ""
+            publicPageMedia = []
             cameraWatch = nil
         }
         .alert("World Armor attention", isPresented: $showAttentionBanner) {
@@ -679,6 +680,7 @@ struct WorldArmorView: View {
                 cameraReceipts = []
                 selectedCameraRef = ""
                 publicCameraURL = ""
+                publicPageMedia = []
                 cameraWatch = nil
                 status = "Sensitive investigation evidence hidden while app is inactive."
             }
@@ -1674,6 +1676,25 @@ struct WorldArmorView: View {
             await refreshNotices(alertOnNew: false)
         } catch {
             status = "Notice update failed: " + error.localizedDescription
+        }
+    }
+
+    private func discoverPageMedia() async {
+        guard !busy, !publicCameraURL.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await client.worldArmorPageMedia(
+                publicCameraURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            publicPageMedia = result.candidates
+            cameraStatus = "Found \(result.candidates.count) possible "
+                + "public image or HLS links. Select one explicitly; "
+                + "a thumbnail may not be a camera view."
+        } catch {
+            publicPageMedia = []
+            cameraStatus = "Page link discovery unavailable: "
+                + error.localizedDescription
         }
     }
 

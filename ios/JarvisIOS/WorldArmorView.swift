@@ -1170,6 +1170,21 @@ struct WorldArmorView: View {
                 Text("An ordinary webcam webpage is not necessarily an "
                      + "image/stream URL. Passwords, signed access tokens, "
                      + "local IPs and private URLs are not accepted in this field.")
+                Button("Find public image/stream links on this webpage") {
+                    Task { await discoverPageMedia() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(busy || publicCameraURL.isEmpty)
+                ForEach(publicPageMedia) { candidate in
+                    Button("Choose " + candidate.source
+                           + (candidate.sameOrigin ? "" : " · external media host")) {
+                        publicCameraURL = candidate.url
+                        selectedCameraRef = ""
+                        publicPageMedia = []
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Picker("Observe", selection: $cameraCondition) {

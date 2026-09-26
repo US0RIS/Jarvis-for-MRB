@@ -56,6 +56,10 @@ Every route requires `Authorization: Bearer <JARVIS API TOKEN>` and sends
   with `{"watch_id":"<watch-id>"}`, transition that exact grant.
   List and stop work even with both switches disabled; resuming does not.
   Revoked/exhausted/expired grants never silently resume.
+- `POST /world-armor/v1/watches/forget` deletes precisely one watch grant
+  and its per-watch sample-reference receipts, even while both switches
+  are disabled. It does not delete the parent investigation's underlying
+  source observations. For full evidence deletion, Forget the region.
 
 The iPhone/iPad workbench includes an additional "Explicit standing
 watches" panel: choose a bounded interval, check limit and expiry; enroll,

@@ -113,12 +113,47 @@ class WorldArmorStandingWatchTests(TestCase):
                 (watch["id"],),
             ).fetchone()[0], 2)
 
+    def test_standing_watch_marks_source_report_delta_not_physical_onset(self):
+        watch = self.enroll()
+        first = self.tick()
+        self.assertEqual(first["change_state"],
+                         "baseline_or_incomparable_receipts")
+        second_air = air()
+        second_air["air_quality"]["us_aqi"] = 58
+        second = self.tick(
+            at=NOW + timedelta(minutes=30), conditions=second_air
+        )
+        self.assertEqual(second["outcome"], "sample_coverage_ok")
+        self.assertEqual(second["change_state"], "retained_source_report_delta")
+        self.assertEqual(second["last_change_state"],
+                         "retained_source_report_delta")
+        with closing(sqlite3.connect(self.db)) as con:
+            rows = con.execute(
+                "SELECT change_state FROM watch_receipts WHERE watch_id=? "
+                "ORDER BY collected_at", (watch["id"],)
+            ).fetchall()
+        self.assertEqual([row[0] for row in rows], [
+            "baseline_or_incomparable_receipts",
+            "retained_source_report_delta",
+        ])
+
+    def test_repeated_identical_reports_do_not_claim_no_world_events(self):
+        self.enroll()
+        self.tick()
+        second = self.tick(at=NOW + timedelta(minutes=30))
+        self.assertEqual(
+            second["change_state"],
+            "no_report_delta_in_two_receipts_not_all_clear",
+        )
+        self.assertFalse(second.get("notifications_enabled", False))
+
     def test_partial_provider_retained_but_no_all_clear(self):
         self.enroll(max_checks=1)
         partial = air()
         partial["weather_alerts"]["status"] = "partial"
         result = self.tick(conditions=partial)
         self.assertEqual(result["outcome"], "sample_degraded_or_partial")
+        self.assertEqual(result["change_state"], "coverage_degraded_or_unknown")
         self.assertEqual(result["state"], "exhausted")
         replay = armor.replay(self.region, db_path=self.db,
                               now=NOW + timedelta(minutes=1))

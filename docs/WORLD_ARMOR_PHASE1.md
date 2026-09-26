@@ -84,10 +84,13 @@ requests at most 51 source items to detect whether its retained 50-item result
 is incomplete. Both emit `source_limit_reached`, while World Armor retains
 only the original per-source cap. A `partial` receipt's saved rows remain
 reviewable but cannot corroborate a second source in an evidence candidate;
-`ok` must not imply that the entire response was retained. These flags cannot
-detect omissions upstream of the approved adapter itself. Counts refer to
-normalized records before deduplication, not necessarily new SQLite
-observations.
+`ok` must not imply that the entire response was retained. An adapter also flags structurally discarded or unidentified source
+rows as `partial`; the normalizer independently marks invalid incoming
+rows as `partial` rather than silently treating the retained subset as
+complete. Intentionally expired NWS alerts are excluded as an explicit
+time filter, not a malformed record. These flags cannot detect omissions
+upstream of the approved adapter itself. Counts refer to normalized records
+before deduplication, not necessarily new SQLite observations.
 
 A revision fingerprint covers a source assertion's event time, publish time,
 kind, lineage, geometry basis and normalized values. Correcting a USGS

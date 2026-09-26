@@ -23,6 +23,7 @@ import httpx
 _IDS = ("macbook", "macmini")
 _MAX_BODY = 4_000_000
 _MAX_JSON = 32_768
+_MAX_WORLD_JSON = 8_500_000
 
 
 class NodeUnavailable(RuntimeError):
@@ -78,7 +79,7 @@ def _request(node_id: str, method: str, path: str, *,
     base, token = config
     if method not in {"GET", "POST", "DELETE"} or path not in {
         "/v1/health", "/v1/context", "/v1/session", "/v1/screen",
-        "/v1/app/open", "/v1/apps"
+        "/v1/app/open", "/v1/apps", "/v1/world/observe"
     }:
         raise ValueError("Unregistered mesh method/path.")
     try:
@@ -102,7 +103,10 @@ def _request(node_id: str, method: str, path: str, *,
                 else:
                     if content_type != "application/json":
                         raise NodeUnavailable("node returned unexpected status content")
-                    maximum = _MAX_JSON
+                    maximum = (
+                        _MAX_WORLD_JSON if path == "/v1/world/observe"
+                        else _MAX_JSON
+                    )
                 chunks = bytearray()
                 for piece in response.iter_bytes():
                     chunks.extend(piece)
@@ -197,6 +201,32 @@ def nodes() -> dict[str, Any]:
         "machine_action_authority": "No remote input or arbitrary command RPC",
         "nodes": [windows, *results],
     }
+
+
+def world_observe(node_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    """Run one fixed read-only public-world task on an explicitly paired Mac."""
+    if node_id not in _IDS:
+        raise ValueError("Distributed world observer must be an exact paired Mac.")
+    if not isinstance(task, dict):
+        raise ValueError("World observer task must be a typed object.")
+    allowed = {"kind", "latitude", "longitude", "radius_km"}
+    if set(task) - allowed or task.get("kind") != "opensky_region":
+        raise ValueError("Only typed OpenSky region worker tasks are supported.")
+    state = probe(node_id)
+    if state["status"] != "online":
+        raise NodeUnavailable("Mac observer is offline or identity-unverified.")
+    capabilities = state.get("capabilities") or {}
+    if capabilities.get("world_observer") != "opensky_region_read_only":
+        raise NodeUnavailable("Mac was not started with world-observer opt-in.")
+    response, _, _ = _request(
+        node_id, "POST", "/v1/world/observe", payload=task,
+    )
+    if (not response or response.get("status") != "ok"
+            or response.get("device_id") != node_id
+            or response.get("provider") != "opensky"
+            or not isinstance(response.get("provider_payload"), dict)):
+        raise NodeUnavailable("Mac world observer returned invalid evidence.")
+    return response
 
 
 def _valid_node(node_id: str) -> None:

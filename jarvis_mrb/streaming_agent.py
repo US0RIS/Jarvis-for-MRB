@@ -475,6 +475,26 @@ def stream_natural_language(
             yield message
         return
 
+    # Trusted-server/developer fallback. Normal iPhone/iPad use keeps the Groq
+    # credential in Keychain and performs the cloud call client-side after the
+    # authenticated backend compiles the minimum cloud context.
+    try:
+        from jarvis_mrb.cloud_cognition import server_cloud_reason
+        cloud_decision, cloud_proposal, _cloud_meta = server_cloud_reason(
+            stripped, _history_for_current_turn(stripped, history)
+        )
+    except Exception:
+        cloud_decision, cloud_proposal = None, None
+    if cloud_decision is not None and cloud_decision.tier == "cloud" and cloud_proposal is not None:
+        if cloud_proposal.tool:
+            reply = _respectful(execute_tool(cloud_proposal.tool, cloud_proposal.arguments))
+            if reply.message and reply.message != "__EXIT__":
+                yield reply.message
+            return
+        if cloud_proposal.response:
+            yield cloud_proposal.response
+            return
+
     # Standalone requests for a take on the ideas already being discussed do
     # not require a JSON tool-planner preamble. They use the more natural
     # conversational streaming path, with no data fetch or action authority.

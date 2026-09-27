@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
 import unittest
 from unittest.mock import patch
+
+from PIL import Image, ImageDraw
 
 import jarvis_mrb.public_camera_vision as vision
 
@@ -24,6 +27,27 @@ class OfficialCameraVisionTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "no supported published still"):
                 vision._pick(_RECORD["id"])
+
+    def test_rejects_caltrans_temporarily_unavailable_placeholder(self) -> None:
+        image = Image.new("RGB", (640, 400), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((120, 120, 520, 250), fill=(0, 20, 140))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=92)
+        self.assertTrue(
+            vision._looks_like_caltrans_unavailable_placeholder(buffer.getvalue())
+        )
+
+    def test_does_not_flag_an_ordinary_scene_like_frame(self) -> None:
+        image = Image.new("RGB", (640, 400), (100, 145, 165))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((0, 220, 640, 400), fill=(70, 70, 70))
+        draw.rectangle((0, 282, 640, 288), fill=(245, 210, 80))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=92)
+        self.assertFalse(
+            vision._looks_like_caltrans_unavailable_placeholder(buffer.getvalue())
+        )
 
     def test_rejects_stale_catalog_and_wrong_image_bytes(self) -> None:
         with patch(

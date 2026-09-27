@@ -1035,3 +1035,95 @@ one governing control plane.
   surface while resolving every real-world effect into explicit, typed, inspectable
   capabilities with independent authorization and verification. Avoid one universal
   privileged execution primitive.
+
+
+## Jarvis Presence / ambient embodiment — 2026-09-26
+
+The next form-factor transition is from "an assistant reached through glasses" to a persistent,
+device-independent intelligence distributed through the user's environment. Glasses remain a
+valuable first-person sensor/output surface, but losing or removing them should cost Jarvis one
+sense rather than make Jarvis disappear.
+
+- **Jarvis Presence Layer.** Maintain four live maps independent of any client: Perception
+  (what Jarvis can currently sense), Interaction (which authorized endpoint can hear/show/touch
+  the user), Agency (what actions are currently available and authorized), and Attention (what
+  deserves interruption now). Capabilities target Presence rather than a specific phone/glasses UI.
+- **Seamless Endpoint Migration.** Conversation, missions, references, and pending interactions
+  follow the user among phone, AirPods, glasses, watch, computer, room node, car, speaker, display,
+  and future hardware without an explicit "transfer session" command.
+- **Physical Context as UI.** Places, objects, people, missions, and events become interface nouns.
+  Resolve "that light", "show me what we were discussing", or "what changed here?" against the
+  Reality Graph and current spatial/device context rather than requiring app navigation.
+- **Modality Router.** Select speech, display, haptic, notification, spatial overlay, silent action,
+  or multiple outputs based on privacy, urgency, environment, device availability, and user state.
+- **Mission-Oriented Interaction.** Allow durable objectives such as "keep an eye on the house"
+  or "I'm picking someone up at 6" to instantiate bounded Reality Graph missions that fuse
+  capabilities and surface information only when it becomes decision-relevant.
+- **Ambient but Inspectable.** Persistent presence must expose what sensed an event, why Jarvis
+  inferred something, which endpoint received output, and which authority enabled any action.
+  Ambient operation must not become invisible unbounded surveillance or authority.
+
+### Raspberry Pi / physical Presence nodes
+
+A Raspberry Pi 5 is a useful bridge from software Jarvis to embodied Jarvis because it is cheap,
+always-on, local, GPIO-capable, networked, and can host deterministic sensing/audio/control even
+when the wearable or Windows AI host is unavailable.
+
+- **Room Presence Node.** Pi 5 becomes a stationary authenticated Jarvis endpoint with optional
+  microphone array, speaker, camera, presence/proximity sensing, environmental sensors, buttons/
+  touch controls, and GPIO actuators. Deploying multiple nodes creates room-scale continuity.
+- **Reuse the Existing Hack-Pack Hardware.** Integrate the already-working Bluetooth audio
+  receiver/amplifier + speaker, proximity/optical sensor, X-Y resistive touchpad, CrunchLabs Nano,
+  potentiometers, power bank, and other safe peripherals as experimental Presence-node I/O rather
+  than treating each as a standalone gadget.
+- **Far-Field Voice Without Glasses.** A microphone-array node can provide local wake-word/VAD,
+  beamforming, room audio capture when explicitly enabled, and speaker output, forwarding only the
+  required transcript/audio to the appropriate Jarvis reasoning tier.
+- **Local Audio Identity + Direction.** Explore speaker verification and direction-of-arrival so
+  Jarvis can distinguish an enrolled speaker from arbitrary room audio and infer which room/side
+  an utterance came from, with confidence rather than pretending certainty.
+- **Physical Attention Channel.** Speaker, LEDs, small display, touch surface, buttons, haptics,
+  or other simple outputs let Jarvis communicate without requiring the user to be wearing anything.
+- **Sensor Fusion Hub.** Pi GPIO/I2C/SPI/UART/BLE/USB turn inexpensive door, motion, mmWave,
+  temperature, humidity, light, air-quality, sound-event, and other authorized sensors into
+  timestamped Reality Graph observations with provenance.
+- **Local Object/Room State.** Presence nodes maintain bounded room state from enrolled sensors:
+  occupied/unoccupied, door state, environmental state, device presence, recent authorized events,
+  and confidence/freshness. Do not infer identity or activity beyond available evidence.
+- **Edge Reflexes.** Safety- and latency-sensitive deterministic rules can execute locally without
+  waiting for an LLM or Internet connection: alarms, sensor thresholds, local notifications,
+  watchdogs, failover behavior, and explicitly authorized device control.
+- **Offline Jarvis Skeleton.** Cache wake word, speech pipeline components, critical playbooks,
+  capability metadata, room state, and deterministic automations so loss of cloud/PC connectivity
+  degrades intelligence rather than eliminating the physical interface.
+- **Presence Mesh.** Multiple Pi nodes advertise sensors, outputs, compute, location/room,
+  health, and authority to the Presence layer. Jarvis routes an interaction to the best node and
+  can combine observations across nodes while preserving provenance.
+- **Follow-Me Audio.** With explicit household configuration, speech output can migrate to the
+  room where the intended user is confidently present, instead of shouting from every speaker.
+- **Private/Public Output Arbitration.** Sensitive content routes to private endpoints (phone,
+  AirPods, glasses) while mundane output can use room speakers/displays; ambiguity defaults to the
+  more private channel.
+- **Physical Confirmation Controls.** A button/touch gesture on a trusted local node can serve as
+  an independent confirmation factor for consequential local actions when appropriate.
+- **Local Capability Discovery.** Plugging in an approved sensor/peripheral causes the node to
+  identify its driver/capability schema, run self-tests, and advertise the new capability to Jarvis
+  rather than requiring hard-coded UI changes.
+- **Room Digital Twin.** Bind node observations and enrolled devices/objects to Reality Graph
+  entities so a room has a continuously updated, evidence-backed digital state rather than a pile
+  of unrelated sensor values.
+- **Node-to-Node Event Bus.** Use authenticated local messaging so events can be consumed anywhere:
+  a door sensor on one node can affect a mission running elsewhere without every sensor talking
+  directly to the central model.
+- **Compute Placement.** Treat Pi, iPhone/iPad, Macs, Windows RTX host, and cloud reasoning as a
+  heterogeneous compute fabric. Put wake words, sensor parsing, caching, and reflexes on the Pi;
+  heavyweight perception/inference on suitable accelerators; planning on the calibrated model tier.
+- **Self-Monitoring Physical Infrastructure.** Each node reports temperature, throttling, storage,
+  network reachability, sensor health, microphone/speaker loopback where feasible, and power state,
+  feeding the existing Capability Dependency/Weak-Link system.
+- **Portable Presence Node.** The same architecture can run from a power bank as a temporary
+  room/workshop/travel node, allowing Jarvis to establish a local sensory/interaction foothold
+  without modifying the building.
+- **Embodiment API.** Define a hardware-neutral contract for microphones, speakers, cameras,
+  sensors, controls, displays, GPIO actuators, and presence estimates. The Pi 5 is the first
+  reference implementation, not a permanent architectural dependency.

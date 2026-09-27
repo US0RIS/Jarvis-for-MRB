@@ -88,7 +88,7 @@ class FeatureAcceptanceIOSSourceTests(unittest.TestCase):
         self.assertIn("this is not evidence that the cataloged feature works", self.guide)
 
     def test_deployed_backend_features_are_not_still_labeled_pending_deployment(self):
-        self.assertIn('"The backend fix is now deployed, but real camera/model acceptance is still required."', self.guide)
+        self.assertIn('"The backend fix is present in source; real camera/model acceptance has not been performed."', self.guide)
         self.assertIn('"Backend Planner"', self.guide)
         self.assertNotIn('"Backend Update Pending"', self.guide)
 

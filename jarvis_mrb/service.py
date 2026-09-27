@@ -144,6 +144,11 @@ class CloudCognitionFeedbackRequest(BaseModel):
     note: str = ""
 
 
+class CloudCognitionFallbackRequest(BaseModel):
+    task_id: str = ""
+    reason: str = ""
+
+
 class ExternalWatchCreateRequest(BaseModel):
     scope: str = "personal"
     kind: str
@@ -3327,6 +3332,17 @@ def cloud_cognition_feedback(
         note=request.note,
     )
     return {"ok": True}
+
+
+@app.post("/cloud-cognition/fallback")
+def cloud_cognition_fallback(
+    request: CloudCognitionFallbackRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Device reports that its Groq attempt failed and it used local Jarvis."""
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import record_fallback
+    return record_fallback(request.task_id, request.reason)
 
 
 @app.post("/command", response_model=CommandResponse)

@@ -99,6 +99,14 @@ def _connect(path: Path = FULL_STORE) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS ix_presence_receipts_grant
           ON presence_receipts(grant_id,requested_at);
 
+        CREATE TABLE IF NOT EXISTS presence_denials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grant_id TEXT NOT NULL,
+          target_id TEXT NOT NULL DEFAULT '',
+          denied_at TEXT NOT NULL,
+          reason TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS parallel_runs (
           id TEXT PRIMARY KEY,
           created_at TEXT NOT NULL,
@@ -805,6 +813,27 @@ def dispatch_presence(
     path = Path(db_path) if db_path is not None else FULL_STORE
     instant = _now(now)
     request_id = uuid4().hex
+    try:
+        row = _reserve_presence_use(path, grant_id, instant, request_id, desired_on)
+    except (KeyError, ValueError) as exc:
+        # A refused actuation is itself acceptance evidence (C19: an
+        # expired/revoked/exhausted grant must prevent another actuation).
+        with closing(_connect(path)) as con, con:
+            target = con.execute(
+                "SELECT target_id FROM presence_grants WHERE id=?", (str(grant_id),)
+            ).fetchone()
+            con.execute(
+                "INSERT INTO presence_denials(grant_id,target_id,denied_at,reason) VALUES(?,?,?,?)",
+                (str(grant_id)[:64], str(target["target_id"]) if target else "",
+                 instant.isoformat(), str(exc)[:200]),
+            )
+        raise
+    return _emit_presence_request(path, row, request_id, desired_on, instant)
+
+
+def _reserve_presence_use(
+    path: Path, grant_id: str, instant: datetime, request_id: str, desired_on: bool,
+) -> sqlite3.Row:
     with closing(_connect(path)) as con, con:
         con.execute("BEGIN IMMEDIATE")
         _expire_grants(con, instant)
@@ -829,7 +858,13 @@ def dispatch_presence(
             "effect is yet verified.')",
             (request_id, grant_id, instant.isoformat(), int(desired_on)),
         )
+    return row
 
+
+def _emit_presence_request(
+    path: Path, row: sqlite3.Row, request_id: str, desired_on: bool, instant: datetime,
+) -> dict[str, Any]:
+    grant_id = str(row["id"])
     event = {
         "type": "world_armor_presence_request",
         "request_id": request_id,

@@ -489,6 +489,78 @@ class PendingCloudTask:
 _pending_lock = threading.Lock()
 _pending: dict[str, PendingCloudTask] = {}
 _telemetry: deque[dict[str, Any]] = deque(maxlen=500)
+_telemetry_db_lock = threading.Lock()
+
+
+def _telemetry_path():
+    from pathlib import Path
+
+    from jarvis_mrb.world_model import DB_PATH
+    return Path(DB_PATH).with_name("cloud_cognition_telemetry.sqlite3")
+
+
+def _emit_telemetry(row: dict[str, Any]) -> None:
+    """Keep routing telemetry in memory and durably (criteria.md C12 audit).
+
+    Rows hold only fingerprints, routing metadata and counts, never request
+    text, prompts, credentials or model output.
+    """
+    _telemetry.append(row)
+    try:
+        import sqlite3
+        from contextlib import closing
+
+        path = _telemetry_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _telemetry_db_lock, closing(sqlite3.connect(path, timeout=5.0)) as conn, conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS telemetry(seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL,"
+                " event TEXT NOT NULL, row_json TEXT NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO telemetry(at,event,row_json) VALUES(?,?,?)",
+                (int(row.get("at") or time.time()), str(row.get("event") or ""), json.dumps(row, sort_keys=True, default=str)),
+            )
+            conn.execute("DELETE FROM telemetry WHERE seq <= (SELECT MAX(seq) FROM telemetry) - 20000")
+    except Exception:
+        pass
+
+
+def durable_telemetry(*, since_epoch: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
+    import sqlite3
+    from contextlib import closing
+
+    path = _telemetry_path()
+    if not path.exists():
+        return []
+    with closing(sqlite3.connect(path, timeout=5.0)) as conn:
+        rows = conn.execute(
+            "SELECT row_json FROM telemetry WHERE at>=? ORDER BY seq LIMIT ?", (int(since_epoch), int(limit))
+        ).fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
+def record_fallback(task_id: str, reason: str) -> dict[str, Any]:
+    """The device reports that its cloud attempt failed and it fell back locally.
+
+    The pending task is consumed so a late cloud result cannot resolve after
+    the local path answered.
+    """
+    task = None
+    with _pending_lock:
+        task = _pending.pop(str(task_id or ""), None)
+    clean_reason, redactions = redact_secrets(" ".join(str(reason or "").split())[:160])
+    row = {
+        "at": int(time.time()),
+        "event": "cloud_fallback",
+        "task_id": str(task_id or "")[:64],
+        "task_known": task is not None,
+        "request_fingerprint": hashlib.sha256(task.text.encode("utf-8")).hexdigest()[:16] if task else "",
+        "reason": clean_reason,
+        "redactions": redactions,
+    }
+    _emit_telemetry(row)
+    return {"recorded": True, "task_known": task is not None}
 
 
 def _purge_pending() -> None:
@@ -522,7 +594,7 @@ def prepare_cloud_task(
             _pending[task_id] = PendingCloudTask(
                 task_id, time.time(), text, session_id, decision, compiled
             )
-    _telemetry.append({
+    _emit_telemetry({
         "at": int(time.time()),
         "event": "route",
         "request_fingerprint": hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
@@ -571,7 +643,7 @@ def validate_proposal(raw: dict[str, Any]) -> CloudProposal:
 
 def record_cloud_result(task: PendingCloudTask, proposal: CloudProposal, metadata: dict[str, Any] | None = None) -> None:
     safe_response, redactions = redact_secrets(proposal.response)
-    _telemetry.append({
+    _emit_telemetry({
         "at": int(time.time()),
         "event": "cloud_result",
         "task_id": task.id,
@@ -596,7 +668,7 @@ def record_execution_outcome(
     outcome: str,
 ) -> None:
     safe_outcome, redactions = redact_secrets(outcome)
-    _telemetry.append({
+    _emit_telemetry({
         "at": int(time.time()),
         "event": "execution_outcome",
         "task_id": task.id,
@@ -616,7 +688,7 @@ def record_routing_feedback(
     note: str = "",
 ) -> None:
     clean_note, redactions = redact_secrets(note[:500])
-    _telemetry.append({
+    _emit_telemetry({
         "at": int(time.time()),
         "event": "routing_feedback",
         "request_fingerprint": request_fingerprint[:64],

@@ -292,6 +292,21 @@ def observe_place(
         else:
             summary.append(f"OpenSky {air_traffic.get('status') or 'unavailable'}")
 
+    for provider, status in providers.items():
+        if status in {"ok", "partial"}:
+            continue
+        # Unavailable/stale/unsupported coverage is recorded as such: a gap is
+        # evidence of a gap, never of an all-clear.
+        record_event(
+            "world.provider_unavailable",
+            f"{provider} returned {status} for {place['name']}; no value recorded.",
+            source_kind=provider,
+            source_ref=f"{entity_id}:{provider}:{status}:{checked}",
+            payload={"place": place, "provider": provider, "status": status},
+            evidence="Provider did not supply usable current data for this check.",
+            confidence=1.0,
+            participants=[(entity_id, "place", 1.0)],
+        )
     return {
         "place": place,
         "entity_id": entity_id,

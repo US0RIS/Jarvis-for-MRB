@@ -100,8 +100,32 @@ def _record_proactive_occurrence(message: str, cue: str, severity: str) -> None:
         pass
 
 
+def _queue_closed_app_delivery(message: str, severity: str) -> None:
+    """Warning/urgent interventions must also reach a phone that is not
+    foregrounded (criteria.md C09/C18). APNs is transport only; the durable
+    world event above stays the record. Info-level alerts never push."""
+    level = str(severity or "").lower()
+    if level not in {"warning", "urgent", "critical"}:
+        return
+    try:
+        from jarvis_mrb.world_armor_push import enabled, enqueue_alert
+
+        if not enabled():
+            return
+        enqueue_alert(
+            "proactive:" + " ".join(str(message).split()).lower(),
+            priority="urgent" if level in {"urgent", "critical"} else "warning",
+            title="Jarvis",
+            body=str(message),
+        )
+    except Exception:
+        # Transport failure must never suppress the foreground alert or journal.
+        pass
+
+
 def emit_proactive(message: str, *, cue: str = "attention", severity: str = "info") -> None:
     _record_proactive_occurrence(message, cue, severity)
+    _queue_closed_app_delivery(message, severity)
     companion_events.publish(
         {
             "type": "proactive_alert",

@@ -49,8 +49,11 @@ def _now(value: datetime | None = None) -> datetime:
 
 def enabled() -> bool:
     return (
-        os.getenv("JARVIS_WORLD_ARMOR_ENABLED") == "1"
-        and os.getenv("JARVIS_WORLD_ARMOR_PUSH_ENABLED") == "1"
+        (
+            os.getenv("JARVIS_WORLD_ARMOR_ENABLED") == "1"
+            and os.getenv("JARVIS_WORLD_ARMOR_PUSH_ENABLED") == "1"
+        )
+        or os.getenv("JARVIS_PUSH_ENABLED") == "1"
     )
 
 
@@ -197,6 +200,31 @@ def _prune(con: sqlite3.Connection, instant: datetime) -> None:
         )
 
 
+def enqueue_alert(
+    dedup_key: str,
+    *,
+    priority: str,
+    title: str,
+    body: str,
+    db_path: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Queue a proactive Jarvis intervention for closed-app delivery.
+
+    The same ``dedup_key`` is delivered at most once per device while the row
+    is retained (7 days), so duplicate evidence or retries cannot produce a
+    second interruption.  Informational alerts never enter the outbox.
+    """
+    key = str(dedup_key or "").strip()
+    if not key:
+        raise ValueError("Jarvis push alert needs a dedup key.")
+    event_id = "jarvis:" + hashlib.sha256(key.encode("utf-8", errors="replace")).hexdigest()[:40]
+    return enqueue_world_event(
+        {"event_id": event_id, "priority": priority, "summary": body, "title": title},
+        db_path=db_path, now=now,
+    )
+
+
 def enqueue_world_event(
     event: dict[str, Any],
     *,
@@ -214,7 +242,9 @@ def enqueue_world_event(
     summary = str(event.get("summary") or "").strip()
     if not summary:
         raise ValueError("World Armor push event needs a summary.")
-    title = "World Armor urgent" if priority == "urgent" else "World Armor"
+    title = str(event.get("title") or "").strip()[:120] or (
+        "World Armor urgent" if priority == "urgent" else "World Armor"
+    )
     instant = _now(now)
     path = Path(db_path) if db_path is not None else PUSH_STORE
     queued = 0
@@ -344,9 +374,10 @@ def _send_one(token: str, title: str, body: str) -> tuple[bool, str]:
         "aps": {
             "alert": {"title": title[:120], "body": body[:700]},
             "sound": "default",
-            "thread-id": "world-armor",
+            "thread-id": "jarvis",
         },
-        "world_armor": True,
+        "world_armor": title.startswith("World Armor"),
+        "jarvis_alert": True,
     }
     try:
         with httpx.Client(http2=True, timeout=12.0) as client:

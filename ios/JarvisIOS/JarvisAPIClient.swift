@@ -2139,6 +2139,13 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(MemoMindCommandSnapshot.self, from: data)
     }
 
+    func reportCloudFallback(taskID: String, reason: String) async {
+        _ = try? await postData(
+            path: "cloud-cognition/fallback",
+            body: ["task_id": taskID, "reason": String(reason.prefix(160))]
+        )
+    }
+
     func cloudCognitionPrepare(_ text: String, mode: String) async throws -> CloudCognitionPrepareResponse {
         let (data, response) = try await postData(
             path: "cloud-cognition/prepare",
@@ -2303,8 +2310,10 @@ struct JarvisAPIClient {
                 let cognition = Self.cognitionRequest(text)
                 let cloudEnabled = UserDefaults.standard.object(forKey: "jarvis.cloudCognitionEnabled") as? Bool ?? false
                 if cloudEnabled && cognition.mode != "local" {
+                    var cloudTaskID: String?
                     do {
                         let prepared = try await cloudCognitionPrepare(cognition.text, mode: cognition.mode)
+                        cloudTaskID = prepared.taskID
                         if prepared.tier == "cloud",
                            let taskID = prepared.taskID,
                            let key = KeychainStore.read("jarvis.groqAPIKey"),
@@ -2325,10 +2334,17 @@ struct JarvisAPIClient {
                             continuation.yield(.done(ok: resolved.ok))
                             continuation.finish()
                             return
+                        } else if prepared.tier == "cloud", let taskID = prepared.taskID {
+                            cloudTaskID = nil
+                            await reportCloudFallback(taskID: taskID, reason: "device_groq_credential_missing")
                         }
                     } catch {
                         // Cloud is optional. Any network/auth/rate/schema failure falls through
                         // to the existing local Jarvis path rather than disabling the turn.
+                        // Tell the backend so routing telemetry shows the real fallback.
+                        if let cloudTaskID {
+                            await reportCloudFallback(taskID: cloudTaskID, reason: String(describing: type(of: error)) + ": " + error.localizedDescription)
+                        }
                     }
                 }
                 do {

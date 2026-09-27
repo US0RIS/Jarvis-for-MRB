@@ -1,5 +1,10 @@
 # Jarvis for MRB
 
+> **Release status: NOT COMPLETE.** [`criteria.md`](criteria.md) defines done for this release (gates C00–C22).
+> Live gate states are in [`RELEASE_STATUS.md`](RELEASE_STATUS.md), and every claimed capability's acceptance mapping is in
+> [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTORY.md). In this README, "implemented", "source in main", "CI verified" and the
+> historical "observed deployed" notes do **not** mean a capability has passed release acceptance.
+
 Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. Its primary presence path is the iPhone/compatible Bluetooth microphone plus phone motion, opt-in GPS/geofences, separately opt-in Health data and public environmental sources. The optional camera-free MemoMind display is an I/O surface, not a sensor prerequisite. A Windows reasoning/tool host, local language/speech models, private Gmail/Calendar data, automation, audited web research and explicit action verification form the remaining system. Meta first-person vision and public-camera lookup remain optional capabilities.
 
 The project is not intended to be “a chatbot with lots of plugins.” The design goal is a single persistent system that can understand what the user is doing, remember durable facts and objectives, connect evidence across sources, decide what matters, act within explicit authority boundaries, and then independently verify whether consequential actions actually changed the outside world.
@@ -383,7 +388,7 @@ Configuration: Physical → Ambient presence → Settings. Independently enable 
 
 # Current state
 
-Jarvis has moved beyond a source-only prototype: the current architecture has been deployed onto the primary Windows PC and a physical iPhone, and several of the most important end-to-end paths have been exercised against real services.
+An earlier (September 7, 2026) build of Jarvis was deployed onto the primary Windows PC and a physical iPhone, and several end-to-end paths were exercised against real services at that time. Those observations are historical: they apply to that build only and are **not** release evidence under `criteria.md`, which requires REAL acceptance of every gate on one frozen candidate SHA.
 
 ### Verification snapshot — September 7, 2026 (Pacific)
 
@@ -1059,7 +1064,7 @@ The runtime:
 - monitors warm-up so a temporary startup degradation can later clear to ready;
 - synthesizes WAV audio for iPhone playback.
 
-The current deployed voice default is `bm_george`.
+The configured voice default is `bm_george`.
 
 The Kokoro HTTP service currently uses port `8880` in the WSL setup.
 
@@ -3309,6 +3314,26 @@ A better JARVIS-20 score means Jarvis is improving. It does not redefine complet
 Future self-improvement is plausible only if the evaluator and safety constraints remain outside the candidate agent’s write authority. The goal is to optimize against hidden, changing tests—not teach Jarvis the answer key.
 
 ---
+
+# Cloud cognitive escalation
+
+Jarvis now supports an optional third reasoning tier without replacing its deterministic or local paths:
+
+```text
+deterministic / hardcoded capability -> local Qwen -> Groq GPT-OSS 120B
+```
+
+`jarvis_mrb.cloud_cognition` makes the escalation decision from deterministic signals such as complexity, uncertainty/conflicting evidence, context size, dependency count, prior local-model failures, source diversity, consequence severity and whether an existing deterministic capability already resolves the request. Ordinary requests remain local; genuinely difficult harmless reasoning can escalate. Authoritative retrieval is preferred over simply asking a larger model to invent high-consequence facts.
+
+The normal credential flow is **Jarvis -> Settings -> Cloud Intelligence / Groq** on iPhone/iPad. The Groq key is device-only Apple Keychain state, not UserDefaults or Reality Graph state. The phone asks the authenticated backend to compile the minimum relevant, secret-redacted context, calls Groq directly, then returns only the structured reasoning proposal to Jarvis. Tool proposals still enter the existing permission/confirmation/audit/verification path and are not cloud-granted authority. A trusted server may alternatively use `GROQ_API_KEY` for CLI/developer operation.
+
+Cloud failure, missing credentials, rate limiting or malformed output falls back to local Jarvis. No current free-tier quota is hard-coded. See **`docs/CLOUD_COGNITION.md`** for the routing, privacy, reliability, debugging and acceptance contract.
+
+Run the routing benchmark with:
+
+```powershell
+py -3.14 -m jarvis_mrb.cognitive_benchmark
+```
 
 # Deterministic routing / smaller local model
 

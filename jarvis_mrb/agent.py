@@ -235,12 +235,61 @@ def _describe_action(tool: str, args: dict[str, Any]) -> str:
         return "enable active Agency mode, allowing persistent goals to execute auto-authorized steps"
     if tool == "agency.activate_goal":
         return f"activate autonomous pursuit of Agency goal {args.get('query')!r}"
+    if tool == "agency.pursue_goal":
+        return (
+            f"start persistently pursuing your goal {args.get('query')!r} (Agency active mode); "
+            "protected actions will still ask for approval"
+        )
     if tool == "permissions.set":
         return f"change {args.get('risk')!r} permission policy to {args.get('mode')!r}"
+    if tool == "presence.set_light":
+        state = "on" if str(args.get("on")).strip().lower() in {"true", "on", "1", "yes"} else "off"
+        return f"physically turn the Apple Home light {args.get('light')!r} {state} through your iPhone"
     return f"run {tool} with {args}"
 
 
 def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
+    from jarvis_mrb.agency_world_tools import HANDLERS as _WORLD_HANDLERS, execute as _world_execute
+    if tool in _WORLD_HANDLERS:
+        return _result(_world_execute(tool, args))
+    if tool in {"world.remember_fact", "world.correct_fact"}:
+        from jarvis_mrb.world_facts import remember as remember_fact
+        try:
+            outcome = remember_fact(
+                str(args.get("entity") or ""), str(args.get("attribute") or ""), str(args.get("value") or ""),
+                kind=str(args.get("kind") or ""), correction=tool == "world.correct_fact",
+            )
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        verb = "Corrected" if tool == "world.correct_fact" else "Noted"
+        replaced = f" (replacing {', '.join(map(str, outcome['replaced']))}, kept in history)" if outcome["replaced"] else ""
+        return AgentReply(True, f"{verb}: {outcome['entity']['name']} {str(args.get('attribute'))} is {outcome['value']}{replaced}.", data=outcome)
+    if tool == "world.describe_entity":
+        from jarvis_mrb.world_facts import describe_text
+        try:
+            return AgentReply(True, describe_text(str(args.get("entity") or "")))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+    if tool == "attention.set_busy":
+        import dateparser
+        from jarvis_mrb.environment_state import set_value as set_env_value
+        text = str(args.get("until") or "").strip()
+        if text.lower() in {"clear", "now", "off", "none"}:
+            set_env_value("preference.busy_until", "")
+            return AgentReply(True, "Okay, normal interruptions are back on.")
+        minutes = args.get("minutes")
+        if minutes:
+            from datetime import timedelta
+            until = datetime.now().astimezone() + timedelta(minutes=max(1, min(int(minutes), 24 * 60)))
+        else:
+            until = dateparser.parse(text, settings={"PREFER_DATES_FROM": "future", "RETURN_AS_TIMEZONE_AWARE": True})
+        if until is None or until <= datetime.now().astimezone():
+            return AgentReply(False, f"I couldn't understand {text!r} as a future time.")
+        set_env_value("preference.busy_until", until.isoformat())
+        return AgentReply(True, f"Understood. I'll hold non-urgent interruptions until {until.strftime('%I:%M %p').lstrip('0')}; urgent ones still come through.")
+    if tool == "capabilities.now":
+        from jarvis_mrb.capability_inventory import describe as describe_capabilities, live_inventory
+        return AgentReply(True, describe_capabilities())
     if tool == "smart.status": return _smart_status(str(args.get("name") or ""))
     if tool == "smart.open": return _smart_open(str(args.get("name") or ""))
     if tool == "smart.close": return _smart_close(str(args.get("name") or ""))
@@ -602,6 +651,18 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
         except ValueError as exc:
             return AgentReply(False, str(exc))
         return AgentReply(True, f"Activated Agency pursuit of {state.get('title')}.")
+    if tool == "agency.pursue_goal":
+        from jarvis_mrb.agency_intake import pursue
+        try:
+            outcome = pursue(str(args.get("query") or ""))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        return AgentReply(
+            True,
+            f"I'm now pursuing {outcome['state'].get('title')}. I'll keep observing and planning, "
+            "tell you about material developments, and ask before any protected action.",
+            data=outcome,
+        )
     if tool == "agency.pause_goal":
         from jarvis_mrb.agency_runtime import pause_matching
         try:
@@ -912,6 +973,22 @@ def _fast_path(text: str) -> AgentReply | None:
         if deterministic.tool:
             return execute_tool(deterministic.tool, dict(deterministic.args))
         return AgentReply(True, deterministic.answer)
+    try:
+        from jarvis_mrb.agency_intake import declared_goal_offer
+        offer = declared_goal_offer(text)
+    except Exception:
+        offer = None
+    if offer is not None:
+        if offer["already_active"]:
+            return AgentReply(True, f"I'm already pursuing {offer['title']}.")
+        if not offer["desired_state_id"]:
+            return AgentReply(True, f"I've recorded your goal: {offer['action']}.")
+        staged = execute_tool("agency.pursue_goal", {"query": offer["title"]})
+        return AgentReply(
+            staged.ok,
+            f"I've recorded your goal: {offer['action']}. {staged.message}",
+            staged.data,
+        )
     goal_query = n.rstrip("?.!")
     if goal_query in {
         "what are my goals",
@@ -1125,7 +1202,8 @@ workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
 custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}};
-agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}}.
+agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
+world.observe_place {{place,include}}; world.camera_sources {{}}; world.observe_camera {{source}}; presence.lights {{}}; presence.set_light {{light,on}}; mesh.nodes {{}}; world.remember_fact {{entity,attribute,value,kind?}}; world.correct_fact {{entity,attribute,value}}; world.describe_entity {{entity}}; capabilities.now {{}}.
 
 Routing rules:
 - web.search: current/recent/public information. Make the query self-contained; Jarvis refines conversational searches automatically.
@@ -1153,6 +1231,10 @@ Routing rules:
 - state.temp_set: temporary focus/context that should expire automatically; use a sensible TTL in minutes. Use state.update only for durable context.
 - sandbox.python, sandbox.command, and custom.* are security-sensitive. Never use them unless the user explicitly asks. sandbox.command runs inside the locked-down Docker container, never the Windows host shell, and the confirmation reads the exact command aloud.
 - Custom API tool synthesis is sandboxed and allow-host constrained. Generated tools start disabled. If an enabled adapter fails structurally, Jarvis may queue a sandbox-validated repair proposal, but custom.apply_repair always requires explicit confirmation. When the user explicitly asks to synthesize a tool for a known Agency capability gap and an exact gap_id is available, pass that gap_id to custom.synthesize so later enablement can reactivate the blocked goal.
+- world.observe_place: live official/public conditions for a named place or 'lat,lon' (NWS alerts, modelled air quality, USGS earthquakes; include "airspace" for an OpenSky aircraft count). Unavailable providers are not an all clear.
+- world.camera_sources / world.observe_camera: only operator-enrolled public camera sources; observe one by its exact label. Never guess camera URLs.
+- presence.lights lists Apple Home lights the iPhone published; presence.set_light physically changes one exact light and always requires confirmation plus HomeKit readback.
+- mesh.nodes: which paired computers are actually reachable now.
 - Gmail read/check/find/search/review received mail -> gmail.query. Latest inbox email: query='in:inbox', limit=1. Never request more than 10.
 - Gmail send -> gmail.send. Sending is protected by confirmation and the exact backend allowlist.
 - Calendar past -> calendar.query direction='past'; future -> direction='future'; last -> calendar.recent.
@@ -1213,8 +1295,34 @@ def handle_natural_language(
     fast = _fast_path(text)
     if fast is not None:
         return _respectful(fast)
+
+    # Optional server-side cloud cognition. The normal iPhone path keeps the
+    # credential in Keychain and uses /cloud-cognition/prepare + /resolve;
+    # GROQ_API_KEY exists for trusted server/developer deployments.
+    try:
+        from jarvis_mrb.cloud_cognition import server_cloud_reason
+        cloud_decision, cloud_proposal, _cloud_meta = server_cloud_reason(text, history)
+    except Exception:
+        cloud_decision, cloud_proposal = None, None
+    if cloud_decision is not None and cloud_decision.tier == "cloud" and cloud_proposal is not None:
+        if cloud_proposal.tool:
+            return _respectful(execute_tool(cloud_proposal.tool, cloud_proposal.arguments))
+        return _respectful(AgentReply(True, cloud_proposal.response or "I'm listening."))
+
     plan, error = _ollama_plan(text, history=history)
     if plan is None:
+        # A local-model parse/timeout failure is itself an escalation signal.
+        try:
+            from jarvis_mrb.cloud_cognition import server_cloud_reason
+            _, fallback_proposal, _ = server_cloud_reason(
+                text, history, force="cloud", prior_local_failures=2
+            )
+        except Exception:
+            fallback_proposal = None
+        if fallback_proposal is not None:
+            if fallback_proposal.tool:
+                return _respectful(execute_tool(fallback_proposal.tool, fallback_proposal.arguments))
+            return _respectful(AgentReply(True, fallback_proposal.response or error))
         return _respectful(AgentReply(False, error))
     tool = plan.get("tool")
     args = plan.get("arguments") or {}

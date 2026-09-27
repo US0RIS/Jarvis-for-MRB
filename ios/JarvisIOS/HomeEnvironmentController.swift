@@ -58,6 +58,9 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
     }
 
     private var manager: HMHomeManager?
+    /// Called after each catalog refresh so the backend world model knows which
+    /// exact lights exist (names/ids/last reported state only).
+    var onCatalogUpdated: (([Light]) -> Void)?
     private var characteristics: [UUID: HMCharacteristic] = [:]
 
     func discover() {
@@ -113,6 +116,7 @@ final class HomeEnvironmentController: NSObject, ObservableObject, HMHomeManager
         }
         discovered = true
         status = "Apple Home connected • \(lights.count) controllable light\(lights.count == 1 ? "" : "s")"
+        onCatalogUpdated?(lights)
     }
 
     /// Exact, individually enrolled and reversible physical action. This is a

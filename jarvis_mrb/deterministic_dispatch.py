@@ -193,10 +193,47 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     raw = re.sub(r"\s+", " ", text.strip())
     spoken = raw.rstrip("?.!").strip()
     lower = spoken.lower()
+    if lower.startswith("jarvis, "):
+        spoken = spoken[8:].strip()
+        lower = spoken.lower()
+    elif lower.startswith("jarvis "):
+        spoken = spoken[7:].strip()
+        lower = spoken.lower()
     current = now or datetime.now().astimezone()
     answer = _clock(lower, current) or _arithmetic(lower)
     if answer:
         return answer
+    m = _match(r"(?:i'?m|i am) (?:busy|in a meeting|heads down|focusing)(?: until (.{2,60}))?|(?:don'?t|do not) (?:interrupt|disturb) me(?: until (.{2,60}))?", spoken.replace("\u2019", "'"))
+    if m:
+        until = (m.group(1) or m.group(2) or "").strip()
+        return _tool("attention", "attention.set_busy", **({"until": until} if until else {"minutes": 60}))
+    m = _match(r"(?:i'?m|i am) (?:free|available|done|out of (?:the|my) meeting)(?: now)?|you can interrupt me(?: again)?(?: now)?", spoken.replace("\u2019", "'"))
+    if m:
+        return _tool("attention", "attention.set_busy", until="clear")
+    fact_text = spoken.replace("\u2019", "'")
+    m = _match(r"(?:correction[:,]?|actually,?|no,? actually,?|that'?s wrong[.,]?|that is wrong[.,]?) (?:the )?(.{2,120}?)'s (.{2,80}?) (?:is|are) (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.correct_fact", entity=m.group(1).strip(), attribute=m.group(2).strip(), value=m.group(3).strip())
+    m = _match(r"correct (?:the )?(.{2,120}?)'s (.{2,80}?) to (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.correct_fact", entity=m.group(1).strip(), attribute=m.group(2).strip(), value=m.group(3).strip())
+    m = _match(r"remember that (?:the )?(.{2,120}?)'s (.{2,80}?) (?:is|are) (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.remember_fact", entity=m.group(1).strip(), attribute=m.group(2).strip(), value=m.group(3).strip())
+    m = _match(r"remember that the (.{2,80}?) (?:of|for) (.{2,120}?) (?:is|are) (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.remember_fact", entity=m.group(2).strip(), attribute=m.group(1).strip(), value=m.group(3).strip())
+    m = _match(r"what do you know about (?:the )?(.{2,120})", fact_text)
+    if m:
+        return _tool("world.fact", "world.describe_entity", entity=m.group(1).strip())
+    if re.fullmatch(
+        r"(?:what can you (?:do|help (?:me )?with)(?: (?:right )?now| today| at the moment)?"
+        r"|what are your (?:current )?capabilities(?: right now)?"
+        r"|what(?:'s| is) (?:available|working) right now"
+        r"|what (?:capabilities|features) (?:are|do you have) (?:available|enabled|working)(?: right now)?)",
+        lower,
+    ):
+        return _tool("capabilities", "capabilities.now")
     if lower in _EXACT:
         family, tool, arguments = _EXACT[lower]
         return Route(family, tool, dict(arguments))

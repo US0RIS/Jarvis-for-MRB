@@ -896,9 +896,15 @@ final class CapabilityArchitectureController: ObservableObject {
     }
 
     private static func normalize(_ raw: String) -> String {
-        raw.lowercased()
+        var value = raw.lowercased()
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        if value.hasPrefix("jarvis, ") {
+            value = String(value.dropFirst(8))
+        } else if value.hasPrefix("jarvis ") {
+            value = String(value.dropFirst(7))
+        }
+        return value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
     private static func isUtilityIntent(_ raw: String) -> Bool {
@@ -911,7 +917,7 @@ final class CapabilityArchitectureController: ObservableObject {
 
     private static func isCalendarIntent(_ raw: String) -> Bool {
         let n = normalize(raw)
-        let cues = ["my calendar", "calendar today", "calendar tomorrow", "schedule today", "schedule tomorrow", "meetings today", "meetings tomorrow", "next meeting", "next calendar event", "what do i have today", "what do i have tomorrow"]
+        let cues = ["my calendar", "calendar today", "calendar tomorrow", "schedule today", "schedule tomorrow", "meetings today", "meetings tomorrow", "meetings do i have today", "meetings do i have tomorrow", "what meetings do i have today", "what meetings do i have tomorrow", "next meeting", "next calendar event", "what do i have today", "what do i have tomorrow"]
         return cues.contains(where: { n.contains($0) })
     }
 

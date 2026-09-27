@@ -1364,7 +1364,8 @@ struct WorldArmorView: View {
             baseURL: appModel.settings.baseURL,
             fallbackBaseURL: appModel.settings.fallbackBaseURL,
             apiToken: appModel.settings.apiToken,
-            sessionID: appModel.settings.conversationSessionID
+            sessionID: appModel.settings.conversationSessionID,
+            windyAPIKey: appModel.settings.windyAPIKeyForRequest() ?? ""
         )
     }
 

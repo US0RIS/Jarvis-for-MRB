@@ -323,6 +323,35 @@ def _plan(tool: str, args: dict[str, Any], reply: Any) -> dict[str, Any]:
             "evidence": "Browser close request completed; waiting for matching tab to disappear.",
         }
 
+    if tool == "presence.set_light":
+        request_id = str(data.get("request_id") or "").strip()
+        expected = {
+            "request_id": request_id,
+            "target_id": str(data.get("target_id") or ""),
+            "target_label": str(data.get("target_label") or args.get("light") or ""),
+            "desired_on": bool(data.get("desired_on")),
+        }
+        if not request_id:
+            return {
+                "verifier": "no_independent_verifier",
+                "expected": expected,
+                "status": "unverified",
+                "next_check_at": None,
+                "deadline_at": now.isoformat(),
+                "evidence": "Presence dispatch returned no request identifier; the physical effect cannot be read back.",
+            }
+        return {
+            "verifier": "presence_reported_state",
+            "expected": expected,
+            "status": "pending",
+            "next_check_at": (now + timedelta(seconds=3)).isoformat(),
+            "deadline_at": (now + timedelta(minutes=3)).isoformat(),
+            "evidence": (
+                f"Presence request {request_id} dispatched to the iPhone; waiting for a fresh Apple Home "
+                "accessory readback. Dispatch alone is not a physical effect."
+            ),
+        }
+
     if tool == "agency.counterfactual.create":
         case_id = str(data.get("id") or "").strip()
         branches = data.get("branches") if isinstance(data.get("branches"), list) else []
@@ -749,6 +778,22 @@ def _observe(verifier: str, expected: dict[str, Any]) -> tuple[str, str]:
     if verifier == "browser_tab_absent":
         present, evidence = _tab_present(str(expected.get("query") or ""))
         return ("pending" if present else "verified", evidence)
+    if verifier == "presence_reported_state":
+        from jarvis_mrb.world_armor_full import get_presence_receipt
+
+        receipt = get_presence_receipt(str(expected.get("request_id") or ""))
+        status = str(receipt.get("status") or "")
+        requested = receipt.get("requested_state")
+        message = str(receipt.get("message") or "")[:600]
+        if status == "verified_reported_state":
+            if bool(requested) == bool(expected.get("desired_on")):
+                return ("verified", f"Apple Home readback on the iPhone reported the requested state. {message}")
+            return ("failed", f"Readback state does not match the requested state. {message}")
+        if status in {"failed", "blocked"}:
+            return ("failed", f"iPhone Presence execution {status}: {message}")
+        if status == "unverified":
+            return ("unverified", f"iPhone executed the request but could not read the accessory state back: {message}")
+        return ("pending", f"Presence request is {status or 'unknown'}; no accessory readback yet.")
     if verifier == "counterfactual_case_persisted":
         from jarvis_mrb.agency_counterfactual import get_case
 
@@ -940,7 +985,7 @@ def check_one(verification_id: str, *, force: bool = False) -> dict[str, Any] | 
     try:
         outcome, evidence = _observe(verifier, expected if isinstance(expected, dict) else {})
         _record_observation(str(row["id"]), outcome=outcome, evidence=evidence)
-        if outcome in {"verified", "failed"}:
+        if outcome in {"verified", "failed", "unverified"}:
             return _transition(row, outcome, evidence)
         if expired:
             timeout_evidence = (

@@ -99,6 +99,14 @@ def _connect(path: Path = FULL_STORE) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS ix_presence_receipts_grant
           ON presence_receipts(grant_id,requested_at);
 
+        CREATE TABLE IF NOT EXISTS presence_denials (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grant_id TEXT NOT NULL,
+          target_id TEXT NOT NULL DEFAULT '',
+          denied_at TEXT NOT NULL,
+          reason TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS parallel_runs (
           id TEXT PRIMARY KEY,
           created_at TEXT NOT NULL,
@@ -805,6 +813,27 @@ def dispatch_presence(
     path = Path(db_path) if db_path is not None else FULL_STORE
     instant = _now(now)
     request_id = uuid4().hex
+    try:
+        row = _reserve_presence_use(path, grant_id, instant, request_id, desired_on)
+    except (KeyError, ValueError) as exc:
+        # A refused actuation is itself acceptance evidence (C19: an
+        # expired/revoked/exhausted grant must prevent another actuation).
+        with closing(_connect(path)) as con, con:
+            target = con.execute(
+                "SELECT target_id FROM presence_grants WHERE id=?", (str(grant_id),)
+            ).fetchone()
+            con.execute(
+                "INSERT INTO presence_denials(grant_id,target_id,denied_at,reason) VALUES(?,?,?,?)",
+                (str(grant_id)[:64], str(target["target_id"]) if target else "",
+                 instant.isoformat(), str(exc)[:200]),
+            )
+        raise
+    return _emit_presence_request(path, row, request_id, desired_on, instant)
+
+
+def _reserve_presence_use(
+    path: Path, grant_id: str, instant: datetime, request_id: str, desired_on: bool,
+) -> sqlite3.Row:
     with closing(_connect(path)) as con, con:
         con.execute("BEGIN IMMEDIATE")
         _expire_grants(con, instant)
@@ -829,7 +858,13 @@ def dispatch_presence(
             "effect is yet verified.')",
             (request_id, grant_id, instant.isoformat(), int(desired_on)),
         )
+    return row
 
+
+def _emit_presence_request(
+    path: Path, row: sqlite3.Row, request_id: str, desired_on: bool, instant: datetime,
+) -> dict[str, Any]:
+    grant_id = str(row["id"])
     event = {
         "type": "world_armor_presence_request",
         "request_id": request_id,
@@ -914,8 +949,44 @@ def record_presence_receipt(
     value["physical_effect_verified"] = (
         value["status"] == "verified_reported_state"
     )
+    if value["status"] == "verified_reported_state":
+        # Make the readback a provenance-bearing world observation so goals
+        # and dormant watches can depend on the physical state.
+        try:
+            with closing(_connect(path)) as con:
+                grant = con.execute(
+                    "SELECT target_id,target_label FROM presence_grants WHERE id=?",
+                    (value["grant_id"],),
+                ).fetchone()
+            if grant is not None:
+                from jarvis_mrb.world_places import record_light_readback
+                record_light_readback(
+                    str(grant["target_id"]), str(grant["target_label"]),
+                    on=bool(value["requested_state"]), request_id=request_id,
+                    message=str(value.get("message") or ""),
+                )
+        except Exception:
+            pass
     value["verification_qualifier"] = (
         "HomeKit accessory state readback is stronger than command acceptance "
         "but is not an independent sensor proving photons/mechanical state."
     )
+    return value
+
+
+def get_presence_receipt(
+    request_id: str, *, db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Read one Presence receipt (used by the independent action verifier)."""
+    if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+        raise ValueError("Invalid Presence request ID.")
+    path = Path(db_path) if db_path is not None else FULL_STORE
+    with closing(_connect(path)) as con:
+        row = con.execute(
+            "SELECT * FROM presence_receipts WHERE id=?", (request_id,)
+        ).fetchone()
+    if row is None:
+        raise KeyError("Presence request does not exist.")
+    value = dict(row)
+    value["physical_effect_verified"] = value["status"] == "verified_reported_state"
     return value

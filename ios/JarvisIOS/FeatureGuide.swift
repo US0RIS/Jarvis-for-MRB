@@ -1,9 +1,10 @@
+import Foundation
 import SwiftUI
 import UIKit
 
 struct JarvisFeature: Identifiable, Hashable {
     enum Status: String, CaseIterable, Hashable {
-        case ready = "Ready"
+        case ready = "Implemented"
         case frontendOnly = "iPhone-only"
         case setup = "Setup required"
         case optional = "Optional"
@@ -100,7 +101,7 @@ enum JarvisFeatureCatalog {
             f("fast-perception", "Vision & Perception", "Fast structural perception", "Perform inexpensive iPhone-side visual checks.", "Optional Apple Vision requests can count detected faces/humans without identity, find rectangles, OCR text, decode codes and detect attention saliency. These are structural signals, not semantic scene understanding.", "Open Power Features and inspect Local Event Timeline.", "Enable Continuous on-device fast perception and inspect the perception summary while changing what the glasses see.", .frontendOnly, "viewfinder.circle"),
             f("visual-change", "Vision & Perception", "Visual scene-change detector", "Notice large changes between recent glasses frames.", "The iPhone compares Apple Vision image feature prints over time and records a local visual-change event when the whole-frame distance crosses your threshold. It intentionally does not claim which semantic object changed.", "Jarvis, what changed visually?", "Enable Detect major visual scene changes, look at one scene, then turn toward a substantially different scene and ask the example.", .frontendOnly, "rectangle.2.swap"),
             f("passive-vision", "Vision & Perception", "Backend passive vision transport", "Sample Ray-Ban frames for PC-side Moondream analysis.", "When Passive vision is enabled, the iPhone sends sampled frames to the authenticated PC path. Remote/Tailscale mode reduces frame rate/resolution to conserve bandwidth.", "Open Persistent Presence and inspect Passive vision status.", "Enable Passive vision and verify the Ray-Ban stream and backend receive/analyze status change. This transport can work even though the separate conversational recent-frame recall bug is pending deployment.", .ready, "eye.fill", runnable: false),
-            f("live-scene-pending", "Vision & Perception", "General ‘what can you see?’ conversational scene recall", "Backend fix exists in the repository but is not deployed on the user’s current PC.", "The recent-frame Moondream path was corrected in source to avoid multi-image requests, but because the Windows backend cannot currently be updated/tested, this feature must not be counted as implemented on the running system.", "Jarvis, what can you see right now?", "Do not use this as a pass/fail test until the PC backend is updated. After deployment, verify a fresh-frame question and a recent-history question separately.", .pendingBackend, "eye.trianglebadge.exclamationmark", runnable: false),
+            f("live-scene-pending", "Vision & Perception", "General ‘what can you see?’ conversational scene recall", "The backend fix is present in source; real camera/model acceptance has not been performed.", "The recent-frame Moondream path was corrected in source to avoid multi-image requests and is present on the current backend. A source deployment is not proof that the physical Ray-Bans → iPhone → PC → vision-model path works on this installation.", "Jarvis, what can you see right now?", "With the Ray-Bans connected and camera enabled, ask for the current scene and separately ask about recent visual history. Treat this as passed only after real fresh-frame/model output is observed.", .ready, "eye.trianglebadge.exclamationmark", runnable: false),
             f("spatial-last-seen", "Vision & Perception", "Backend spatial last-seen memory", "Remember conservative object sightings from PC vision.", "The existing backend can store last-seen scene/context records for portable objects. It is evidence-based scene memory, not a precise 3D map or navigation system.", "Jarvis, where did I last see my keys?", "Ask about an object previously observed by the backend and confirm the answer refers to a recorded sighting rather than inventing a location.", .ready, "mappin.and.ellipse")
         ]
 
@@ -221,28 +222,28 @@ enum JarvisFeatureCatalog {
             f("native-contacts-local", "Local Intelligence", "Native iPhone Contacts lookup", "Read saved contact details locally with permission.", "The frontend can search Contacts for names and return bounded phone/email details. Explicit Known People profiles can be linked to a unique matching iOS Contact identifier; ambiguous matches are deliberately left unlinked.", "Jarvis, look up [saved contact] in my contacts.", "Grant Contacts access, use a known saved contact, and compare the returned information. Try an ambiguous name and verify Jarvis asks for specificity instead of guessing.", .frontendOnly, "person.crop.circle.badge.checkmark", runnable: false),
             f("context-capsules", "Local Intelligence", "Encrypted Context Capsules", "Explicitly snapshot useful local context for later recall.", "‘Remember this context’ stores a bounded capsule containing mode, current advisory Known People match, recent OCR, last heard command, last Jarvis response, bounded clipboard excerpt and approximate coordinates when available. It does not silently persist raw camera frames or rolling microphone audio. Capsules are AES-GCM encrypted with a Keychain-held key and complete file protection.", "Jarvis, remember this context.", "Run the example, open Local → Context capsules, verify a new entry appears, then inspect local memory search. Stop Camera/rolling-audio settings should remain unchanged.", .frontendOnly, "archivebox.fill"),
             f("unified-local-memory", "Local Intelligence", "Unified iPhone memory search", "Search local Jarvis records across feature silos.", "The Local Memory center can search context capsules, local conversation turns, Known People notes, encounter records, inventory, local events, goals, waiting items and action receipts. When available, Apple Foundation Models can synthesize an answer from retrieved records only and is instructed not to invent absent facts.", "Jarvis, search local memory for Japan flight.", "Store a known local record, run a matching search and verify the returned evidence comes from local Jarvis data rather than a fabricated memory.", .frontendOnly, "magnifyingglass.circle"),
-            f("compact-context-packet", "Local Intelligence", "Compact local context packets", "Give local reasoning only the context relevant to the current turn.", "Stable local-model requests receive a bounded packet such as conversation mode, current advisory enrolled-person match, recent OCR and immediate conversation context rather than an indiscriminate dump of the user’s local history.", "Open Local and run a stable local-model test.", "Use a stable request while OCR/person context is present and verify behavior remains relevant without resurrecting unrelated old topics.", .frontendOnly, "shippingbox.circle", runnable: false),
+            f("compact-context-packet", "Local Intelligence", "Internal mechanism (not a user capability): Compact local context packets", "Give local reasoning only the context relevant to the current turn.", "Stable local-model requests receive a bounded packet such as conversation mode, current advisory enrolled-person match, recent OCR and immediate conversation context rather than an indiscriminate dump of the user’s local history.", "Open Local and run a stable local-model test.", "Use a stable request while OCR/person context is present and verify behavior remains relevant without resurrecting unrelated old topics.", .frontendOnly, "shippingbox.circle", runnable: false),
             f("local-route-telemetry", "Local Intelligence", "Local routing telemetry and verification suite", "See what the iPhone intercepted and test the intended routes.", "The Local tab reports the latest local route and count of locally handled requests and includes reproducible tests for time, arithmetic, conversion, Calendar, timers and Context Capsules.", "Open the Local tab and run the verification prompts.", "The displayed route should match the expected local capability, especially the canonical ‘What time is it in DC?’ test.", .frontendOnly, "chart.bar.doc.horizontal", runnable: false)
         ]
 
         // MARK: ETDK-inspired capability architecture
         x += [
-            f("capability-packs", "Capability Architecture", "Explicit capability-pack registry", "Model frontend functions as named, inspectable packs instead of an opaque handler chain.", "Major capability families register stable IDs, human-readable names, categories, priority, effect class, requirements, activation policy, claim predicate, availability predicate and execution handler. The legacy frontend stack remains available through a lowest-priority compatibility adapter while features are progressively promoted into explicit packs.", "Open the Packs tab.", "Inspect the registered packs and verify each shows its effect/priority/requirements rather than appearing as an anonymous handler.", .frontendOnly, "square.stack.3d.up.fill", runnable: false),
-            f("capability-router", "Capability Architecture", "Central capability-pack router", "Select the smallest appropriate frontend capability before falling through to the backend.", "The router evaluates only packs whose intent predicates match, honors availability gates, records which candidates were considered, and preserves backend fallback when no frontend pack can produce a valid result.", "Jarvis, what time is it in DC?", "Run several canonical requests and inspect Packs → Last decision. Utility, Calendar, Contacts and backend-only requests should route differently.", .frontendOnly, "point.3.connected.trianglepath.dotted"),
+            f("capability-packs", "Capability Architecture", "Internal mechanism (not a user capability): Explicit capability-pack registry", "Model frontend functions as named, inspectable packs instead of an opaque handler chain.", "Major capability families register stable IDs, human-readable names, categories, priority, effect class, requirements, activation policy, claim predicate, availability predicate and execution handler. The legacy frontend stack remains available through a lowest-priority compatibility adapter while features are progressively promoted into explicit packs.", "Open the Packs tab.", "Inspect the registered packs and verify each shows its effect/priority/requirements rather than appearing as an anonymous handler.", .frontendOnly, "square.stack.3d.up.fill", runnable: false),
+            f("capability-router", "Capability Architecture", "Internal mechanism (not a user capability): Central capability-pack router", "Select the smallest appropriate frontend capability before falling through to the backend.", "The router evaluates only packs whose intent predicates match, honors availability gates, records which candidates were considered, and preserves backend fallback when no frontend pack can produce a valid result.", "Jarvis, what time is it in DC?", "Run several canonical requests and inspect Packs → Last decision. Utility, Calendar, Contacts and backend-only requests should route differently.", .frontendOnly, "point.3.connected.trianglepath.dotted"),
             f("camera-privacy-pack", "Capability Architecture", "Highest-priority camera privacy gate", "Block visual intents at the router when Stop Camera is latched.", "In addition to the camera manager’s hard master latch, the capability router has a highest-priority privacy pack. A visual request while the camera master is off is answered locally as unavailable rather than allowing lower visual packs to attempt a restart.", "Stop Camera, then ask ‘Jarvis, who is this?’", "With the camera master off, issue a camera-dependent request and verify the Packs decision is the privacy gate and the stream remains stopped.", .frontendOnly, "camera.badge.ellipsis"),
-            f("readonly-composer", "Capability Architecture", "Read-only pack composition", "Combine multiple safe local specialists within one compound request.", "A small composer can split a compound request when every clause is independently recognized as a safe local read. It runs the clauses through the preserved local stack and combines their answers. Any command containing write/action language is excluded rather than being decomposed unsafely.", "Jarvis, what time is it in DC and what meetings do I have tomorrow?", "Use a compound read-only request and inspect the resulting Packs receipt. Then try a compound request containing a write and verify it is not automatically composed/replayed.", .frontendOnly, "rectangle.3.group.bubble.left.fill"),
+            f("readonly-composer", "Capability Architecture", "Internal mechanism (not a user capability): Read-only pack composition", "Combine multiple safe local specialists within one compound request.", "A small composer can split a compound request when every clause is independently recognized as a safe local read. It runs the clauses through the preserved local stack and combines their answers. Any command containing write/action language is excluded rather than being decomposed unsafely.", "Jarvis, what time is it in DC and what meetings do I have tomorrow?", "Use a compound read-only request and inspect the resulting Packs receipt. Then try a compound request containing a write and verify it is not automatically composed/replayed.", .frontendOnly, "rectangle.3.group.bubble.left.fill"),
             f("quality-shield", "Capability Architecture", "Deterministic response Quality Shield", "Reject structurally wrong local answers before treating them as authoritative.", "Every pack result receives inexpensive checks for empty output and known contradictions. The exact observed failure ‘What time is it in DC?’ → ‘Clock appears to be running’ is explicitly rejected. Utility requests receiving app-status answers are also rejected, and read-only packs are warned if they claim external actions.", "Open Packs and run the regression suite.", "The synthetic bad Clock response should show Reject while a direct time answer shows Pass.", .frontendOnly, "checkmark.shield.fill", runnable: false),
             f("no-write-replay", "Capability Architecture", "No automatic replay of consequential writes", "Keep recovery/verifier behavior from duplicating actions.", "If a write or mixed capability produces an uncertain result, Jarvis does not automatically execute the request again merely to get a cleaner answer. This preserves the existing rule that recovery from communication/planner problems must not create duplicate emails, reminders or other side effects.", "Review Packs execution receipts after a local write.", "Verify no verifier or fallback path causes the same write command to execute twice automatically.", .frontendOnly, "arrow.uturn.backward.circle.badge.xmark", runnable: false),
             f("semantic-audit", "Capability Architecture", "Optional Apple-model semantic audit", "Run an advisory relevance check on selected read-only answers.", "When explicitly enabled, the existing on-device Apple model can audit a completed read-only request/response pair in the background. The audit does not delay speech, does not answer the user itself, does not authorize actions and stores only a bounded PASS/WARN result with the local receipt.", "Enable Semantic audit in the Packs tab, then ask a read-only question.", "After the answer, inspect the execution receipt for an audit result. Disable the toggle to confirm the auditor is optional.", .frontendOnly, "checkmark.bubble.fill", runnable: false),
             f("capability-receipts", "Capability Architecture", "Encrypted capability execution receipts", "Keep an auditable record of frontend routing decisions.", "For routed turns the iPhone stores bounded command/response excerpts, selected pack, considered pack IDs, effect class, declared requirements, routing duration, outcome, deterministic quality verdict and optional semantic-audit result. The newest 200 receipts are AES-GCM encrypted with a Keychain-held key and complete file protection.", "Open Packs → Execution receipts.", "Run a harmless local command and verify a new receipt records the selected pack and quality outcome without exposing unrestricted raw histories.", .frontendOnly, "doc.text.magnifyingglass", runnable: false),
-            f("routing-regressions", "Capability Architecture", "Canonical dry-run regression harness", "Continuously test that representative prompts choose the intended capability.", "The Packs tab includes a no-side-effect route preview suite for local utility, Calendar, Reminders, timers, memory, Contacts, vision/person, Local Executive, stable Apple-model answers and backend-only requests. It also includes synthetic Quality Shield cases. Dry-run tests do not execute writes.", "Open Packs and run the regression suite.", "All canonical route tests should pass; importantly ‘Open Clock’ and ‘Is Clock running on my PC?’ should remain backend while ‘What time is it in DC?’ should be local.utility.", .frontendOnly, "checklist.checked", runnable: false),
-            f("lazy-pack-activation", "Capability Architecture", "Lazy capability activation", "Avoid waking unrelated capability systems for every request.", "Capability handlers are considered only when their intent predicate matches, and availability gates skip disabled/unavailable capabilities. This is the frontend equivalent of an elastic core: keep the routing core small and activate specialists only when useful.", "Open Packs and inspect a routing receipt.", "A simple time question should not list vision/Contacts/Calendar as executed capabilities; only relevant matching candidates should be considered.", .frontendOnly, "bolt.horizontal.circle.fill", runnable: false),
+            f("routing-regressions", "Capability Architecture", "Internal mechanism (not a user capability): Canonical dry-run regression harness", "Continuously test that representative prompts choose the intended capability.", "The Packs tab includes a no-side-effect route preview suite for local utility, Calendar, Reminders, timers, memory, Contacts, vision/person, Local Executive, stable Apple-model answers and backend-only requests. It also includes synthetic Quality Shield cases. Dry-run tests do not execute writes.", "Open Packs and run the regression suite.", "All canonical route tests should pass; importantly ‘Open Clock’ and ‘Is Clock running on my PC?’ should remain backend while ‘What time is it in DC?’ should be local.utility.", .frontendOnly, "checklist.checked", runnable: false),
+            f("lazy-pack-activation", "Capability Architecture", "Internal mechanism (not a user capability): Lazy capability activation", "Avoid waking unrelated capability systems for every request.", "Capability handlers are considered only when their intent predicate matches, and availability gates skip disabled/unavailable capabilities. This is the frontend equivalent of an elastic core: keep the routing core small and activate specialists only when useful.", "Open Packs and inspect a routing receipt.", "A simple time question should not list vision/Contacts/Calendar as executed capabilities; only relevant matching candidates should be considered.", .frontendOnly, "bolt.horizontal.circle.fill", runnable: false),
             f("packs-tab", "Capability Architecture", "Packs diagnostics tab", "Inspect the capability registry, quality system and routing tests from the iPhone.", "The third main app tab shows registered packs, last routing decision, camera-gate state, semantic-audit control, canonical regression results and encrypted execution receipts.", "Open the Packs tab.", "Verify the registry and regression controls are visible and that a new local request updates Last decision/receipts.", .frontendOnly, "square.stack.3d.up.fill", runnable: false)
         ]
 
-        // MARK: Backend source changes waiting for deployment
+        // MARK: Backend planner guardrails
         x += [
-            f("backend-tool-necessity-pending", "Backend Update Pending", "Backend direct-answer / tool-necessity gate", "Reduce unnecessary tool use after the Windows server can be updated.", "Backend source now tells the planner that tools are the exception: answer ordinary knowledge, reasoning, arithmetic and supplied date/time directly; use tools only when they add information or perform an action. A post-plan necessity gate can reject obviously mismatched tool calls such as inspecting Clock.app for ‘What time is it in DC?’. The user currently cannot update the Windows server, so this source change must remain marked pending deployment.", "Jarvis, what time is it in DC?", "Do not judge this backend gate until the Windows PC is updated/restarted. In the meantime the iPhone deterministic local utility should already answer this particular example without the backend.", .pendingBackend, "wrench.and.screwdriver.fill", runnable: false)
+            f("backend-tool-necessity-pending", "Backend Planner", "Backend direct-answer / tool-necessity gate", "Reduce unnecessary tool use on the deployed Windows backend.", "The current backend tells the planner that tools are the exception: ordinary knowledge/reasoning should be answered directly, while tools are used only when they add information or perform an action. The source is deployed; live planner behavior still needs an end-to-end model test rather than a routing-only simulation.", "Explain why ice floats in one sentence.", "Run a harmless ordinary knowledge question that reaches the backend planner and verify the response is a direct answer with no unrelated tool execution.", .ready, "wrench.and.screwdriver.fill", runnable: false)
         ]
 
         // MARK: Explicit limits
@@ -263,6 +264,7 @@ enum JarvisFeatureCatalog {
 
 struct FeatureGuideView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
+    @EnvironmentObject private var architecture: CapabilityArchitectureController
     @State private var searchText = ""
     @State private var selectedCategory = "All"
 
@@ -285,6 +287,17 @@ struct FeatureGuideView: View {
 
     var body: some View {
         List {
+            Section("Acceptance") {
+                NavigationLink {
+                    FullFeatureAcceptanceView()
+                } label: {
+                    Label("Run Full Feature Acceptance", systemImage: "checkmark.seal.fill")
+                }
+                Text("One button simulates every cataloged prompt without executing writes, then runs live backend/Groq checks and isolated World Model, Agency, and cognition acceptance suites. Hardware/provider features remain explicitly marked as requiring real-world acceptance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Category", selection: $selectedCategory) {
                     ForEach(categories, id: \.self) { Text($0).tag($0) }
@@ -390,5 +403,567 @@ private struct FeatureDetailView: View {
         }
         .navigationTitle("Feature")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+
+private enum FullAcceptanceState: String {
+    case pass = "PASS"
+    case simulated = "SIM PASS"
+    case unverified = "UNVERIFIED"
+    case expectedFail = "EXPECTED FAIL"
+    case manual = "MANUAL"
+    case blocked = "BLOCKED"
+    case fail = "FAIL"
+
+    var symbol: String {
+        switch self {
+        case .pass: return "checkmark.seal.fill"
+        case .simulated: return "checkmark.circle.fill"
+        case .unverified: return "questionmark.diamond.fill"
+        case .expectedFail: return "shield.lefthalf.filled.badge.checkmark"
+        case .manual: return "hand.raised.fill"
+        case .blocked: return "exclamationmark.triangle.fill"
+        case .fail: return "xmark.octagon.fill"
+        }
+    }
+}
+
+private struct FullAcceptanceFeatureResult: Identifiable {
+    let id: String
+    let title: String
+    let category: String
+    let prompt: String
+    let state: FullAcceptanceState
+    let route: String
+    let detail: String
+}
+
+private struct FullAcceptanceSystemResult: Identifiable {
+    let id: String
+    let title: String
+    let state: FullAcceptanceState
+    let detail: String
+}
+
+private struct FullFeatureAcceptanceView: View {
+    @EnvironmentObject private var appModel: JarvisAppModel
+    @EnvironmentObject private var architecture: CapabilityArchitectureController
+
+    @State private var running = false
+    @State private var progressText = "Not run"
+    @State private var featureResults: [FullAcceptanceFeatureResult] = []
+    @State private var systemResults: [FullAcceptanceSystemResult] = []
+    @State private var negativeResults: [FullAcceptanceSystemResult] = []
+    @State private var lastRun: Date?
+    @State private var copied = false
+
+    private var client: JarvisAPIClient {
+        JarvisAPIClient(
+            baseURL: appModel.settings.baseURL,
+            fallbackBaseURL: appModel.settings.fallbackBaseURL,
+            apiToken: appModel.settings.apiToken,
+            sessionID: appModel.settings.conversationSessionID
+        )
+    }
+
+    private var counts: [FullAcceptanceState: Int] {
+        Dictionary(grouping: featureResults, by: \.state).mapValues(\.count)
+    }
+
+    private var activeNegativeResults: [FullAcceptanceSystemResult] {
+        negativeResults.filter { $0.state != .manual }
+    }
+
+    private var healthyNegativeCount: Int {
+        activeNegativeResults.filter { $0.state == .expectedFail }.count
+    }
+
+    private var skippedNegativeCount: Int {
+        negativeResults.filter { $0.state == .manual }.count
+    }
+
+    var body: some View {
+        List {
+            Section("Run") {
+                Button {
+                    Task { await runAll() }
+                } label: {
+                    Label(running ? "Running Full Acceptance…" : "Run Every Feature Test", systemImage: "play.circle.fill")
+                }
+                .disabled(running)
+
+                if running {
+                    ProgressView()
+                    Text(progressText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let lastRun {
+                    Text("Last run: \(lastRun.formatted(date: .abbreviated, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("This suite never sends email, creates calendar/reminder writes, launches apps, changes HomeKit, moves physical hardware, or spends a model-proposed action grant. It simulates prompt routing, performs safe live connectivity/provider checks, and runs isolated backend acceptance harnesses.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !featureResults.isEmpty {
+                Section("Summary") {
+                    LabeledContent("Catalog entries", value: String(featureResults.count))
+                    LabeledContent("Simulation passed", value: String(counts[.simulated] ?? 0))
+                    LabeledContent("Unverified planner fallback", value: String(counts[.unverified] ?? 0))
+                    LabeledContent("Manual/live acceptance", value: String(counts[.manual] ?? 0))
+                    LabeledContent("Blocked", value: String(counts[.blocked] ?? 0))
+                    LabeledContent("Failed", value: String(counts[.fail] ?? 0))
+                    LabeledContent(
+                        "Anti-cheat controls",
+                        value: "\(healthyNegativeCount)/\(activeNegativeResults.count) active rejected"
+                            + (skippedNegativeCount > 0 ? " • \(skippedNegativeCount) skipped" : "")
+                    )
+
+                    Button {
+                        UIPasteboard.general.string = reportText
+                        copied = true
+                    } label: {
+                        Label(copied ? "Report Copied" : "Copy Full Report", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                }
+            }
+
+            if !negativeResults.isEmpty {
+                Section("Anti-cheat negative controls") {
+                    Text("These checks are deliberately constructed so Jarvis cannot legitimately pass them. A trustworthy run observes the failure. If any impossible control reports success, the harness marks that control FAIL.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(negativeResults) { result in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label(result.state.rawValue, systemImage: result.state.symbol)
+                                .font(.caption.bold())
+                            Text(result.title).font(.headline)
+                            Text(result.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+
+            if !systemResults.isEmpty {
+                Section("System acceptance") {
+                    ForEach(systemResults) { result in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label(result.state.rawValue, systemImage: result.state.symbol)
+                                .font(.caption.bold())
+                            Text(result.title).font(.headline)
+                            Text(result.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+
+            if !featureResults.isEmpty {
+                ForEach(Dictionary(grouping: featureResults, by: \.category).keys.sorted(), id: \.self) { category in
+                    Section(category) {
+                        ForEach((Dictionary(grouping: featureResults, by: \.category)[category] ?? [])) { result in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Label(result.state.rawValue, systemImage: result.state.symbol)
+                                        .font(.caption.bold())
+                                    Spacer()
+                                    if !result.route.isEmpty {
+                                        Text(result.route)
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(result.title).font(.headline)
+                                if !result.prompt.isEmpty {
+                                    Text(result.prompt)
+                                        .font(.caption.monospaced())
+                                        .lineLimit(3)
+                                }
+                                Text(result.detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Full Acceptance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @MainActor
+    private func runAll() async {
+        running = true
+        copied = false
+        featureResults = []
+        systemResults = []
+        negativeResults = []
+        defer {
+            running = false
+            lastRun = Date()
+            progressText = "Complete"
+        }
+
+        progressText = "Checking iPhone capability router…"
+        architecture.router.runRegressionSuite()
+        let routeRegressions = architecture.router.regressionResults
+        let routeFailures = routeRegressions.filter { !$0.passed }
+        systemResults.append(.init(
+            id: "iphone-routing",
+            title: "iPhone capability routing regression",
+            state: routeFailures.isEmpty ? .pass : .fail,
+            detail: routeFailures.isEmpty
+                ? "\(routeRegressions.count)/\(routeRegressions.count) canonical route/quality cases passed."
+                : "\(routeFailures.count) failed: " + routeFailures.map(\.prompt).joined(separator: "; ")
+        ))
+
+        progressText = "Running anti-cheat controls…"
+        let impossiblePack = "__negative_control_pack_\(UUID().uuidString)__"
+        let actualPack = architecture.router.previewRoute(for: "What time is it in DC?")
+        negativeResults.append(.init(
+            id: "negative-iphone-route",
+            title: "Impossible iPhone route expectation",
+            state: actualPack == impossiblePack ? .fail : .expectedFail,
+            detail: actualPack == impossiblePack
+                ? "Unexpectedly matched the impossible pack name. The acceptance harness is not trustworthy."
+                : "Expected failure observed: real route was \(actualPack), not the deliberately impossible \(impossiblePack)."
+        ))
+
+        await runUnreachableEndpointCanary()
+
+        progressText = "Checking live backend…"
+        do {
+            let healthy = try await client.health()
+            systemResults.append(.init(
+                id: "backend-health",
+                title: "Windows backend live health",
+                state: healthy ? .pass : .fail,
+                detail: healthy ? "Authenticated iPhone request reached the configured Jarvis backend." : "Backend returned an unhealthy response."
+            ))
+        } catch {
+            systemResults.append(.init(
+                id: "backend-health",
+                title: "Windows backend live health",
+                state: .fail,
+                detail: error.localizedDescription
+            ))
+        }
+
+        progressText = "Checking backend anti-cheat route…"
+        do {
+            let canary = try await client.acceptancePreviewBatch([
+                (id: "negative-backend-route", text: "What time is it")
+            ])
+            if let row = canary.items.first {
+                let impossibleFamily = "__negative_control_backend_family_\(UUID().uuidString)__"
+                negativeResults.append(.init(
+                    id: "negative-backend-route",
+                    title: "Impossible backend route expectation",
+                    state: row.family == impossibleFamily ? .fail : .expectedFail,
+                    detail: row.family == impossibleFamily
+                        ? "Unexpectedly produced the deliberately impossible backend family \(impossibleFamily)."
+                        : "Expected failure observed: backend reported \(row.family), not the deliberately impossible \(impossibleFamily)."
+                ))
+            } else {
+                negativeResults.append(.init(
+                    id: "negative-backend-route",
+                    title: "Impossible backend route expectation",
+                    state: .fail,
+                    detail: "The backend returned no canary row, so this negative control could not validate the harness."
+                ))
+            }
+        } catch {
+            negativeResults.append(.init(
+                id: "negative-backend-route",
+                title: "Impossible backend route expectation",
+                state: .fail,
+                detail: "The negative control itself could not run: \(error.localizedDescription)"
+            ))
+        }
+
+        progressText = "Simulating every cataloged prompt…"
+        var provisional: [String: FullAcceptanceFeatureResult] = [:]
+        var backendItems: [(id: String, text: String)] = []
+
+        for feature in JarvisFeatureCatalog.all {
+            if feature.status == .pendingBackend {
+                provisional[feature.id] = .init(
+                    id: feature.id,
+                    title: feature.title,
+                    category: feature.category,
+                    prompt: feature.examplePrompt,
+                    state: .blocked,
+                    route: "",
+                    detail: "Catalog marks this feature as pending backend deployment; it is not counted as working."
+                )
+                continue
+            }
+
+            if !feature.runnable {
+                provisional[feature.id] = .init(
+                    id: feature.id,
+                    title: feature.title,
+                    category: feature.category,
+                    prompt: feature.examplePrompt,
+                    state: .manual,
+                    route: "",
+                    detail: "The catalog intentionally marks this as a setup, UI, side-effect, hardware, or platform-boundary verification. It is included in the report but not auto-executed."
+                )
+                continue
+            }
+
+            let route = architecture.router.previewRoute(for: feature.examplePrompt)
+            if route != "backend" {
+                provisional[feature.id] = .init(
+                    id: feature.id,
+                    title: feature.title,
+                    category: feature.category,
+                    prompt: feature.examplePrompt,
+                    state: .simulated,
+                    route: route,
+                    detail: "Prompt was accepted by the real iPhone capability router in dry-run mode. No handler/write was executed."
+                )
+            } else {
+                backendItems.append((feature.id, feature.examplePrompt))
+            }
+        }
+
+        if !backendItems.isEmpty {
+            do {
+                let preview = try await client.acceptancePreviewBatch(backendItems)
+                let byID = Dictionary(uniqueKeysWithValues: preview.items.map { ($0.id, $0) })
+                for feature in JarvisFeatureCatalog.all where provisional[feature.id] == nil {
+                    guard let row = byID[feature.id] else {
+                        provisional[feature.id] = .init(
+                            id: feature.id, title: feature.title, category: feature.category,
+                            prompt: feature.examplePrompt, state: .fail, route: "",
+                            detail: "Backend preview returned no row for this feature."
+                        )
+                        continue
+                    }
+                    let route = row.mode == "deterministic"
+                        ? [row.mode, row.family, row.tool].compactMap { $0 }.joined(separator: " → ")
+                        : "model_planner"
+                    provisional[feature.id] = .init(
+                        id: feature.id,
+                        title: feature.title,
+                        category: feature.category,
+                        prompt: feature.examplePrompt,
+                        state: row.mode == "deterministic" ? .simulated : .unverified,
+                        route: route,
+                        detail: row.mode == "deterministic"
+                            ? "Backend deterministic dispatcher recognized this prompt. The tool/direct answer was not executed."
+                            : "The prompt only reached the generic backend model-planner boundary. Because the model was not invoked and no feature-specific behavior was observed, this is not evidence that the cataloged feature works."
+                    )
+                }
+            } catch {
+                for feature in JarvisFeatureCatalog.all where provisional[feature.id] == nil {
+                    provisional[feature.id] = .init(
+                        id: feature.id,
+                        title: feature.title,
+                        category: feature.category,
+                        prompt: feature.examplePrompt,
+                        state: .fail,
+                        route: "backend",
+                        detail: "Backend dry-run preview failed: \(error.localizedDescription)"
+                    )
+                }
+            }
+        }
+
+        featureResults = JarvisFeatureCatalog.all.compactMap { provisional[$0.id] }
+
+        progressText = "Running isolated backend acceptance…"
+        do {
+            let synthetic = try await client.syntheticAcceptance()
+            systemResults.append(sectionResult(
+                id: "world-synthetic", title: "World Model fixed-endpoint synthetic acceptance", section: synthetic.world
+            ))
+            systemResults.append(sectionResult(
+                id: "agency-synthetic", title: "Agency A1–A12 synthetic acceptance", section: synthetic.agency
+            ))
+            systemResults.append(sectionResult(
+                id: "cognition-synthetic", title: "Cloud/local cognition routing benchmark", section: synthetic.cognition
+            ))
+        } catch {
+            systemResults.append(.init(
+                id: "backend-synthetic",
+                title: "Backend isolated acceptance harnesses",
+                state: .fail,
+                detail: error.localizedDescription
+            ))
+        }
+
+        progressText = "Checking Groq provider…"
+        if let key = appModel.settings.groqAPIKeyForRequest() {
+            let groq = await client.testGroqConnection(apiKey: key)
+            systemResults.append(.init(
+                id: "groq",
+                title: "Groq GPT-OSS 120B live provider check",
+                state: groq.state == "available" ? .pass : .fail,
+                detail: "\(groq.state): \(groq.detail)"
+            ))
+            if groq.state == "available" {
+                await runGroqNonexistentModelCanary(apiKey: key)
+            } else {
+                negativeResults.append(.init(
+                    id: "negative-groq-model",
+                    title: "Nonexistent Groq model rejection",
+                    state: .manual,
+                    detail: "Skipped because the normal Groq provider check did not establish a working authenticated account."
+                ))
+            }
+        } else {
+            systemResults.append(.init(
+                id: "groq",
+                title: "Groq GPT-OSS 120B live provider check",
+                state: .manual,
+                detail: "No Groq API key is stored on this iPhone. Cloud cognition remains a setup-dependent capability."
+            ))
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: .manual,
+                detail: "Skipped because no Groq API key is configured."
+            ))
+        }
+
+        let activeControls = negativeResults.filter { $0.state != .manual }
+        let badControls = activeControls.filter { $0.state != .expectedFail }
+        systemResults.append(.init(
+            id: "acceptance-integrity",
+            title: "Acceptance harness integrity",
+            state: !activeControls.isEmpty && badControls.isEmpty ? .pass : .fail,
+            detail: badControls.isEmpty && !activeControls.isEmpty
+                ? "\(activeControls.count)/\(activeControls.count) active negative controls failed exactly as expected."
+                : "Negative-control integrity failure: \(badControls.map(\.title).joined(separator: "; "))."
+        ))
+    }
+
+    @MainActor
+    private func runUnreachableEndpointCanary() async {
+        guard let url = URL(string: "http://127.0.0.1:1/__jarvis_negative_control__/health") else {
+            negativeResults.append(.init(
+                id: "negative-unreachable-endpoint",
+                title: "Deliberately unreachable endpoint",
+                state: .fail,
+                detail: "Could not construct the negative-control URL."
+            ))
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 0.75
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let unexpectedlyHealthy = (200..<300).contains(code)
+            negativeResults.append(.init(
+                id: "negative-unreachable-endpoint",
+                title: "Deliberately unreachable endpoint",
+                state: unexpectedlyHealthy ? .fail : .expectedFail,
+                detail: unexpectedlyHealthy
+                    ? "A deliberately dead localhost endpoint returned HTTP \(code). The network acceptance checker is suspect."
+                    : "Expected failure observed: deliberately dead endpoint did not return a healthy response (HTTP \(code))."
+            ))
+        } catch {
+            negativeResults.append(.init(
+                id: "negative-unreachable-endpoint",
+                title: "Deliberately unreachable endpoint",
+                state: .expectedFail,
+                detail: "Expected failure observed: \(error.localizedDescription)"
+            ))
+        }
+    }
+
+    @MainActor
+    private func runGroqNonexistentModelCanary(apiKey: String) async {
+        let fakeModel = "jarvis-negative-control-\(UUID().uuidString.lowercased())"
+        guard let url = URL(string: "https://api.groq.com/openai/v1/models/\(fakeModel)") else {
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: .fail,
+                detail: "Could not construct the negative-control Groq URL."
+            ))
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let wronglyAccepted = (200..<300).contains(code)
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: wronglyAccepted ? .fail : .expectedFail,
+                detail: wronglyAccepted
+                    ? "Groq unexpectedly accepted the deliberately nonexistent model \(fakeModel)."
+                    : "Expected rejection observed: nonexistent Groq model returned HTTP \(code)."
+            ))
+        } catch {
+            negativeResults.append(.init(
+                id: "negative-groq-model",
+                title: "Nonexistent Groq model rejection",
+                state: .expectedFail,
+                detail: "Expected rejection/failure observed: \(error.localizedDescription)"
+            ))
+        }
+    }
+
+    private func sectionResult(
+        id: String,
+        title: String,
+        section: SyntheticAcceptanceSection
+    ) -> FullAcceptanceSystemResult {
+        FullAcceptanceSystemResult(
+            id: id,
+            title: title,
+            state: section.ok ? .pass : .fail,
+            detail: section.ok
+                ? "\(section.passed)/\(section.total) isolated checks passed."
+                : "\(section.passed)/\(section.total) passed. Failures: " + section.failed.joined(separator: "; ")
+        )
+    }
+
+    private var reportText: String {
+        var lines = [
+            "JARVIS FULL FEATURE ACCEPTANCE",
+            "Generated: \((lastRun ?? Date()).formatted(date: .numeric, time: .standard))",
+            "",
+            "SYSTEM"
+        ]
+        for result in systemResults {
+            lines.append("[\(result.state.rawValue)] \(result.title) — \(result.detail)")
+        }
+        lines.append("")
+        lines.append("ANTI-CHEAT NEGATIVE CONTROLS")
+        for result in negativeResults {
+            lines.append("[\(result.state.rawValue)] \(result.title) — \(result.detail)")
+        }
+        lines.append("")
+        lines.append("FEATURES")
+        for result in featureResults {
+            lines.append("[\(result.state.rawValue)] \(result.category) / \(result.title)")
+            if !result.route.isEmpty { lines.append("  route: \(result.route)") }
+            if !result.prompt.isEmpty { lines.append("  prompt: \(result.prompt)") }
+            lines.append("  \(result.detail)")
+        }
+        return lines.joined(separator: "\n")
     }
 }

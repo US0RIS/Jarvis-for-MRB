@@ -21,6 +21,7 @@ on:
       - jarvis/world-armor-live-fabric
       - jarvis/world-armor-full-scope
       - jarvis/world-armor-cross-region
+      - claude/jarvis-release-completion-77kour
   pull_request:
     paths:
       - "ios/**"
@@ -155,6 +156,16 @@ jobs:
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/jarvis-derived-data" \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Build Jarvis iPhone simulator app (Personal Team variant, no APNs entitlement)
+        run: |
+          xcodebuild \
+            -project ios/JarvisIOS.xcodeproj \
+            -scheme JarvisIOS \
+            -configuration PersonalTeam \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/jarvis-derived-data-personal" \
             CODE_SIGNING_ALLOWED=NO build
 
   full-world-validation:

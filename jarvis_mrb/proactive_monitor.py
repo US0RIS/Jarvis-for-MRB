@@ -246,6 +246,11 @@ def _check_agency_runtime() -> None:
     from jarvis_mrb.agency_runtime import tick_all
     from jarvis_mrb.desired_state import get_desired_state
 
+    try:
+        from jarvis_mrb.agency_attention import flush_deferred
+        flush_deferred()
+    except Exception as exc:
+        _health_failure("agency_attention_flush", exc)
     report = tick_all(max_actions=2, limit=50)
     candidates: list[dict[str, Any]] = []
     for item in report.get("results") or []:
@@ -355,6 +360,13 @@ def _check_desired_states() -> None:
         reconcile_gaps()
     except Exception as exc:
         _health_failure("agency_capability_reconcile", exc)
+    try:
+        # Dormant goals and world-condition goals depend on fresh real
+        # observations; re-observe their places at a bounded cadence.
+        from jarvis_mrb.world_places import refresh_referenced
+        refresh_referenced()
+    except Exception as exc:
+        _health_failure("world_place_refresh", exc)
     check_wake_watches()
     for item in list_desired_states(limit=200):
         if str(item.get("state") or "") in {"blocked", "paused", "retired"}:

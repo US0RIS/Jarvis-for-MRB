@@ -70,8 +70,71 @@ def _connect() -> sqlite3.Connection:
             ON agency_attention_events(desired_state_id,last_seen_at DESC);
         """
     )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(agency_attention_events)").fetchall()}
+    if "deferred_reason" not in columns:
+        conn.execute("ALTER TABLE agency_attention_events ADD COLUMN deferred_reason TEXT NOT NULL DEFAULT ''")
     conn.commit()
     return conn
+
+
+def _current_meeting(now: datetime) -> str:
+    """Title of a calendar event (from the synced world model) happening now."""
+    import json as _json
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT e.canonical_name,
+                  (SELECT value_json FROM beliefs b WHERE b.subject_id=e.id AND b.predicate='start_at' AND b.state='current' ORDER BY b.id DESC LIMIT 1) AS start_at,
+                  (SELECT value_json FROM beliefs b WHERE b.subject_id=e.id AND b.predicate='end_at' AND b.state='current' ORDER BY b.id DESC LIMIT 1) AS end_at,
+                  (SELECT value_json FROM beliefs b WHERE b.subject_id=e.id AND b.predicate='calendar_status' AND b.state='current' ORDER BY b.id DESC LIMIT 1) AS status
+                FROM entities e
+                WHERE e.id IN (SELECT subject_id FROM beliefs WHERE predicate='start_at' AND state='current')
+                ORDER BY e.last_seen_at DESC LIMIT 300
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return ""
+    for row in rows:
+        try:
+            start = _parse_time(_json.loads(row["start_at"])) if row["start_at"] else None
+            end = _parse_time(_json.loads(row["end_at"])) if row["end_at"] else None
+            status = str(_json.loads(row["status"]) if row["status"] else "").lower()
+        except (TypeError, ValueError):
+            continue
+        if start and end and start <= now < end and status not in {"cancelled", "canceled", "declined"}:
+            return str(row["canonical_name"])
+    return ""
+
+
+def attention_context(now: datetime | None = None) -> str:
+    """Return why a non-urgent interruption should be deferred right now, or ''."""
+    instant = now or _now_dt()
+    try:
+        from jarvis_mrb.sensor_opportunities import quiet_reason
+        reason = quiet_reason()
+        if reason:
+            return reason
+    except Exception:
+        pass
+    try:
+        from jarvis_mrb.environment_state import get_state
+        state = get_state()
+        prefs = state.get("preferences") if isinstance(state.get("preferences"), dict) else {}
+        busy_until = _parse_time(str(prefs.get("busy_until") or state.get("busy_until") or ""))
+        if busy_until and busy_until > instant:
+            return f"you asked not to be interrupted until {busy_until.isoformat(timespec='minutes')}"
+    except Exception:
+        pass
+    meeting = _current_meeting(instant)
+    if meeting:
+        return f"you are in the calendar event {meeting!r}"
+    return ""
 
 
 def attention_value(
@@ -130,6 +193,13 @@ def consider(
     decision = "interrupt" if interrupt else "log"
     now = _now()
     duplicate = False
+    deferred_reason = ""
+    if interrupt and allow_emit and str(severity or "").lower() not in {"urgent", "critical"}:
+        context = attention_context()
+        if context:
+            allow_emit = False
+            deferred_reason = context
+            suppress_reason = f"deferred while {context}"
     should_emit = interrupt and bool(allow_emit)
     suppressed = bool(interrupt and not allow_emit)
 
@@ -218,6 +288,10 @@ def consider(
                 last_emitted,
             ),
         )
+        conn.execute(
+            "UPDATE agency_attention_events SET deferred_reason=? WHERE attention_key=? AND emitted_count=0",
+            (deferred_reason[:300], key),
+        )
         if should_emit:
             reserved_emit_at = now
             conn.execute(
@@ -266,8 +340,45 @@ def consider(
         "emitted": emitted,
         "duplicate": duplicate,
         "suppressed": suppressed,
+        "deferred_reason": deferred_reason,
         "rationale": rationale,
     }
+
+
+def flush_deferred(*, max_age_hours: int = 12, emitter: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Deliver interruptions that were deferred for context once it has cleared.
+
+    Each deferred item is delivered at most once and only if still recent; it is
+    never delivered while the deferring context persists.
+    """
+    context = attention_context()
+    if context:
+        return {"delivered": 0, "still_deferred_because": context}
+    cutoff = (_now_dt() - timedelta(hours=max_age_hours)).isoformat()
+    delivered = 0
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """SELECT attention_key,message,severity FROM agency_attention_events
+               WHERE deferred_reason<>'' AND emitted_count=0 AND last_seen_at>=? ORDER BY last_seen_at LIMIT 10""",
+            (cutoff,),
+        ).fetchall()
+        now = _now()
+        for row in rows:
+            conn.execute(
+                """UPDATE agency_attention_events SET emitted_count=1,last_emitted_at=?,deferred_reason='',
+                   rationale=rationale || '; delivered after deferral' WHERE attention_key=? AND emitted_count=0""",
+                (now, str(row["attention_key"])),
+            )
+        conn.commit()
+    for row in rows:
+        if emitter is not None:
+            emitter(str(row["message"]))
+        else:
+            from jarvis_mrb.event_bus import emit_proactive
+            emit_proactive(str(row["message"]), cue="attention", severity=str(row["severity"] or "info"))
+        delivered += 1
+    return {"delivered": delivered}
 
 
 def list_events(*, desired_state_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:

@@ -327,3 +327,23 @@ def status() -> dict[str, Any]:
             "transcripts_or_raw_audio_persisted": False,
             "gps_trails_persisted": False,
         }
+
+
+
+def quiet_reason(max_age_seconds: int = 120) -> str:
+    """Why the user should not be interrupted right now, from fresh phone sensing.
+
+    Only an explicitly enabled, fresh (<= 2 min) phone snapshot counts; stale
+    or missing sensing never implies the user is busy or free.
+    """
+    instant = datetime.now(timezone.utc)
+    with _LOCK:
+        for state in _LIVE.values():
+            updated = state.get("updated_at")
+            if (
+                state.get("quiet")
+                and isinstance(updated, datetime)
+                and (instant - updated).total_seconds() <= max_age_seconds
+            ):
+                return "driving or in a conversation (iPhone motion/audio)"
+    return ""

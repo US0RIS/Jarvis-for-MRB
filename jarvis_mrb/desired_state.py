@@ -120,6 +120,27 @@ def _validate_criterion(raw: dict[str, Any]) -> dict[str, Any]:
             values = raw.get("values")
             if not isinstance(values, list) or not values:
                 raise ValueError("belief_in requires a non-empty values list.")
+    elif kind == "belief_compare":
+        if not str(raw.get("entity_id") or "").strip():
+            raise ValueError("belief_compare requires entity_id.")
+        if not str(raw.get("predicate") or "").strip():
+            raise ValueError("belief_compare requires predicate.")
+        op = str(raw.get("op") or "").strip()
+        if op not in _COMPARE_OPS:
+            raise ValueError(f"belief_compare op must be one of {sorted(_COMPARE_OPS)}.")
+        value = raw.get("value")
+        if op in {"lt", "le", "gt", "ge"} and (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+        ):
+            raise ValueError("belief_compare ordering ops require a numeric value.")
+        criterion["op"] = op
+        observed_after = str(raw.get("observed_after") or "").strip()
+        if observed_after:
+            try:
+                datetime.fromisoformat(observed_after.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("belief_compare observed_after must be ISO-8601.") from exc
+        criterion["observed_after"] = observed_after
     elif kind == "commitment_status":
         if not str(raw.get("commitment_id") or "").strip():
             raise ValueError("commitment_status requires commitment_id.")
@@ -273,6 +294,37 @@ def _belief_value(conn: sqlite3.Connection, entity_id: str, predicate: str) -> t
     return True, value, int(row["id"])
 
 
+_COMPARE_OPS = {"eq", "ne", "lt", "le", "gt", "ge"}
+
+
+def _aware(text: str) -> datetime:
+    value = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    return value if value.tzinfo is not None else value.astimezone()
+
+
+def _belief_observed_at(conn: sqlite3.Connection, belief_id: int | None) -> str:
+    if belief_id is None:
+        return ""
+    row = conn.execute("SELECT observed_at FROM beliefs WHERE id=?", (int(belief_id),)).fetchone()
+    return str(row["observed_at"] or "") if row else ""
+
+
+def _compare(actual: Any, op: str, expected: Any) -> bool:
+    if op == "eq":
+        return _equal(actual, expected)
+    if op == "ne":
+        return not _equal(actual, expected)
+    if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+        # Missing/unavailable/non-numeric observations never satisfy an ordering.
+        return False
+    return {
+        "lt": actual < expected,
+        "le": actual <= expected,
+        "gt": actual > expected,
+        "ge": actual >= expected,
+    }[op]
+
+
 def _equal(actual: Any, expected: Any) -> bool:
     if isinstance(actual, str) and isinstance(expected, str):
         return _normalize(actual) == _normalize(expected)
@@ -295,6 +347,33 @@ def _evaluate_criterion(conn: sqlite3.Connection, criterion: dict[str, Any]) -> 
             values = list(criterion.get("values") or [])
             result["expected"] = values
             result["satisfied"] = bool(exists and any(_equal(actual, value) for value in values))
+        return result
+
+    if kind == "belief_compare":
+        entity_id = str(criterion.get("entity_id") or "")
+        predicate = str(criterion.get("predicate") or "")
+        op = str(criterion.get("op") or "eq")
+        exists, actual, belief_id = _belief_value(conn, entity_id, predicate)
+        observed_at = _belief_observed_at(conn, belief_id)
+        observed_after = str(criterion.get("observed_after") or "")
+        fresh = True
+        if observed_after and observed_at:
+            try:
+                fresh = _aware(observed_at) >= _aware(observed_after)
+            except ValueError:
+                fresh = False
+        elif observed_after:
+            fresh = False
+        result.update({
+            "exists": exists,
+            "actual": actual,
+            "expected": criterion.get("value"),
+            "op": op,
+            "belief_id": belief_id,
+            "observed_at": observed_at,
+            "fresh": fresh,
+            "satisfied": bool(exists and fresh and _compare(actual, op, criterion.get("value"))),
+        })
         return result
 
     if kind == "commitment_status":

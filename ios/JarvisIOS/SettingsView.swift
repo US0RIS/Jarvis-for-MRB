@@ -14,6 +14,12 @@ struct SettingsView: View {
     @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
     @State private var isSwitchingPlanner = false
+    @State private var groqDraftKey = ""
+    @State private var groqStatus = "Not checked"
+    @State private var testingGroq = false
+    @State private var windyDraftKey = ""
+    @State private var windyStatus = "Not checked"
+    @State private var testingWindy = false
 
     private let fastPlannerModel = "qwen3:8b"
     private let qualityPlannerModel = "qwen3.8:27b"
@@ -23,7 +29,8 @@ struct SettingsView: View {
             baseURL: settings.baseURL,
             fallbackBaseURL: settings.fallbackBaseURL,
             apiToken: settings.apiToken,
-            sessionID: settings.conversationSessionID
+            sessionID: settings.conversationSessionID,
+            windyAPIKey: settings.windyAPIKeyForRequest() ?? ""
         )
     }
 
@@ -41,6 +48,11 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                     Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("App build SHA", value: String(JarvisBuildIdentity.buildSHA.prefix(12)) + " • " + JarvisBuildIdentity.buildVariant)
+                        .font(.caption)
+                    Text("Release receipts bind this phone's behavior to the build SHA above. A value of \"unstamped\" or ending in \"-dirty\" cannot qualify for release acceptance.")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
@@ -85,6 +97,144 @@ struct SettingsView: View {
                          ? "Routine voice turns stay on 8B. Hard reasoning is routed to 27B, then 8B is rewarmed for the next conversational turn. Thinking remains disabled."
                          : "Manual mode pins the selected planner model. Thinking remains disabled.")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Cloud Intelligence / Groq") {
+                    Toggle("Enable cloud cognition", isOn: $settings.cloudCognitionEnabled)
+                        .disabled(!settings.groqKeyConfigured)
+
+                    Picker("Routing", selection: $settings.cognitionMode) {
+                        Text("Automatic").tag("auto")
+                        Text("Force local").tag("local")
+                        Text("Force cloud").tag("cloud")
+                    }
+
+                    HStack {
+                        Text("Model")
+                        Spacer()
+                        Text("GPT-OSS 120B")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Credential")
+                        Spacer()
+                        if settings.groqKeyConfigured {
+                            Text("Configured ••••••••")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not configured")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    SecureField(
+                        settings.groqKeyConfigured ? "Paste replacement API key" : "Paste Groq API key",
+                        text: $groqDraftKey
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    HStack {
+                        Button(settings.groqKeyConfigured ? "Replace Key" : "Save Key") {
+                            settings.saveGroqAPIKey(groqDraftKey)
+                            groqDraftKey = ""
+                            groqStatus = settings.groqKeyConfigured ? "Key saved in Apple Keychain." : "No key stored."
+                        }
+                        .disabled(groqDraftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Test Connection") {
+                            Task { await testGroqConnection() }
+                        }
+                        .disabled(!settings.groqKeyConfigured || testingGroq)
+                    }
+
+                    if settings.groqKeyConfigured {
+                        Button("Delete Key", role: .destructive) {
+                            settings.deleteGroqAPIKey()
+                            groqDraftKey = ""
+                            groqStatus = "Key deleted; cloud cognition disabled."
+                        }
+                    }
+
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        if testingGroq { ProgressView().controlSize(.small) }
+                        Text(groqStatus)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+
+                    Text("Automatic routing keeps deterministic functions first and ordinary conversation on local Qwen. Jarvis escalates difficult, ambiguous, conflicting-evidence, long-context, repeatedly failed, or materially consequential reasoning to Groq when stronger reasoning is useful. The API key stays in this device's Apple Keychain; it is sent only to Groq. Jarvis sends a minimized, secret-redacted context package and treats the cloud response as an untrusted proposal that still passes through existing backend authorization and verification.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Per-request override: start a request with “local:” or “cloud:”. Developer routing details remain available from the authenticated cloud-cognition status endpoint.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Worldwide Public Cameras / Windy") {
+                    HStack {
+                        Text("Credential")
+                        Spacer()
+                        if settings.windyKeyConfigured {
+                            Text("Configured ••••••••")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Not configured")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    SecureField(
+                        settings.windyKeyConfigured ? "Paste replacement API key" : "Paste Windy Webcams API key",
+                        text: $windyDraftKey
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                    HStack {
+                        Button(settings.windyKeyConfigured ? "Replace Key" : "Save Key") {
+                            settings.saveWindyAPIKey(windyDraftKey)
+                            windyDraftKey = ""
+                            windyStatus = settings.windyKeyConfigured
+                                ? "Key saved in Apple Keychain."
+                                : "No key stored."
+                        }
+                        .disabled(windyDraftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Test Connection") {
+                            Task { await testWindyConnection() }
+                        }
+                        .disabled(!settings.windyKeyConfigured || testingWindy)
+                    }
+
+                    if settings.windyKeyConfigured {
+                        Button("Delete Key", role: .destructive) {
+                            settings.deleteWindyAPIKey()
+                            windyDraftKey = ""
+                            windyStatus = "Key deleted."
+                        }
+                    }
+
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        if testingWindy { ProgressView().controlSize(.small) }
+                        Text(windyStatus)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+
+                    Text("This key enables the Windy Webcams v3 worldwide camera directory from Jarvis on this iPhone. It is stored in Apple Keychain. Interactive camera requests send the credential only when a Windy-capable lookup or inspection needs it; it is not written into Jarvis's camera evidence database.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("A key stored only on the iPhone does not give unattended Windows background camera watches a durable credential after the phone is gone. Those background watches still require a separately configured backend credential.")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
@@ -411,6 +561,32 @@ struct SettingsView: View {
             useFastPlanner = previousFastValue
             plannerModelStatus = "Model switch failed: \(error.localizedDescription)"
         }
+    }
+
+    private func testGroqConnection() async {
+        guard let key = settings.groqAPIKeyForRequest() else {
+            groqStatus = "not configured"
+            return
+        }
+        testingGroq = true
+        defer { testingGroq = false }
+        let status = await client.testGroqConnection(apiKey: key)
+        groqStatus = status.state == "available"
+            ? "Available"
+            : "\(status.state): \(status.detail)"
+    }
+
+    private func testWindyConnection() async {
+        guard let key = settings.windyAPIKeyForRequest() else {
+            windyStatus = "not configured"
+            return
+        }
+        testingWindy = true
+        defer { testingWindy = false }
+        let status = await client.testWindyConnection(apiKey: key)
+        windyStatus = status.state == "available"
+            ? "Available"
+            : "\(status.state): \(status.detail)"
     }
 
     private func checkNeuralVoice() async {

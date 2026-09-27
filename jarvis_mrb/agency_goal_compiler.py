@@ -140,6 +140,22 @@ Return JSON only:
       "commitment_id":"an EXACT supplied commitment id",
       "status":"resolved"
     }
+    OR (only when success is a physical/world state Jarvis can observe)
+    {
+      "kind":"device_state",
+      "device":"exact Apple Home light name from the supplied device list",
+      "predicate":"power_on",
+      "op":"eq",
+      "value":true
+    }
+    OR
+    {
+      "kind":"world_metric",
+      "place":"named place or lat,lon",
+      "predicate":"us_aqi|pm2_5_ug_m3|uv_index|nws_alert_count|usgs_quake_count|usgs_max_magnitude|aircraft_count",
+      "op":"eq|ne|lt|le|gt|ge",
+      "value":0
+    }
   ],
   "explanation":"short explanation of what future observation proves success"
 }
@@ -152,6 +168,7 @@ Rules:
 - Put common negations / incomplete formulations in terms_none, for example "not signed", "unsigned", "needs signature", "pending".
 - Leave event_types/source_kinds empty unless the supplied context justifies narrowing them.
 - commitment_status may use ONLY an exact commitment id supplied in context.
+- device_state may use ONLY a device named in the supplied Apple Home device list; world_metric only the listed predicates. A future fresh observation must prove them.
 - Do not invent entity IDs, commitment IDs, tools, sources, or facts.
 - If the goal cannot be converted into reliable observable evidence from this context, return confidence below 0.70 and criteria=[].
 """
@@ -379,6 +396,13 @@ def _validate_compiled(
                 }
             )
             continue
+        if kind in {"device_state", "world_metric"}:
+            from jarvis_mrb.world_places import compile_condition
+
+            grounded = compile_condition(dict(criterion))
+            grounded.pop("label", None)
+            clean.append(grounded)
+            continue
         if kind != "event_match":
             raise ValueError(f"Compiler requested unsupported success criterion {kind!r}.")
 
@@ -486,9 +510,15 @@ def compile_observable_contract(
         raise ValueError(f"Unknown desired state {desired_state_id!r}.")
     intention_id = str(state.get("intention_id") or "")
     intention = _intention_context(intention_id) if intention_id else {}
+    try:
+        from jarvis_mrb.world_places import known_lights
+        devices = [item["name"] for item in known_lights()]
+    except Exception:
+        devices = []
     prompt = (
         f"Goal: {state.get('title')}\n"
         f"Intention: {json.dumps(intention, ensure_ascii=False, sort_keys=True)}\n"
+        f"Apple Home device list: {json.dumps(devices, ensure_ascii=False)}\n"
         "Compile only the minimum future observable evidence that proves this goal has actually been achieved."
     )
 

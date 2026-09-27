@@ -77,6 +77,23 @@ final class JarvisAppModel: ObservableObject {
         memoMind = MemoMindBridge()
         homeEnvironment = HomeEnvironmentController()
 
+        homeEnvironment.onCatalogUpdated = { [weak self] lights in
+            Task { @MainActor in
+                guard let self else { return }
+                let payload: [[String: Any]] = lights.map { light in
+                    var item: [String: Any] = [
+                        "id": light.id.uuidString.lowercased(),
+                        "name": light.name,
+                        "room": light.room,
+                        "reachable": light.reachable,
+                    ]
+                    if let on = light.cachedOn { item["on"] = on }
+                    return item
+                }
+                try? await self.client.publishPresenceCatalog(payload)
+            }
+        }
+
         geofenceManager.onHomeArrival = { [weak self] in
             Task { @MainActor in
                 await self?.sendEvent("home_arrival")
@@ -89,7 +106,8 @@ final class JarvisAppModel: ObservableObject {
             baseURL: settings.baseURL,
             fallbackBaseURL: settings.fallbackBaseURL,
             apiToken: settings.apiToken,
-            sessionID: settings.conversationSessionID
+            sessionID: settings.conversationSessionID,
+            windyAPIKey: settings.windyAPIKeyForRequest() ?? ""
         )
     }
 

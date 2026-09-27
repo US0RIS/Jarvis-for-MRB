@@ -252,6 +252,27 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     from jarvis_mrb.agency_world_tools import HANDLERS as _WORLD_HANDLERS, execute as _world_execute
     if tool in _WORLD_HANDLERS:
         return _result(_world_execute(tool, args))
+    if tool in {"world.remember_fact", "world.correct_fact"}:
+        from jarvis_mrb.world_facts import remember as remember_fact
+        try:
+            outcome = remember_fact(
+                str(args.get("entity") or ""), str(args.get("attribute") or ""), str(args.get("value") or ""),
+                kind=str(args.get("kind") or ""), correction=tool == "world.correct_fact",
+            )
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+        verb = "Corrected" if tool == "world.correct_fact" else "Noted"
+        replaced = f" (replacing {', '.join(map(str, outcome['replaced']))}, kept in history)" if outcome["replaced"] else ""
+        return AgentReply(True, f"{verb}: {outcome['entity']['name']} {str(args.get('attribute'))} is {outcome['value']}{replaced}.", data=outcome)
+    if tool == "world.describe_entity":
+        from jarvis_mrb.world_facts import describe_text
+        try:
+            return AgentReply(True, describe_text(str(args.get("entity") or "")))
+        except ValueError as exc:
+            return AgentReply(False, str(exc))
+    if tool == "capabilities.now":
+        from jarvis_mrb.capability_inventory import describe as describe_capabilities, live_inventory
+        return AgentReply(True, describe_capabilities())
     if tool == "smart.status": return _smart_status(str(args.get("name") or ""))
     if tool == "smart.open": return _smart_open(str(args.get("name") or ""))
     if tool == "smart.close": return _smart_close(str(args.get("name") or ""))
@@ -1165,7 +1186,7 @@ state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set 
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};
 custom.list {{}}; custom.synthesize {{name,description,api_spec,allowed_hosts,risk,gap_id?}}; custom.enable {{name,enabled}}; custom.run {{name,arguments}}; custom.repairs {{}}; custom.apply_repair {{name}};
 agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
-world.observe_place {{place,include}}; world.camera_sources {{}}; world.observe_camera {{source}}; presence.lights {{}}; presence.set_light {{light,on}}; mesh.nodes {{}}.
+world.observe_place {{place,include}}; world.camera_sources {{}}; world.observe_camera {{source}}; presence.lights {{}}; presence.set_light {{light,on}}; mesh.nodes {{}}; world.remember_fact {{entity,attribute,value,kind?}}; world.correct_fact {{entity,attribute,value}}; world.describe_entity {{entity}}; capabilities.now {{}}.
 
 Routing rules:
 - web.search: current/recent/public information. Make the query self-contained; Jarvis refines conversational searches automatically.

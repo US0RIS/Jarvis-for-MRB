@@ -105,7 +105,7 @@ knowledge.refresh {{}}; knowledge.search {{query,limit}}; spatial.find {{object}
 jobs.list {{}}; jobs.create_time {{when,command}}; jobs.create_recurring {{when,command,recurrence}}; jobs.create_event {{event,command}}; jobs.cancel {{job_id}};
 background.submit {{prompt}}; background.list {{limit}}; background.status {{task_id}}; background.cancel {{task_id}};
 agency.status {{}}; agency.deliberate {{question,context}}; agency.counterfactual.create {{question,context,branches}}; agency.counterfactual.compare {{case_id}}; agency.counterfactual.select {{case_id,branch,rationale,change_conditions}}; agency.enable {{}}; agency.monitor {{}}; agency.disable {{}}; agency.activate_goal {{query}}; agency.pause_goal {{query}};
-world.observe_place {{place,include}}; world.camera_sources {{}}; world.observe_camera {{source}}; presence.lights {{}}; presence.set_light {{light,on}}; mesh.nodes {{}};
+world.observe_place {{place,include}}; world.camera_sources {{}}; world.observe_camera {{source}}; presence.lights {{}}; presence.set_light {{light,on}}; mesh.nodes {{}}; world.remember_fact {{entity,attribute,value,kind?}}; world.correct_fact {{entity,attribute,value}}; world.describe_entity {{entity}}; capabilities.now {{}};
 workflow.run {{goal}};
 state.get {{}}; state.update {{key,value}}; state.temp_get {{}}; state.temp_set {{key,value,ttl_minutes}}; state.temp_clear {{key}};
 sandbox.status {{}}; sandbox.python {{code,input,timeout_seconds}}; sandbox.command {{command,timeout_seconds}};

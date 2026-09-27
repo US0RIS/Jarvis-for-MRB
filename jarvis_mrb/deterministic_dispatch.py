@@ -203,6 +203,30 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     answer = _clock(lower, current) or _arithmetic(lower)
     if answer:
         return answer
+    fact_text = spoken.replace("\u2019", "'")
+    m = _match(r"(?:correction[:,]?|actually,?|no,? actually,?|that'?s wrong[.,]?|that is wrong[.,]?) (?:the )?(.{2,120}?)'s (.{2,80}?) (?:is|are) (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.correct_fact", entity=m.group(1).strip(), attribute=m.group(2).strip(), value=m.group(3).strip())
+    m = _match(r"correct (?:the )?(.{2,120}?)'s (.{2,80}?) to (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.correct_fact", entity=m.group(1).strip(), attribute=m.group(2).strip(), value=m.group(3).strip())
+    m = _match(r"remember that (?:the )?(.{2,120}?)'s (.{2,80}?) (?:is|are) (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.remember_fact", entity=m.group(1).strip(), attribute=m.group(2).strip(), value=m.group(3).strip())
+    m = _match(r"remember that the (.{2,80}?) (?:of|for) (.{2,120}?) (?:is|are) (.{1,300})", fact_text)
+    if m:
+        return _tool("world.fact", "world.remember_fact", entity=m.group(2).strip(), attribute=m.group(1).strip(), value=m.group(3).strip())
+    m = _match(r"what do you know about (?:the )?(.{2,120})", fact_text)
+    if m:
+        return _tool("world.fact", "world.describe_entity", entity=m.group(1).strip())
+    if re.fullmatch(
+        r"(?:what can you (?:do|help (?:me )?with)(?: (?:right )?now| today| at the moment)?"
+        r"|what are your (?:current )?capabilities(?: right now)?"
+        r"|what(?:'s| is) (?:available|working) right now"
+        r"|what (?:capabilities|features) (?:are|do you have) (?:available|enabled|working)(?: right now)?)",
+        lower,
+    ):
+        return _tool("capabilities", "capabilities.now")
     if lower in _EXACT:
         family, tool, arguments = _EXACT[lower]
         return Route(family, tool, dict(arguments))

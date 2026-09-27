@@ -113,6 +113,10 @@ TOOL_RISK: dict[str, Risk] = {
     "presence.lights": "read",
     "presence.set_light": "external_write",
     "mesh.nodes": "read",
+    "capabilities.now": "read",
+    "world.remember_fact": "local_write",
+    "world.correct_fact": "local_write",
+    "world.describe_entity": "read",
 }
 
 

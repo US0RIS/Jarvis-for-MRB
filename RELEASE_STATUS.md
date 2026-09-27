@@ -1,54 +1,57 @@
 # Release status — C00–C22 (governed by `criteria.md`)
 
-> **RELEASE STATUS: NOT COMPLETE.** No gate has REAL PASS evidence. Nothing here
-> upgrades SOURCE PRESENT / SYNTHETIC PASS to REAL PASS.
+> **RELEASE STATUS: NOT COMPLETE.** No gate has REAL PASS evidence. Nothing here upgrades SOURCE PRESENT or
+> SYNTHETIC PASS to REAL PASS.
 
-Release branch: `claude/jarvis-release-completion-77kour` (= `main` + `jarvis/cloud-cognition-groq`,
-which carries `criteria.md`). Frozen candidate SHA: **none yet**.
+- **Release branch:** `claude/jarvis-release-completion-77kour` (`main` + `jarvis/cloud-cognition-groq`, the branch that carries `criteria.md`).
+- **Frozen candidate SHA:** none yet.
+- **Evidence:** `jarvis-release-gate` (`docs/RELEASE_EVIDENCE.md`).
+- **Procedure:** `docs/RELEASE_RUNBOOK.md`.
 
-Allowed states: `UNPROVEN` · `IMPLEMENTING` · `IMPLEMENTATION BLOCKED` · `SYNTHETIC PASS` ·
-`READY FOR REAL TEST` · `REAL TEST FAILED` · `REAL PASS` · `BLOCKED ON USER/HARDWARE/EXTERNAL SERVICE`.
+Allowed states: `UNPROVEN` · `IMPLEMENTING` · `IMPLEMENTATION BLOCKED` · `SYNTHETIC PASS` · `READY FOR REAL TEST` ·
+`REAL TEST FAILED` · `REAL PASS` · `BLOCKED ON USER/HARDWARE/EXTERNAL SERVICE`.
 
-Evidence ledger: `jarvis-release-gate` (see `docs/RELEASE_EVIDENCE.md`). A gate is PASS only
-when that ledger holds a valid PASS record bound to the frozen SHA.
-
-## Matrix
+"READY FOR REAL TEST" means the source path exists, synthetic tests pass, and the machine evaluator for the gate is in place.
+The gate still needs the frozen deployment and the user's real run.
 
 | Gate | State | Principal blocker | Next action |
 |---|---|---|---|
-| C00 Candidate integrity | IMPLEMENTING | `/health` had no code SHA; iOS build carried no SHA; no single C00 check | Add build identity (backend + iOS), `jarvis-release-gate c00-check`; then freeze + deploy (user) |
-| C01 Feature inventory | IMPLEMENTING | README (3.4k lines) + UI claims not mapped to gates | Write `CAPABILITY_INVENTORY.md`; correct overstated README text |
-| C02 Ordinary interaction | IMPLEMENTING | No "what can you do right now?" answer reflecting live enabled/reachable capabilities | Deterministic live capability inventory tool + route |
-| C03 World model / identity | IMPLEMENTING | No conversational path to assert or correct a fact as the user (distinct from inference) | Add user fact/correction tools + entity readback with provenance/disputes |
-| C04 Intentions across restart | SYNTHETIC PASS (A1) | Real restart on Windows + physical iPhone | Ready once C00 deployed; harness `jarvis-agency-real-gate start A1` |
-| C05 Executive loop | SYNTHETIC PASS (A2) | Agency tool scope limited to PC/browser/Google/state tools | Widen Agency tool scope (see C22) then real test |
-| C06 Authority / approval | SYNTHETIC PASS (A3, A11) | Real protected write + denial on device | Real test after deploy |
-| C07 Verification / recovery | SYNTHETIC PASS (A4) | Real verified write + induced failure | Real test after deploy |
-| C08 Replan / dormant wake | SYNTHETIC PASS (A5, A6) | Needs a real observable external change reachable by Agency observations | Real test after Agency world-evidence tools |
-| C09 Proactivity | IMPLEMENTING | Agency interruptions only go to the foreground WebSocket; APNs carried only World Armor events | Route warning/urgent proactive interventions into the durable APNs outbox |
-| C10 Situational awareness | SYNTHETIC (world acceptance) | Real imminent event with multi-source data | Real test after deploy |
-| C11 Deliberation / gaps | SYNTHETIC PASS (A7, A9, A10) | Production model workers on real task | Real test after deploy |
-| C12 Cognitive routing | SOURCE PRESENT | Real Groq key on iPhone Keychain; real outage case | Ready after iOS build installed |
-| C13 Conductor | SOURCE PRESENT | Real paired workstation + phone | BLOCKED ON HARDWARE until Mac node/Windows flags configured |
-| C14 Reality Mesh | SOURCE PRESENT | Real Mac node, Tailscale, screen permission | BLOCKED ON HARDWARE (configured Mac required) |
-| C15 Reality Graph | SOURCE PRESENT | Real mission with ≥2 real sources | Real test after deploy |
-| C16 Public cameras | SOURCE PRESENT | 3 real lawful sources, 2 publishers, 2 regions | Real campaign after deploy |
-| C17 Providers | SOURCE PRESENT | Inventory of shipped providers + each real request | Derive list in C01; real campaign |
-| C18 Closed-app / resilience | SOURCE PRESENT | APNs requires paid Apple Developer team + .p8 key | BLOCKED ON USER (APNs credentials) |
-| C19 Presence (HomeKit) | SOURCE PRESENT | Physical light + human observation | Real test after iOS install |
-| C20 Privacy / fail-closed | SYNTHETIC (partial) | Consolidated campaign over the 8 cases on real deploy | Script the campaign; run after deploy |
-| C21 24-h soak | UNPROVEN | No soak sampler | Add `jarvis-release-soak` sampler; run 24 h after freeze |
-| C22 Capstone | IMPLEMENTING | **Agency cannot compose World Armor / weather / hazards / cameras / Presence / Mesh / Reality Graph — they are HTTP/UI-only, absent from the tool registry and Agency scope** | Expose them as permission-gated, verifiable Agency tools |
+| C00 Candidate integrity | READY FOR REAL TEST | Deployment of this branch to Windows and the iPhone; a paired Mac node | Deploy → `validate` → `freeze` → install the iOS build from the same SHA |
+| C01 Feature inventory | BLOCKED ON USER | Part B of `CAPABILITY_INVENTORY.md`: the user must choose P (add a REAL test) or L (label "not release-accepted") for each group | User decision, then I amend `criteria.md` (C01 appendix) or the labels |
+| C02 Ordinary interaction | READY FOR REAL TEST | — | Real session on the iPhone |
+| C03 World model / identity | READY FOR REAL TEST | — | Real session (entity in ≥3 sources, correction, restart) |
+| C04 Intentions across restart | READY FOR REAL TEST | — | "My goal is …" → confirm → restart; A1 inside C04 |
+| C05 Executive loop | READY FOR REAL TEST | Local Qwen plan quality for a real two-write goal (unmeasured) | A2 inside C05 |
+| C06 Authority / approval | READY FOR REAL TEST | — | A3 + A11 inside C06 |
+| C07 Verification / recovery | READY FOR REAL TEST | — | A4 inside C07 |
+| C08 Replan / dormant wake | READY FOR REAL TEST | — | A5 + A6 inside C08 (dormant `wait_until` now exists in production) |
+| C09 Proactivity | BLOCKED ON USER (APNs) | Closed-app delivery needs a paid Apple Developer team and a `.p8` key | A8 inside C09 once APNs is configured |
+| C10 Situational awareness | READY FOR REAL TEST | — | Real imminent meeting |
+| C11 Deliberation / gaps | READY FOR REAL TEST | — | A7 + A9 inside C11 |
+| C12 Cognitive routing | READY FOR REAL TEST | Groq key on the iPhone | Real session; evaluator checks tiers, Groq, fallback, redaction and protected proposal |
+| C13 Conductor | BLOCKED ON HARDWARE | Mac node running `jarvis-mac-node.py --allow-app-launch` over Tailscale | Configure the Mac, then a real session |
+| C14 Reality Mesh | BLOCKED ON HARDWARE | Same Mac node with `--allow-screen` and Screen Recording permission | Configure the Mac, then a real session |
+| C15 Reality Graph | READY FOR REAL TEST | — | Real mission |
+| C16 Public cameras | READY FOR REAL TEST | User must choose 3 lawful sources (2 publishers, 2 regions) | Real campaign; evaluator checks counts, regions, failure and pause |
+| C17 Providers | BLOCKED ON USER (inventory) | Which providers are claimed depends on the C01 decision; NWS, air, USGS and OpenSky are evaluated automatically | Real campaign |
+| C18 Closed-app / resilience | BLOCKED ON USER (APNs) | Paid team + APNs key; watchdog configuration | Real session after APNs |
+| C19 Presence (HomeKit) | READY FOR REAL TEST | — | Real session + human attestation |
+| C20 Privacy / fail-closed | READY FOR REAL TEST | — | Live probes on the deployed build (validated here against a local service) + revoke/stop |
+| C21 24-h soak | READY FOR REAL TEST | Needs every earlier code change finished | Soak after the final freeze |
+| C22 Capstone | READY FOR REAL TEST | Composition now possible (world, device, calendar, mail, cameras, Mesh, dormant watch, proactivity); unproven on real models | After the freeze; you choose the objective |
 
-## Audit findings (2026-09-27)
+## Engineering done in this release branch
 
-- `criteria.md` existed only on `jarvis/cloud-cognition-groq`; `main` lacked it and cloud cognition,
-  while the groq branch lacked main's two-region comparison. Merged both into the release branch.
-- Full Python suite on the merge: 2 regressions (time-bomb in APNs outbox tests; Caltrans placeholder
-  threshold) — fixed. Agency synthetic A1–A12: ok. World acceptance + world check (prepared DB): ok.
-- Agency A1–A12 real-gate harness (`jarvis-agency-real-gate`) is strong and SHA/env-bound; it covers
-  C04–C08, C11 and part of C06/C09/C22 but nothing for C00–C03, C10, C12–C21.
-- 84 conversational tools exist; Agency may use 55 of them. None cover World Armor, NWS/USGS/air,
-  public cameras, movement, Reality Graph, Mesh, Conductor or Presence. This is the shared root cause
-  blocking C05/C08 real tests with world evidence, C15/C17 through the normal user path, and C22.
-- `jarvis/cloud-cognition-groq-lite` removes APNs for Personal Team signing: C18 needs a paid team.
+| Change | Gates | Notes |
+|---|---|---|
+| Merged `criteria.md` and cloud cognition | — | Fixed two test regressions and one iOS compile break caused by the merge (APNs delegate) |
+| Evidence ledger (`jarvis-release-gate`) | C00–C22 | Append-only and hash-chained; build identity for the backend and iOS; evaluators for C00, C08, C12, C16–C21 |
+| Agency capability bridge | C05, C08, C15–C17, C19, C22 | World/place observations as beliefs; camera sources; Presence with readback verifier; Mesh status; `wait_until` dormant goals; grounded world/device success criteria; planner argument contracts |
+| Goal intake | C04, C22 | "My goal is …" becomes a confirmed offer to pursue it |
+| Live capability inventory | C02 | "What can you do right now?" |
+| User facts and corrections with provenance | C03 | — |
+| Proactive interventions to APNs, with dedup | C09, C18 | Adds context-aware deferral (driving, meeting, user-set busy window) |
+| Durable cloud routing telemetry | C12 | iPhone reports fallbacks; the deterministic tier is now recorded correctly |
+| Presence denials recorded; provider gaps recorded | C17, C19 | — |
+| 24-h soak sampler | C21 | — |
+| README / Feature Guide truthfulness; `CAPABILITY_INVENTORY.md` draft | C01 | — |

@@ -33,6 +33,7 @@ final class CompanionConnection: ObservableObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
+        JarvisBuildIdentity.apply(to: &request)
         if !client.apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(client.apiToken)", forHTTPHeaderField: "Authorization")
         }

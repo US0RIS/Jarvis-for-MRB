@@ -49,6 +49,11 @@ struct SettingsView: View {
                     Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    LabeledContent("App build SHA", value: String(JarvisBuildIdentity.buildSHA.prefix(12)))
+                        .font(.caption)
+                    Text("Release receipts bind this phone's behavior to the build SHA above. A value of \"unstamped\" or ending in \"-dirty\" cannot qualify for release acceptance.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("AI Planner") {

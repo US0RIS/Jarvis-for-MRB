@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -69,6 +69,38 @@ agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
 app = FastAPI(title="Jarvis for MRB", version="0.13.0")
+_SERVICE_BOOT_ID = __import__("uuid").uuid4().hex
+_client_seen_at: dict[tuple[str, str], float] = {}
+
+
+@app.middleware("http")
+async def _record_client_build(request: Request, call_next):
+    """Record which authenticated app build/device is talking to this backend.
+
+    Release receipts (criteria.md C00) must bind iPhone behavior to one exact
+    candidate SHA; only authenticated requests are recorded, throttled per
+    device/build so this cannot become write amplification.
+    """
+    build = request.headers.get("x-jarvis-client-build", "")
+    device = request.headers.get("x-jarvis-client-device", "")
+    if build and device:
+        import hmac
+        import time as _time
+        supplied = request.headers.get("authorization", "")
+        authorized = (not API_TOKEN) or hmac.compare_digest(supplied, f"Bearer {API_TOKEN}")
+        key = (device[:80], build[:80])
+        now_mono = _time.monotonic()
+        if authorized and now_mono - _client_seen_at.get(key, -1e9) >= 30:
+            _client_seen_at[key] = now_mono
+            try:
+                from jarvis_mrb.release_gates import record_client_seen
+                record_client_seen(
+                    device_id=device, build_sha=build,
+                    model=request.headers.get("x-jarvis-client-model", ""),
+                )
+            except Exception:
+                pass
+    return await call_next(request)
 _scheduler_started = False
 _external_watches_started = False
 _tts_start_attempted = False
@@ -1095,9 +1127,16 @@ def health() -> dict[str, Any]:
     except Exception as exc:
         agency = {"ready": False, "mode": "unknown", "error": str(exc)[:500]}
 
+    try:
+        from jarvis_mrb.agency_release import deployment_sha as _code_sha
+        code_sha = _code_sha()
+    except Exception:
+        code_sha = ""
     return {
         "status": "ok",
         "version": "0.13.0",
+        "code_sha": code_sha,
+        "boot_id": _SERVICE_BOOT_ID,
         "bind": BIND_HOST,
         "tts": "ready" if tts_health() else "starting-or-unavailable",
         "web_search": "ready" if web_status().ok else "unconfigured",
@@ -1124,6 +1163,18 @@ def health() -> dict[str, Any]:
         "agency_plans": agency.get("plans") or {},
         "agency_steps": agency.get("steps") or {},
     }
+
+
+@app.get("/release/identity")
+def release_identity(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Exact code/installation identity of this running service (criteria.md C00)."""
+    _check_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.release_gates import build_identity
+    return {**build_identity(), "boot_id": _SERVICE_BOOT_ID}
 
 
 def _armor_error(exc: Exception) -> None:

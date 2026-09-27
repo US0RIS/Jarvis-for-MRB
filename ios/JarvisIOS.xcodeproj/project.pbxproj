@@ -215,6 +215,7 @@
 				400000000000000000000001 /* Sources */,
 				401000000000000000000001 /* Frameworks */,
 				402000000000000000000001 /* Resources */,
+				404000000000000000000001 /* Stamp Jarvis build SHA */,
 				403000000000000000000001 /* Embed Frameworks */,
 				403000000000000000000002 /* Embed App Extensions */,
 			);
@@ -307,6 +308,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		404000000000000000000001 /* Stamp Jarvis build SHA */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp Jarvis build SHA";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nSHA=$(git -C \"$SRCROOT\" rev-parse HEAD 2>/dev/null || echo unknown)\nif [ \"$SHA\" != unknown ] && [ -n \"$(git -C \"$SRCROOT/..\" status --porcelain --untracked-files=normal -- . ':!*xcuserdata*' 2>/dev/null)\" ]; then SHA=\"$SHA-dirty\"; fi\nPLIST=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n/usr/libexec/PlistBuddy -c \"Set :JarvisBuildSHA $SHA\" \"$PLIST\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :JarvisBuildSHA string $SHA\" \"$PLIST\"\necho \"Stamped JarvisBuildSHA=$SHA\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		400000000000000000000001 /* Sources */ = {
@@ -411,6 +431,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = JarvisIOS/Info.plist;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -434,6 +455,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = JarvisIOS/Info.plist;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

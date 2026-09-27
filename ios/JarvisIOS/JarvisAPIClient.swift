@@ -1,4 +1,46 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// Exact build/device identity sent to the private Jarvis backend so release
+/// receipts can bind iPhone behavior to one candidate SHA (criteria.md C00).
+/// Never sent to third-party providers.
+enum JarvisBuildIdentity {
+    static var buildSHA: String {
+        let value = Bundle.main.object(forInfoDictionaryKey: "JarvisBuildSHA") as? String
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "unstamped" : trimmed
+    }
+
+    static var bundleVersion: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+
+    static var deviceID: String {
+        #if canImport(UIKit)
+        return UIDevice.current.identifierForVendor?.uuidString ?? "unknown-device"
+        #else
+        return "unknown-device"
+        #endif
+    }
+
+    static var deviceModel: String {
+        #if canImport(UIKit)
+        return "\(UIDevice.current.model) iOS \(UIDevice.current.systemVersion)"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    static func apply(to request: inout URLRequest) {
+        request.setValue(buildSHA, forHTTPHeaderField: "X-Jarvis-Client-Build")
+        request.setValue(deviceID, forHTTPHeaderField: "X-Jarvis-Client-Device")
+        request.setValue(deviceModel, forHTTPHeaderField: "X-Jarvis-Client-Model")
+    }
+}
 
 struct LifeFabricRecord: Decodable, Identifiable {
     struct Detail: Decodable {
@@ -761,6 +803,7 @@ private actor JarvisEndpointResolver {
         guard let url = URL(string: baseURL)?.appendingPathComponent("health") else { return false }
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
+        JarvisBuildIdentity.apply(to: &request)
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         }
@@ -2681,6 +2724,7 @@ struct JarvisAPIClient {
     }
 
     private func addAuthorization(to request: inout URLRequest) {
+        JarvisBuildIdentity.apply(to: &request)
         if !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         }

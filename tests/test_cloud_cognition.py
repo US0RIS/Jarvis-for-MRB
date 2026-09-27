@@ -273,3 +273,23 @@ class IOSCredentialSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServicePrepareRoutingTests(unittest.TestCase):
+    def test_prepare_marks_deterministic_capability_so_telemetry_shows_true_tier(self) -> None:
+        from unittest.mock import patch
+
+        from jarvis_mrb import service
+
+        with patch.object(service, "API_TOKEN", ""), \
+             patch("jarvis_mrb.cloud_cognition._emit_telemetry"):
+            deterministic = service.cloud_cognition_prepare(
+                service.CloudCognitionPrepareRequest(text="What can you do right now?", mode="auto"),
+                authorization=None,
+            )
+            ordinary = service.cloud_cognition_prepare(
+                service.CloudCognitionPrepareRequest(text="tell me a short story about a lighthouse", mode="auto"),
+                authorization=None,
+            )
+        self.assertEqual(deterministic["tier"], "deterministic")
+        self.assertEqual(ordinary["tier"], "local")

@@ -3279,11 +3279,17 @@ def cloud_cognition_prepare(
     session_id = request.session_id or "default"
     effective_text = _command_alias(request.text)
     history = _contextual_history(session_id, effective_text, limit=12)
+    try:
+        from jarvis_mrb.deterministic_dispatch import dispatch as deterministic_route
+        deterministic_available = deterministic_route(effective_text) is not None
+    except Exception:
+        deterministic_available = False
     return prepare_cloud_task(
         effective_text,
         session_id=session_id,
         history=history,
         force=request.mode,
+        deterministic_available=deterministic_available,
     )
 
 

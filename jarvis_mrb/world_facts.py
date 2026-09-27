@@ -48,10 +48,27 @@ def find_entities(name: str) -> list[dict[str, Any]]:
     return [{"id": str(r["id"]), "kind": str(r["kind"]), "name": str(r["canonical_name"])} for r in rows]
 
 
+def _infer_kind(name: str) -> str:
+    """Use the same typing the conversation linker uses, so a user fact and the
+    linker's later extraction land on one entity instead of two."""
+    try:
+        from jarvis_mrb.world_linker import _explicit_project_names
+        if any(_norm(found) == _norm(name) for found in _explicit_project_names(name)):
+            return "project"
+    except Exception:
+        pass
+    return "thing"
+
+
 def _resolve(name: str, *, kind: str = "", create: bool = False) -> dict[str, Any]:
     matches = find_entities(name)
     if kind:
         matches = [m for m in matches if m["kind"] == _norm(kind).replace(" ", "_")] or matches
+    typed = [m for m in matches if m["kind"] != "thing"]
+    if len(matches) > 1 and len(typed) == 1:
+        # An untyped placeholder with the same exact name is not a competing
+        # identity; the typed entity is the one other sources resolve to.
+        return typed[0]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -62,8 +79,9 @@ def _resolve(name: str, *, kind: str = "", create: bool = False) -> dict[str, An
         )
     if not create:
         raise ValueError(f"I don't have anything recorded as {name!r}.")
-    entity_id = world_model.ensure_entity(kind or "thing", name)
-    return {"id": entity_id, "kind": _norm(kind or "thing").replace(" ", "_"), "name": name.strip()}
+    resolved_kind = kind or _infer_kind(name)
+    entity_id = world_model.ensure_entity(resolved_kind, name)
+    return {"id": entity_id, "kind": _norm(resolved_kind).replace(" ", "_"), "name": name.strip()}
 
 
 def remember(name: str, attribute: str, value: str, *, kind: str = "", correction: bool = False) -> dict[str, Any]:

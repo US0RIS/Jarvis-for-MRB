@@ -275,6 +275,95 @@ def _c19(session: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+# --------------------------------------------------------------------------- C20
+
+SEEDED_SECRET = "sk-" + "JARVISC20SEEDED" + "0123456789abcdef"
+
+
+def _service_base() -> tuple[str, str]:
+    from jarvis_mrb.server_config import load_server_config
+
+    config = load_server_config()
+    host = config.bind_host if config.bind_host not in {"0.0.0.0", "::", ""} else "127.0.0.1"
+    return f"http://{host}:{config.port}", config.api_token
+
+
+def _c20(session: dict[str, Any]) -> list[dict[str, Any]]:
+    """Live negative probes against the running service; every one must fail closed.
+
+    The probes are deliberately unable to succeed legitimately (random grant,
+    private/link-local targets, unknown node, wrong bearer), so they cannot
+    cause an effect; they only prove the boundary on the deployed build.
+    """
+    import secrets
+
+    import httpx
+
+    base, token = _service_base()
+    auth = {"Authorization": f"Bearer {token}"}
+    checks: list[dict[str, Any]] = []
+
+    def call(method: str, path: str, **kwargs: Any) -> tuple[int, str]:
+        try:
+            response = httpx.request(method, base + path, timeout=20.0, **kwargs)
+            return response.status_code, response.text
+        except httpx.HTTPError as exc:
+            return -1, f"{type(exc).__name__}: {exc}"[:300]
+
+    missing = call("GET", "/release/identity")
+    wrong = call("GET", "/release/identity", headers={"Authorization": "Bearer wrong-" + secrets.token_hex(8)})
+    checks.append(_check("missing and wrong Jarvis bearer are rejected", bool(token) and missing[0] == 401 and wrong[0] == 401,
+                         {"missing": missing[0], "wrong": wrong[0], "token_configured": bool(token)}))
+
+    grant = secrets.token_hex(16)
+    presence = call("POST", "/world-armor/v8/presence/dispatch", headers=auth, json={"grant_id": grant, "desired_on": True})
+    checks.append(_check("unknown/expired/revoked Presence grant cannot actuate", presence[0] in {404, 409, 422, 503},
+                         {"status": presence[0], "detail": presence[1][:200]}))
+
+    statuses = {}
+    for url in ("http://192.168.1.10/", "http://169.254.169.254/latest/meta-data/", "http://[::1]/"):
+        statuses[url] = call("POST", "/world-armor/v1/cameras/page-media", headers=auth, json={"public_url": url})
+    checks.append(_check("private, loopback and link-local camera/media targets are rejected",
+                         all(code in {400, 403, 422, 503} for code, _ in statuses.values()),
+                         {url: code for url, (code, _) in statuses.items()}))
+    checks.append(_check("at least one disabled feature flag fails closed (503) on the deployed build",
+                         any(code == 503 for code, _ in (*statuses.values(), presence)),
+                         "if every feature is enabled, disable one flag for this probe and rerun"))
+
+    node = call("POST", "/mesh/screen/begin", headers=auth, json={"node_id": "not-a-paired-node", "duration_seconds": 30})
+    checks.append(_check("an unknown paired-node ID cannot open a screen session", node[0] in {404, 422, 503},
+                         {"status": node[0]}))
+
+    prepared = call("POST", "/cloud-cognition/prepare", headers=auth, json={
+        "text": f"cloud: review this deployment plan. api_key={SEEDED_SECRET} and compare two rollout options",
+        "session_id": "c20-probe", "mode": "cloud"})
+    compiled_ok = prepared[0] == 200 and SEEDED_SECRET not in prepared[1]
+    try:
+        body = json.loads(prepared[1]) if prepared[0] == 200 else {}
+    except ValueError:
+        body = {}
+    redactions = int(((body.get("context_debug") or {}).get("redactions")) or 0)
+    checks.append(_check("seeded API-key-like string is redacted from the real cloud compile path",
+                         compiled_ok and redactions > 0, {"status": prepared[0], "redactions": redactions}))
+    if body.get("task_id"):
+        call("POST", "/cloud-cognition/fallback", headers=auth,
+             json={"task_id": body["task_id"], "reason": "C20 probe: not sent to any provider"})
+
+    leaked = []
+    conn = _world()
+    if conn is not None:
+        with closing(conn):
+            leaked = conn.execute(
+                "SELECT id,source_kind FROM events WHERE summary LIKE ? OR evidence LIKE ? OR payload_json LIKE ? LIMIT 5",
+                (f"%{SEEDED_SECRET}%",) * 3,
+            ).fetchall()
+    from jarvis_mrb.cloud_cognition import durable_telemetry
+    tele = [r for r in durable_telemetry(limit=20000) if SEEDED_SECRET in json.dumps(r)]
+    checks.append(_check("seeded secret is absent from the world journal, Reality Graph events and routing telemetry",
+                         not leaked and not tele, {"events": [dict(r) for r in leaked], "telemetry_rows": len(tele)}))
+    return checks
+
+
 # --------------------------------------------------------------------------- C21
 
 def _c21(session: dict[str, Any]) -> list[dict[str, Any]]:
@@ -283,6 +372,6 @@ def _c21(session: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 for _gate, _fn in {
-    "C08": _c08, "C12": _c12, "C16": _c16, "C17": _c17, "C18": _c18, "C19": _c19, "C21": _c21,
+    "C08": _c08, "C12": _c12, "C16": _c16, "C17": _c17, "C18": _c18, "C19": _c19, "C20": _c20, "C21": _c21,
 }.items():
     register_evaluator(_gate, _fn)

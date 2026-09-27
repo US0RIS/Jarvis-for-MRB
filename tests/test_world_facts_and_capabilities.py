@@ -71,6 +71,17 @@ class WorldFactTests(unittest.TestCase):
         self.assertFalse(missing.ok)
         self.assertIn("don't have anything recorded", missing.message)
 
+    def test_user_fact_and_linker_extraction_share_one_project_entity(self) -> None:
+        reply = agent._fast_path("Remember that Project Apollo's contract lead is Dana Reyes")
+        self.assertTrue(reply.ok, reply.message)
+        self.assertEqual(reply.data["entity"]["kind"], "project")
+        linker_id = world_model.ensure_entity("project", "Project Apollo", confidence=0.92)
+        self.assertEqual(linker_id, reply.data["entity"]["id"])
+        # A legacy untyped duplicate does not make the name ambiguous.
+        world_model.ensure_entity("thing", "Project Apollo")
+        corrected = agent._fast_path("Actually, Project Apollo's contract lead is Maria Chen")
+        self.assertTrue(corrected.ok, corrected.message)
+
     def test_new_fact_creates_entity_with_user_provenance(self) -> None:
         reply = agent._fast_path("Remember that the venue for Offsite 2026 is Pier 17")
         self.assertTrue(reply.ok, reply.message)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -174,7 +175,7 @@ class ReleaseGateLedgerTests(unittest.TestCase):
         self.assertEqual(status["gates"]["C19"]["state"], "PASS")
         self.assertFalse(status["release_complete"])
         self.assertEqual([item["result"] for item in gates.records(gate="C19")], ["FAIL", "PASS"])
-        with sqlite3.connect(gates.LEDGER_PATH) as conn:
+        with closing(sqlite3.connect(gates.LEDGER_PATH)) as conn:
             with self.assertRaises(sqlite3.DatabaseError):
                 conn.execute("UPDATE release_gate_records SET result='PASS' WHERE result='FAIL'")
             with self.assertRaises(sqlite3.DatabaseError):

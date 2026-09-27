@@ -25,6 +25,11 @@ Requires-Dist: comtypes
 
 # Jarvis for MRB
 
+> **Release status: NOT COMPLETE.** [`criteria.md`](criteria.md) defines done for this release (gates C00–C22).
+> Live gate states are in [`RELEASE_STATUS.md`](RELEASE_STATUS.md), and every claimed capability's acceptance mapping is in
+> [`CAPABILITY_INVENTORY.md`](CAPABILITY_INVENTORY.md). In this README, "implemented", "source in main", "CI verified" and the
+> historical "observed deployed" notes do **not** mean a capability has passed release acceptance.
+
 Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. Its primary presence path is the iPhone/compatible Bluetooth microphone plus phone motion, opt-in GPS/geofences, separately opt-in Health data and public environmental sources. The optional camera-free MemoMind display is an I/O surface, not a sensor prerequisite. A Windows reasoning/tool host, local language/speech models, private Gmail/Calendar data, automation, audited web research and explicit action verification form the remaining system. Meta first-person vision and public-camera lookup remain optional capabilities.
 
 The project is not intended to be “a chatbot with lots of plugins.” The design goal is a single persistent system that can understand what the user is doing, remember durable facts and objectives, connect evidence across sources, decide what matters, act within explicit authority boundaries, and then independently verify whether consequential actions actually changed the outside world.
@@ -408,7 +413,7 @@ Configuration: Physical → Ambient presence → Settings. Independently enable 
 
 # Current state
 
-Jarvis has moved beyond a source-only prototype: the current architecture has been deployed onto the primary Windows PC and a physical iPhone, and several of the most important end-to-end paths have been exercised against real services.
+An earlier (September 7, 2026) build of Jarvis was deployed onto the primary Windows PC and a physical iPhone, and several end-to-end paths were exercised against real services at that time. Those observations are historical: they apply to that build only and are **not** release evidence under `criteria.md`, which requires REAL acceptance of every gate on one frozen candidate SHA.
 
 ### Verification snapshot — September 7, 2026 (Pacific)
 
@@ -1084,7 +1089,7 @@ The runtime:
 - monitors warm-up so a temporary startup degradation can later clear to ready;
 - synthesizes WAV audio for iPhone playback.
 
-The current deployed voice default is `bm_george`.
+The configured voice default is `bm_george`.
 
 The Kokoro HTTP service currently uses port `8880` in the WSL setup.
 

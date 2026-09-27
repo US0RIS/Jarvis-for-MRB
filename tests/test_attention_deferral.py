@@ -28,7 +28,7 @@ class AttentionDeferralTests(unittest.TestCase):
 
         self.addCleanup(restore)
         world_model.APP_DIR = base
-        world_model.DB_PATH = attention.DB_PATH = base / "world.sqlite3"
+        world_model.DB_PATH = attention.DB_PATH = base / "world_model.sqlite3"
         environment_state.APP_DIR = base
         environment_state.STATE_PATH = base / "state.json"
         permissions.APP_DIR = base

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import closing
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -36,7 +37,7 @@ class ProactiveClosedAppDeliveryTests(unittest.TestCase):
         push.register_device(TOKEN)
 
     def _rows(self) -> list[tuple[str, str, str]]:
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             return conn.execute("SELECT priority,title,body FROM push_outbox ORDER BY created_at").fetchall()
 
     def test_warning_interventions_are_queued_once_and_info_never(self) -> None:

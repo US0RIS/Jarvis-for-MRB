@@ -16,6 +16,7 @@ jarvis_mrb/agency_command_view.py
 jarvis_mrb/agency_counterfactual.py
 jarvis_mrb/agency_deliberation.py
 jarvis_mrb/agency_goal_compiler.py
+jarvis_mrb/agency_intake.py
 jarvis_mrb/agency_plan.py
 jarvis_mrb/agency_real_acceptance.py
 jarvis_mrb/agency_real_acceptance_check.py
@@ -23,12 +24,14 @@ jarvis_mrb/agency_release.py
 jarvis_mrb/agency_release_check.py
 jarvis_mrb/agency_runtime.py
 jarvis_mrb/agency_self_model.py
+jarvis_mrb/agency_world_tools.py
 jarvis_mrb/agent.py
 jarvis_mrb/audio_damping.py
 jarvis_mrb/background_workers.py
 jarvis_mrb/briefing.py
 jarvis_mrb/browser_setup.py
 jarvis_mrb/calendar_assist.py
+jarvis_mrb/capability_inventory.py
 jarvis_mrb/cli.py
 jarvis_mrb/cloud_cognition.py
 jarvis_mrb/cognitive_benchmark.py
@@ -90,6 +93,9 @@ jarvis_mrb/reality_graph_dialogue.py
 jarvis_mrb/reality_graph_missions.py
 jarvis_mrb/reality_lens.py
 jarvis_mrb/reality_mesh.py
+jarvis_mrb/release_gate_evaluators.py
+jarvis_mrb/release_gates.py
+jarvis_mrb/release_soak.py
 jarvis_mrb/remote_setup.py
 jarvis_mrb/resource_monitor.py
 jarvis_mrb/runtime_health.py
@@ -140,6 +146,7 @@ jarvis_mrb/world_document_versions.py
 jarvis_mrb/world_executive.py
 jarvis_mrb/world_executive_loop.py
 jarvis_mrb/world_extended_backfill.py
+jarvis_mrb/world_facts.py
 jarvis_mrb/world_frontend_ingest.py
 jarvis_mrb/world_gmail_attachments.py
 jarvis_mrb/world_intent_capture.py
@@ -148,6 +155,7 @@ jarvis_mrb/world_migrate.py
 jarvis_mrb/world_migrations.py
 jarvis_mrb/world_model.py
 jarvis_mrb/world_occurrence.py
+jarvis_mrb/world_places.py
 jarvis_mrb/world_prebrief.py
 jarvis_mrb/world_prepare.py
 jarvis_mrb/world_relevance.py
@@ -174,7 +182,9 @@ tests/test_agency_release.py
 tests/test_agency_runtime.py
 tests/test_agency_self_model.py
 tests/test_agency_workflow_contract.py
+tests/test_agency_world_bridge.py
 tests/test_agent_confirmation_security.py
+tests/test_attention_deferral.py
 tests/test_audited_search_routing.py
 tests/test_calendar_create_reliability.py
 tests/test_cloud_cognition.py
@@ -205,6 +215,7 @@ tests/test_ofac_screen.py
 tests/test_physical_awareness.py
 tests/test_physical_conditions.py
 tests/test_proactive_agency_loop.py
+tests/test_proactive_push.py
 tests/test_public_airspace.py
 tests/test_public_camera_catalog.py
 tests/test_public_camera_vision.py
@@ -217,6 +228,8 @@ tests/test_reality_graph.py
 tests/test_reality_graph_missions.py
 tests/test_reality_lens.py
 tests/test_reality_mesh.py
+tests/test_release_gate_evaluators.py
+tests/test_release_gates.py
 tests/test_search_benchmark.py
 tests/test_search_integrity.py
 tests/test_sensor_frontend_wiring.py
@@ -253,6 +266,7 @@ tests/test_world_document_numeric_magnitudes.py
 tests/test_world_document_versions.py
 tests/test_world_executive_loop.py
 tests/test_world_executive_owner_link.py
+tests/test_world_facts_and_capabilities.py
 tests/test_world_ingestion_reliability.py
 tests/test_world_intent_capture.py
 tests/test_world_migration_integrity.py

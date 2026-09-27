@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -106,9 +107,7 @@ class EvaluatorTests(unittest.TestCase):
                 "phones_last_seen": [{"device_id": "d", "build_sha": SHA, "last_seen": str(minutes // 60)}],
             }
         session = {**self.session, "id": "release-session:soak", "gate": "C21"}
-        with sqlite3.connect(gates.LEDGER_PATH) as conn:
-            pass
-        with soak._ledger() as conn:
+        with closing(soak._ledger()) as conn, conn:
             for minute in range(0, 25 * 60 + 1, 20):
                 item = sample(minute, verified=1 if minute > 600 else 0,
                               healthy=not (300 <= minute < 320), boot="b1" if minute < 310 else "b2")
@@ -118,7 +117,7 @@ class EvaluatorTests(unittest.TestCase):
         self.assertTrue(all(c["passed"] for c in checks.values()),
                         {k: v["evidence"] for k, v in checks.items() if not v["passed"]})
         short = {**session, "id": "release-session:short"}
-        with soak._ledger() as conn:
+        with closing(soak._ledger()) as conn, conn:
             for minute in (0, 20):
                 item = sample(minute)
                 conn.execute("INSERT INTO release_soak_samples(session_id,sampled_at,sample_json) VALUES(?,?,?)",

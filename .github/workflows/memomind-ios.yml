@@ -21,6 +21,7 @@ on:
       - jarvis/world-armor-live-fabric
       - jarvis/world-armor-full-scope
       - jarvis/world-armor-cross-region
+      - claude/jarvis-release-completion-77kour
   pull_request:
     paths:
       - "ios/**"

@@ -19,6 +19,7 @@ on:
       - jarvis/world-armor-full-scope
       - jarvis/world-armor-cross-region
       - jarvis/cloud-cognition-groq
+      - claude/jarvis-release-completion-77kour
   pull_request:
     branches:
       - main

@@ -193,6 +193,12 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     raw = re.sub(r"\s+", " ", text.strip())
     spoken = raw.rstrip("?.!").strip()
     lower = spoken.lower()
+    if lower.startswith("jarvis, "):
+        spoken = spoken[8:].strip()
+        lower = spoken.lower()
+    elif lower.startswith("jarvis "):
+        spoken = spoken[7:].strip()
+        lower = spoken.lower()
     current = now or datetime.now().astimezone()
     answer = _clock(lower, current) or _arithmetic(lower)
     if answer:

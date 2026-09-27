@@ -24,12 +24,19 @@ _ID = re.compile(r"^windy-([1-9][0-9]{0,19})$")
 _MAX_BODY = 2_500_000
 
 
-def configured() -> bool:
-    return bool(os.getenv("JARVIS_WINDY_WEBCAMS_API_KEY", "").strip())
+def _api_key(request_key: str | None = None) -> str:
+    value = str(request_key or "").strip()
+    if value:
+        return value
+    return os.getenv("JARVIS_WINDY_WEBCAMS_API_KEY", "").strip()
 
 
-def _get(path: str, *, params: dict[str, Any]) -> Any:
-    key = os.getenv("JARVIS_WINDY_WEBCAMS_API_KEY", "").strip()
+def configured(api_key: str | None = None) -> bool:
+    return bool(_api_key(api_key))
+
+
+def _get(path: str, *, params: dict[str, Any], api_key: str | None = None) -> Any:
+    key = _api_key(api_key)
     if not key:
         raise ValueError("Windy Webcams is not configured; an API key is required.")
     with httpx.Client(
@@ -107,7 +114,8 @@ def _entry(raw: Any) -> dict[str, Any] | None:
 
 def discover_windy_cameras(latitude: float, longitude: float, *,
                             radius_km: float = 20,
-                            limit: int = 30) -> dict[str, Any]:
+                            limit: int = 30,
+                            api_key: str | None = None) -> dict[str, Any]:
     if (type(latitude) not in (float, int)
             or type(longitude) not in (float, int)
             or type(radius_km) not in (float, int)
@@ -117,7 +125,7 @@ def discover_windy_cameras(latitude: float, longitude: float, *,
             or not 1 <= radius_km <= 250
             or type(limit) is not int or not 1 <= limit <= 100):
         raise ValueError("Windy search requires a finite point, 1–250 km radius and limit 1–100.")
-    if not configured():
+    if not configured(api_key):
         return {
             "status": "not_configured", "cameras": [],
             "key_required": "JARVIS_WINDY_WEBCAMS_API_KEY",
@@ -133,7 +141,7 @@ def discover_windy_cameras(latitude: float, longitude: float, *,
                 "nearby": f"{latitude:.5f},{longitude:.5f},{radius_km:.1f}",
                 "include": "images,location,urls,player",
                 "limit": 50, "offset": offset,
-            })
+            }, api_key=api_key)
         except (httpx.HTTPError, ValueError) as exc:
             errors.append(type(exc).__name__)
             break
@@ -164,12 +172,13 @@ def discover_windy_cameras(latitude: float, longitude: float, *,
     }
 
 
-def camera_from_windy_id(camera_id: str) -> dict[str, Any]:
+def camera_from_windy_id(camera_id: str, *, api_key: str | None = None) -> dict[str, Any]:
     match = _ID.fullmatch(camera_id or "")
     if not match:
         raise ValueError("Invalid Windy camera ID.")
     raw = _get(_API + "/" + match.group(1),
-               params={"include": "images,location,urls,player"})
+               params={"include": "images,location,urls,player"},
+               api_key=api_key)
     entry = _entry(raw)
     if entry is None or entry["id"] != camera_id:
         raise ValueError("Windy camera inactive or returned no usable metadata.")
@@ -178,8 +187,8 @@ def camera_from_windy_id(camera_id: str) -> dict[str, Any]:
     return entry
 
 
-def snapshot_windy_camera(camera_id: str) -> dict[str, Any]:
-    camera = camera_from_windy_id(camera_id)
+def snapshot_windy_camera(camera_id: str, *, api_key: str | None = None) -> dict[str, Any]:
+    camera = camera_from_windy_id(camera_id, api_key=api_key)
     frame = snapshot_public_media(camera["image_url"], provider_signed=True)
     return {
         **frame,

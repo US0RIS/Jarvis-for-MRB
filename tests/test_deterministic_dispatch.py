@@ -26,6 +26,13 @@ class ModelFreeDispatchTests(unittest.TestCase):
         self.assertEqual(self.route("3.5 plus 0.25").answer, "3.75.")
         self.assertEqual(self.route("1 divided by 3").answer, "0.333333333333 (rounded to twelve decimal places).")
 
+    def test_spoken_jarvis_prefix_is_normalized_before_dispatch(self):
+        self.assertEqual(self.route("Jarvis, what time is it").family, "clock.local")
+        self.assertEqual(
+            self.route("Jarvis, show my inbox").tool,
+            "gmail.query",
+        )
+
     def test_calendar_day_boundaries_use_explicit_time_windows(self):
         today = self.route("What's on my calendar today?")
         self.assertEqual(today.tool, "calendar.query")

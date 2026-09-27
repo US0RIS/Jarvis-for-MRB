@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from typing import Annotated, Any
@@ -78,6 +82,34 @@ _world_armor_guard_started = False
 class CommandRequest(BaseModel):
     text: str
     session_id: str | None = None
+
+
+class AcceptancePreviewItem(BaseModel):
+    id: str
+    text: str
+
+
+class AcceptancePreviewBatchRequest(BaseModel):
+    items: list[AcceptancePreviewItem]
+
+
+class CloudCognitionPrepareRequest(BaseModel):
+    text: str
+    session_id: str | None = None
+    mode: str = "auto"
+
+
+class CloudCognitionResolveRequest(BaseModel):
+    task_id: str
+    proposal: dict[str, Any]
+    metadata: dict[str, Any] | None = None
+
+
+class CloudCognitionFeedbackRequest(BaseModel):
+    request_fingerprint: str
+    user_corrected: bool = False
+    cloud_materially_changed_result: bool | None = None
+    note: str = ""
 
 
 class ExternalWatchCreateRequest(BaseModel):
@@ -887,6 +919,164 @@ def model_routing_status(
     _check_auth(authorization)
     from jarvis_mrb.deterministic_dispatch import routing_status
     return routing_status()
+
+
+@app.post("/acceptance/preview-batch")
+def acceptance_preview_batch(
+    request: AcceptancePreviewBatchRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Pure prompt-routing preview. Never executes tools, writes, or a model."""
+    _check_auth(authorization)
+    if len(request.items) > 300:
+        raise HTTPException(status_code=400, detail="At most 300 acceptance prompts may be previewed at once.")
+    from jarvis_mrb.deterministic_dispatch import dispatch
+
+    rows: list[dict[str, Any]] = []
+    for item in request.items:
+        text = item.text.strip()
+        if not text:
+            rows.append({
+                "id": item.id,
+                "mode": "invalid",
+                "family": "invalid",
+                "tool": None,
+                "has_direct_answer": False,
+                "side_effects_executed": False,
+            })
+            continue
+        route = dispatch(text)
+        if route is None:
+            rows.append({
+                "id": item.id,
+                "mode": "model_planner",
+                "family": "model_planner",
+                "tool": None,
+                "has_direct_answer": False,
+                "side_effects_executed": False,
+            })
+        else:
+            rows.append({
+                "id": item.id,
+                "mode": "deterministic",
+                "family": route.family,
+                "tool": route.tool or None,
+                "has_direct_answer": bool(route.answer),
+                "side_effects_executed": False,
+            })
+    return {
+        "ok": True,
+        "mode": "dry_run",
+        "side_effects_executed": False,
+        "items": rows,
+    }
+
+
+def _run_acceptance_subprocess(module: str, *, compact: bool = False) -> dict[str, Any]:
+    """Run synthetic acceptance outside the live server process and deployed APPDATA."""
+    args = [sys.executable, "-m", module]
+    if compact:
+        args.append("--compact")
+    with tempfile.TemporaryDirectory(prefix="jarvis-acceptance-") as isolated_appdata:
+        env = dict(os.environ)
+        env["APPDATA"] = isolated_appdata
+        try:
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "ok": False,
+                "failed_checks": [{"name": f"{module} process failed: {exc}"}],
+            }
+    try:
+        payload = json.loads(proc.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return {
+            "ok": False,
+            "failed_checks": [{
+                "name": (
+                    f"{module} returned non-JSON output"
+                    + (f": {proc.stderr[:500]}" if proc.stderr else "")
+                )
+            }],
+        }
+    if not isinstance(payload, dict):
+        return {"ok": False, "failed_checks": [{"name": f"{module} returned an invalid payload"}]}
+    return payload
+
+
+@app.post("/acceptance/synthetic")
+def acceptance_synthetic(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Run isolated acceptance in child processes; never retarget live server globals."""
+    _check_auth(authorization)
+    from jarvis_mrb.cognitive_benchmark import evaluate as evaluate_cognition
+
+    world = _run_acceptance_subprocess("jarvis_mrb.world_acceptance_check", compact=True)
+    agency = _run_acceptance_subprocess("jarvis_mrb.agency_acceptance_check")
+    cognition = evaluate_cognition()
+
+    world_criteria = world.get("criteria") or {}
+    world_passed = sum(1 for value in world_criteria.values() if bool((value or {}).get("passed")))
+    world_total = len(world_criteria)
+    world_failed = [
+        str(item.get("name") or "unnamed world check")
+        for item in (world.get("failed_checks") or [])
+    ][:50]
+
+    agency_gates = agency.get("synthetic_gate_results") or {}
+    agency_passed = sum(
+        1 for value in agency_gates.values()
+        if bool((value or {}).get("synthetic_passed"))
+    )
+    agency_total = len(agency_gates)
+    agency_failed = [
+        str(item.get("name") or "unnamed agency check")
+        for item in (agency.get("failed_checks") or [])
+    ][:50]
+
+    cognition_total = int(cognition.get("total") or 0)
+    cognition_passed = int(cognition.get("matched") or 0)
+    cognition_failed = [
+        str(row.get("category") or "unnamed cognition case")
+        for row in (cognition.get("rows") or [])
+        if not bool(row.get("matched"))
+    ][:50]
+
+    result = {
+        "world": {
+            "ok": bool(world.get("ok")),
+            "passed": world_passed,
+            "total": world_total,
+            "failed": world_failed,
+        },
+        "agency": {
+            "ok": bool(agency.get("ok")),
+            "passed": agency_passed,
+            "total": agency_total,
+            "failed": agency_failed,
+        },
+        "cognition": {
+            "ok": cognition_total == cognition_passed,
+            "passed": cognition_passed,
+            "total": cognition_total,
+            "failed": cognition_failed,
+        },
+    }
+    return {
+        "ok": all(section["ok"] for section in result.values()),
+        "mode": "synthetic_isolated",
+        "mutates_user_data": False,
+        "uses_external_services": False,
+        **result,
+    }
 
 
 @app.get("/health")
@@ -1836,6 +2026,7 @@ def world_armor_camera_discover(
     request: WorldArmorPublicCameraSearchRequest,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
@@ -1844,6 +2035,7 @@ def world_armor_camera_discover(
         return discover_public_cameras_global(
             request.latitude, request.longitude,
             radius_km=request.radius_km, limit=request.limit,
+            windy_api_key=x_jarvis_windy_key,
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
@@ -1871,15 +2063,20 @@ def world_armor_camera_inspect(
     request: WorldArmorCameraInspectRequest,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     _check_mesh_auth(authorization)
     response.headers["Cache-Control"] = "private, no-store"
     from jarvis_mrb.world_armor_cameras import inspect_camera
     try:
-        return inspect_camera(
-            request.investigation_id, camera_ref=request.camera_ref,
-            public_url=request.public_url, condition=request.condition,
-        )
+        kwargs = {
+            "camera_ref": request.camera_ref,
+            "public_url": request.public_url,
+            "condition": request.condition,
+        }
+        if x_jarvis_windy_key:
+            kwargs["windy_api_key"] = x_jarvis_windy_key
+        return inspect_camera(request.investigation_id, **kwargs)
     except (ValueError, KeyError, RuntimeError) as exc:
         _armor_error(exc)
     except httpx.HTTPError as exc:
@@ -2875,12 +3072,17 @@ def public_airspace_region(
 def nearby_physical_awareness(
     request: PhysicalConditionsRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """On-demand multisource briefing; no background surveillance."""
     _check_auth(authorization)
     from jarvis_mrb.physical_awareness import physical_awareness
     try:
-        return physical_awareness(request.latitude, request.longitude)
+        return physical_awareness(
+            request.latitude,
+            request.longitude,
+            windy_api_key=x_jarvis_windy_key,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -2889,11 +3091,17 @@ def nearby_physical_awareness(
 def analyze_public_camera_still(
     request: OfficialCameraAnalysisRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """Explicit one-still vision pass for a catalog-verified public camera ID."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_vision import analyze_official_still
+    from jarvis_mrb.public_camera_vision import analyze_official_still, analyze_public_camera
     try:
+        if request.camera_id.startswith("windy-"):
+            return analyze_public_camera(
+                camera_ref=request.camera_id,
+                windy_api_key=x_jarvis_windy_key,
+            )
         return analyze_official_still(request.camera_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -2939,14 +3147,18 @@ def nearby_physical_conditions(
 def nearby_public_cameras(
     request: NearbyPublicCameraRequest,
     authorization: Annotated[str | None, Header()] = None,
+    x_jarvis_windy_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     """Opt-in public provider lookup. POST avoids putting coordinates in URL access logs."""
     _check_auth(authorization)
-    from jarvis_mrb.public_camera_catalog import discover_public_cameras
+    from jarvis_mrb.public_camera_catalog import discover_combined_public_cameras
     try:
-        return discover_public_cameras(
-            request.latitude, request.longitude,
-            radius_km=request.radius_km, limit=request.limit,
+        return discover_combined_public_cameras(
+            request.latitude,
+            request.longitude,
+            radius_km=request.radius_km,
+            limit=request.limit,
+            windy_api_key=x_jarvis_windy_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -2958,6 +3170,81 @@ def agency_command_view(authorization: Annotated[str | None, Header()] = None) -
     _check_auth(authorization)
     from jarvis_mrb.agency_command_view import build_command_view
     return build_command_view()
+
+
+@app.get("/cloud-cognition/status")
+def cloud_cognition_status(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import telemetry_snapshot
+    return telemetry_snapshot()
+
+
+@app.post("/cloud-cognition/prepare")
+def cloud_cognition_prepare(
+    request: CloudCognitionPrepareRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import prepare_cloud_task
+
+    session_id = request.session_id or "default"
+    effective_text = _command_alias(request.text)
+    history = _contextual_history(session_id, effective_text, limit=12)
+    return prepare_cloud_task(
+        effective_text,
+        session_id=session_id,
+        history=history,
+        force=request.mode,
+    )
+
+
+@app.post("/cloud-cognition/resolve", response_model=CommandResponse)
+def cloud_cognition_resolve(
+    request: CloudCognitionResolveRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CommandResponse:
+    _check_auth(authorization)
+    from jarvis_mrb.agent import execute_tool
+    from jarvis_mrb.cloud_cognition import (
+        consume_cloud_task,
+        record_cloud_result,
+        record_execution_outcome,
+        validate_proposal,
+    )
+
+    task = consume_cloud_task(request.task_id)
+    proposal = validate_proposal(request.proposal)
+    record_cloud_result(task, proposal, request.metadata)
+
+    # Cloud output is a proposal, never authority. Existing deterministic tool
+    # dispatch remains the only execution path and therefore keeps the normal
+    # permissions, confirmations, audit and verification semantics.
+    if proposal.tool:
+        reply = execute_tool(proposal.tool, proposal.arguments)
+        message = _voice_safe_confirmation(reply.message)
+        record_execution_outcome(task, proposal, ok=reply.ok, outcome=message)
+        return CommandResponse(ok=reply.ok, message=message)
+    message = proposal.response or "I could not form a useful cloud answer."
+    record_execution_outcome(task, proposal, ok=True, outcome=message)
+    return CommandResponse(ok=True, message=message)
+
+
+@app.post("/cloud-cognition/feedback")
+def cloud_cognition_feedback(
+    request: CloudCognitionFeedbackRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.cloud_cognition import record_routing_feedback
+    record_routing_feedback(
+        request_fingerprint=request.request_fingerprint,
+        user_corrected=request.user_corrected,
+        cloud_materially_changed_result=request.cloud_materially_changed_result,
+        note=request.note,
+    )
+    return {"ok": True}
 
 
 @app.post("/command", response_model=CommandResponse)

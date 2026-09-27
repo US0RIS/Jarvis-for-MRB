@@ -1,0 +1,22 @@
+[console_scripts]
+jarvis = jarvis_mrb.cli:main
+jarvis-20 = jarvis_mrb.jarvis20_cli:main
+jarvis-agency-acceptance = jarvis_mrb.agency_acceptance_check:main
+jarvis-agency-real-gate = jarvis_mrb.agency_real_acceptance_check:main
+jarvis-agency-release-check = jarvis_mrb.agency_release_check:main
+jarvis-browser-setup = jarvis_mrb.browser_setup:main
+jarvis-cognition-benchmark = jarvis_mrb.cognitive_benchmark:main
+jarvis-cover-score = jarvis_mrb.cover_universal_cli:main
+jarvis-google-auth = jarvis_mrb.google_auth:main
+jarvis-install-startup = jarvis_mrb.startup:main
+jarvis-remote-setup = jarvis_mrb.remote_setup:main
+jarvis-serper-setup = jarvis_mrb.serper_setup:main
+jarvis-service = jarvis_mrb.service:main
+jarvis-world-acceptance = jarvis_mrb.world_acceptance_check:main
+jarvis-world-check = jarvis_mrb.world_check:main
+jarvis-world-distributed = jarvis_mrb.world_armor_distributed:main
+jarvis-world-live = jarvis_mrb.world_armor_live:main
+jarvis-world-live-watchdog = jarvis_mrb.world_armor_watchdog:main
+jarvis-world-migrate = jarvis_mrb.world_migrate:main
+jarvis-world-movement = jarvis_mrb.world_armor_movement:main
+jarvis-world-prepare = jarvis_mrb.world_prepare:main

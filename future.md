@@ -18,6 +18,19 @@ leaves this dump only when it is promoted into a design/implementation artifact,
 with its lineage preserved, or explicitly rejected with a recorded reason. Implementation
 must still respect applicable law, consent, authorization, security, and safety constraints.
 
+## Promoted / implemented lineage
+
+- **Cloud cognitive escalation — promoted to implementation.** The earlier small-model emergency
+  competence and Ethical Context / Necessity & Proportionality ideas now have a concrete cognitive
+  hierarchy implementation on the cloud-cognition branch: deterministic capabilities remain first,
+  local Qwen remains the ordinary conversational/planning tier, and Groq GPT-OSS 120B is an optional
+  stronger reasoning tier selected by deterministic routing signals. Cloud output is proposal-only;
+  existing Jarvis authorization, validation, permissions, proportionality/safety logic, execution,
+  observation and verification remain authoritative. The normal iPhone/iPad setup keeps the Groq
+  credential in Apple Keychain and sends Groq only a minimized, secret-redacted context package.
+  This promotion does **not** delete the broader future ideas: it establishes the provider/routing/
+  privacy seam that later Ethical Context Engine and Small-Model Emergency Competence work can use.
+
 ## Proactive / situational awareness
 
 - **Push, don't pull, the pre-meeting brief.** Situation Evidence already
@@ -949,3 +962,168 @@ fields, communicates, and chooses among verified capabilities.
   dangerous real-world effects; measure whether Jarvis recognized the situation, found the
   right playbook, chose appropriate escalation, communicated clearly, and terminated
   exceptional authority correctly.
+
+
+## Cross-universe armor transcript ideas — 2026-09-26
+
+The useful abstraction from the fictional armor is not any individual superpower. It is the
+architecture: capabilities become much more valuable when they can inherit properties from
+other capabilities, compose dynamically, stabilize each other's weaknesses, and remain under
+one governing control plane.
+
+- **Capability Inheritance / Universal Augmentation Layers.** Let cross-cutting capabilities
+  automatically wrap many others. Provenance, verification, authentication, logging, spatial
+  context, retries, privacy filtering, and cloud escalation should not each require bespoke
+  integration with every tool. A capability declares compatible traits and inherits these
+  layers automatically.
+- **Capability Fusion Planner.** Given a goal, search the capability graph for combinations
+  of tools whose joint output can solve something no individual tool can: camera + ADS-B +
+  traffic + weather + calendar, or email + geofence + door sensor + camera, with explicit
+  provenance and uncertainty for each contributor.
+- **Emergent-Combination Discovery.** Periodically test safe combinations of existing
+  capabilities in simulation and identify useful composite abilities nobody explicitly
+  programmed. Surface candidates as proposed named skills with evidence showing why the
+  combination works.
+- **Capability Compatibility Matrix.** Every capability advertises inputs, outputs,
+  authority requirements, latency, freshness, confidence, side effects, reversibility,
+  locality, and failure modes so Jarvis can mechanically determine what can be chained,
+  fused, substituted, or must remain isolated.
+- **Precision / Stabilization Stage.** Separate generating a powerful plan or observation
+  from making it precise enough to use. Before consequential output reaches an actuator,
+  notification, or user decision, pass it through domain-appropriate constraint, validation,
+  rate-limit, scope, targeting, and verification stages: power -> stabilize -> focus -> verify.
+- **Capability Amplifier vs. Capability Source.** Model accelerators separately from the
+  underlying ability. Stronger cloud reasoning, extra compute, richer context, better sensors,
+  or higher-resolution data can amplify a task without becoming the authority that decides
+  what actions are permitted.
+- **Governing Intelligence for Agent Swarms.** If Jarvis creates multiple autonomous workers,
+  generated micro-agents, or distributed collectors, give them a shared mission contract,
+  world-state channel, authority envelope, resource budget, and reconciliation protocol.
+  Workers may operate independently, but the control plane can explain, revoke, or redirect.
+- **Adaptive Countermeasure Library.** When a capability repeatedly encounters a new failure
+  mode, record the phenomenon, successful workaround, evidence, and applicability, then make
+  that adaptation reusable elsewhere: learn from encountered failures without arbitrary
+  self-modification.
+- **Phenomenon-to-Regression Pipeline.** A successful adaptation should crystallize into a
+  deterministic detector/test/mitigation where possible, so the next encounter invokes the
+  known fix rather than asking the model to rediscover it. Preserve evidence and rollback.
+- **Defense-in-Depth by Orthogonal Failure Modes.** Redundancy should not mean two copies of
+  the same dependency. Important missions deliberately combine independent sensing,
+  communications, compute, and verification paths whose failures are weakly correlated.
+- **Mission Energy / Resource Bus.** Treat compute, battery, bandwidth, API quota, thermal
+  headroom, storage, and monetary cost as shared resources visible to the planner. Missions
+  can reserve budgets, degrade gracefully, or move workloads between devices.
+- **Hot-Swappable Capability Loadouts.** Extend named presets into capability bundles for a
+  mission: travel, severe weather, workshop, driving, investigation, emergency,
+  low-connectivity, etc. A loadout declares sensors, models, collectors, interfaces, alert
+  thresholds, and retention policies while respecting underlying authorization.
+- **Transformation Stack / Temporary Capability Overlay.** Apply temporary, inspectable
+  overlays to an existing capability without permanently changing it: higher observation
+  frequency, stronger model routing, alternate output modality, additional verification, or
+  tighter privacy. Overlays have explicit scope and TTL.
+- **Capability Dependency Graph + Weak-Link Analysis.** For any claimed Jarvis ability, show
+  the full dependency chain and identify the component currently limiting reliability,
+  latency, coverage, or confidence. Target upgrades at the actual bottleneck.
+- **Composite Capability Acceptance Tests.** Test important combinations end-to-end, not
+  merely integrations individually. A camera, aircraft feed, map, model, and notification
+  service can all be healthy while the fused user-facing ability is broken.
+- **Fallback Stack / Last-Line-of-Defense Semantics.** Missions declare ordered fallback
+  strategies with increasingly degraded but still useful outcomes: live stream -> recent
+  frame -> metadata -> alternate nearby source -> explicit unknown; cloud model -> local
+  model -> deterministic procedure. Never silently present a weaker substitute as equivalent.
+- **Reality-Admin Separation.** Preserve a universal-feeling natural-language control
+  surface while resolving every real-world effect into explicit, typed, inspectable
+  capabilities with independent authorization and verification. Avoid one universal
+  privileged execution primitive.
+
+
+## Jarvis Presence / ambient embodiment — 2026-09-26
+
+The next form-factor transition is from "an assistant reached through glasses" to a persistent,
+device-independent intelligence distributed through the user's environment. Glasses remain a
+valuable first-person sensor/output surface, but losing or removing them should cost Jarvis one
+sense rather than make Jarvis disappear.
+
+- **Jarvis Presence Layer.** Maintain four live maps independent of any client: Perception
+  (what Jarvis can currently sense), Interaction (which authorized endpoint can hear/show/touch
+  the user), Agency (what actions are currently available and authorized), and Attention (what
+  deserves interruption now). Capabilities target Presence rather than a specific phone/glasses UI.
+- **Seamless Endpoint Migration.** Conversation, missions, references, and pending interactions
+  follow the user among phone, AirPods, glasses, watch, computer, room node, car, speaker, display,
+  and future hardware without an explicit "transfer session" command.
+- **Physical Context as UI.** Places, objects, people, missions, and events become interface nouns.
+  Resolve "that light", "show me what we were discussing", or "what changed here?" against the
+  Reality Graph and current spatial/device context rather than requiring app navigation.
+- **Modality Router.** Select speech, display, haptic, notification, spatial overlay, silent action,
+  or multiple outputs based on privacy, urgency, environment, device availability, and user state.
+- **Mission-Oriented Interaction.** Allow durable objectives such as "keep an eye on the house"
+  or "I'm picking someone up at 6" to instantiate bounded Reality Graph missions that fuse
+  capabilities and surface information only when it becomes decision-relevant.
+- **Ambient but Inspectable.** Persistent presence must expose what sensed an event, why Jarvis
+  inferred something, which endpoint received output, and which authority enabled any action.
+  Ambient operation must not become invisible unbounded surveillance or authority.
+
+### Raspberry Pi / physical Presence nodes
+
+A Raspberry Pi 5 is a useful bridge from software Jarvis to embodied Jarvis because it is cheap,
+always-on, local, GPIO-capable, networked, and can host deterministic sensing/audio/control even
+when the wearable or Windows AI host is unavailable.
+
+- **Room Presence Node.** Pi 5 becomes a stationary authenticated Jarvis endpoint with optional
+  microphone array, speaker, camera, presence/proximity sensing, environmental sensors, buttons/
+  touch controls, and GPIO actuators. Deploying multiple nodes creates room-scale continuity.
+- **Reuse the Existing Hack-Pack Hardware.** Integrate the already-working Bluetooth audio
+  receiver/amplifier + speaker, proximity/optical sensor, X-Y resistive touchpad, CrunchLabs Nano,
+  potentiometers, power bank, and other safe peripherals as experimental Presence-node I/O rather
+  than treating each as a standalone gadget.
+- **Far-Field Voice Without Glasses.** A microphone-array node can provide local wake-word/VAD,
+  beamforming, room audio capture when explicitly enabled, and speaker output, forwarding only the
+  required transcript/audio to the appropriate Jarvis reasoning tier.
+- **Local Audio Identity + Direction.** Explore speaker verification and direction-of-arrival so
+  Jarvis can distinguish an enrolled speaker from arbitrary room audio and infer which room/side
+  an utterance came from, with confidence rather than pretending certainty.
+- **Physical Attention Channel.** Speaker, LEDs, small display, touch surface, buttons, haptics,
+  or other simple outputs let Jarvis communicate without requiring the user to be wearing anything.
+- **Sensor Fusion Hub.** Pi GPIO/I2C/SPI/UART/BLE/USB turn inexpensive door, motion, mmWave,
+  temperature, humidity, light, air-quality, sound-event, and other authorized sensors into
+  timestamped Reality Graph observations with provenance.
+- **Local Object/Room State.** Presence nodes maintain bounded room state from enrolled sensors:
+  occupied/unoccupied, door state, environmental state, device presence, recent authorized events,
+  and confidence/freshness. Do not infer identity or activity beyond available evidence.
+- **Edge Reflexes.** Safety- and latency-sensitive deterministic rules can execute locally without
+  waiting for an LLM or Internet connection: alarms, sensor thresholds, local notifications,
+  watchdogs, failover behavior, and explicitly authorized device control.
+- **Offline Jarvis Skeleton.** Cache wake word, speech pipeline components, critical playbooks,
+  capability metadata, room state, and deterministic automations so loss of cloud/PC connectivity
+  degrades intelligence rather than eliminating the physical interface.
+- **Presence Mesh.** Multiple Pi nodes advertise sensors, outputs, compute, location/room,
+  health, and authority to the Presence layer. Jarvis routes an interaction to the best node and
+  can combine observations across nodes while preserving provenance.
+- **Follow-Me Audio.** With explicit household configuration, speech output can migrate to the
+  room where the intended user is confidently present, instead of shouting from every speaker.
+- **Private/Public Output Arbitration.** Sensitive content routes to private endpoints (phone,
+  AirPods, glasses) while mundane output can use room speakers/displays; ambiguity defaults to the
+  more private channel.
+- **Physical Confirmation Controls.** A button/touch gesture on a trusted local node can serve as
+  an independent confirmation factor for consequential local actions when appropriate.
+- **Local Capability Discovery.** Plugging in an approved sensor/peripheral causes the node to
+  identify its driver/capability schema, run self-tests, and advertise the new capability to Jarvis
+  rather than requiring hard-coded UI changes.
+- **Room Digital Twin.** Bind node observations and enrolled devices/objects to Reality Graph
+  entities so a room has a continuously updated, evidence-backed digital state rather than a pile
+  of unrelated sensor values.
+- **Node-to-Node Event Bus.** Use authenticated local messaging so events can be consumed anywhere:
+  a door sensor on one node can affect a mission running elsewhere without every sensor talking
+  directly to the central model.
+- **Compute Placement.** Treat Pi, iPhone/iPad, Macs, Windows RTX host, and cloud reasoning as a
+  heterogeneous compute fabric. Put wake words, sensor parsing, caching, and reflexes on the Pi;
+  heavyweight perception/inference on suitable accelerators; planning on the calibrated model tier.
+- **Self-Monitoring Physical Infrastructure.** Each node reports temperature, throttling, storage,
+  network reachability, sensor health, microphone/speaker loopback where feasible, and power state,
+  feeding the existing Capability Dependency/Weak-Link system.
+- **Portable Presence Node.** The same architecture can run from a power bank as a temporary
+  room/workshop/travel node, allowing Jarvis to establish a local sensory/interaction foothold
+  without modifying the building.
+- **Embodiment API.** Define a hardware-neutral contract for microphones, speakers, cameras,
+  sensors, controls, displays, GPIO actuators, and presence estimates. The Pi 5 is the first
+  reference implementation, not a permanent architectural dependency.

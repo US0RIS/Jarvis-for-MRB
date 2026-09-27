@@ -8,12 +8,14 @@ identification, and no fusion into the first-person Meta visual memory.
 
 import base64
 import hashlib
+import io
 import json
 from datetime import datetime, timezone
 import re
 from typing import Any
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from jarvis_mrb.public_camera_catalog import _get_district, _public_media_url, _source_url
 from jarvis_mrb.vision import OLLAMA_URL, VISION_KEEP_ALIVE, VISION_MODEL, VISION_NUM_GPU
@@ -31,6 +33,45 @@ def _jpeg_or_png(body: bytes, mime: str) -> bool:
     return (
         (content in {"image/jpeg", "image/jpg"} and body.startswith(b"\xff\xd8\xff"))
         or (content == "image/png" and body.startswith(b"\x89PNG\r\n\x1a\n"))
+    )
+
+
+def _looks_like_caltrans_unavailable_placeholder(body: bytes) -> bool:
+    """Conservatively detect Caltrans' white/blue unavailable frame.
+
+    Caltrans may keep a camera catalog record marked in-service while the
+    current JPEG is its generated "Temporarily Unavailable" image. Never send
+    that provider error frame to the vision model as if it were roadway
+    evidence. Malformed/undecodable images are handled elsewhere and return
+    False here so this heuristic cannot become an image parser.
+    """
+    try:
+        with Image.open(io.BytesIO(body)) as image:
+            rgb = image.convert("RGB").resize((96, 60))
+            pixels = list(rgb.get_flattened_data()) if hasattr(rgb, "get_flattened_data") else list(rgb.getdata())
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        return False
+    if not pixels:
+        return False
+
+    white = 0
+    deep_blue = 0
+    brightness = 0.0
+    for red, green, blue in pixels:
+        brightness += (red + green + blue) / 3
+        if red > 235 and green > 235 and blue > 235:
+            white += 1
+        if blue > 90 and blue > red * 1.35 and blue > green * 1.15 and red < 160:
+            deep_blue += 1
+
+    total = len(pixels)
+    white_fraction = white / total
+    blue_fraction = deep_blue / total
+    mean_brightness = brightness / total
+    return (
+        white_fraction >= 0.72
+        and blue_fraction >= 0.02
+        and mean_brightness >= 205
     )
 
 
@@ -68,6 +109,10 @@ def analyze_official_still(camera_id: str, *, condition: str = "") -> dict[str, 
     data = bytes(blob)
     if not _jpeg_or_png(data, mime):
         raise ValueError("Published still is not a supported JPEG or PNG image.")
+    if _looks_like_caltrans_unavailable_placeholder(data):
+        raise ValueError(
+            "Caltrans currently reports this camera as temporarily unavailable."
+        )
     retrieved_at = datetime.now(timezone.utc).isoformat()
     prompt = (
         "Describe only what is clearly visible in this single publicly published "
@@ -155,7 +200,7 @@ def analyze_official_still(camera_id: str, *, condition: str = "") -> dict[str, 
 
 def analyze_public_camera(
     *, camera_ref: str = "", public_url: str = "",
-    condition: str = "",
+    condition: str = "", windy_api_key: str | None = None,
 ) -> dict[str, Any]:
     """One opt-in still from Caltrans, Windy or a user-supplied public URL.
 
@@ -171,7 +216,7 @@ def analyze_public_camera(
     from jarvis_mrb.public_camera_media import snapshot_public_media
     if camera_ref:
         from jarvis_mrb.public_camera_windy import snapshot_windy_camera
-        selected = snapshot_windy_camera(camera_ref)
+        selected = snapshot_windy_camera(camera_ref, api_key=windy_api_key)
     else:
         selected = snapshot_public_media(public_url)
     # The raw frame is never returned to the caller nor stored in World Armor.

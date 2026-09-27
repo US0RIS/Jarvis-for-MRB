@@ -56,7 +56,7 @@ class WorldArmorPushTests(unittest.TestCase):
             }, db_path=self.db, now=NOW)
         self.assertEqual(low["queued"], 0)
         self.assertEqual(high["queued"], 1)
-        self.assertEqual(push.status(db_path=self.db)["pending"], 1)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 1)
 
     def test_durable_outbox_marks_success_only_after_apns_200_equivalent(self):
         with patch.object(push, "start_worker", return_value=True):
@@ -69,7 +69,7 @@ class WorldArmorPushTests(unittest.TestCase):
             result = push.drain_once(db_path=self.db, now=NOW)
         self.assertEqual(result["attempted"], 1)
         self.assertEqual(result["sent"], 1)
-        self.assertEqual(push.status(db_path=self.db)["pending"], 0)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 0)
 
     def test_transient_failure_retries_with_backoff(self):
         with patch.object(push, "start_worker", return_value=True):
@@ -81,7 +81,7 @@ class WorldArmorPushTests(unittest.TestCase):
         with patch.object(push, "_send_one", return_value=(False, "ConnectError")):
             result = push.drain_once(db_path=self.db, now=NOW)
         self.assertEqual(result["failed"], 1)
-        self.assertEqual(push.status(db_path=self.db)["pending"], 1)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 1)
         with patch.object(push, "_send_one", return_value=(True, "")):
             early = push.drain_once(
                 db_path=self.db, now=NOW + timedelta(seconds=1)

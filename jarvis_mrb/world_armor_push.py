@@ -242,13 +242,13 @@ def enqueue_world_event(
     return {"queued": queued, "reason": "queued" if queued else "no_enabled_devices"}
 
 
-def status(*, db_path: Path | None = None) -> dict[str, Any]:
+def status(*, db_path: Path | None = None, now: datetime | None = None) -> dict[str, Any]:
     path = Path(db_path) if db_path is not None else PUSH_STORE
     devices = pending = dead = sent = 0
     oldest = None
     if path.exists():
         with closing(_connect(path)) as con, con:
-            _prune(con, _now())
+            _prune(con, now or _now())
             devices = int(con.execute(
                 "SELECT count(*) FROM push_devices WHERE enabled=1"
             ).fetchone()[0])
@@ -454,7 +454,7 @@ def drain_once(
         "attempted": len(rows),
         "sent": sent,
         "failed": failed,
-        "remaining": status(db_path=path)["pending"],
+        "remaining": status(db_path=path, now=now)["pending"],
     }
 
 

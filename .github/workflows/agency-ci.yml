@@ -18,6 +18,7 @@ on:
       - jarvis/world-armor-live-fabric
       - jarvis/world-armor-full-scope
       - jarvis/world-armor-cross-region
+      - jarvis/cloud-cognition-groq
   pull_request:
     branches:
       - main

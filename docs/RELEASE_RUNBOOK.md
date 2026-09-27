@@ -9,7 +9,7 @@ Every behavior under test happens through the iPhone app or voice.
 
 | Need | Why | Gate |
 |---|---|---|
-| Paid Apple Developer Program team and an APNs `.p8` key (Key ID, Team ID) | Closed-app push requires the `aps-environment` entitlement; Personal Team signing cannot carry it | C09, C18, C21 |
+| Paid Apple Developer Program team and an APNs `.p8` key (Key ID, Team ID) — *enrollment in progress* | Closed-app push requires the `aps-environment` entitlement; Personal Team signing cannot carry it. Until then use the **JarvisIOS (Personal Team)** scheme: the same source without that entitlement. | C09, C18, C21 (and the final C22/C21 runs) |
 | A Mac running `scripts/jarvis-mac-node.py` over Tailscale (see `REALITY_MESH.md`) | C14 requires at least one real configured Mac; C13 targets a paired workstation | C00, C13, C14 |
 | One Apple Home light in the iPhone's Home app | Presence acceptance | C19 |
 | Groq API key (entered only in iPhone Settings → Cloud Intelligence / Groq) | Real Groq tier | C12 |
@@ -38,8 +38,20 @@ $env:JARVIS_APNS_ENVIRONMENT = 'development'        # matches the development-si
 $env:JARVIS_CONDUCTOR_ENABLED = '1'                 # C13
 $env:JARVIS_MESH_WINDOWS_APP_ENABLED = '1'          # C13/C14 Windows app buttons
 $env:JARVIS_REALITY_GRAPH_MISSIONS_ENABLED = '1'    # C15
-$env:JARVIS_MESH_MACBOOK_URL = 'http://100.x.y.z:8766'; $env:JARVIS_MESH_MACBOOK_TOKEN = '<mac node token>'
+$env:JARVIS_MESH_MACBOOK_URL = 'http://100.x.y.z:8766'; $env:JARVIS_MESH_MACBOOK_TOKEN = '<MacBook Air node token>'
+$env:JARVIS_MESH_MACMINI_URL = 'http://100.a.b.c:8766';  $env:JARVIS_MESH_MACMINI_TOKEN = '<Mac mini node token>'
 ```
+
+Mac nodes (MacBook Air M5 and Mac mini M4), each in its own clone of this repository at the same commit:
+
+```sh
+export JARVIS_MESH_NODE_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"   # keep private
+python3 scripts/jarvis-mac-node.py --device-id macbook --label "MacBook Air" \
+  --bind "$(tailscale ip -4)" --port 8766 --allow-screen --allow-app-launch
+# Mac mini: --device-id macmini --label "Mac mini"
+```
+
+Grant Screen & System Audio Recording to the Terminal/Python running the agent (System Settings → Privacy & Security).
 
 In a second terminal on the same host and in the same environment, run `jarvis-world-live-watchdog`.
 
@@ -54,9 +66,11 @@ jarvis-release-gate validate        # must print ok: true
 jarvis-release-gate freeze          # records the candidate SHA
 ```
 
-Build the iOS app from the **same commit** on the Mac: Xcode → JarvisIOS → your paid team → Run to the physical iPhone.
-The Xcode build log must show `Stamped JarvisBuildSHA=<sha>`, with no `-dirty` suffix.
-iPhone → Settings → Jarvis Server shows **App build SHA**, which must match.
+Build the iOS app from the **same commit** on a Mac: Xcode → scheme **JarvisIOS (Personal Team)** until the paid team is active,
+then scheme **JarvisIOS** (push-entitled) → your team → Run to the physical iPhone. Both variants come from the same SHA;
+C09/C18 (and the final C21/C22 runs) require the push-entitled build.
+The Xcode build log must show `Stamped JarvisBuildSHA=<sha> variant=<PersonalTeam|Debug>`, with no `-dirty` suffix.
+iPhone → Settings → Jarvis Server shows **App build SHA • variant**, which must match.
 
 ```powershell
 jarvis-release-gate start C00 --user-entry-surface "iPhone app" --literal-user-request "n/a (deployment)" `
@@ -97,4 +111,6 @@ Where an Agency receipt is required, run the matching `jarvis-agency-real-gate` 
 | C19 | "Turn on the desk lamp" (confirm) or the Presence panel; look at the lamp; try again after the grant is spent; unplug the lamp and try | grant bound, readback, later refusal, failure case (+ `--attest`) |
 | C20 | Run the live probes on the deployed build, plus revoke and stop during a collection | bearer, grant, private targets, disabled flag, node, redaction, no leakage |
 | C21 | `jarvis-release-gate start C21`, then `jarvis-release-soak run --session <id>` for 24 h+ | soak checks |
+| C01-S01…S16 | The 16 grouped scenarios in `criteria.md` §7A (voice, glasses, offline iPhone, perception, people, privacy, executive, iOS integration, PC/automation, failover, Mission Control, Life Fabric, Reality Lens + v8 surfaces, Notecard/Health, ambient light, Guardian); each needs `--attest` | common (+ artifacts) |
+| C01 | After all 16 scenario records are PASS | every C01-Sxx PASS |
 | C22 | After the freeze, you choose one bounded objective and state it once; only approve, deny, answer value questions, perturb once, observe | Agency trace (+ `--attest`) |

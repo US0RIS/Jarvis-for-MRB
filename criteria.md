@@ -210,6 +210,7 @@ All gates begin as **UNPROVEN**. Source code or old demonstrations do not pre-ma
 | C20 | Privacy, secrets, revocation, and fail-closed boundaries | SYNTHETIC + REAL | UNPROVEN |
 | C21 | Long-run reliability / recovery soak | REAL | UNPROVEN |
 | C22 | Unscripted revolutionary capstone | REAL | UNPROVEN |
+| C01-S01 … C01-S16 | Shipped-capability scenarios (§7A) | REAL | UNPROVEN |
 
 **Release condition: every row must be PASS.**
 
@@ -275,6 +276,8 @@ For each capability, map it to exactly one of:
 - every capability promoted into the release has a concrete REAL test.
 
 If a claimed capability is discovered without a test, C01 fails and the release remains incomplete until this file is amended and the new test passes.
+
+The amendment in §7A adds scenario gates C01-S01 … C01-S16. C01 is PASS only when all of them are PASS on the frozen candidate.
 
 ---
 
@@ -942,6 +945,49 @@ ordinary user objective
 The user must be able to experience this as **one Jarvis task**, not as a developer walking through twelve demos.
 
 If every preceding gate passes but C22 fails, the revolutionary upgrade is **not done**.
+
+---
+
+## 7A. C01 appendix — shipped-capability acceptance scenarios
+
+*Amendment adopted 2026-09-27 under C01 ("this file is amended and the new test passes"). The user decided that every
+capability previously presented to them as implemented or current is in release scope. It gets a REAL test and may
+not be relabelled to pass. The only exceptions are the internal mechanisms listed at the end. This amendment adds
+tests. It weakens no gate.*
+
+Each scenario below is a REAL gate with its own acceptance record (gate IDs `C01-S01` … `C01-S16`).
+§3 applies in full:
+- the current frozen candidate SHA;
+- normal user surfaces only;
+- real devices and services;
+- at least one failure case per scenario.
+
+Each scenario record also needs a human attestation of what was observed. **C01 passes only when every C01-Sxx
+record is PASS on the frozen candidate** and the inventory in `CAPABILITY_INVENTORY.md` has no orphan.
+
+| ID | Scenario (one real session) | Capabilities covered (Feature Guide ids / docs) | PASS requires | Failure case |
+|---|---|---|---|---|
+| C01-S01 | Hands-free voice conversation of at least 10 turns on the iPhone | wake, followup, barge, dictation, vocab, quiet-speech, local-alias, audio-hud, response-done-tone, sir-dedupe, empty-stream-recovery, kokoro, whisper, context-discipline, episodic | Wake word starts a turn. A follow-up within 5 s needs no wake word. Speaking over Jarvis interrupts it. A long dictated email body is not cut off. A custom vocabulary word is recognized. The Kokoro voice is heard, and a whisper response when requested. The done tone plays. No duplicated "sir". A reference from 3 turns earlier resolves. | Kill the TTS server mid-session: Jarvis falls back audibly, without a silent failure. |
+| C01-S02 | Ray-Ban Meta glasses session | Gen 1 audio route, welcome-back, passive-vision, live-scene recall ("what can you see?"), spatial last-seen, camera-master, local-visual-cache, fast-perception, visual-change | Audio routes through the glasses. Put the glasses back on: greeting. "What can you see?" describes the current fresh scene. "Where did I last see my keys?" answers from a real sighting. The Stop Camera master switch stops frames. | Camera stopped: vision questions report no fresh frames instead of describing stale ones. |
+| C01-S03 | iPhone-only intelligence with the backend unreachable, then reachable | offline-brain, local-first-router, deterministic-utilities, stable-local-brain, native-calendar-local, native-reminders-local, local-timers, native-contacts-local, context-capsules, unified-local-memory, local-route-telemetry, quality-shield, semantic-audit, capability-receipts, packs-tab, offline-queue, no-write-replay, diagnostics, auto-recovery | Backend off: a time/unit question, a native Calendar read, a Reminder created (visible in Reminders.app), a timer, a Contacts lookup, a stable factual question all answered on the phone. An email request is staged offline, **not** sent. Backend on: auto-recovery reconnects; the staged write is **not** replayed without confirmation. Packs/receipts/telemetry show the routes taken. | The backend outage itself. |
+| C01-S04 | On-device perception and audio | audio-memory, sound-analysis, translation, ocr, qr | "What did I just say?" recalls recent speech. A doorbell/alarm sound is classified. A phrase is translated on-device. OCR of a printed page. A QR code decoded. | Airplane mode: all still work, or say explicitly that they are unavailable. |
+| C01-S05 | People and personal inventory | known-people, person-brief, encounter-capture, inventory, inventory-lastseen, inventory-alert | Enroll one consenting person. Jarvis recognizes them later and gives a pre-conversation brief. Post-encounter capture is saved. An enrolled item is matched with last-seen time and place, and a knowledge-triggered item note fires. | A non-enrolled face is not identified. Unenrollment removes the person from future matches. |
+| C01-S06 | Privacy and interruption controls | privacy-mode, privacy-zone, incident, modes, smart-interrupt, context-reminders, event-timeline, camera-privacy-pack | Guest/privacy mode suppresses personal data. Entering a configured privacy zone disables capture. An encrypted incident capture is created and viewable. Conversation modes change behavior. A contextual reminder fires in context. The event timeline shows the session. | Inside the privacy zone a camera request is refused. |
+| C01-S07 | Local executive tools | goals, waiting, routine, intent-radar, knowledge-graph, clipboard, local-receipts | Create a goal and a waiting-on item. A routine proposal appears after repeated behavior. Intent radar surfaces a relevant item. Knowledge-graph query answers. Clipboard intelligence acts on copied text. Local receipts list the actions. | Delete a waiting-on item: it no longer surfaces. |
+| C01-S08 | iOS integration | shortcuts (App Intents / Action Button), share-text | An Action Button / Shortcuts invocation reaches Jarvis. Text shared from another app is processed. | Invoke while the backend is down: the result reports offline honestly. |
+| C01-S09 | Windows PC and automation | pc-app, browser, desktop-context, jobs, briefing, background, prewarm, resources, audio-damping, journal, expenses, meeting, meeting-offline, unified-search | Launch and close a Windows app (process verified). Focus a browser tab. "What am I working on?" is correct. A scheduled reminder fires at its time and a recurring one is created. A briefing is generated. A background task completes. Resource status is shown. Audio damping lowers media during speech. A daily journal and an expense from a real receipt. Start/finish meeting notes (online and offline). Unified search finds an email and an event. | Close the browser: tab control reports unavailable instead of claiming success. |
+| C01-S10 | Connectivity failover | tailscale failover (LAN → Tailscale) | Away from home, requests succeed via Tailscale automatically. Back home, LAN is used again. | Both paths down: the app says unreachable and queues nothing consequential. |
+| C01-S11 | Mission Control and navigation | appointment journey mission, Maps handoff, GPS arrival, turn-by-turn navigation | For a real appointment: the mission starts, the Maps handoff opens the correct destination, arrival is observed by GPS, and navigation commands work. | Location permission revoked: arrival is reported unknown, never assumed. |
+| C01-S12 | Life Fabric | deadlines, handoffs, assets, friction log, readiness, what-if | Create a deadline, a handoff and an asset. Readiness reflects them. A friction entry is logged. A what-if returns minutes saved with provenance. Retire/forget works. | A forgotten record no longer appears after restart. |
+| C01-S13 | Reality Lens and World Armor analysis surfaces | Reality Lens sense/compare/remember; Synthetic Senses; Causal Debugger; Parallel Existence; two-region comparison | Reality Lens senses a real place and remembers it for 30 days. Each v8 surface runs once on real retained evidence. The two-region comparison compares two enrolled regions with provenance. | An unsupported region shows unknown/unavailable providers, never an all-clear. |
+| C01-S14 | Personal Notecard and Health context | Personal Notecard (address, relationships), optional Apple Health context | Store the home address and one relationship; Jarvis uses them in an answer. With Health opt-in, a Health-derived context appears in a relevant answer. | Health permission revoked: no Health data is used or claimed. |
+| C01-S15 | Camera-free ambient physical actuation (second actuation path per C19) | arrival- and doorbell-triggered pre-enrolled HomeKit light | A real away→home arrival turns on the enrolled light, with fresh HomeKit readback and human observation. A real doorbell sound triggers the enrolled doorbell light. | The first at-home fix after launch, a stale geofence, or a revoked enrollment produces no actuation. |
+| C01-S16 | Guardian surfaces | Counterfactual Guardian, Goal Guardian deadline/warning loops | An enrolled objective with a real deadline produces an evidence-backed warning at the right time. Snooze and revoke work. | Revoked enrollment: no further warnings. |
+
+**Internal mechanisms (not user capabilities, labelled as such, no separate gate):** capability-packs registry,
+capability-router, readonly-composer, lazy-pack-activation, routing-regressions harness, compact-context-packets.
+They are exercised implicitly by C01-S03, C02 and C12.
+**Declared limitations** (Feature Guide "Known Limits") claim no capability and need no gate.
 
 ---
 

@@ -199,6 +199,21 @@ class ReleaseGateLedgerTests(unittest.TestCase):
             gates.freeze()
             self.assertEqual(gates.release_status()["gates"]["C19"]["state"], "UNPROVEN")
 
+    def test_c01_requires_every_shipped_capability_scenario(self) -> None:
+        gates.freeze()
+        self.assertEqual(len(gates.C01_SCENARIOS), 16)
+        self.assertIn("C01-S09", gates.release_status()["gates"])
+        s03 = gates.start_session("c01-s03")
+        with self.assertRaisesRegex(ValueError, "human attestation required"):
+            gates.finalize_session(s03["id"], result="PASS", fields=_FIELDS)
+        gates.finalize_session(s03["id"], result="PASS", fields={**_FIELDS, "artifacts": "screen recording"},
+                               attestations=[{"statement": "reminder appeared in Reminders.app while offline"}])
+        c01 = gates.start_session("C01")
+        evaluation = {c["name"]: c["passed"] for c in gates.evaluate_session(c01["id"])["checks"]}
+        self.assertTrue(evaluation["C01-S03 (iPhone-only intelligence, offline then online) is PASS on this candidate"])
+        self.assertFalse(evaluation["C01-S01 (Hands-free voice conversation) is PASS on this candidate"])
+        self.assertFalse(gates.release_status()["release_complete"])
+
     def test_client_builds_are_recorded(self) -> None:
         gates.record_client_seen(device_id="dev-1", build_sha=SHA, model="iPhone iOS 26")
         gates.record_client_seen(device_id="dev-1", build_sha=SHA, model="iPhone iOS 26")

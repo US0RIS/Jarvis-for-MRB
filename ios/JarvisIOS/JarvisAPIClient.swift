@@ -13,6 +13,14 @@ enum JarvisBuildIdentity {
         return trimmed.isEmpty ? "unstamped" : trimmed
     }
 
+    /// Xcode build configuration: "Debug" carries the APNs entitlement (paid team),
+    /// "PersonalTeam" is the same source without it.
+    static var buildVariant: String {
+        let value = Bundle.main.object(forInfoDictionaryKey: "JarvisBuildVariant") as? String
+        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "unstamped" : trimmed
+    }
+
     static var bundleVersion: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
@@ -29,7 +37,7 @@ enum JarvisBuildIdentity {
 
     static var deviceModel: String {
         #if canImport(UIKit)
-        return "\(UIDevice.current.model) iOS \(UIDevice.current.systemVersion)"
+        return "\(UIDevice.current.model) iOS \(UIDevice.current.systemVersion) [\(buildVariant)]"
         #else
         return "unknown"
         #endif

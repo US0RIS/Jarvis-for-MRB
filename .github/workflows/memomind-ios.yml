@@ -157,6 +157,16 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/jarvis-derived-data" \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Build Jarvis iPhone simulator app (Personal Team variant, no APNs entitlement)
+        run: |
+          xcodebuild \
+            -project ios/JarvisIOS.xcodeproj \
+            -scheme JarvisIOS \
+            -configuration PersonalTeam \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/jarvis-derived-data-personal" \
+            CODE_SIGNING_ALLOWED=NO build
 
   full-world-validation:
     runs-on: ubuntu-latest

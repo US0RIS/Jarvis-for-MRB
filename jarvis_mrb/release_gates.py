@@ -64,6 +64,27 @@ GATES: dict[str, str] = {
     "C22": "Unscripted revolutionary capstone",
 }
 
+# criteria.md §7A: shipped-capability scenarios that C01 requires.
+C01_SCENARIOS: dict[str, str] = {
+    "C01-S01": "Hands-free voice conversation",
+    "C01-S02": "Ray-Ban Meta glasses session",
+    "C01-S03": "iPhone-only intelligence, offline then online",
+    "C01-S04": "On-device perception and audio",
+    "C01-S05": "People and personal inventory",
+    "C01-S06": "Privacy and interruption controls",
+    "C01-S07": "Local executive tools",
+    "C01-S08": "iOS integration (App Intents, share)",
+    "C01-S09": "Windows PC and automation",
+    "C01-S10": "Connectivity failover",
+    "C01-S11": "Mission Control and navigation",
+    "C01-S12": "Life Fabric",
+    "C01-S13": "Reality Lens and World Armor analysis surfaces",
+    "C01-S14": "Personal Notecard and Health context",
+    "C01-S15": "Camera-free ambient physical actuation",
+    "C01-S16": "Guardian surfaces",
+}
+GATES.update(C01_SCENARIOS)
+
 # Agency REAL receipts (jarvis-agency-real-gate) that a C gate additionally
 # requires.  They must be valid, same SHA/env, and minted during the C session.
 AGENCY_REQUIREMENTS: dict[str, tuple[str, ...]] = {
@@ -81,6 +102,7 @@ HUMAN_OBSERVATION_GATES: dict[str, str] = {
     "C18": "the physical iPhone displayed the notification while Jarvis was not foregrounded",
     "C19": "the physical light visibly changed state",
     "C22": "the user experienced the run as one Jarvis task without orchestrating it",
+    **{gate: f"what the user observed during: {title}" for gate, title in C01_SCENARIOS.items()},
 }
 
 RECORD_FIELDS = (
@@ -480,11 +502,26 @@ def _c00_checks(session: dict[str, Any]) -> list[dict[str, Any]]:
     return checks
 
 
+def _c01_checks(session: dict[str, Any]) -> list[dict[str, Any]]:
+    checks = []
+    for gate in C01_SCENARIOS:
+        items = [
+            item for item in records(sha=session["sha"], gate=gate)
+            if item["candidate_id"] == session["candidate_id"]
+        ]
+        latest = items[-1] if items else None
+        checks.append(_check(f"{gate} ({C01_SCENARIOS[gate]}) is PASS on this candidate",
+                             bool(latest) and latest["result"] == "PASS",
+                             (latest or {}).get("id", "no record")))
+    return checks
+
+
 # Gate-specific evaluators.  Gates without an evaluator still get the common
 # identity checks; their PASS then rests on the §4 human fields and artifacts,
 # which the finalize step requires to be explicit.
 EVALUATORS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "C00": _c00_checks,
+    "C01": _c01_checks,
 }
 
 
@@ -518,7 +555,7 @@ def start_session(
 ) -> dict[str, Any]:
     gate = str(gate or "").upper().strip()
     if gate not in GATES:
-        raise ValueError(f"Unknown gate {gate!r}; expected one of C00–C22.")
+        raise ValueError(f"Unknown gate {gate!r}; expected C00–C22 or C01-S01…C01-S16.")
     candidate = current_candidate(path)
     if not candidate:
         raise ValueError("No frozen release candidate. Run `jarvis-release-gate freeze` first.")

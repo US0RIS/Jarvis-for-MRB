@@ -220,7 +220,12 @@ def _c18(session: dict[str, Any]) -> list[dict[str, Any]]:
         watchdog = {"error": type(exc).__name__}
     restarts = int(watchdog.get("restart_count") or 0)
     duplicates_protected = _protected_duplicates(session)
+    from jarvis_mrb.release_gates import client_builds
+    push_builds = [c for c in client_builds(since=session["started_at"])
+                   if c["build_sha"] == session["sha"] and "[PersonalTeam]" not in str(c.get("model") or "")]
     return [
+        _check("the push-entitled (paid team) iPhone build of the frozen SHA was used", bool(push_builds),
+               [c.get("model") for c in push_builds][:3]),
         _check("APNs accepted at least one warning/urgent Jarvis push during the session (transport only)",
                bool(sent), sent[-5:]),
         _check("no duplicate user-level notification for the same content/device", not duplicates, duplicates[:5]),

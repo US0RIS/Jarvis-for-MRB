@@ -1,17 +1,16 @@
-# Capability inventory — C01 truth audit (draft)
+# Capability inventory — C01 truth audit
 
-> **C01 state: IMPLEMENTING. It cannot pass yet.** Part B lists shipped or claimed capabilities that have no REAL gate
-> in `criteria.md`. Under `criteria.md` §0 and C01, each one must either
-> (1) get a concrete REAL test added to `criteria.md` and pass it, or
-> (2) be relabelled as not a finished capability by an **explicit user choice**. Engineering may not relabel it
-> merely to pass. The user makes that decision, one group at a time (see "Decision needed").
+> **C01 state: READY FOR REAL TEST (not passed).** User decision on 2026-09-27: every capability previously presented as
+> implemented or current stays in scope (P). `criteria.md` §7A adds grouped REAL scenarios C01-S01 … C01-S16 for them.
+> C01 passes only when every one of those scenarios, plus the A-table gates, has REAL PASS on the frozen candidate.
+> Only pure internal mechanisms are labelled "not a user capability".
 
 Sources enumerated:
 
 - `README.md`;
 - the iPhone Feature Guide (`ios/JarvisIOS/FeatureGuide.swift`, 116 entries);
 - the iPhone tabs (Mesh, World Armor, Physical, Life Fabric, Mission Control, Settings);
-- the conversational tool registry (`jarvis_mrb/permissions.py`, 95 tools);
+- the conversational tool registry (`jarvis_mrb/permissions.py`);
 - production HTTP routes (`jarvis_mrb/service.py`).
 
 ## A. Mapped to a REAL gate
@@ -46,34 +45,34 @@ real-request checks automatically for NWS, Open-Meteo, USGS and OpenSky. For the
 Caltrans, Windy), the C17 record must carry the real request and provider timestamp as artifacts, or else the provider must be
 labelled unavailable/unconfigured in the product by user choice.
 
-## B. Shipped or claimed with no REAL gate — **decision needed**
+## B. Shipped capabilities without a C02–C22 gate → covered by §7A scenarios (decision: P)
 
-Recommended disposition: **P** = promote, i.e. add a REAL smoke test to `criteria.md` (a C01 appendix) and run it on the candidate.
-**L** = the user explicitly chooses to label it "not release-accepted" in the README and Feature Guide.
+| Scenario | Capabilities |
+|---|---|
+| C01-S01 Voice conversation | wake, followup, barge, dictation, vocab, quiet-speech, local-alias, audio-hud, response-done-tone, sir-dedupe, empty-stream-recovery, kokoro, whisper, context-discipline, episodic memory |
+| C01-S02 Ray-Ban Meta glasses | Gen 1 audio route, welcome-back, passive-vision, live-scene recall, spatial last-seen, camera-master, local-visual-cache, fast-perception, visual-change |
+| C01-S03 iPhone-only intelligence (offline → online) | offline-brain, local-first-router, deterministic-utilities, stable-local-brain, native Calendar/Reminders/Contacts, local-timers, context-capsules, unified-local-memory, local-route-telemetry, quality-shield, semantic-audit, capability-receipts, packs-tab, offline-queue, no-write-replay, diagnostics, auto-recovery |
+| C01-S04 On-device perception/audio | audio-memory, sound-analysis, translation, ocr, qr |
+| C01-S05 People & inventory | known-people, person-brief, encounter-capture, inventory, inventory-lastseen, inventory-alert |
+| C01-S06 Privacy & interruption | privacy-mode, privacy-zone, incident, modes, smart-interrupt, context-reminders, event-timeline, camera-privacy-pack |
+| C01-S07 Local executive | goals, waiting, routine, intent-radar, knowledge-graph, clipboard, local-receipts |
+| C01-S08 iOS integration | shortcuts (App Intents / Action Button), share-text |
+| C01-S09 Windows PC & automation | pc-app, browser, desktop-context, jobs, briefing, background, prewarm, resources, audio-damping, journal, expenses, meeting, meeting-offline, unified-search |
+| C01-S10 Connectivity | LAN → Tailscale failover |
+| C01-S11 Mission Control & navigation | appointment mission, Maps handoff, GPS arrival, turn-by-turn navigation |
+| C01-S12 Life Fabric | deadlines, handoffs, assets, friction log, readiness, what-if |
+| C01-S13 Reality Lens & World Armor analysis | Reality Lens; Synthetic Senses; Causal Debugger; Parallel Existence; two-region comparison |
+| C01-S14 Notecard & Health | Personal Notecard; optional Apple Health context |
+| C01-S15 Ambient physical actuation | arrival- and doorbell-triggered enrolled HomeKit light (second actuation path) |
+| C01-S16 Guardian surfaces | Counterfactual Guardian, Goal Guardian |
 
-| Group | Capabilities (Feature Guide ids / docs) | Recommendation |
-|---|---|---|
-| Voice UX | wake, followup, barge, dictation, vocab, quiet-speech, local-alias, audio-hud, response-done-tone, sir-dedupe, empty-stream-recovery | P (one scripted voice session covers them) |
-| Speech output | kokoro, whisper (adaptive/forced) | P |
-| Ray-Ban Meta glasses | Gen 1 audio route, welcome-back greeting, passive-vision transport, live-scene recall, spatial last-seen, camera-master switch | P if the glasses are in use, otherwise L |
-| iPhone local intelligence | offline-brain, local-first-router, deterministic-utilities, stable-local-brain, native Calendar/Reminders/Contacts, local-timers, context-capsules, unified-local-memory, compact-context-packet, local-route-telemetry | P (single local-routing session) |
-| Capability-pack architecture (internal mechanisms) | capability-packs, capability-router, camera-privacy-pack, readonly-composer, quality-shield, no-write-replay, semantic-audit, capability-receipts, routing-regressions, lazy-pack-activation, packs-tab | L (internal mechanisms; they are exercised implicitly by C02/C12) |
-| Local audio/vision | audio-memory, sound-analysis, translation, local-visual-cache, ocr, qr, fast-perception, visual-change | L unless used |
-| People & inventory | known-people, person-brief, encounter-capture, inventory, inventory-lastseen, inventory-alert | L unless used (face recognition carries privacy weight) |
-| Local memory & privacy | event-timeline, context-reminders, privacy-mode, privacy-zone, incident, modes, smart-interrupt | P for privacy-mode/privacy-zone (fail-closed, fits C20); L for the rest unless used |
-| Local executive | waiting, routine, intent-radar, knowledge-graph, clipboard, local-receipts | L unless used |
-| iOS integration | shortcuts (App Intents/Action Button), share-text | P (cheap) |
-| Automation/records | jobs (scheduled/recurring reminders), briefing, background worker, prewarm, expenses, journal, resources, audio-damping, health, meeting / meeting-offline | P for jobs, briefing, meeting; L for the rest unless used |
-| PC/browser | pc-app (local Windows), browser (Opera CDP), desktop-context | P (pc-app is also usable in C07 Test A) |
-| Connectivity diagnostics | diagnostics, auto-recovery, offline-queue | P for offline-queue (no automatic replay of writes, fits C20); L for the rest |
-| Mission Control | appointment journey mission, Maps handoff, GPS arrival | P (real appointment) or L |
-| Life Fabric | deadlines, handoffs, assets, friction log, readiness, what-if | L unless used |
-| Reality Lens | sense/compare/remember at a place | P (cheap once providers work) |
-| Personal Notecard | home address, relationships | P (cheap) |
-| Turn-by-turn navigation | Maps routing commands | L unless used |
-| Camera-free ambient presence | arrival/doorbell-triggered preauthorized HomeKit light | **P required if kept**: this is a second physical actuation path, so C19 requires its own physical scenario |
-| World Armor v8 analysis surfaces | Synthetic Senses, Causal Debugger, Parallel Existence, two-region comparison | P (read-only; one real run each) or L |
-| Counterfactual Guardian / Goal Guardian iOS surfaces | evidence-backed warning loops | map to C09 if their alerts use the proactive path; otherwise P |
+**Labelled "internal mechanism, not a user capability" (decision: L):** capability-packs registry, capability-router,
+readonly-composer, lazy-pack-activation, routing-regressions harness, compact-context-packets. These are implementation
+mechanisms. They were never presented as things the user does, and they are exercised implicitly by C01-S03, C02 and C12.
+
+C17 provider list, all P: NWS, Open-Meteo air/UV, USGS, OpenSky, AISStream (needs its server-side key), OSM facilities,
+SEC / EPA / OFAC matter diligence, Caltrans, Windy (needs the key entered on the iPhone). Each needs a real request on
+the frozen candidate.
 
 ## C. No gate needed
 
@@ -84,9 +83,3 @@ Recommended disposition: **P** = promote, i.e. add a REAL smoke test to `criteri
   routes, `jarvis-agency-*`, `jarvis-world-*` and `jarvis-release-*` CLIs.
 - **Honestly labelled bench/roadmap items**: the CrunchLabs servo (bench only; documented as not integrated with Jarvis), MemoMind
   (documented as "Simulator only"), and all of `future.md`.
-
-## Decision needed from the user
-
-For each Part B group, reply **P** or **L**. **P** means I add a concrete REAL test to `criteria.md` (C01 appendix) and it becomes
-part of the acceptance campaign. **L** means you explicitly choose to label it "not release-accepted" in the README and the
-in-app Feature Guide. Both choices keep the code in the product.

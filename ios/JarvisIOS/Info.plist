@@ -22,6 +22,8 @@
     <string>1</string>
     <key>JarvisBuildSHA</key>
     <string>unstamped</string>
+    <key>JarvisBuildVariant</key>
+    <string>unstamped</string>
 
     <key>CFBundleURLTypes</key>
     <array>

@@ -461,6 +461,18 @@ class WorldArmorPresenceReceiptRequest(BaseModel):
     message: str
 
 
+class PresenceCatalogLight(BaseModel):
+    id: str
+    name: str
+    room: str = ""
+    on: bool | None = None
+    reachable: bool | None = None
+
+
+class PresenceCatalogRequest(BaseModel):
+    lights: list[PresenceCatalogLight]
+
+
 class RealityLensRequest(BaseModel):
     latitude: float
     longitude: float
@@ -1716,6 +1728,25 @@ def world_armor_presence_receipt(
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         _world_armor_platform_error(exc)
+
+
+@app.post("/world-armor/v8/presence/catalog")
+def world_armor_presence_catalog(
+    request: PresenceCatalogRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """The iPhone publishes its Apple Home light catalog (names, ids, state).
+
+    Publishing a catalog grants nothing: every actuation still needs an exact
+    confirmed request, a one-use grant and a fresh HomeKit readback.
+    """
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    if len(request.lights) > 100:
+        raise HTTPException(status_code=422, detail="At most 100 lights per catalog.")
+    from jarvis_mrb.world_places import record_light_catalog
+    return record_light_catalog([item.model_dump() for item in request.lights])
 
 
 @app.get("/world-armor/v7/live/status")

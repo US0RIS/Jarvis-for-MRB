@@ -914,8 +914,44 @@ def record_presence_receipt(
     value["physical_effect_verified"] = (
         value["status"] == "verified_reported_state"
     )
+    if value["status"] == "verified_reported_state":
+        # Make the readback a provenance-bearing world observation so goals
+        # and dormant watches can depend on the physical state.
+        try:
+            with closing(_connect(path)) as con:
+                grant = con.execute(
+                    "SELECT target_id,target_label FROM presence_grants WHERE id=?",
+                    (value["grant_id"],),
+                ).fetchone()
+            if grant is not None:
+                from jarvis_mrb.world_places import record_light_readback
+                record_light_readback(
+                    str(grant["target_id"]), str(grant["target_label"]),
+                    on=bool(value["requested_state"]), request_id=request_id,
+                    message=str(value.get("message") or ""),
+                )
+        except Exception:
+            pass
     value["verification_qualifier"] = (
         "HomeKit accessory state readback is stronger than command acceptance "
         "but is not an independent sensor proving photons/mechanical state."
     )
+    return value
+
+
+def get_presence_receipt(
+    request_id: str, *, db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Read one Presence receipt (used by the independent action verifier)."""
+    if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+        raise ValueError("Invalid Presence request ID.")
+    path = Path(db_path) if db_path is not None else FULL_STORE
+    with closing(_connect(path)) as con:
+        row = con.execute(
+            "SELECT * FROM presence_receipts WHERE id=?", (request_id,)
+        ).fetchone()
+    if row is None:
+        raise KeyError("Presence request does not exist.")
+    value = dict(row)
+    value["physical_effect_verified"] = value["status"] == "verified_reported_state"
     return value

@@ -27,6 +27,31 @@ _ALLOWED_NODE_TOOLS = {
     "state.get", "state.update", "state.temp_set", "state.temp_clear",
     "knowledge.search", "spatial.find", "agency.deliberate", "custom.run",
     "background.list",
+    # Real-world subsystems (read-only observation plus one confirmed,
+    # readback-verified physical actuator).
+    "world.observe_place", "world.camera_sources", "world.observe_camera",
+    "presence.lights", "presence.set_light", "mesh.nodes",
+}
+
+# Argument contracts shown to the planner.  Without them a local model must
+# guess argument names, which silently breaks composition.
+TOOL_SIGNATURES: dict[str, str] = {
+    "calendar.list": '{"days": int, "limit": int}',
+    "calendar.query": '{"direction": "future|past", "days": int, "limit": int, "query": str?, "start": iso?, "end": iso?}',
+    "calendar.create": '{"summary": str, "start": iso8601, "end": iso8601, "description": str?} (protected write)',
+    "calendar.conflicts": '{"days": int}',
+    "gmail.query": '{"query": gmail search string, "limit": int<=10}',
+    "gmail.send": '{"recipient": email, "subject": str, "body": str} (protected write)',
+    "contacts.resolve": '{"query": name}',
+    "web.search": '{"query": str, "num": int}',
+    "knowledge.search": '{"query": str, "limit": int}',
+    "fact.check": '{"claim": str}',
+    "pc.launch_app": '{"name": app name}', "pc.app_status": '{"name": app name}',
+    "pc.close_app": '{"name": app name}',
+    "smart.open": '{"name": app or site}', "smart.status": '{"name": app or site}',
+    "state.update": '{"key": str, "value": any}', "state.temp_set": '{"key": str, "value": any, "ttl_minutes": int}',
+    "agency.deliberate": '{"question": str, "context": str}',
+    "custom.run": '{"name": enabled adapter, "arguments": {}}',
 }
 
 
@@ -35,6 +60,14 @@ class WorkflowResult:
     ok: bool
     message: str
     plan: dict[str, Any] | None = None
+
+
+def _tool_signatures() -> dict[str, str]:
+    from jarvis_mrb.agency_world_tools import WORLD_TOOLS
+
+    signatures = dict(TOOL_SIGNATURES)
+    signatures.update({name: spec for name, (_risk, spec) in WORLD_TOOLS.items()})
+    return {name: spec for name, spec in signatures.items() if name in _ALLOWED_NODE_TOOLS}
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -146,6 +179,7 @@ def plan_workflow(goal: str) -> dict[str, Any]:
         _validate_plan(simple)
         return simple
     tools = ", ".join(sorted(_ALLOWED_NODE_TOOLS))
+    signatures = "\n".join(f"- {name} {spec}" for name, spec in sorted(_tool_signatures().items()))
     custom_catalog = _enabled_custom_tool_catalog()
     custom_text = json.dumps(custom_catalog, ensure_ascii=False, sort_keys=True)
     system = f"""Create a small directed acyclic graph for a personal assistant workflow.
@@ -153,8 +187,13 @@ Return JSON only with this schema:
 {{"summary":"...","nodes":[{{"id":"n1","tool":"tool.name","arguments":{{}},"depends_on":[]}}],"missing_capability":null}}
 If the goal requires a capability that no allowed tool can provide, return:
 {{"summary":"...","nodes":[],"missing_capability":{{"capability":"short machine-readable name","reason":"concrete reason this capability is necessary"}}}}
+If the next useful step cannot happen until a real observable world/device condition changes, you may instead return no nodes and:
+{{"summary":"...","nodes":[],"missing_capability":null,"wait_until":{{"condition":{{"kind":"world_metric","place":"...","predicate":"us_aqi|pm2_5_ug_m3|uv_index|nws_alert_count|usgs_quake_count|usgs_max_magnitude|aircraft_count","op":"eq|ne|lt|le|gt|ge","value":0}},"reason":"why progress must wait"}}}}
+or with {{"kind":"device_state","device":"exact Apple Home light name","predicate":"power_on|reachable","op":"eq","value":true}}. Jarvis will keep observing and resume the goal when that condition is freshly observed.
 Allowed tools: {tools}
 Enabled custom adapters usable only through custom.run: {custom_text}
+Tool argument contracts (use exactly these argument names):
+{signatures}
 Rules:
 - Use no more than 8 nodes.
 - Use explicit dependencies. Independent read-only lookups may have no dependency and can run in parallel.
@@ -206,8 +245,16 @@ def _validate_plan(plan: dict[str, Any]) -> None:
         reason = str(missing.get("reason") or "").strip()
         if not capability or not reason:
             raise ValueError("Workflow missing_capability requires capability and reason.")
-    if not nodes and not isinstance(missing, dict):
-        raise ValueError("Workflow must contain at least one node or an explicit missing_capability.")
+    wait_until = plan.get("wait_until")
+    if wait_until is not None:
+        if not isinstance(wait_until, dict) or not isinstance(wait_until.get("condition"), dict):
+            raise ValueError("Workflow wait_until must be an object with a condition object.")
+        if not str(wait_until.get("reason") or "").strip():
+            raise ValueError("Workflow wait_until requires a reason.")
+        if nodes:
+            raise ValueError("Workflow wait_until cannot be combined with executable nodes.")
+    if not nodes and not isinstance(missing, dict) and not isinstance(wait_until, dict):
+        raise ValueError("Workflow must contain at least one node, an explicit missing_capability, or wait_until.")
     ids: set[str] = set()
     for raw in nodes:
         if not isinstance(raw, dict):

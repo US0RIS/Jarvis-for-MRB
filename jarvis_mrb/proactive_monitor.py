@@ -355,6 +355,13 @@ def _check_desired_states() -> None:
         reconcile_gaps()
     except Exception as exc:
         _health_failure("agency_capability_reconcile", exc)
+    try:
+        # Dormant goals and world-condition goals depend on fresh real
+        # observations; re-observe their places at a bounded cadence.
+        from jarvis_mrb.world_places import refresh_referenced
+        refresh_referenced()
+    except Exception as exc:
+        _health_failure("world_place_refresh", exc)
     check_wake_watches()
     for item in list_desired_states(limit=200):
         if str(item.get("state") or "") in {"blocked", "paused", "retired"}:

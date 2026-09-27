@@ -386,6 +386,22 @@ def _planner_prompt(desired: dict[str, Any], evaluation: dict[str, Any], previou
                   "prior result stale or insufficient."
             )
     try:
+        from jarvis_mrb.desired_state import list_wake_watches
+        woken = [
+            {"condition": item.get("condition"), "triggered_at": item.get("triggered_at"),
+             "observed": {k: (item.get("evidence") or {}).get(k) for k in ("actual", "observed_at")}}
+            for item in list_wake_watches(desired_state_id=str(desired.get("id") or ""))
+            if str(item.get("status") or "") == "triggered"
+        ][-3:]
+    except Exception:
+        woken = []
+    if woken:
+        previous_text += (
+            "\nThis goal was dormant and has been reactivated because its wake condition is now freshly observed: "
+            + json.dumps(woken, ensure_ascii=False, sort_keys=True, default=str)
+            + ". Do not wait on the same condition again; plan the newly feasible next step."
+        )
+    try:
         from jarvis_mrb.agency_self_model import compact_context as self_model_context
         self_context = self_model_context(max_chars=5000)
     except Exception:
@@ -448,6 +464,45 @@ def _handle_declared_capability_gap(
     set_state(str(desired_state_id), "blocked", reason=reason)
 
 
+def _enter_dormant_watch(
+    desired_state_id: str,
+    wait_until: dict[str, Any],
+    *,
+    set_state: Callable[..., Any],
+) -> dict[str, Any]:
+    """Put a goal into an explicit dormant state bound to one real condition.
+
+    The condition is grounded (exact place/device entity) and freshness-bound,
+    so only a *new* real observation can wake the goal.  The world-observation
+    refresher keeps re-observing referenced places while the goal sleeps.
+    """
+    from jarvis_mrb.desired_state import add_wake_watch
+    from jarvis_mrb.world_model import record_event
+    from jarvis_mrb.world_places import compile_condition
+
+    try:
+        criterion = compile_condition(dict(wait_until.get("condition") or {}))
+    except ValueError as exc:
+        reason = f"Planner asked to wait on an ungroundable condition: {exc}"
+        set_state(desired_state_id, "blocked", reason=reason)
+        raise ValueError(reason) from exc
+    label = str(criterion.pop("label", "") or "")
+    why = " ".join(str(wait_until.get("reason") or "").split())[:600]
+    watch = add_wake_watch(desired_state_id, criterion)
+    set_state(desired_state_id, "blocked", reason=f"Dormant until {label}: {why}")
+    record_event(
+        "agency.dormant",
+        f"Goal dormant until {label}.",
+        source_kind="jarvis_agency",
+        source_ref=str(watch["id"]),
+        payload={"desired_state_id": desired_state_id, "watch_id": watch["id"],
+                 "condition": criterion, "reason": why},
+        evidence="Planner declared that progress requires a real observable condition change.",
+        confidence=1.0,
+    )
+    return watch
+
+
 def compile_plan(
     desired_state_id: str,
     *,
@@ -487,6 +542,11 @@ def compile_plan(
                 missing,
                 set_state=set_state,
             )
+            _update_runtime(str(desired_state_id), planner_success=True)
+            return None
+        wait_until = workflow.get("wait_until")
+        if isinstance(wait_until, dict):
+            _enter_dormant_watch(str(desired_state_id), wait_until, set_state=set_state)
             _update_runtime(str(desired_state_id), planner_success=True)
             return None
         signature = _workflow_signature(workflow)

@@ -102,8 +102,17 @@ TOOL_RISK: dict[str, Risk] = {
     "agency.monitor": "local_write",
     "agency.disable": "local_write",
     "agency.activate_goal": "security",
+    "agency.pursue_goal": "security",
     "agency.pause_goal": "local_write",
     "permissions.set": "security",
+    # Real-world subsystems exposed through the ordinary tool boundary
+    # (jarvis_mrb.agency_world_tools). Physical actuation always confirms.
+    "world.observe_place": "read",
+    "world.camera_sources": "read",
+    "world.observe_camera": "read",
+    "presence.lights": "read",
+    "presence.set_light": "external_write",
+    "mesh.nodes": "read",
 }
 
 

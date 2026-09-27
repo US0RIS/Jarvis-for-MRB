@@ -1511,6 +1511,16 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(ArmorPresenceReceipt.self, from: data)
     }
 
+    /// Publish the phone's Apple Home light catalog so persistent goals can name
+    /// an exact light. Publishing grants no actuation authority.
+    func publishPresenceCatalog(_ lights: [[String: Any]]) async throws {
+        let (data, response) = try await postData(
+            path: "world-armor/v8/presence/catalog",
+            body: ["lights": lights]
+        )
+        try validate(response: response, data: data)
+    }
+
     func worldArmorPresenceRevoke(_ grantID: String) async throws -> ArmorPresenceRevoke {
         let (data, response) = try await postData(
             path: "world-armor/v8/presence/revoke",

@@ -270,6 +270,23 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
             return AgentReply(True, describe_text(str(args.get("entity") or "")))
         except ValueError as exc:
             return AgentReply(False, str(exc))
+    if tool == "attention.set_busy":
+        import dateparser
+        from jarvis_mrb.environment_state import set_value as set_env_value
+        text = str(args.get("until") or "").strip()
+        if text.lower() in {"clear", "now", "off", "none"}:
+            set_env_value("preference.busy_until", "")
+            return AgentReply(True, "Okay, normal interruptions are back on.")
+        minutes = args.get("minutes")
+        if minutes:
+            from datetime import timedelta
+            until = datetime.now().astimezone() + timedelta(minutes=max(1, min(int(minutes), 24 * 60)))
+        else:
+            until = dateparser.parse(text, settings={"PREFER_DATES_FROM": "future", "RETURN_AS_TIMEZONE_AWARE": True})
+        if until is None or until <= datetime.now().astimezone():
+            return AgentReply(False, f"I couldn't understand {text!r} as a future time.")
+        set_env_value("preference.busy_until", until.isoformat())
+        return AgentReply(True, f"Understood. I'll hold non-urgent interruptions until {until.strftime('%I:%M %p').lstrip('0')}; urgent ones still come through.")
     if tool == "capabilities.now":
         from jarvis_mrb.capability_inventory import describe as describe_capabilities, live_inventory
         return AgentReply(True, describe_capabilities())

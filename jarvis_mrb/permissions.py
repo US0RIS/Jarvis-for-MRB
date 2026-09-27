@@ -117,6 +117,7 @@ TOOL_RISK: dict[str, Risk] = {
     "world.remember_fact": "local_write",
     "world.correct_fact": "local_write",
     "world.describe_entity": "read",
+    "attention.set_busy": "local_write",
 }
 
 

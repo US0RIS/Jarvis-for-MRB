@@ -203,6 +203,13 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     answer = _clock(lower, current) or _arithmetic(lower)
     if answer:
         return answer
+    m = _match(r"(?:i'?m|i am) (?:busy|in a meeting|heads down|focusing)(?: until (.{2,60}))?|(?:don'?t|do not) (?:interrupt|disturb) me(?: until (.{2,60}))?", spoken.replace("\u2019", "'"))
+    if m:
+        until = (m.group(1) or m.group(2) or "").strip()
+        return _tool("attention", "attention.set_busy", **({"until": until} if until else {"minutes": 60}))
+    m = _match(r"(?:i'?m|i am) (?:free|available|done|out of (?:the|my) meeting)(?: now)?|you can interrupt me(?: again)?(?: now)?", spoken.replace("\u2019", "'"))
+    if m:
+        return _tool("attention", "attention.set_busy", until="clear")
     fact_text = spoken.replace("\u2019", "'")
     m = _match(r"(?:correction[:,]?|actually,?|no,? actually,?|that'?s wrong[.,]?|that is wrong[.,]?) (?:the )?(.{2,120}?)'s (.{2,80}?) (?:is|are) (.{1,300})", fact_text)
     if m:

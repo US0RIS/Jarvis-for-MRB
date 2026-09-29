@@ -1115,3 +1115,78 @@ and fit with Jarvis's authority/verification architecture.
   Jarvis capability gaps, score them for novelty/fit/activity/license, and append candidates for
   human review. The system should search for missing primitives, not blindly chase popular
   "AI agent" repositories.
+
+
+### Voice stack replacement candidates — deeper GitHub sweep 2026-09-28
+
+The earlier GitHub survey under-searched speech synthesis. This deserves its own capability lane because
+voice quality/latency materially affects whether Jarvis feels ambient or like a chatbot. Also keep the
+current-state distinction explicit: backend code/docs currently identify **Kokoro-82M / bm_george** as
+the default low-latency TTS path, while `ios/README.md` still contains stale Qwen3-TTS runtime text.
+Any replacement evaluation must benchmark against the *actually running* Kokoro service, not the stale
+documentation.
+
+- **debpalash/VoiceStudio — top candidate for replacing the current TTS service layer, not merely a
+  desktop voice app.** Fully local speech platform with voice cloning/design, local HTTP/WebSocket/API
+  surfaces, MCP, CUDA support, model management, and a pluggable TTS engine catalogue. It currently
+  supports OmniVoice, CosyVoice 3, IndexTTS 2.5, MLX-Audio/Kokoro/CSM/Dia, VoxCPM2, MOSS-TTS-Nano,
+  PocketTTS, Sherpa-ONNX, GPT-SoVITS and others. On the RTX 5080, this could let Jarvis keep one stable
+  `/tts`-style integration while experimentally switching among much better voices/models underneath.
+  **This should have been in the first survey.** License is AGPL-3.0 and individual model licenses vary;
+  treat VoiceStudio as a separately running local service unless/until licensing implications of tighter
+  code integration are reviewed. https://github.com/debpalash/VoiceStudio
+- **VoiceStudio OmniVoice — cloned/designed Jarvis voice candidate.** Default VoiceStudio engine,
+  600+ languages, zero-shot cloning, voice design, CUDA support and ~6 GB recommended VRAM floor.
+  Particularly interesting because Jarvis could design a restrained original aide voice instead of
+  depending on a generic preset speaker. Benchmark quality and first-audio latency on the actual 5080.
+- **VoiceStudio / CosyVoice 3 — instructed zero-shot clone candidate.** 0.5B-class multilingual model
+  with reference-voice cloning and instruction-driven speech. VoiceStudio's managed Windows recipe
+  explicitly handles RTX 50-series PyTorch/CUDA compatibility. Candidate if it sounds materially more
+  natural than Kokoro without unacceptable sentence-start latency.
+- **VoiceStudio / IndexTTS 2.5 — expressive/emotional voice candidate.** Reference cloning plus emotion
+  reference/vector/text control. Probably overkill for routine acknowledgements, but useful if a
+  high-quality Jarvis voice needs controlled emphasis and prosody rather than generic TTS cadence.
+  Treat model licensing separately from VoiceStudio itself.
+- **OpenMOSS/MOSS-TTS-Nano — low-resource cloned-voice fallback.** ~100M parameter, 20-language,
+  realtime CPU-capable model with reference voice cloning. Interesting as an offline/failover voice on
+  Raspberry Pi/CPU-class nodes where Kokoro/large CUDA models are unavailable.
+  https://github.com/OpenMOSS/MOSS-TTS-Nano
+- **Kyutai PocketTTS through VoiceStudio — ultra-low-latency CPU clone lane.** VoiceStudio documents it
+  as roughly 8–9x realtime on an Apple M3 Pro, with zero-shot voice cloning. Evaluate for room satellites
+  and degraded-mode operation where conversational latency matters more than maximum expressiveness.
+- **resemble-ai/chatterbox — standalone high-quality open TTS candidate.** MIT-licensed, widely adopted
+  open-source TTS/voice-cloning project. It should be in the bake-off even if VoiceStudio is chosen as
+  the service layer, because the best Jarvis voice may come from a model VoiceStudio does not currently
+  expose. https://github.com/resemble-ai/chatterbox
+- **SWivid/F5-TTS — standalone zero-shot cloning candidate.** Mature MIT-licensed flow-matching TTS with
+  a large ecosystem. Include in quality/latency testing, especially if a distinctive Jarvis voice can
+  be cloned/designed from a short reference more naturally than Kokoro presets.
+  https://github.com/SWivid/F5-TTS
+- **fishaudio/fish-speech — expressive standalone candidate.** High-quality open-source TTS with voice
+  cloning/conditioning; evaluate licensing, local serving and latency before considering integration.
+  https://github.com/fishaudio/fish-speech
+- **ServeurpersoCom/qwentts.cpp — native/quantized Qwen TTS path.** Interesting specifically because
+  Jarvis previously used Qwen3-TTS but moved away for latency. A native C++/quantized implementation
+  could change that tradeoff; benchmark rather than assuming the old Python service's latency still
+  characterizes Qwen-based speech. https://github.com/ServeurpersoCom/qwentts.cpp
+
+#### Voice replacement acceptance test
+
+Do not replace the voice because a model demo sounds impressive. Build a repeatable local bake-off on
+the actual Jarvis PC and score/record **measured** behavior for the same corpus:
+
+- cold-start time and warm **time-to-first-audio** for 5-word, 15-word and 40-word responses;
+- real-time factor / total synthesis latency;
+- VRAM/RAM footprint and contention with Jarvis's other GPU workloads;
+- naturalness, intelligibility, pronunciation of names/addresses/acronyms, and long-response stability;
+- ability to produce one consistent original Jarvis identity (preset, designed or permissioned clone);
+- streaming/chunking behavior with the existing sentence-level iPhone playback path;
+- barge-in behavior, cancellation latency and whether an interrupted generation actually releases work;
+- reliability across 100+ sequential short generations and backend restart/recovery;
+- local-only operation, network dependencies, model/license constraints and failure fallback;
+- exact API contract needed to drop behind Jarvis's existing TTS client.
+
+**Decision rule:** keep Kokoro as the baseline until another stack is demonstrably better on the dimensions
+that matter in conversation. VoiceStudio is especially attractive because it can turn this from a one-time
+model choice into a provider-independent local speech layer: Jarvis owns the TTS contract and VoiceStudio
+owns model lifecycle/engine switching underneath it.

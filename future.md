@@ -1190,3 +1190,249 @@ the actual Jarvis PC and score/record **measured** behavior for the same corpus:
 that matter in conversation. VoiceStudio is especially attractive because it can turn this from a one-time
 model choice into a provider-independent local speech layer: Jarvis owns the TTS contract and VoiceStudio
 owns model lifecycle/engine switching underneath it.
+
+
+## Systematic GitHub capability mining — mechanical sweep 2026-09-28
+
+This pass deliberately corrects the earlier search method. Discovery was run mechanically across
+GitHub topic/star queries, recent high-growth repositories (2026-created + substantial stars),
+"awesome" indexes, and second-hop projects referenced by those indexes. It covered TTS/voice,
+realtime audio, computer use, browser automation, mobile control, memory/knowledge graphs,
+computer vision/video analytics, home automation/IoT, robotics/SLAM, AR, geospatial/OSINT,
+ADS-B/AIS/satellite/SDR, mesh/networking, media transport, change detection, observability,
+evaluation and agent sandboxing.
+
+**These are research candidates, not implementation claims.** Repository popularity is not proof of
+quality, and README claims are not acceptance evidence. Any promoted item still needs license/security
+review plus an end-to-end test against Jarvis's actual hardware and criteria.
+
+### Ambient presence / voice / glasses
+
+- **QwenAudio/qwen-audio-agent — realtime "agent presence" runtime.** This is much closer to the
+  conversational behavior Jarvis is trying to achieve than a plain STT -> LLM -> TTS pipeline:
+  full-duplex voice, natural interruption, concurrent background agent tasks, progress/cancellation,
+  task results returning naturally to the ongoing conversation, replaceable realtime voice frontends,
+  and local speech-to-speech support. Mine the architecture even if Jarvis does not adopt Qwen as the
+  model. The important primitive is **conversation continuing while work happens elsewhere**.
+  https://github.com/QwenAudio/qwen-audio-agent
+- **Intent-Lab/VisionClaw — direct Ray-Ban realtime voice+vision reference implementation.** Uses the
+  same Meta Wearables DAT family Jarvis already integrates, streams glasses video plus bidirectional
+  audio to a live multimodal model, and routes tool calls to an external action gateway. Extremely
+  relevant as a reference for the glasses transport/session layer, WebRTC POV sharing, native-audio
+  conversation and phone-camera fallback. Do not copy its trust model blindly; preserve Jarvis's
+  stronger authority/verification boundaries. https://github.com/Intent-Lab/VisionClaw
+- **xzf-thu/VoiceMem — streaming memory specifically designed for voice agents.** Performs retrieval
+  while the user is still speaking so relevant memory can already be available at turn completion.
+  Mine the speculative-prefetch, bounded Top-K injection, session-buffer and interruption-timeline
+  architecture. Treat speaker voiceprints/emotion/personality inference as separately consented,
+  optional capabilities rather than importing that policy wholesale.
+  https://github.com/xzf-thu/VoiceMem
+- **FireRedTeam/FireRedTTS3 — another serious voice-design/cloning bake-off candidate.** Apache-2.0
+  code; multilingual zero-shot cloning plus instruction-controlled voice design and speech editing.
+  Add it to the same measured TTS acceptance harness as VoiceStudio/Kokoro/F5/Chatterbox rather than
+  choosing from demos. https://github.com/FireRedTeam/FireRedTTS3
+- **k2-fsa/OmniVoice — inspect upstream directly, not only through VoiceStudio.** VoiceStudio's default
+  engine is itself an actively developed voice-cloning/design stack. Keep the upstream project in the
+  bake-off so Jarvis can distinguish VoiceStudio service-layer issues from model-engine behavior.
+  https://github.com/k2-fsa/OmniVoice
+
+### Camera-free physical awareness
+
+- **ruvnet/RuView — Wi-Fi CSI as a camera-free room sensor.** Potentially major for a Jarvis room node:
+  low-cost ESP32 CSI sensors feeding local occupancy/motion/activity observations without putting a
+  camera in the room. The repo also explores pose/vitals/etc., but its own README explicitly notes that
+  some live pose paths are still first-cut/stub quality. Initial Jarvis evaluation should therefore
+  target only independently verifiable primitives such as presence/movement/room transition and treat
+  health/pose claims as research until measured on real hardware. https://github.com/ruvnet/RuView
+- **esphome/esphome — sensor-node fabric.** Instead of custom firmware for every ESP32 sensor,
+  evaluate ESPHome as the standardized edge layer for temperature, humidity, light, mmWave presence,
+  BLE proxying, buttons, relays and other user-owned sensors. Jarvis consumes normalized state/events
+  above it rather than becoming an embedded-firmware project. https://github.com/esphome/esphome
+- **merbanan/rtl_433 — local RF sensor receiver.** An inexpensive SDR can decode many common
+  unlicensed-band weather/environment sensors and emit JSON/MQTT. Useful for *user-owned* weather,
+  leak, temperature and utility sensors without vendor clouds. Scope ingestion to enrolled/authorized
+  devices rather than treating every nearby broadcast as Jarvis property.
+  https://github.com/merbanan/rtl_433
+
+### Computer / browser / phone agency
+
+- **trycua/cua — canonical current Cua repo.** The earlier survey cited an older/alternate Cua path.
+  The current project includes Cua Driver for macOS/Windows/Linux app control, isolated desktops,
+  local Apple-Silicon VMs, specialized bounded decision models, and Cua Bench for verified computer-use
+  tasks. Particularly strong fit for Jarvis because it treats APIs/code/GUI as interchangeable control
+  surfaces and includes an evaluator rather than merely a click agent. https://github.com/trycua/cua
+- **mediar-ai/terminator — deterministic Windows automation with AI recovery.** Uses accessibility,
+  browser DOM and pixels; can work in the background without stealing the real cursor; records human
+  workflows into reusable deterministic automation and invokes AI for recovery. This maps almost
+  exactly onto Jarvis's Demonstrate -> Compile -> Verify direction and is directly relevant to the
+  Windows backend. https://github.com/mediar-ai/terminator
+- **ShawnPana/phone-harness — no-jailbreak control of a real iPhone through Apple's iPhone Mirroring.**
+  Uses macOS Screen Recording/Accessibility plus Vision OCR to see/tap/type on the mirrored phone;
+  Android uses ADB. This could give Jarvis an action surface for iPhone apps that expose no API or
+  Shortcuts action, while keeping the phone unmodified. Constraints are real: Mac dependency,
+  mirroring must be connected, Face ID/camera/DRM flows do not work, and consequential actions still
+  need confirmation/readback. https://github.com/ShawnPana/phone-harness
+- **jackwener/OpenCLI — "crystallize websites into tools."** Can operate a logged-in Chrome session,
+  inspect network responses/DOM, and turn repeated website workflows into deterministic adapters with
+  verification. Strong implementation reference for Jarvis's Feature Crystallization / generated
+  adapters: use browser reasoning once to discover a stable interface, then stop spending model tokens
+  re-discovering it every time. https://github.com/jackwener/opencli
+- **omxyz/lumen — vision-first browser agent with self-healing replay.** Screenshot-first execution,
+  action caching, structured persistent state, stuck detection, domain/action policy hooks, resumable
+  sessions and an explicit completion verifier. Mine the **known-good action replay + verification**
+  pattern as a fallback for sites where DOM/API automation is unreliable. https://github.com/omxyz/lumen
+- **vercel-labs/agent-browser — fast accessibility-tree browser control.** Native Rust CLI, stable
+  element refs, screenshots only when needed, CDP attachment and page-provided WebMCP discovery.
+  Candidate low-overhead deterministic browser lane beneath the high-level agent.
+  https://github.com/vercel-labs/agent-browser
+- **pinchtab/pinchtab — persistent local browser control plane.** Single Go service providing
+  token-efficient structured page state, reusable authenticated profiles, multiple browser instances,
+  ARM64/Raspberry Pi support and explicit local-first security defaults. Interesting if Jarvis should
+  have a standing browser capability service rather than spawning browser automation ad hoc.
+  https://github.com/pinchtab/pinchtab
+- **lightpanda-io/browser — agent-native headless browser.** A non-Chromium browser built for
+  automation with much lower memory/process overhead. Not a replacement for a real logged-in Chrome
+  session where compatibility matters, but worth benchmarking for high-volume read-only research jobs
+  and background web sensors. https://github.com/lightpanda-io/browser
+
+### World Armor / global reality layer
+
+- **koala73/worldmonitor — ready-made global intelligence/data fusion surface.** Real-time global
+  dashboard combining news, infrastructure/geopolitical signals, 3D/2D maps, correlation, local AI,
+  plus MCP/REST/CLI/SDK access. Do not copy its conclusions or scores blindly; mine its source adapters,
+  map-layer catalogue, correlation plumbing and programmatic interfaces as potential World Armor
+  inputs. https://github.com/koala73/worldmonitor
+- **bilawalsidhu/gods-eye-view — photorealistic open-source spatial-intelligence globe.** Live public
+  geospatial data on a Cesium-style 3D world with flight/satellite/geospatial layers. Strong visual and
+  architecture reference for what the World Armor globe should feel like when it is driven by real
+  sources rather than bespoke demo dots. Verify the project's non-standard license before reuse.
+  https://github.com/bilawalsidhu/gods-eye-view
+- **tidwall/tile38 — realtime geospatial database + geofencing.** Candidate primitive for persistent
+  location predicates: moving entities enter/exit regions, proximity triggers, "within N meters" and
+  spatial indexing should live in a purpose-built geospatial layer rather than repeatedly scanning
+  every Reality Graph entity in Python. https://github.com/tidwall/tile38
+- **organicmaps/organicmaps + Project-OSRM/osrm-backend — offline map/search/routing lane.** Jarvis
+  currently depends heavily on online map services for many location questions. These projects show a
+  path to locally stored OSM maps, offline search and local routing, useful both for privacy and
+  degraded-connectivity/emergency operation. https://github.com/organicmaps/organicmaps and
+  https://github.com/Project-OSRM/osrm-backend
+- **roboflow/supervision — reusable CV tracking/event primitives.** Mature tooling around detections,
+  tracking, zones, lines and video processing. Useful for the Eventification Layer: convert raw camera
+  detections into durable observations like "object crossed zone" or "track entered region" rather
+  than feeding raw boxes directly to an LLM. https://github.com/roboflow/supervision
+
+### Local radio reality — independent of Internet APIs
+
+- **cpaczek/skylight — excellent Pi 5 reference project for physical-world fusion.** Receives local
+  ADS-B through RTL-SDR with sub-second updates, renders aircraft/satellites against the real sky, and
+  optionally points a PTZ camera at predicted aircraft using ADS-B lead prediction + visual lock +
+  continuous self-calibration. Mine both the local-radio path and the elegant
+  **telemetry prediction -> actuator pointing -> visual verification -> calibration** loop.
+  https://github.com/cpaczek/skylight
+- **wiedehopf/readsb + wiedehopf/tar1090 — local aircraft receiver/data/history stack.** A cheap
+  RTL-SDR on the Raspberry Pi can give Jarvis locally received aircraft state independent of OpenSky
+  or other Internet providers, while tar1090 provides history/visualization. This would make nearby
+  aircraft a directly observed Reality Graph source rather than merely a web API.
+  https://github.com/wiedehopf/readsb and https://github.com/wiedehopf/tar1090
+- **jvde-github/AIS-catcher — local AIS vessel receiving.** The maritime equivalent of local ADS-B:
+  with appropriate SDR/antenna hardware, ingest VHF AIS broadcasts directly into World Armor for
+  nearby vessels instead of depending entirely on third-party AIS APIs.
+  https://github.com/jvde-github/AIS-catcher
+- **SatDump/SatDump — local satellite downlink processing.** Broad SDR pipeline for receiving and
+  decoding supported satellite transmissions. This is not a universal "live satellite imagery"
+  shortcut—reception depends on orbit, antenna, frequency and spacecraft—but it creates a genuinely
+  independent physical observation path worth exploring on the Pi/SDR side.
+  https://github.com/SatDump/SatDump
+- **thkruz/keeptrack.space — local/offline orbital world model.** Tracks tens of thousands of
+  satellites and can run offline. Mine its orbital mechanics, sensor-visibility calculations and
+  time-scrubbing model for a World Armor space layer rather than relying only on static map markers.
+  https://github.com/thkruz/keeptrack.space
+
+### Data plane / media plane / reactive state
+
+- **eclipse-zenoh/zenoh — unified pub/sub + store/query transport for Jarvis nodes.** Built for
+  distributed robotics/edge systems and supports multiple languages. Potential replacement for a
+  growing pile of bespoke REST polling between PC, Mac, Pi and sensor nodes: observations can be
+  published, queried and retained through one locality-aware data plane. Evaluate against the
+  operational simplicity of the current HTTP/Tailscale design before adopting.
+  https://github.com/eclipse-zenoh/zenoh
+- **bluenviron/mediamtx — realtime media router.** Complements go2rtc: protocol conversion among
+  WebRTC/RTSP/HLS/RTMP/SRT/etc., recording/playback, auth, hooks, control API and metrics in a
+  portable single executable. Interesting if Worldwide Cams/Jarvis needs persistent recording,
+  replay or multi-consumer routing rather than only stream normalization.
+  https://github.com/bluenviron/mediamtx
+- **drasi-project/drasi-platform — change-data-processing engine.** Evaluate its CDC/change-query/
+  reaction model as a general Reality Diff substrate: sources emit changes, standing queries decide
+  what those changes mean, and reactions fire only when relevant state transitions occur. This is
+  closer to how a persistent Jarvis should work than thousands of independent polling loops.
+  https://github.com/drasi-project/drasi-platform
+
+### Verification, observability and safe execution
+
+- **promptfoo/promptfoo — model/agent regression harness.** Jarvis's problem is not only capability;
+  it is repeatedly claiming capabilities that later fail. Promptfoo can provide repeatable model and
+  agent eval matrices across local/cloud models and prompts. Connect future `criteria.md` claims to
+  machine-run regression suites rather than prose assertions. https://github.com/promptfoo/promptfoo
+- **langfuse/langfuse — agent trace/evaluation observability.** Capture complete model/tool traces,
+  latency and evaluation data so a failed "Jarvis did X" claim can be reconstructed rather than
+  guessed at. Mine it for an internal **capability evidence ledger** even if the full platform is too
+  heavy. https://github.com/langfuse/langfuse
+- **opensandbox-group/OpenSandbox / firecracker-microvm/firecracker — isolate generated or risky
+  compute from the real host.** Jarvis increasingly generates code, installs dependencies and may
+  execute unfamiliar tooling. A disposable sandbox/microVM lane would let it explore/build/test
+  without granting every experiment the same authority as the user's real Windows/Mac environment.
+  https://github.com/opensandbox-group/OpenSandbox and
+  https://github.com/firecracker-microvm/firecracker
+- **Cua Bench (inside trycua/cua) — real task verification for computer use.** Treat this as more than
+  a benchmark: adopt the pattern that every computer-control capability has a reproducible task,
+  reference state and evaluator. "Clicked the right thing" is not completion; the resulting computer
+  state must satisfy the test.
+
+### New architectural ideas synthesized from the mechanical sweep
+
+- **Conversation/Execution Split.** Keep a realtime low-latency conversational presence alive while
+  durable backend jobs execute independently. The voice frontend can answer, interrupt, report
+  progress, cancel and accept follow-ups without coupling conversational responsiveness to tool-task
+  duration.
+- **Direct-Observation Tier.** Prefer local physical receivers when practical—ADS-B, AIS, SDR sensors,
+  ESPHome, Wi-Fi CSI—then use Internet data as broader but less direct evidence. Record which facts are
+  locally observed versus provider-reported.
+- **Camera-Free Room Model.** Build the room Presence node around non-camera sources first
+  (mmWave/CSI/BLE/door/light/audio labels as authorized), with cameras as an optional high-information
+  sensor rather than the prerequisite for ambient intelligence.
+- **Physical Sensor Gateway on Pi 5.** Make the Pi the edge concentrator for SDR, ESPHome/MQTT,
+  Bluetooth, Wi-Fi CSI and local environmental sensors. It publishes normalized timestamped
+  observations to Jarvis; it should not need to run the main reasoning model.
+- **RF Reality Layer.** Treat radio as another sensory modality: aircraft transponders, AIS, weather
+  sensors and supported satellite downlinks can populate the same Reality Graph as cameras and web
+  APIs, each with source/provenance and reception limits.
+- **Predict -> Point -> Verify -> Calibrate loop.** Generalize Skylight's aircraft-camera design:
+  external telemetry predicts where an observable target should be; an actuator/sensor is directed
+  there; perception verifies the target; measured error updates calibration. Useful well beyond
+  aircraft whenever Jarvis controls a PTZ camera or physical sensor.
+- **Compiled Website Capability.** After Jarvis successfully operates a website through a general
+  browser agent, attempt to crystallize the workflow into a deterministic DOM/network adapter with
+  tests. Fall back to visual/agent control only when the deterministic adapter stops satisfying its
+  verifier.
+- **Capability Evidence Ledger.** Every user-visible capability claim links to: implementation commit,
+  environment/hardware, last passing acceptance test, recorded trace/receipt, and freshness. A feature
+  with no current passing evidence is described as designed/implemented-but-unverified, never simply
+  "working."
+- **Standing Query Reality Engine.** Express ongoing interests as persistent queries over changing
+  state rather than scheduled prompts. Example: `aircraft where distance(home)<10mi AND altitude
+  decreasing`, `camera source changed availability`, or `device entered geofence`. Emit events
+  only on meaningful result-set changes.
+- **Offline World Core.** Maintain enough local maps, routing, satellite ephemerides, emergency
+  knowledge, enrolled-device state and direct RF sensing that degraded Internet removes breadth but
+  does not reduce Jarvis to a dead chat box.
+- **Model-independent Interaction Bus.** Voice, browser, desktop, phone, sensors and world feeds should
+  expose stable typed capabilities while models remain swappable. The system can then change Qwen,
+  Groq, Gemini Live, local speech models, etc. without rebuilding its hands and senses.
+
+### Ongoing discovery rule
+
+The GitHub survey should not be a one-off. A future Repository Radar should periodically run the same
+mechanical categories plus **recently-created/high-growth** queries, then inspect second-hop projects
+from awesome lists and dependency graphs. A candidate is interesting when it adds a missing primitive,
+materially improves latency/reliability/privacy, or supplies a tested implementation of something
+already in `future.md`—not merely because it is popular.

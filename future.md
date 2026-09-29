@@ -1436,3 +1436,35 @@ mechanical categories plus **recently-created/high-growth** queries, then inspec
 from awesome lists and dependency graphs. A candidate is interesting when it adds a missing primitive,
 materially improves latency/reliability/privacy, or supplies a tested implementation of something
 already in `future.md`—not merely because it is popular.
+
+
+## User Belief Model — track what the user believes, not just what is true
+
+Every layer of Jarvis models one thing: what is true (with provenance, confidence, verification). Nothing models what the user currently believes and, more importantly, the gap between the two.
+
+That gap is the thing that actually hurts people — and it’s the real engine of the cinematic Apollo moment. The danger in that scene isn’t that the draft says 15%. It’s that you still think it says 10% and you’re about to sign.
+
+The current Executive Loop can tell you “the term changed.” It cannot tell you:
+
+> “The term changed, you were never exposed to the change, and you’re about to act on the old number in 12 minutes.”
+
+That third clause is the whole game, and no existing subsystem represents it.
+
+A **User Belief Model** should therefore track not only world-state facts, but the best evidence-backed estimate of what the user currently believes about those facts, including when and how that belief was formed. Jarvis should be able to represent:
+
+- the current verified fact;
+- the user’s likely believed value/state;
+- the evidence that the user was exposed to that value/state;
+- the last time the user’s belief was plausibly updated;
+- uncertainty about whether the user actually noticed or understood a change;
+- the delta between believed state and verified state;
+- whether the user is about to take an action that depends on the stale belief;
+- the deadline / irreversibility / consequence level of that action.
+
+This creates a new class of proactive intervention:
+
+**world changed + user probably did not update + user is about to act on stale state = intervene now.**
+
+The system must not treat inferred beliefs as facts. Every belief estimate needs provenance and confidence, and Jarvis should prefer direct evidence of exposure (opened message, viewed document, explicit acknowledgment, spoken discussion, etc.) over assumptions. It should also be able to say **unknown** when it cannot establish what the user believes.
+
+The important output is not merely “something changed.” It is **decision-relevant belief divergence**: the subset of changes where Jarvis has evidence that the user’s mental model is stale and that the stale model is about to affect a real decision or action.

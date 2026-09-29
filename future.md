@@ -949,3 +949,169 @@ fields, communicates, and chooses among verified capabilities.
   dangerous real-world effects; measure whether Jarvis recognized the situation, found the
   right playbook, chose appropriate escalation, communicated clearly, and terminated
   exceptional authority correctly.
+
+
+## Open-source capability mining — GitHub survey 2026-09-28
+
+These repositories are **idea/component candidates, not dependencies or implementation claims**.
+The point is to mine proven primitives and architectures that could expand Jarvis. Before adopting
+anything, verify license, maintenance state, security posture, hardware requirements, privacy model,
+and fit with Jarvis's authority/verification architecture.
+
+### Computer use / digital agency
+
+- **opensymph/open-computer-use — accessibility-first desktop MCP.** Cross-platform local MCP
+  exposing app state plus click/type/scroll/drag/set-value operations through OS accessibility
+  layers, with an explicit goal of not hijacking the user's real mouse/keyboard. Candidate for a
+  deterministic semantic-control lane underneath Conductor: accessibility/API control first,
+  screenshot/VLM fallback second. https://github.com/opensymph/open-computer-use
+- **heaventree/cua-desktop-ai (Cua) — computer-use infrastructure + evaluation.** Common SDK
+  across macOS/Linux/Windows VMs, pluggable local/cloud computer-use models, and benchmarks.
+  Mine its abstraction boundary and eval harness so Jarvis computer control can be model-agnostic
+  and acceptance-tested instead of tied to one visual agent. https://github.com/heaventree/cua-desktop-ai
+- **microsoft/UFO — Windows multi-app AgentOS.** Separates host-level app selection from
+  app-specific execution and combines Windows UI Automation/native APIs with visual reasoning.
+  Candidate architecture for turning the Windows backend from individual hard-coded functions into
+  reliable cross-application workflows while retaining native controls where possible.
+  https://github.com/microsoft/UFO
+- **bytedance/UI-TARS-desktop — local/remote GUI + browser operator.** Mature open multimodal
+  computer-use stack for Windows/macOS/browser with visual grounding and mouse/keyboard control.
+  Evaluate as a visual fallback lane for interfaces with no API/accessibility path, and mine its
+  grounding/evaluation patterns rather than assuming it should replace deterministic tools.
+  https://github.com/bytedance/UI-TARS-desktop
+- **browser-use/browser-use — browser agency.** Mature Playwright-based browser-agent layer that
+  can navigate, fill forms, manage tabs and extract content. Candidate browser execution backend
+  for Jarvis tasks where no stable first-party API exists; actions still need Jarvis confirmation,
+  domain allowlisting, receipts and post-action verification. https://github.com/browser-use/browser-use
+- **arthurkatcher/desktop-use — observable computer-use mission control.** Particularly relevant
+  idea: live VNC, snapshot replay, append-only event/screenshots, and mid-flight human intervention.
+  Mine this for Conductor's observability contract: every autonomous GUI task should be watchable,
+  interruptible and replayable after the fact. https://github.com/arthurkatcher/desktop-use
+- **shlawgathon/Computer-Use — demonstrate/record/replay desktop workflows.** Vision-first macOS
+  agent with named tools, confidence rejection, active-window context and AppleScript state probes.
+  Strong reference for the existing Demonstrate -> Compile -> Verify / Physical Macros ideas:
+  learn a workflow visually, then crystallize stable pieces into deterministic controls.
+  https://github.com/shlawgathon/Computer-Use
+
+### Memory / Reality Graph
+
+- **getzep/graphiti — temporal knowledge graphs.** Tracks entities and relationships with validity
+  windows, source episodes/provenance, incremental updates and historical queries. This maps almost
+  directly onto Reality Rewind, Reality Diff and the requirement that Jarvis distinguish
+  "was true" from "is true." Evaluate its temporal model as a Reality Graph substrate or borrow
+  its episode/fact/validity semantics. https://github.com/getzep/graphiti
+- **neo4j-labs/agent-memory — graph-native agent memory.** Combines short-term conversation,
+  long-term entity knowledge, reasoning/tool traces, entity resolution, geospatial queries,
+  consolidation and evals. Interesting for making Jarvis remember not merely facts but prior
+  decisions, tool use and which entities a reasoning step touched. https://github.com/neo4j-labs/agent-memory
+- **letta-ai/letta-code / letta-agent-sdk — persistent agent identity/state.** Long-lived agents
+  retain memory/identity across sessions, machines and model backends and can run proactively.
+  Mine the separation between agent state and transient model execution so "Jarvis" remains one
+  continuous system even when cognition moves among local 8B, Groq/cloud, PC, Mac and phone.
+  https://github.com/letta-ai/letta-code
+
+### Cameras / visual-world ingestion
+
+- **AlexxIT/go2rtc — universal camera stream normalization.** Accepts RTSP, RTMP, MJPEG, WebRTC,
+  ONVIF and other camera inputs and can expose normalized RTSP/WebRTC/HTTP outputs. Potentially a
+  major simplification for both Worldwide Cams and Jarvis: provider adapters discover lawful/public
+  streams; a dedicated media gateway handles protocol/codec normalization; perception sees one
+  stable interface. https://github.com/AlexxIT/go2rtc
+- **koush/scrypted — high-performance video integration platform.** Low-latency camera integration,
+  NVR/smart-detection architecture and bridges into HomeKit/Google Home/Alexa. Mine its camera
+  plugin model and event/detection pipeline for user-owned cameras and authorized physical-space
+  perception. https://github.com/koush/scrypted
+- **blakeblackshear/frigate — local camera perception/NVR.** Evaluate Frigate's event-oriented
+  object-detection model for user-owned/authorized camera feeds: continuous video should become
+  sparse, queryable observations/events rather than forcing Jarvis to reason over raw streams.
+  https://github.com/blakeblackshear/frigate
+- **streamlink/streamlink + yt-dlp/yt-dlp — public livestream resolution.** Useful components for
+  Worldwide Cams' YouTube/public-webcam ingestion: resolve supported public streaming pages into
+  actual media streams and metadata. Pair with the existing webcam-only classifier/filter so
+  arbitrary livestreams (music, gaming, news loops, etc.) do not become "cameras."
+  https://github.com/streamlink/streamlink and https://github.com/yt-dlp/yt-dlp
+
+### Persistent monitoring / proactive Jarvis
+
+- **dgtlmoon/changedetection.io — generalized web Reality Diff.** Already solves persistent page
+  watching, JavaScript-rendered pages, history and change alerts. Instead of inventing one-off
+  polling for every site, evaluate using/borrowing its watcher engine as a Web Observation adapter
+  that emits timestamped diffs into the Reality Graph. https://github.com/dgtlmoon/changedetection.io
+- **huginn/huginn — persistent event agents.** Long-running agents watch sources, transform events
+  and trigger downstream actions. Mine its event-graph model for the Reality Compiler: natural
+  language intent -> persistent collector -> transform/filter -> condition -> notification/action,
+  with the compiled graph visible and editable. https://github.com/huginn/huginn
+- **binwiederhier/ntfy — self-hosted push bus.** Extremely simple HTTP pub/sub notifications to
+  phones/desktops. Candidate redundant alert path for Guardian and local infrastructure, especially
+  when Jarvis needs a vendor-light way for any node to push an authenticated event to the user.
+  https://github.com/binwiederhier/ntfy
+
+### Voice / ambient presence
+
+- **livekit/agents — realtime multimodal agent transport.** Framework for low-latency voice/video
+  agents with streaming STT/LLM/TTS, turn detection and realtime media. Mine its transport/session
+  architecture for making Jarvis conversation continuous across room node, iPhone/iPad and future
+  glasses rather than rebuilding realtime media plumbing per surface. https://github.com/livekit/agents
+- **rhasspy/wyoming — small interoperable voice-service protocol.** Simple streaming event protocol
+  designed to connect wake-word, STT and TTS components without forcing one monolithic assistant.
+  Strong fit for Raspberry Pi room satellites: microphones/speakers can be replaceable edge nodes
+  while Jarvis cognition remains elsewhere. https://github.com/rhasspy/wyoming
+- **The-OASIS-Project/dawn — multi-room local JARVIS-style assistant.** Always-listening voice,
+  wake word, local/cloud models, memory, smart-home control and embedded Linux satellites.
+  Worth mining specifically for multi-room presence topology, deployment and failure handling,
+  not for its branding or as a wholesale replacement for Jarvis. https://github.com/The-OASIS-Project/dawn
+
+### Physical world / infrastructure
+
+- **home-assistant/core — use Home Assistant as a capability bus, not merely a smart-home UI.**
+  Its enormous local-first device/integration ecosystem could let Jarvis inherit normalized state
+  and authorized control for many physical devices instead of writing bespoke integrations for
+  every manufacturer. Jarvis should remain the intent/authority/verification layer above it.
+  https://github.com/home-assistant/core
+- **meshtastic/firmware — off-grid Jarvis mesh.** LoRa mesh provides low-power messaging, location
+  and telemetry without cellular/Internet infrastructure. Candidate for Raspberry Pi/portable
+  Presence nodes, family emergency beacons and degraded-connectivity Guardian messages. Treat
+  radio hardware as an optional future transport, not a current capability.
+  https://github.com/meshtastic/firmware
+- **juanfont/headscale — self-hosted private device mesh control plane.** A self-hosted Tailscale
+  control server can provide a stable private overlay among Jarvis PCs, Macs, Raspberry Pis and
+  remote nodes without exposing services directly to the public Internet. Evaluate against plain
+  Tailscale before adding operational complexity. https://github.com/juanfont/headscale
+
+### New feature ideas synthesized from the repositories
+
+- **Semantic-First Computer Control Router.** For each digital action choose the strongest
+  available control surface in order: native API -> OS accessibility/UI Automation -> DOM ->
+  visual grounding. The VLM is a fallback, not the default, and every lane emits the same action
+  receipt schema.
+- **Observable Autonomy / Mission Recorder.** Any multi-step autonomous task exposes a live view,
+  current goal/subgoal, action stream, screenshots/state snapshots, pause/take-over/abort controls,
+  and deterministic replay/audit after completion. "Jarvis did it" should never be opaque.
+- **Temporal Truth Model.** Every mutable Reality Graph fact can carry observed-at, valid-from,
+  valid-to/superseded-at, source episode, confidence and derivation. Queries such as "where was it
+  yesterday?" and "what changed?" become first-class rather than reconstructed ad hoc.
+- **Universal Media Gateway.** Separate camera *discovery* from camera *transport*. Provider
+  adapters establish provenance, legality/public availability and coordinates; a go2rtc-like
+  gateway resolves codecs/protocols; perception consumes normalized frames; the UI can show the
+  exact source Jarvis used.
+- **Eventification Layer.** Convert high-bandwidth continuous sources (video, audio, telemetry,
+  web pages) into sparse typed events plus links to retained evidence. The Reality Graph should
+  reason primarily over events while allowing drill-down to the underlying observation.
+- **Web Observation Fabric.** Make arbitrary user-approved web state monitorable as a durable
+  sensor: page/selector/API value -> normalized observation -> diff -> Reality Graph event ->
+  optional alert/action. This generalizes price/restock/status/deadline/change monitoring without
+  bespoke code per website.
+- **Transport-Independent Presence.** Voice/text/event sessions should survive switching among
+  LAN, Internet, push, WebRTC and eventually LoRa/off-grid paths. "Jarvis is present" should not
+  be synonymous with one server or one network link.
+- **Capability Bus Adapters.** Treat mature integration ecosystems such as Home Assistant as
+  subordinate capability buses. Jarvis discovers their entities/actions, wraps them in its own
+  authority and verification model, and gains breadth without duplicating hundreds of device
+  integrations.
+- **Agent State Portability.** Define a serializable Jarvis cognitive-state packet—active mission,
+  salient memories, pending commitments, current hypotheses, capability grants and provenance—
+  that can move between model/runtime backends without resetting the assistant's continuity.
+- **Repository Radar.** Periodically search GitHub/release feeds for projects relevant to known
+  Jarvis capability gaps, score them for novelty/fit/activity/license, and append candidates for
+  human review. The system should search for missing primitives, not blindly chase popular
+  "AI agent" repositories.

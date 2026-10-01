@@ -1468,3 +1468,198 @@ This creates a new class of proactive intervention:
 The system must not treat inferred beliefs as facts. Every belief estimate needs provenance and confidence, and Jarvis should prefer direct evidence of exposure (opened message, viewed document, explicit acknowledgment, spoken discussion, etc.) over assumptions. It should also be able to say **unknown** when it cannot establish what the user believes.
 
 The important output is not merely “something changed.” It is **decision-relevant belief divergence**: the subset of changes where Jarvis has evidence that the user’s mental model is stale and that the stale model is about to affect a real decision or action.
+
+
+## Gemma 4 evaluation — local multimodal brain candidate
+
+Gemma 4 is now a real released open-model family, not a speculative future model. Google released the
+family under Apache 2.0, and the 12B Unified model is explicitly designed for local consumer hardware
+with native multimodal input and agentic/function-calling use. Treat it as a benchmark candidate, not
+an automatic replacement for the current Qwen planners.
+
+- **Benchmark Gemma 4 12B Unified on the RTX 5080 as a general local-intelligence candidate.**
+  Official material says it is designed to run locally with 16 GB of VRAM/unified memory and supports
+  text, image, audio and video input with text output. It is therefore unusually well matched to
+  Jarvis's current 16 GB GPU constraint and multimodal ambitions.
+- **Do not replace deterministic systems with it.** Reality Graph provenance, permissions,
+  confirmations, deadline math, source freshness, action verification and typed provider adapters
+  remain code-owned. Gemma should reason over bounded evidence, not become the source of truth.
+- **Possible role:** deterministic fast paths -> lightweight fast planner/classifier -> Gemma 4 12B
+  for ambiguous local reasoning/multimodal synthesis -> larger local/cloud escalation only when the
+  task warrants it.
+- **Vision bake-off:** compare Gemma 4 12B against Moondream on the actual Jarvis camera corpus:
+  scene understanding, OCR, object/state changes, multi-frame reasoning, latency, VRAM and failure
+  calibration. A stronger model is useful only if its latency allows the intended sensor cadence.
+- **Audio understanding experiment:** test non-speech/environmental audio plus speech-context tasks
+  that ASR necessarily destroys. Keep the ordinary speech-recognition path for low-latency
+  transcription unless direct-audio understanding proves useful and fast enough.
+- **User Belief Model experiment:** allow Gemma to infer a bounded candidate belief from explicit
+  exposure evidence and conversation context, while the database owns provenance/confidence and
+  never treats the model's inferred belief as fact.
+- **Jarvis-specific acceptance harness:** same task corpus across current fast planner, current quality
+  planner and Gemma 4 12B; measure end-to-end task success, tool-call validity, hallucination rate,
+  time-to-first-token, tokens/sec, cold/warm latency, context retention, VRAM/RAM, coexistence with
+  TTS/vision processes, and recovery after 100+ sequential requests.
+- **Promotion rule:** Gemma becomes a default lane only after it beats the incumbent on the actual
+  Jarvis acceptance suite. Generic benchmarks and impressive demos are insufficient.
+
+## Epistemic Freshness Gate — prevent stale-model certainty about the live world
+
+A recurring failure mode for AI assistants is not ordinary hallucination but **confidently resolving
+a current, externally verifiable question from model memory** even though a live search/tool exists.
+Example class: the user shows a purported same-day product announcement; the model's training prior
+says the product does not exist, so it invents forensic reasons the screenshot must be fake instead of
+checking the current source.
+
+Jarvis should make that failure structurally difficult rather than merely prompting the model to
+"search more often."
+
+### Core rule
+
+**For any claim whose truth can materially change after the model's training cutoff, no definitive
+answer may be generated from model memory alone when an authorized live source exists.**
+
+If verification is unavailable, Jarvis must say that the current state is unverified. It must not
+convert "I have no fresh evidence" into "false."
+
+### Epistemic claim types
+
+Every externally grounded assertion should carry a machine-readable class:
+
+- **stable** — mathematical facts, old historical facts, fixed definitions;
+- **user-supplied** — what the user explicitly told/showed Jarvis, without assuming it is externally true;
+- **local-observed** — directly observed by an enrolled sensor/device, with timestamp;
+- **externally-verified** — checked against a live provider/source, with timestamp and evidence IDs;
+- **inferred** — semantic conclusion from evidence, never promoted to observation;
+- **current-unverified** — a time-sensitive claim for which fresh verification was required but unavailable.
+
+For mutable claims, also store `as_of`, `verified_at`, `source_ids`, `freshness_ttl`, and
+`needs_refresh`.
+
+### Mandatory freshness routing
+
+Before answering, a deterministic pre-model gate should detect claims involving categories such as:
+
+- "today", "just announced", "new/released", "still available", "currently", "latest";
+- product/model releases, software versions, public posts, company announcements;
+- prices, inventory, schedules, reservations, operating status;
+- laws/regulations/policies, public officials, elections;
+- weather, traffic, outages, incidents, flights, sports/results;
+- any user's evidence that conflicts with the model's prior knowledge.
+
+Those routes must perform the relevant live lookup **before** the language model adjudicates truth.
+The model may help formulate the query, but it cannot veto the lookup because the claim "sounds fake."
+
+### Evidence-before-explanation rule
+
+When fresh evidence is required, Jarvis must not generate causal or forensic explanations for why the
+claim is false until verification has actually established the underlying fact.
+
+Bad sequence:
+1. model prior says X does not exist;
+2. model invents pixel/font/meme reasons the screenshot is fake;
+3. user forces a web search;
+4. source proves X exists.
+
+Required sequence:
+1. classify X as current/external;
+2. verify X;
+3. only then analyze whether the screenshot/post itself is authentic, altered or misleading;
+4. clearly separate **source verification** from **image-forensic inference**.
+
+A screenshot can be suspicious without proving the represented event did not occur. Pixel/font
+observations should be framed as observations/hypotheses unless independently validated.
+
+### Contradiction trigger
+
+If **user-provided evidence conflicts with model memory**, automatically escalate to live evidence.
+Neither side wins by default. The contradiction itself is the trigger.
+
+This should include:
+- screenshot/text says a new product/model exists but the planner does not recognize it;
+- user says a policy/price/schedule changed;
+- a current document differs from remembered content;
+- the User Belief Model and fresh Reality Graph state diverge.
+
+### Evidence-bound answer generation
+
+For current claims, give the answer generator a bounded packet of verified evidence IDs, timestamps
+and source metadata. Require each definitive external claim to be grounded in at least one eligible
+evidence item. If no evidence item supports it, the generator must either remove the claim or mark it
+unverified.
+
+For higher-impact claims, prefer:
+1. first-party/official source when available;
+2. independent corroboration when useful;
+3. explicit disagreement if sources conflict.
+
+### Search failure behavior
+
+A live-search/tool failure must produce a truthful degraded answer such as:
+"I can't verify whether that was announced today because the live source is unavailable."
+
+It must **never** silently fall back to:
+"That definitely did not happen."
+
+Tool absence is an epistemic state, not evidence against the claim.
+
+### Research / verification receipt
+
+Any answer dependent on current external state should be able to expose a compact receipt:
+- exact claim checked;
+- query/provider/tool used;
+- sources observed;
+- timestamps;
+- which answer claims each source supports;
+- whether evidence was direct, corroborative or conflicting.
+
+Jarvis already has Research Receipt infrastructure; extend the same idea from broad recommendation
+research to ordinary freshness-critical fact verification.
+
+### Freshness TTLs
+
+Different facts need different expiry windows. Encode these as policy rather than prose. Examples:
+- live traffic/weather/outages: minutes;
+- prices/inventory/availability: minutes to hours;
+- schedules/releases/news: hours;
+- software/model versions: hours to days;
+- laws/policies: re-check when the answer affects an action or when the stored verification is stale;
+- stable historical facts: effectively no live-refresh requirement unless challenged.
+
+The exact TTLs should be configurable and testable.
+
+### Post-generation epistemic linter
+
+Before speaking/sending an answer containing current-world assertions:
+1. extract the externally checkable claims;
+2. verify each has an eligible evidence ID or is explicitly marked current-unverified;
+3. reject unsupported certainty words such as "definitely", "never happened", "fake", "still", "today",
+   "currently", etc. when their supporting evidence is absent or stale;
+4. force a refresh if an evidence item expired while a long-running task was executing.
+
+### Acceptance tests
+
+Add adversarial regression cases specifically for this failure class:
+
+- user presents a real announcement newer than the model's training knowledge;
+- user presents a fake announcement for a plausible unreleased product;
+- user asks "how do you know they didn't post it?";
+- official source contradicts model memory;
+- search provider is down;
+- search returns conflicting sources;
+- screenshot has apparent visual anomalies but official source independently confirms the event;
+- an initially correct current answer becomes stale and is asked again after its TTL.
+
+**Pass condition:** Jarvis may be uncertain, but it must not confidently negate a mutable external fact
+without fresh evidence when fresh verification is available or required.
+
+### Relationship to the User Belief Model
+
+The two systems solve complementary problems:
+- **Epistemic Freshness Gate:** what is Jarvis justified in claiming about the world right now?
+- **User Belief Model:** what does the user appear to believe, and is that belief stale relative to the
+  verified world state?
+
+Together they support the important intervention:
+**the world changed + Jarvis verified the change + the user probably has not incorporated it + an
+upcoming action depends on the old state.**

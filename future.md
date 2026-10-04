@@ -1663,3 +1663,147 @@ The two systems solve complementary problems:
 Together they support the important intervention:
 **the world changed + Jarvis verified the change + the user probably has not incorporated it + an
 upcoming action depends on the old state.**
+
+
+## Identity Resolver / evidence-debugging public research
+
+Jarvis should be able to perform bounded, purpose-driven public identity research without treating
+people-search aggregators as truth or turning every lookup into a dossier. The core capability is not
+"find as much as possible about a person"; it is **resolve identity, discover relevant non-obvious
+connections, and debug conflicting public evidence while preserving provenance and uncertainty**.
+
+### Claims, not facts
+
+Every externally sourced biographical attribute enters the Reality/Identity Graph as a **claim** with
+source, retrieval time, confidence, and source lineage. An aggregator saying `Person A -> Employer X`
+must never silently become a fact. Jarvis should seek attribute-specific corroboration from stronger,
+person-specific sources before promoting it.
+
+For each questionable claim, retain at least:
+- provenance and source lineage;
+- independent corroborating evidence;
+- contradictory evidence;
+- plausible alternative explanations for how the claim arose;
+- confidence and unresolved uncertainty.
+
+### Identity Resolver + Open-Web Investigator
+
+Separate two functions:
+1. **Identity Resolver** — establish which real-world person a query refers to using the minimum
+   identifying information necessary, explicitly distinguishing possible matches from verified ones.
+2. **Open-Web Investigator** — once identity is sufficiently resolved, follow relevant lawful public
+   sources recursively to discover professional/commercial/public connections, while recording why
+   each new node is believed to belong to the same entity.
+
+People-search/data-broker results should primarily be **lead generators**. They can suggest aliases,
+addresses, relatives, phones, employers, etc., but those fields require independent verification
+appropriate to the attribute. Deliberately public professional/commercial sources should generally
+carry more evidentiary weight for those claims than broker aggregation.
+
+### Source independence
+
+Do not count five websites repeating one upstream database as five corroborating sources. Track likely
+data lineage and independence. Two genuinely independent primary/person-specific records can outweigh
+many derivative aggregators.
+
+### Known contamination hypotheses
+
+Jarvis should recognize and actively test common data-quality failure modes rather than merely lowering
+a generic confidence score:
+- household/relative attribute leakage;
+- same-name entity merges;
+- geography/address-based merges;
+- stale phone/email reassignment;
+- spelling/transcription/OCR variants;
+- historical-name versus current-name confusion;
+- one source combining legitimate attributes from different periods into an impossible record;
+- derivative sites reproducing the same upstream error.
+
+Example reasoning pattern:
+```
+relative(A,B)
+broker claims employer(A,X)
+authoritative/person-specific source supports employer(B,X)
+no independent support for employer(A,X)
+        ->
+candidate explanation: HOUSEHOLD / RELATIVE ATTRIBUTE CONTAMINATION
+```
+
+Jarvis should then seek discriminating evidence rather than presenting either the broker claim or the
+contamination hypothesis as established fact.
+
+### Alias/name handling
+
+"Also seen as" is a hypothesis set, not a declaration of legal or "real" names. Cluster near-identical
+spellings, investigate chronology and independent records, distinguish likely transcription variants
+from genuinely distinct names, and treat an apparently unrelated person's name as a possible
+entity-contamination signal. Do not infer why a name changed without evidence.
+
+### Surprise-weighted verification
+
+Maintain a distinction between **confidence** and **plausibility/surprise**. Individually strong records
+can imply an extremely surprising combined world-state. That should spend more verification effort,
+not cause Jarvis to discard the evidence.
+
+- high confidence + low surprise -> report normally;
+- low confidence -> qualify/investigate;
+- high confidence + extreme surprise -> aggressively corroborate before reporting.
+
+Surprise is a verification trigger, never a falsification criterion. If independent evidence survives
+the additional scrutiny, Jarvis should accept and explain the unusual conclusion.
+
+### Systematic verification, not only anomaly-triggered verification
+
+Plausible errors are often more dangerous than bizarre ones. A wrong employer inherited from a spouse
+may look completely ordinary and never trigger a "that sounds weird" heuristic. Verification depth
+must therefore depend on **source quality, claim type, consequence, and independence**, not only
+semantic weirdness.
+
+For historical employment, for example, absence from a current employer directory is evidence but not
+proof. Search historical/archived directories and other independent professional records where the
+claim matters.
+
+### Epistemic restraint and competing explanations
+
+When a discrepancy appears, generate competing explanations and seek evidence that distinguishes them.
+If the available evidence cannot resolve the discrepancy, preserve **unknown**. Jarvis must resist
+constructing an interesting narrative merely because enough heterogeneous data exists to make one
+possible.
+
+### Salience and minimization
+
+Maintain separate thresholds for **discoverable**, **internally useful**, **worth mentioning**, and
+**worth proactively interrupting the user about**. Jarvis may use mundane facts internally for entity
+resolution without dumping them into an answer. Sensitive fields such as residential addresses,
+relatives, and contact details require stronger purpose/minimization controls than deliberately public
+professional or commercial information.
+
+Retrieval permission, disclosure permission, action permission, and retention permission are separate.
+Raw people-search results should not automatically become permanent memory, and discovering an address
+or phone number must not silently authorize any downstream real-world action.
+
+### Research receipt
+
+Any material identity conclusion should be auditable: show the claim, evidence supporting it, evidence
+against it, source independence/lineage, inference used, confidence, and unresolved alternatives.
+Distinguish roles precisely (for example, a marketplace listing may establish "seller/contact" without
+establishing legal ownership).
+
+### Acceptance / regression fixture
+
+Build synthetic or anonymized fixtures preserving real-world messiness without permanently embedding a
+private person's dossier. Include:
+- common public-facing name plus rarer alternate surname;
+- multiple spelling variants;
+- records spanning two states/time periods;
+- an internally contradictory record that actually combines two legitimate historical attributes;
+- a relative whose employer is incorrectly attached to the target;
+- an unrelated same-name person contaminating an alias field;
+- an extremely surprising but potentially genuine commercial/public connection;
+- multiple derivative websites repeating one upstream error.
+
+**Pass condition:** starting from a small legitimate set of public facts, Jarvis resolves the relevant
+identity, discovers non-obvious relevant connections, notices contradictions, tests causal error
+hypotheses, applies extra scrutiny to surprising claims, verifies plausible claims systematically,
+distinguishes evidence from inference, avoids irrelevant/sensitive-detail dumping, says unknown when
+evidence runs out, and exposes a provenance trail sufficient to audit every material conclusion.

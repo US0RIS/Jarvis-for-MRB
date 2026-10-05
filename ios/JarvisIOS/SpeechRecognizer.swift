@@ -223,7 +223,7 @@ final class SpeechRecognizer: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
-        request.contextualStrings = Array(Set(["Jarvis", "Dubeck", "Emmett Dubeck"] + PersonalVocabularyStore.values()))
+        request.contextualStrings = Array(Set(["Horus", "Dubeck", "Emmett Dubeck"] + PersonalVocabularyStore.values()))
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }

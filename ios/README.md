@@ -129,7 +129,7 @@ Jarvis replies `Yes, sir?` and treats the next utterance as the command.
 
 After every normal response, Jarvis listens for five seconds. Speech that *starts* during that window becomes a follow-up without saying `Jarvis` again; it is not cut off merely because the five-second deadline passes after the user has begun talking.
 
-Dictation-like commands use longer silence thresholds. Partial text can survive Apple Speech task restarts so email addresses, URLs, spelling, and long bodies are less likely to be truncated. The recognizer biases toward `Jarvis`, `Dubeck`, and `Emmett Dubeck`, and corrects common `Dubek` / `Du Beck` transcriptions to `Dubeck`.
+Dictation-like commands use longer silence thresholds. Partial text can survive Apple Speech task restarts so email addresses, URLs, spelling, and long bodies are less likely to be truncated. The recognizer biases toward `Horus`, `Dubeck`, and `Emmett Dubeck`, and corrects common `Dubek` / `Du Beck` transcriptions to `Dubeck`.
 
 Protected actions keep the confirmation barrier and get a longer confirmation window so `confirm` or `cancel` can be spoken without another wake word.
 

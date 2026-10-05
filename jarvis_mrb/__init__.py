@@ -1,4 +1,4 @@
-"""Jarvis for MRB.
+"""HORUS personal intelligence system.\n\nThe ``jarvis_mrb`` package name is retained as a compatibility surface.
 
 Several Jarvis modules historically use ``with sqlite3.connect(...)`` as a
 transaction-and-lifetime boundary. Python's standard sqlite3 connection context

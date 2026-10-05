@@ -58,7 +58,7 @@ def find_conflicts(days: int = 7) -> str:
     message = "Calendar conflicts: " + "; ".join(conflicts[:5]) + "."
     if suggestions:
         message += " Possible open alternatives: " + "; ".join(suggestions) + "."
-    message += " These are proposals only; Jarvis will not move or decline meetings without confirmation."
+    message += " These are proposals only; Horus will not move or decline meetings without confirmation."
     return message
 
 

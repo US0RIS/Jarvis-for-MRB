@@ -13,7 +13,7 @@ from jarvis_mrb.planner_model import QUALITY_MODEL
 
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JarvisForMRB"
 DB_PATH = APP_DIR / "background_tasks.sqlite3"
-_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jarvis-worker")
+_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sisyphus-worker")
 _LOCK = threading.RLock()
 _CANCELLED: set[int] = set()
 
@@ -183,7 +183,7 @@ def _run(task_id: int) -> None:
             {
                 "type": "background_complete",
                 "task_id": task_id,
-                "message": f"Background task {task_id} is complete. {concise}",
+                "message": f"Sisyphus task {task_id} is complete. {concise}",
                 "cue": "task_complete",
             }
         )
@@ -202,7 +202,7 @@ def _run(task_id: int) -> None:
             {
                 "type": "background_failed",
                 "task_id": task_id,
-                "message": f"Background task {task_id} failed: {message[:500]}",
+                "message": f"Sisyphus task {task_id} failed: {message[:500]}",
                 "cue": "error",
             }
         )

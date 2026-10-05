@@ -69,5 +69,5 @@ def recipient_is_allowed(address: str) -> bool:
 def blocked_recipient_message(address: str) -> str:
     return (
         f"Email to {normalize_email(address)} was blocked because that address is not "
-        "on Jarvis's allowed-recipient list. Add it in the Jarvis iPhone app settings first."
+        "on Horus's allowed-recipient list. Add it in the Horus iPhone app settings first."
     )

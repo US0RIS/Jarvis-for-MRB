@@ -1,9 +1,9 @@
 import AppIntents
 import Foundation
 
-struct TalkToJarvisIntent: AppIntent {
-    static var title: LocalizedStringResource = "Talk to Jarvis"
-    static var description = IntentDescription("Open Jarvis and begin a local push-to-talk interaction.")
+struct TalkToHorusIntent: AppIntent {
+    static var title: LocalizedStringResource = "Talk to Horus"
+    static var description = IntentDescription("Open Horus and begin a local push-to-talk interaction.")
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -13,8 +13,8 @@ struct TalkToJarvisIntent: AppIntent {
 }
 
 struct LocalVisualScanIntent: AppIntent {
-    static var title: LocalizedStringResource = "Jarvis Visual Scan"
-    static var description = IntentDescription("Open Jarvis and run the on-device fast visual scan on the latest Ray-Ban frame.")
+    static var title: LocalizedStringResource = "Horus Visual Scan"
+    static var description = IntentDescription("Open Horus and run the on-device fast visual scan on the latest Ray-Ban frame.")
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -24,7 +24,7 @@ struct LocalVisualScanIntent: AppIntent {
 }
 
 struct ReadVisibleTextIntent: AppIntent {
-    static var title: LocalizedStringResource = "Jarvis Read Visible Text"
+    static var title: LocalizedStringResource = "Horus Read Visible Text"
     static var description = IntentDescription("Use on-device OCR on the latest Ray-Ban frame.")
     static var openAppWhenRun = true
 
@@ -35,7 +35,7 @@ struct ReadVisibleTextIntent: AppIntent {
 }
 
 struct TogglePassiveVisionIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle Jarvis Passive Vision"
+    static var title: LocalizedStringResource = "Toggle Horus Passive Vision"
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -44,8 +44,8 @@ struct TogglePassiveVisionIntent: AppIntent {
     }
 }
 
-struct ToggleJarvisSpeechIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle Jarvis Spoken Responses"
+struct ToggleHorusSpeechIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle Horus Spoken Responses"
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -55,8 +55,8 @@ struct ToggleJarvisSpeechIntent: AppIntent {
 }
 
 struct ToggleMeetingNotesIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle Jarvis Meeting Notes"
-    static var description = IntentDescription("Start or stop the explicit Jarvis meeting-note recorder.")
+    static var title: LocalizedStringResource = "Toggle Horus Meeting Notes"
+    static var description = IntentDescription("Start or stop the explicit Horus meeting-note recorder.")
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -65,9 +65,9 @@ struct ToggleMeetingNotesIntent: AppIntent {
     }
 }
 
-struct StageTextInJarvisIntent: AppIntent {
-    static var title: LocalizedStringResource = "Send Text to Jarvis"
-    static var description = IntentDescription("Hand text from Shortcuts or a Share Sheet shortcut to the Jarvis command field without automatically executing it.")
+struct StageTextInHorusIntent: AppIntent {
+    static var title: LocalizedStringResource = "Send Text to Horus"
+    static var description = IntentDescription("Hand text from Shortcuts or a Share Sheet shortcut to the Horus command field without automatically executing it.")
     static var openAppWhenRun = true
 
     @Parameter(title: "Text")
@@ -76,19 +76,19 @@ struct StageTextInJarvisIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else {
-            return .result(dialog: "There is no text to hand to Jarvis.")
+            return .result(dialog: "There is no text to hand to Horus.")
         }
         FrontendImportMailbox.post(cleaned)
-        return .result(dialog: "Text staged in Jarvis. It has not been sent or executed.")
+        return .result(dialog: "Text staged in Horus. It has not been sent or executed.")
     }
 }
 
-struct JarvisAppShortcuts: AppShortcutsProvider {
+struct HorusAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
-            intent: TalkToJarvisIntent(),
+            intent: TalkToHorusIntent(),
             phrases: ["Talk to \(.applicationName)", "Ask \(.applicationName)"],
-            shortTitle: "Talk to Jarvis",
+            shortTitle: "Talk to Horus",
             systemImageName: "waveform"
         )
         AppShortcut(
@@ -110,7 +110,7 @@ struct JarvisAppShortcuts: AppShortcutsProvider {
             systemImageName: "camera"
         )
         AppShortcut(
-            intent: ToggleJarvisSpeechIntent(),
+            intent: ToggleHorusSpeechIntent(),
             phrases: ["Toggle speech in \(.applicationName)"],
             shortTitle: "Toggle Speech",
             systemImageName: "speaker.wave.2"
@@ -122,9 +122,9 @@ struct JarvisAppShortcuts: AppShortcutsProvider {
             systemImageName: "record.circle"
         )
         AppShortcut(
-            intent: StageTextInJarvisIntent(),
+            intent: StageTextInHorusIntent(),
             phrases: ["Send text to \(.applicationName)"],
-            shortTitle: "Send Text to Jarvis",
+            shortTitle: "Send Text to Horus",
             systemImageName: "square.and.arrow.down"
         )
     }

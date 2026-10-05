@@ -646,13 +646,13 @@ final class MeetingCaptureController: ObservableObject {
         let normalized = text.lowercased()
             .replacingOccurrences(of: ",", with: "")
             .replacingOccurrences(of: ".", with: "")
-        return normalized.contains("jarvis stop meeting notes")
-            || normalized.contains("jarvis end meeting notes")
+        return normalized.contains("horus stop meeting notes")
+            || normalized.contains("horus end meeting notes")
     }
 
     private static func cleanedMeetingText(_ text: String) -> String {
         var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for phrase in ["jarvis stop meeting notes", "jarvis end meeting notes"] {
+        for phrase in ["horus stop meeting notes", "horus end meeting notes"] {
             if let range = value.range(of: phrase, options: [.caseInsensitive, .diacriticInsensitive]) {
                 value = String(value[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             }

@@ -5,6 +5,26 @@ scheduled, prioritized, or committed to — this is a place to dump ideas before
 lost, not a roadmap. Move an idea out of this file and into a real design
 doc (or just implement it) once someone decides to act on it.
 
+## HORUS naming architecture
+
+**HORUS** is the product/system name. "A real-world Jarvis" remains useful shorthand for explaining
+the goal, but new user-facing subsystem names should use the following story-driven vocabulary where
+the mapping is semantically useful rather than forcing a theme:
+
+- **Kant** — deep reasoning / deliberate high-effort thinking.
+- **Carcosa** — reconstructed and historical world state; Reality Rewind and accumulated past evidence.
+- **Ariadne** — investigation; following evidence threads through complex research and identity/world questions.
+- **Cassandra** — predictive warnings; forward-looking risk detection and proactive alerts.
+- **Mnemosyne** — memory; durable personal/world memory and retrieval.
+- **Cerberus** — security; permission, policy, trust and defensive boundaries.
+- **Mercury** — communications; messaging, routing and cross-device information delivery.
+- **Sisyphus** — retries/background repair; persistent recovery, maintenance and self-healing work.
+
+These are **semantic names, not a mythology theme requirement**. The naming rule is that a name should
+carry a story that explains the subsystem once the reference is known. Existing internal module names,
+environment variables and compatibility surfaces do not need a mechanical mass rename merely for
+branding; migrate user-facing terminology deliberately and preserve compatibility.
+
 ## Governing principle: go broad to go narrow
 
 Capture **every potentially useful Jarvis feature idea, big or small, before evaluating it**.

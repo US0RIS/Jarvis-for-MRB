@@ -340,7 +340,7 @@ final class FrontendIntelligenceController: ObservableObject {
             // existing SpeechRecognizer tap; do not start a second microphone.
             // A spoken command/follow-up is not ambient context.
             let wakeOnly = appModel.handsFreeEnabled
-                && appModel.voiceStatus == "Listening for “Jarvis”…"
+                && appModel.voiceStatus == "Listening for “Horus”…"
             if ambientOpportunityAllowed
                 && (!appModel.speechRecognizer.isActive || wakeOnly) {
                 await persistentPresence?.observeAmbientSound()

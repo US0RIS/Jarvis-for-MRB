@@ -23,10 +23,10 @@ def main() -> None:
     token = secrets.token_urlsafe(32)
     path = save_server_config(ServerConfig(bind_host="0.0.0.0", port=8765, api_token=token))
 
-    print("Jarvis remote access is configured for private-network use.")
+    print("Horus remote access is configured for private-network use.")
     print(f"Saved server configuration to: {path}")
     print()
-    print("API token (copy this into the Jarvis iPhone app):")
+    print("API token (copy this into the Horus iPhone app):")
     print(token)
     print()
     addresses = _local_ipv4_addresses()
@@ -37,7 +37,7 @@ def main() -> None:
     else:
         print("Use this PC's private LAN or Tailscale IP as http://<ip>:8765")
     print()
-    print("Restart the Jarvis service after running this command.")
+    print("Restart the Horus service after running this command.")
     print("Do not forward port 8765 from your router to the public Internet.")
 
 

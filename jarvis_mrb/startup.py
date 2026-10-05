@@ -35,7 +35,7 @@ def main() -> None:
     )
 
     if result.returncode == 0:
-        print("Jarvis will now start automatically when you log into Windows.")
+        print("Horus will now start automatically when you log into Windows.")
         print("Starting the service now...")
         subprocess.Popen(
             [pythonw, "-m", "jarvis_mrb.service"],

@@ -1,10 +1,20 @@
-# Jarvis for MRB
+# HORUS
 
-Jarvis is a private, local-first personal operating system built around a persistent model of the user’s world. Its primary presence path is the iPhone/compatible Bluetooth microphone plus phone motion, opt-in GPS/geofences, separately opt-in Health data and public environmental sources. The optional camera-free MemoMind display is an I/O surface, not a sensor prerequisite. A Windows reasoning/tool host, local language/speech models, private Gmail/Calendar data, automation, audited web research and explicit action verification form the remaining system. Meta first-person vision and public-camera lookup remain optional capabilities.
+**HORUS** is a private, local-first personal operating system built around a persistent model of the user’s world. Its primary presence path is the iPhone/compatible Bluetooth microphone plus phone motion, opt-in GPS/geofences, separately opt-in Health data and public environmental sources. The optional camera-free MemoMind display is an I/O surface, not a sensor prerequisite. A Windows reasoning/tool host, local language/speech models, private Gmail/Calendar data, automation, audited web research and explicit action verification form the remaining system. Meta first-person vision and public-camera lookup remain optional capabilities.
 
 The project is not intended to be “a chatbot with lots of plugins.” The design goal is a single persistent system that can understand what the user is doing, remember durable facts and objectives, connect evidence across sources, decide what matters, act within explicit authority boundaries, and then independently verify whether consequential actions actually changed the outside world.
 
 This README is the canonical high-level guide to the repository. It is intentionally broad: architecture, setup, every major feature family, privacy/security boundaries, world-model semantics, runtime operations, testing, evaluation, and troubleshooting are all covered here. Deeper design/history documents remain in the repository for specialized details.
+
+
+### Named subsystem architecture
+
+HORUS uses story-driven user-facing names while retaining stable internal module/package names for compatibility:
+**Kant** (deep reasoning), **Carcosa** (reconstructed/historical world), **Ariadne** (investigation),
+**Cassandra** (predictive warnings), **Mnemosyne** (memory), **Cerberus** (security), **Mercury**
+(communications), and **Sisyphus** (retries/background repair). These are semantic names, not a forced
+mythology theme. Existing `jarvis_mrb`, `JARVIS_*` environment variables, persisted paths, and protocol
+identifiers remain compatibility surfaces until deliberately migrated.
 
 ## World Armor — merge status (2026-09-26)
 

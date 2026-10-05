@@ -70,11 +70,11 @@ def choose_model(text: str) -> RouteDecision:
     words = normalized.split()
 
     if any(re.search(pattern, normalized) for pattern in _COMPLEX_PATTERNS):
-        return RouteDecision(QUALITY_MODEL, "complex reasoning cue", True)
+        return RouteDecision(QUALITY_MODEL, "Kant: complex reasoning cue", True)
     if len(words) >= 75 or len(normalized) >= 480:
-        return RouteDecision(QUALITY_MODEL, "long multi-part request", True)
+        return RouteDecision(QUALITY_MODEL, "Kant: long multi-part request", True)
     if normalized.count(" and ") >= 4 or normalized.count(" then ") >= 2:
-        return RouteDecision(QUALITY_MODEL, "multi-stage request", True)
+        return RouteDecision(QUALITY_MODEL, "Kant: multi-stage request", True)
     if any(re.search(pattern, normalized) for pattern in _FAST_PATTERNS) and len(words) < 45:
         return RouteDecision(FAST_MODEL, "routine interaction", False)
 

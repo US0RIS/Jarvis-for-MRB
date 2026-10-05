@@ -11,7 +11,7 @@ final class JarvisAppModel: ObservableObject {
     @Published var connectionStatus = "Not checked"
     @Published var errorMessage: String?
     @Published private(set) var handsFreeEnabled = false
-    @Published private(set) var voiceStatus = "Hands-free Jarvis is off"
+    @Published private(set) var voiceStatus = "Hands-free Horus is off"
     @Published private(set) var lastHeardCommand = ""
     @Published private(set) var conversationLog: [FrontendConversationTurn] = FrontendConversationStore.load()
     @Published private(set) var lastLatency = JarvisLatencySnapshot()
@@ -31,20 +31,20 @@ final class JarvisAppModel: ObservableObject {
     // Physical-world observations belong to the iPhone session, not a HUD
     // accessory. The same state is used by buttons and Gen 1 Meta voice input.
     @Published private(set) var nearbyPublicCameras: [PublicCameraListing] = []
-    @Published private(set) var nearbyCameraStatus = "Tap Search or ask Jarvis to find nearby public cameras."
+    @Published private(set) var nearbyCameraStatus = "Tap Search or ask Horus to find nearby public cameras."
     @Published private(set) var nearbyCameraCoverage = ""
     @Published private(set) var nearbyCameraSourceURL = ""
     @Published private(set) var nearbyCameraBusy = false
     @Published private(set) var analyzingPublicCameraID: String?
     @Published private(set) var publicCameraAnalyses: [String: String] = [:]
     @Published private(set) var nearbyConditions: PhysicalConditionsResponse?
-    @Published private(set) var nearbyConditionsStatus = "Tap Check or ask Jarvis for nearby conditions."
+    @Published private(set) var nearbyConditionsStatus = "Tap Check or ask Horus for nearby conditions."
     @Published private(set) var nearbyConditionsBusy = false
     @Published private(set) var nearbyFacilities: NearbyFacilitiesResponse?
-    @Published private(set) var nearbyFacilitiesStatus = "Tap Find or ask Jarvis about nearby public resources."
+    @Published private(set) var nearbyFacilitiesStatus = "Tap Find or ask Horus about nearby public resources."
     @Published private(set) var nearbyFacilitiesBusy = false
     @Published private(set) var latestPhysicalAwareness: PhysicalAwarenessResponse?
-    @Published private(set) var physicalAwarenessStatus = "Tap Brief or say: Jarvis, establish situational awareness."
+    @Published private(set) var physicalAwarenessStatus = "Tap Brief or say: Horus, establish situational awareness."
     @Published private(set) var physicalAwarenessBusy = false
     private lazy var nearbyCameraLocation = PublicCameraLocationRequest()
 
@@ -235,9 +235,9 @@ final class JarvisAppModel: ObservableObject {
     private static func isPhysicalAwarenessIntent(_ rawText: String) -> Bool {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
-        if normalized.hasPrefix("jarvis, ") {
+        if normalized.hasPrefix("horus, ") {
             normalized = String(normalized.dropFirst(8))
-        } else if normalized.hasPrefix("jarvis ") {
+        } else if normalized.hasPrefix("horus ") {
             normalized = String(normalized.dropFirst(7))
         }
         return [
@@ -273,9 +273,9 @@ final class JarvisAppModel: ObservableObject {
     private static func isAnalyzePublicStillIntent(_ rawText: String) -> Bool {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
-        if normalized.hasPrefix("jarvis, ") {
+        if normalized.hasPrefix("horus, ") {
             normalized = String(normalized.dropFirst(8))
-        } else if normalized.hasPrefix("jarvis ") {
+        } else if normalized.hasPrefix("horus ") {
             normalized = String(normalized.dropFirst(7))
         }
         return [
@@ -323,9 +323,9 @@ final class JarvisAppModel: ObservableObject {
     private static func isPublicCameraIntent(_ rawText: String) -> Bool {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
-        if normalized.hasPrefix("jarvis, ") {
+        if normalized.hasPrefix("horus, ") {
             normalized = String(normalized.dropFirst(8))
-        } else if normalized.hasPrefix("jarvis ") {
+        } else if normalized.hasPrefix("horus ") {
             normalized = String(normalized.dropFirst(7))
         }
         return [
@@ -370,9 +370,9 @@ final class JarvisAppModel: ObservableObject {
     private static func isNearbyFacilitiesIntent(_ rawText: String) -> Bool {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
-        if normalized.hasPrefix("jarvis, ") {
+        if normalized.hasPrefix("horus, ") {
             normalized = String(normalized.dropFirst(8))
-        } else if normalized.hasPrefix("jarvis ") {
+        } else if normalized.hasPrefix("horus ") {
             normalized = String(normalized.dropFirst(7))
         }
         return [
@@ -435,9 +435,9 @@ final class JarvisAppModel: ObservableObject {
     private static func isPhysicalConditionsIntent(_ rawText: String) -> Bool {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
-        if normalized.hasPrefix("jarvis, ") {
+        if normalized.hasPrefix("horus, ") {
             normalized = String(normalized.dropFirst(8))
-        } else if normalized.hasPrefix("jarvis ") {
+        } else if normalized.hasPrefix("horus ") {
             normalized = String(normalized.dropFirst(7))
         }
         return [
@@ -497,8 +497,8 @@ final class JarvisAppModel: ObservableObject {
             )
             return "Created a 24-hour public-camera watch on \(nearest.title). "
                 + (condition.isEmpty
-                    ? "Jarvis will record a change log without speculative alerts. "
-                    : "Jarvis will report a possible \(condition.replacingOccurrences(of: "_", with: " ")) only after two different still images receive conservative model matches. ")
+                    ? "Horus will record a change log without speculative alerts. "
+                    : "Horus will report a possible \(condition.replacingOccurrences(of: "_", with: " ")) only after two different still images receive conservative model matches. ")
                 + "View or stop the watch on your iPhone. Watch ID: \(watch.id)."
         } catch {
             return "Could not start public-camera watch: " + error.localizedDescription
@@ -508,9 +508,9 @@ final class JarvisAppModel: ObservableObject {
     private static func nearestCameraWatchCondition(_ rawText: String) -> String? {
         var normalized = rawText.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
-        if normalized.hasPrefix("jarvis, ") {
+        if normalized.hasPrefix("horus, ") {
             normalized = String(normalized.dropFirst(8))
-        } else if normalized.hasPrefix("jarvis ") {
+        } else if normalized.hasPrefix("horus ") {
             normalized = String(normalized.dropFirst(7))
         }
         switch normalized {
@@ -1040,7 +1040,7 @@ final class JarvisAppModel: ObservableObject {
                     }
                 } else if settings.offlineQueueEnabled && Self.isConnectivityError(error) {
                     offlineQueueHandler?(text)
-                    let message = "The Jarvis server is unreachable, so I staged that command on this iPhone instead of losing it. Nothing will execute until you explicitly send the queued command."
+                    let message = "The Horus server is unreachable, so I staged that command on this iPhone instead of losing it. Nothing will execute until you explicitly send the queued command."
                     lastResponse = message
                     recordTurn(role: "assistant", text: message, model: "iPhone")
                     modelLabel = "iPhone queue"
@@ -1154,7 +1154,7 @@ final class JarvisAppModel: ObservableObject {
         handsFreeEnabled = true
         confirmationFollowUpDeadline = nil
         conversationalFollowUpDeadline = nil
-        voiceStatus = "Listening for “Jarvis”…"
+        voiceStatus = "Listening for “Horus”…"
         wakeWordTask = Task { [weak self] in
             guard let self else { return }
             await self.runHandsFreeLoop()
@@ -1172,7 +1172,7 @@ final class JarvisAppModel: ObservableObject {
             _ = speechRecognizer.stopListening()
         }
         isListening = false
-        voiceStatus = "Hands-free Jarvis is off"
+        voiceStatus = "Hands-free Horus is off"
     }
 
     private func runHandsFreeLoop() async {
@@ -1200,14 +1200,14 @@ final class JarvisAppModel: ObservableObject {
             if let deadline = confirmationFollowUpDeadline, now >= deadline {
                 confirmationFollowUpDeadline = nil
                 if case .waitingForWake = phase, conversationalFollowUpDeadline == nil {
-                    voiceStatus = "Listening for “Jarvis”…"
+                    voiceStatus = "Listening for “Horus”…"
                 }
             }
 
             if let deadline = conversationalFollowUpDeadline, now >= deadline {
                 conversationalFollowUpDeadline = nil
                 if case .waitingForWake = phase, confirmationFollowUpDeadline == nil {
-                    voiceStatus = "Listening for “Jarvis”…"
+                    voiceStatus = "Listening for “Horus”…"
                 }
             }
 
@@ -1362,7 +1362,7 @@ final class JarvisAppModel: ObservableObject {
                     confirmationFollowUpDeadline = nil
                     conversationalFollowUpDeadline = nil
                     phase = .waitingForWake
-                    voiceStatus = "Listening for “Jarvis”…"
+                    voiceStatus = "Listening for “Horus”…"
                     _ = speechRecognizer.stopListening()
                     isListening = false
                     _ = await restartVoiceRecognition()
@@ -1410,7 +1410,7 @@ final class JarvisAppModel: ObservableObject {
         } else if conversationalFollowUpDeadline != nil {
             voiceStatus = "Listening for follow-up…"
         } else {
-            voiceStatus = "Listening for “Jarvis”…"
+            voiceStatus = "Listening for “Horus”…"
         }
         _ = await restartVoiceRecognition()
     }
@@ -1436,11 +1436,11 @@ final class JarvisAppModel: ObservableObject {
     }
 
     static func containsWakeWord(_ transcript: String) -> Bool {
-        transcript.range(of: "jarvis", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        transcript.range(of: "horus", options: [.caseInsensitive, .diacriticInsensitive]) != nil
     }
 
     static func commandAfterWakeWord(in transcript: String) -> String? {
-        guard let range = transcript.range(of: "jarvis", options: [.caseInsensitive, .diacriticInsensitive]) else {
+        guard let range = transcript.range(of: "horus", options: [.caseInsensitive, .diacriticInsensitive]) else {
             return nil
         }
         let suffix = transcript[range.upperBound...]

@@ -116,7 +116,7 @@ def launch_app(name: str) -> ToolResult:
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-    return ToolResult(False, f"Jarvis could not find an application named {name}.")
+    return ToolResult(False, f"Horus could not find an application named {name}.")
 
 
 def _post_close_to_windows(pids: set[int]) -> int:
@@ -221,11 +221,11 @@ def close_app(name: str) -> ToolResult:
 
     detail = ", ".join(names) if names else f"{len(remaining)} matching process(es)"
     if taskkill_succeeded:
-        return ToolResult(False, f"Jarvis closed part of {name}, but {detail} are still running.")
+        return ToolResult(False, f"Horus closed part of {name}, but {detail} are still running.")
     return ToolResult(
         False,
         f"Windows denied permission to force-close {name}. Still running: {detail}. "
-        "Jarvis also tried a normal window-close request first. If the remaining process is elevated or protected, an elevated Jarvis process may be required.",
+        "Horus also tried a normal window-close request first. If the remaining process is elevated or protected, an elevated Horus process may be required.",
     )
 
 
@@ -289,4 +289,4 @@ def launch_minecraft() -> ToolResult:
         except OSError:
             continue
 
-    return ToolResult(False, "Jarvis could not find a usable Minecraft launch method on this PC.")
+    return ToolResult(False, "Horus could not find a usable Minecraft launch method on this PC.")

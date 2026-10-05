@@ -17,7 +17,7 @@ _LOCK = threading.RLock()
 _DEFAULT_STATE: dict[str, Any] = {
     "location": "unknown",
     "active_profile": "default",
-    "project_focus": "Jarvis",
+    "project_focus": "Horus",
     "devices": {
         "ray_ban_meta": "unknown",
         "phone_transport": "unknown",

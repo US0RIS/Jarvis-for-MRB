@@ -223,7 +223,7 @@ final class PersistentPresenceController: ObservableObject {
               !frontendMeetingActive,
               (!appModel.speechRecognizer.isActive
                   || (appModel.handsFreeEnabled
-                      && appModel.voiceStatus == "Listening for “Jarvis”…")),
+                      && appModel.voiceStatus == "Listening for “Horus”…")),
               appModel.voiceStatus != "Speaking offline…",
               let frontend,
               let observed = frontend.sensors.lastLocationAt,

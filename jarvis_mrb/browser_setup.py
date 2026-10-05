@@ -12,7 +12,7 @@ def main() -> None:
         return
 
     print("Opera browser-tab control is not connected.")
-    print("Jarvis will try to start Opera with Chrome DevTools Protocol enabled on port 9222.")
+    print("Horus will try to start Opera with Chrome DevTools Protocol enabled on port 9222.")
     result = launch_opera_debug()
     print(result.message)
 

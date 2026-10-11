@@ -1827,3 +1827,26 @@ identity, discovers non-obvious relevant connections, notices contradictions, te
 hypotheses, applies extra scrutiny to surprising claims, verifies plausible claims systematically,
 distinguishes evidence from inference, avoids irrelevant/sensitive-detail dumping, says unknown when
 evidence runs out, and exposes a provenance trail sufficient to audit every material conclusion.
+
+## HORUS Ambient Commentary — private personal comedian
+
+**Idea, not an implementation commitment.** HORUS should occasionally make the user laugh by delivering short, perfectly timed, deadpan observations about conversations and ordinary situations through a private earbud. This is **not** a comeback coach: the user is the audience, not necessarily the person who will repeat the line. The objective is surprise, relevance, and genuinely funny commentary rather than high joke volume.
+
+- **Delivery:** private audio only, with explicit output-device verification, immediate mute, and no fallback to public speakers. Enable listening only in clear, consent-based sessions; process locally where feasible, avoid retaining bystanders' recordings or transcripts by default, and honor applicable privacy rules.
+- **Frequency:** selective, high threshold, long variable cooldowns, no forced jokes. Silence is the default. Discard jokes that arrive after the moment has passed or would interfere with important conversation.
+- **Voice:** dry, understated, witty, occasionally absurd; ultra-concise (often 3–10 words), spoken as if making a serious operational assessment. Avoid long explanations, generic roasts, and punchlines that announce themselves.
+- **Humor mechanisms:** misplaced conversational clichés; absurd agreement with nonsense; treating trivial events as grave or historic; ironic skepticism about obvious truths; mock mission-control commentary; short reframings, wordplay, and escalating callbacks. Commentary can tease the user too, not just other speakers. Avoid cruelty toward vulnerabilities or genuine distress.
+- **Canonical examples and triggers:**
+  - Someone spends minutes explaining nonsense: **“Onto something or on something?”**
+  - Conversation completely loses direction: **“Houston, we lost the plot.”**
+  - Someone confidently proposes an idea without any execution strategy: **“In terms of a plan, there is no plan.”**
+  - Someone states the obvious: **“You don't say.”** / **“You would think.”**
+  - Someone says something bizarre: **“That's what I'm saying.”**
+  - Someone calls the user slow: **“Look, Rome wasn't built in a day.”**
+  - Someone stumbles over a sentence: **“Couldn't have said it better myself.”** (use discretion; do not mock a speech disability)
+  - Mundane checkout interaction: **“You come here often?”**
+  - Before a completely ordinary question: **“Okay, be honest with me here.”**
+- **Personalization:** curate a repertoire from user-supplied examples, learn preferences from explicit feedback, generate novel variations, track repetition, and maintain short-term context for running jokes and callbacks. Do not assume silence means dislike.
+- **Candidate pipeline:** opt-in microphone -> voice activity detection / streaming transcription -> rolling conversational context -> cheap opportunity filter -> local LLM candidate + quality judgment -> deterministic timing/cooldown/privacy gate -> private TTS. Keep recording and retention controls separate from humor logic.
+- **Practical prototype:** text-transcript evaluation harness first, then PC microphone + local ASR + Ollama on RTX 5080 + headphone-only TTS. Benchmark latency, genuine laugh rate, false-positive interruptions, repetition, privacy behavior, and device routing before attempting portable glasses/phone integration. Meta Ray-Ban microphone access and iOS background capture must be validated rather than assumed.
+- **Success criterion:** HORUS occasionally produces an unexpectedly excellent, situation-specific remark that makes the user laugh, while remaining unobtrusive most of the time.

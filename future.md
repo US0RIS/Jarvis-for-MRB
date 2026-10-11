@@ -1850,3 +1850,19 @@ evidence runs out, and exposes a provenance trail sufficient to audit every mate
 - **Candidate pipeline:** opt-in microphone -> voice activity detection / streaming transcription -> rolling conversational context -> cheap opportunity filter -> local LLM candidate + quality judgment -> deterministic timing/cooldown/privacy gate -> private TTS. Keep recording and retention controls separate from humor logic.
 - **Practical prototype:** text-transcript evaluation harness first, then PC microphone + local ASR + Ollama on RTX 5080 + headphone-only TTS. Benchmark latency, genuine laugh rate, false-positive interruptions, repetition, privacy behavior, and device routing before attempting portable glasses/phone integration. Meta Ray-Ban microphone access and iOS background capture must be validated rather than assumed.
 - **Success criterion:** HORUS occasionally produces an unexpectedly excellent, situation-specific remark that makes the user laugh, while remaining unobtrusive most of the time.
+
+### Suggestion Mode — help the user be funny aloud
+
+Complement private **Commentary Mode** with an explicitly selectable **Suggestion Mode**. Commentary entertains the user; Suggestion Mode privately proposes a short, natural line the user can choose to say aloud to make other people laugh. The user always decides whether to speak; HORUS never speaks the suggestion publicly or impersonates the user.
+
+- **Modes:** Commentary / Suggestion / Off, with a fast hands-free toggle; consider an optional hybrid mode only after measuring interruption burden.
+- **Output:** discreet, concise suggestions (typically one line), phrased like something the user would spontaneously say, not scripted stand-up. Avoid prefacing every line with a verbose explanation; an optional subtle audio cue can distinguish suggestions from commentary.
+- **Timing:** target the conversational opening, not the aftermath. Reject suggestions that arrive too late or require the user to interrupt awkwardly. Account for live-audio latency and the user's ability to hear, remember, and deliver the line.
+- **Calibration:** optimize for social success, not just private amusement. Match relationship, audience, setting, severity, and the user's natural speaking style; keep risky or dark humor for contexts where it is genuinely appropriate. Never pressure the user to repeat a line.
+- **Learning:** user feedback should distinguish “made me laugh privately” from “I said it and it landed,” plus whether a suggestion felt natural, too late, repetitive, or socially off-base.
+- **Prototype test:** replay real or consented synthetic conversation transcripts with timestamped candidate openings; evaluate line quality, speakability, timing, and false interruptions separately from Commentary Mode.
+
+### Additional running-gag examples
+
+- After an unrelated minor mishap or setback: **“How is this going to affect local trout populations?”** The humor is an absurdly specific, irrelevant consequence; use sparingly so the callback retains surprise.
+- Dark, taboo observational humor can be part of private commentary when context warrants it; for example, in a retrospective, joking conversation about someone's parents divorcing: **“Probably told them it wasn't their fault too.”** Do not deploy this during an active disclosure of distress or treat private irreverence as automatically suitable for Suggestion Mode.

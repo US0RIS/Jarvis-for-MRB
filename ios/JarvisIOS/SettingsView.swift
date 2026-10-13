@@ -247,7 +247,23 @@ struct SettingsView: View {
 
                 Section("Voice & Privacy") {
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
-                    Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
+                    Toggle("Use Bluetooth hands-free microphone", isOn: $settings.preferBluetoothAudio)
+                    Picker("Preferred headset", selection: $settings.bluetoothAudioDevicePreference) {
+                        Text("Automatic").tag("auto")
+                        Text("AirPods").tag("airpods")
+                        Text("Ray-Ban Meta").tag("meta")
+                    }
+                    .disabled(!settings.preferBluetoothAudio)
+                    Text("AirPods use the normal iPhone Bluetooth hands-free route; no separate AirPods app or pairing SDK is needed. When both headsets are connected, choose one above. An unavailable selection falls back to the iPhone microphone instead of silently switching headsets. iOS controls output routing. Changes apply to the next listening/speaking turn; use Control Center to select the output device when needed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("Active input/output", value: audioRouteManager.routeSummary)
+                        .font(.caption)
+                    if audioRouteManager.requestedBluetoothRouteUnavailable {
+                        Text("The selected Bluetooth hands-free microphone is unavailable. Check that the headset is connected, or select Automatic.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     Toggle("Adaptive whisper mode", isOn: $settings.adaptiveWhisperEnabled)
                     Toggle("Quiet-speech mode", isOn: $settings.subvocalModeEnabled)
                     Toggle("Adapt HUD cue volume to room noise", isOn: $settings.adaptiveCueVolumeEnabled)

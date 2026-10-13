@@ -1210,6 +1210,15 @@ def handle_natural_language(
     if n in {"quit", "exit"}: return AgentReply(True, "__EXIT__")
     if n in {"model", "what model are you using", "what model are you using?"}:
         return _respectful(AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}"))
+    # Current public claims must reach a live source before the model can
+    # deny an announcement or invent explanations from stale priors.
+    from jarvis_mrb.freshness_policy import freshness_decision
+    freshness = freshness_decision(text, history)
+    if freshness is not None:
+        if freshness.kind == "clarify":
+            return AgentReply(True, freshness.message)
+        return _respectful(execute_tool("web.search", {"query": freshness.query, "num": 5}))
+
     fast = _fast_path(text)
     if fast is not None:
         return _respectful(fast)

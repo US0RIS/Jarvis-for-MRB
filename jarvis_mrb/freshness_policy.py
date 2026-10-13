@@ -119,7 +119,14 @@ def freshness_decision(
     if _DISPUTED_POST.search(text):
         earlier = _last_public_user_claim(history)
         if earlier:
-            return FreshnessDecision("search", query=f"{earlier} {text}"[:400])
+            return FreshnessDecision("search", query=earlier)
+        entities = list(dict.fromkeys(
+            match.group(0) for match in _SAFE_PUBLIC_ENTITIES.finditer(text)
+        ))
+        if entities:
+            return FreshnessDecision(
+                "search", query=" ".join(entities[:4]) + " official announcement post"
+            )
         return FreshnessDecision(
             "clarify",
             message=(

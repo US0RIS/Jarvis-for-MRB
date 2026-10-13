@@ -10,6 +10,10 @@ final class SettingsStore: ObservableObject {
     @Published var homeRadius: Double { didSet { defaults.set(homeRadius, forKey: "jarvis.homeRadius") } }
     @Published var speakResponses: Bool { didSet { defaults.set(speakResponses, forKey: "jarvis.speakResponses") } }
     @Published var preferBluetoothAudio: Bool { didSet { defaults.set(preferBluetoothAudio, forKey: "jarvis.preferBluetoothAudio") } }
+    // Explicit preference when multiple Bluetooth HFP inputs are connected.
+    // "auto" retains the legacy Ray-Ban-first behavior; the preference never
+    // authorizes microphone recording on its own.
+    @Published var bluetoothAudioDevicePreference: String { didSet { defaults.set(bluetoothAudioDevicePreference, forKey: "jarvis.bluetoothAudioDevicePreference") } }
     @Published var passiveVisionEnabled: Bool { didSet { defaults.set(passiveVisionEnabled, forKey: "jarvis.passiveVisionEnabled") } }
     @Published var adaptiveBandwidthEnabled: Bool { didSet { defaults.set(adaptiveBandwidthEnabled, forKey: "jarvis.adaptiveBandwidthEnabled") } }
     @Published var ambientCuesEnabled: Bool { didSet { defaults.set(ambientCuesEnabled, forKey: "jarvis.ambientCuesEnabled") } }
@@ -92,6 +96,8 @@ final class SettingsStore: ObservableObject {
         homeRadius = defaults.object(forKey: "jarvis.homeRadius") as? Double ?? 150
         speakResponses = defaults.object(forKey: "jarvis.speakResponses") as? Bool ?? true
         preferBluetoothAudio = defaults.object(forKey: "jarvis.preferBluetoothAudio") as? Bool ?? true
+        let savedBluetoothPreference = defaults.string(forKey: "jarvis.bluetoothAudioDevicePreference") ?? "auto"
+        bluetoothAudioDevicePreference = ["auto", "airpods", "meta"].contains(savedBluetoothPreference) ? savedBluetoothPreference : "auto"
         passiveVisionEnabled = defaults.object(forKey: "jarvis.passiveVisionEnabled") as? Bool ?? false
         adaptiveBandwidthEnabled = defaults.object(forKey: "jarvis.adaptiveBandwidthEnabled") as? Bool ?? true
         ambientCuesEnabled = defaults.object(forKey: "jarvis.ambientCuesEnabled") as? Bool ?? true

@@ -23,6 +23,14 @@ class FreshnessPolicyTests(unittest.TestCase):
             "search",
         )
 
+    def test_suspect_public_screenshot_is_verified_not_forged_from_pixels(self) -> None:
+        decision = freshness_decision("Is the Gemini 4 Argon announcement fake?")
+        self.assertEqual(decision.kind, "search")
+        self.assertIn("Gemini 4 Argon", decision.query)
+        self.assertNotIn("fake", decision.query)
+        ambiguous = freshness_decision("Is this screenshot fake?")
+        self.assertEqual(ambiguous.kind, "clarify")
+
     def test_current_availability_forces_lookup(self) -> None:
         self.assertEqual(
             freshness_decision("Is the iPhone 18 currently available?").kind,

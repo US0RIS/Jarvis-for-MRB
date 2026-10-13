@@ -24,7 +24,7 @@ class FreshnessDecision:
 
 
 _PRIVATE = re.compile(
-    r"\b(?:my|our)\s+(?:email|inbox|calendar|notes|documents?|drafts?|"
+    r"\b(?:my|our)\s+(?:(?:private|confidential|personal|work)\s+)?(?:email|inbox|calendar|notes|documents?|drafts?|"
     r"files?|conversation|messages?|account|appointments?|meetings?|"
     r"history|data|photos?|screenshots?)\b"
     r"|\b(?:attached|uploaded|private|local)\s+(?:file|document|records?)\b",

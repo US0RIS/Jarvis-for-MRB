@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from jarvis_mrb.freshness_policy import FreshnessDecision, freshness_decision
 
@@ -80,6 +81,33 @@ class FreshnessPolicyTests(unittest.TestCase):
         for text in (agent_entry, stream_entry):
             self.assertLess(text.index("freshness_decision("), text.index("_fast_path("))
             self.assertIn('execute_tool("web.search"', text)
+
+    def test_normal_chat_calls_search_before_model(self) -> None:
+        from jarvis_mrb import agent
+
+        with (
+            patch.object(agent, "_ollama_plan", side_effect=AssertionError("model ran")) as planner,
+            patch.object(agent, "execute_tool", return_value=agent.AgentReply(True, "Verified by web search")) as tool,
+        ):
+            result = agent.handle_natural_language("Did Google announce Gemini 4 Argon today?")
+        self.assertIn("Verified by web search", result.message)
+        tool.assert_called_once_with(
+            "web.search", {"query": "Did Google announce Gemini 4 Argon today?", "num": 5}
+        )
+        planner.assert_not_called()
+
+    def test_streaming_chat_calls_search_before_model(self) -> None:
+        from jarvis_mrb import streaming_agent
+
+        with patch.object(
+            streaming_agent, "execute_tool",
+            return_value=streaming_agent.AgentReply(True, "Verified by web search"),
+        ) as tool:
+            response = list(streaming_agent.stream_natural_language("Did Google announce Gemini 4 Argon today?"))
+        self.assertIn("Verified by web search", " ".join(response))
+        tool.assert_called_once_with(
+            "web.search", {"query": "Did Google announce Gemini 4 Argon today?", "num": 5}
+        )
 
     def test_airpods_selection_is_not_just_ui_label(self) -> None:
         settings = (ROOT / "ios/JarvisIOS/SettingsStore.swift").read_text(encoding="utf-8")

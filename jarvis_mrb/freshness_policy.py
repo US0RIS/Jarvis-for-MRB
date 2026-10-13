@@ -60,6 +60,10 @@ _DIRECT_EVENT = re.compile(
     r"released|in stock)\b",
     re.I,
 )
+_AUTHENTICITY = re.compile(r"\b(?:real|fake|authentic|photoshopped|legit|fabricated)\b", re.I)
+_POST_OR_ANNOUNCEMENT = re.compile(
+    r"\b(?:post|tweet|screenshot|announcement|release|launched|model)\b", re.I
+)
 _DISPUTED_POST = re.compile(
     r"\b(?:how do you know|what makes you (?:think|say)|prove|"
     r"are you sure|did you check)\b.{0,120}"
@@ -136,6 +140,24 @@ def freshness_decision(
         )
 
     public = bool(_PUBLIC.search(text))
+    if _AUTHENTICITY.search(text) and (
+        _POST_OR_ANNOUNCEMENT.search(text)
+        or re.search(r"\b(?:gemini|gemma|gpt|claude|qwen)\b", text, re.I)
+    ):
+        # A plausible-looking or suspicious-looking screenshot cannot establish
+        # whether the represented official post actually happened.
+        entities = list(dict.fromkeys(
+            match.group(0) for match in _SAFE_PUBLIC_ENTITIES.finditer(text)
+        ))
+        if not entities:
+            return FreshnessDecision(
+                "clarify",
+                message="A screenshot alone cannot prove whether a public post is authentic. Which official account or announcement should I check?",
+            )
+        return FreshnessDecision(
+            "search", query=" ".join(entities[:4]) + " official announcement post"
+        )
+
     has_fresh_context = bool(_FRESH.search(text))
     has_event = bool(_EVENT.search(text))
     direct_event = bool(_DIRECT_EVENT.search(text))

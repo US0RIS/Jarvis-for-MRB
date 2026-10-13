@@ -262,7 +262,7 @@ enum HorusFeatureCatalog {
 }
 
 struct FeatureGuideView: View {
-    @EnvironmentObject private var appModel: HorusAppModel
+    @EnvironmentObject private var appModel: JarvisAppModel
     @State private var searchText = ""
     @State private var selectedCategory = "All"
 
@@ -335,7 +335,7 @@ struct FeatureGuideView: View {
 }
 
 private struct FeatureDetailView: View {
-    @EnvironmentObject private var appModel: HorusAppModel
+    @EnvironmentObject private var appModel: JarvisAppModel
     let feature: HorusFeature
     @State private var copied = false
 

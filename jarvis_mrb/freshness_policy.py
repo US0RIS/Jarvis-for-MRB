@@ -67,10 +67,11 @@ _DISPUTED_POST = re.compile(
     r"\b(?:post|announce|release|publish|launch)\b",
     re.I,
 )
-_PUBLIC_CONTEXT = re.compile(
+_SAFE_PUBLIC_ENTITIES = re.compile(
     r"\b(?:google|apple|microsoft|openai|anthropic|meta|nvidia|"
-    r"gemma|gemini|gpt|claude|qwen|public post|official post|"
-    r"announcement|press release)\b",
+    r"gemini(?:\s+\d+(?:\s+[a-zA-Z]{2,18})?)?|"
+    r"gemma(?:\s+\d+)?|gpt(?:[-\s]+\d+(?:\.\d+)?)?|"
+    r"claude|qwen(?:\s*\d+)?)\b",
     re.I,
 )
 
@@ -88,12 +89,14 @@ def _last_public_user_claim(history: Sequence[Any] | None) -> str:
         if role != "user" or not isinstance(content, str):
             continue
         candidate = _normalize(content)
-        if (
-            5 <= len(candidate) <= 250
-            and _PUBLIC_CONTEXT.search(candidate)
-            and not _PRIVATE.search(candidate)
-        ):
-            return candidate
+        if 5 <= len(candidate) <= 250 and not _PRIVATE.search(candidate):
+            # Send only allowlisted public product/company identifiers. Never
+            # send an arbitrary sentence from conversation history to Serper.
+            entities = list(dict.fromkeys(
+                match.group(0) for match in _SAFE_PUBLIC_ENTITIES.finditer(candidate)
+            ))
+            if entities:
+                return " ".join(entities[:4]) + " official announcement post"
     return ""
 
 

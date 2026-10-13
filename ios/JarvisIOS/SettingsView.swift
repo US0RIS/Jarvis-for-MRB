@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var geofence: GeofenceManager
+    @ObservedObject var audioRouteManager: AudioRouteManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var allowedRecipients: [String] = []

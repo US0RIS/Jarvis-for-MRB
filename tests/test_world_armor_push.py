@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 from jarvis_mrb import world_armor_push as push
 
-NOW = datetime(2026, 9, 25, 21, 0, tzinfo=timezone.utc)
+# Use a fresh fixture time: status() legitimately prunes events older than 24h.
+NOW = datetime.now(timezone.utc)
 TOKEN = "ab" * 32
 FLAGS = {
     "JARVIS_WORLD_ARMOR_ENABLED": "1",

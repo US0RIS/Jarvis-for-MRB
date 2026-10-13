@@ -468,6 +468,18 @@ def stream_natural_language(
             yield reply.message
         return
 
+    # This gate is execution policy, not a suggestion to the model.
+    from jarvis_mrb.freshness_policy import freshness_decision
+    freshness = freshness_decision(stripped, history)
+    if freshness is not None:
+        if freshness.kind == "clarify":
+            yield freshness.message
+        else:
+            reply = _respectful(execute_tool("web.search", {"query": freshness.query, "num": 5}))
+            if reply.message and reply.message != "__EXIT__":
+                yield reply.message
+        return
+
     fast = _fast_path(stripped)
     if fast is not None:
         message = _respectful(fast).message

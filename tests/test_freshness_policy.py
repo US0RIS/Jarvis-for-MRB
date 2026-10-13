@@ -48,7 +48,8 @@ class FreshnessPolicyTests(unittest.TestCase):
             ],
         )
         self.assertEqual(decision.kind, "search")
-        self.assertIn("Google announced Gemini 4 Argon", decision.query)
+        self.assertIn("Google Gemini 4 Argon official announcement post", decision.query)
+        self.assertNotIn("announced", decision.query)
 
     def test_no_private_context_is_sent_to_public_search(self) -> None:
         decision = freshness_decision(

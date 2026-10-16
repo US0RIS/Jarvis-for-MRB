@@ -98,7 +98,8 @@ class VoiceStudioIntegrationTests(unittest.TestCase):
             patch.object(tts,"TTS_URL","http://192.168.1.10:3900"),
             patch.object(tts,"VOICESTUDIO_API_KEY","verysecret"),
             patch.object(tts,"tts_health",return_value=True),
-        ),self.assertRaises(RuntimeError):
+            self.assertRaises(RuntimeError),
+        ):
             tts.synthesize_wav("Hi")
 
     def test_authenticated_local_service(self):

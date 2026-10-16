@@ -1020,6 +1020,17 @@ def belief_model_forget(
         raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
 
 
+@app.get("/attention/budget")
+def attention_budget_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.attention_budget import status
+    return status()
+
+
 @app.get("/capabilities/evidence")
 def capability_evidence_status(
     response: Response,

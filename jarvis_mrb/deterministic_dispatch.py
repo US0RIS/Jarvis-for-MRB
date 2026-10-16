@@ -197,6 +197,12 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     answer = _clock(lower, current) or _arithmetic(lower)
     if answer:
         return answer
+    if lower in {
+        "what can you do right now", "which of your features are actually verified",
+        "what capabilities are verified", "show capability evidence",
+        "what features have passed tests", "capability evidence status"
+    }:
+        return _tool("capability_evidence", "capabilities.status")
     if lower in _EXACT:
         family, tool, arguments = _EXACT[lower]
         return Route(family, tool, dict(arguments))

@@ -1903,6 +1903,7 @@ devices:
 - Hash-linked receipts for strict first-party public-claim checks, with
   six-hour retrieval freshness classification and explicit uncertainty about
   screenshot/post authenticity. This is not a full claim-entailment engine.
+- Authenticated runtime build provenance reporting the actual responding PC process ID (random nonce), start time, checkout commit and source hashes, with the revision shown in iPhone Settings. Disk hashes do not prove the installed phone build or in-memory bytecode.
 
 All other items remain future work unless separately proved by running code,
 tests and actual deployment receipts. No bulk "mark complete" operation

@@ -66,6 +66,10 @@ class RuntimeProvenanceTests(unittest.TestCase):
         self.assertIn('case checkoutCommit = "checkout_commit"',client)
         self.assertIn("await client.runtimeProvenance()",ui)
         self.assertIn("Cannot verify PC backend",ui)
+        self.assertIn('path: "capabilities/evidence"',client)
+        self.assertIn("await client.capabilityEvidence()",ui)
+        self.assertIn("fully verified",ui)
+        self.assertIn("No current acceptance readback",ui)
 
 
 if __name__=="__main__":

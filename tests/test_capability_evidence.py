@@ -71,7 +71,7 @@ class CapabilityEvidenceTests(unittest.TestCase):
 
     def test_runner_uses_fixed_test_suite_not_shell(self):
         fake_git=Mock(returncode=0,stdout=COMMIT)
-        fake_test=Mock(returncode=0,stdout="OK",stderr="")
+        fake_test=Mock(returncode=0,stdout="",stderr="Ran 7 tests in 0.01s\nOK")
         with patch.object(evidence.subprocess,"run",side_effect=[fake_git,fake_test]) as runner:
             output=evidence.run_unit_acceptance("user_belief_model",path=self.path)
         self.assertEqual(output["result"],"passed")
@@ -80,6 +80,13 @@ class CapabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(unit_args[:4],[evidence.sys.executable,"-m","unittest","discover"])
         self.assertEqual(unit_args[-2],"test_user_belief_model.py")
         self.assertFalse(runner.call_args_list[1].kwargs.get("shell",False))
+
+    def test_zero_test_discovery_does_not_count_as_acceptance(self):
+        fake_git=Mock(returncode=0,stdout=COMMIT)
+        empty=Mock(returncode=0,stdout="",stderr="Ran 0 tests in 0.001s\nOK")
+        with patch.object(evidence.subprocess,"run",side_effect=[fake_git,empty]):
+            receipt=evidence.run_unit_acceptance("user_belief_model",path=self.path)
+        self.assertEqual(receipt["result"],"failed")
 
     def test_voice_self_description_uses_permissioned_deterministic_route(self):
         route=dispatch("What capabilities are verified?")

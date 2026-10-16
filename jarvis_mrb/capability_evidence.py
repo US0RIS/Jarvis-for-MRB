@@ -50,10 +50,20 @@ CATALOG: dict[str, dict[str, Any]] = {
         "required":("unit", "rtx5080_benchmark", "end_to_end_jarvis_tasks"),
         "unit_pattern":"test_model_bakeoff.py",
     },
+    "public_claim_verifier":{
+        "title":"Official-source announcement verification",
+        "required":("unit", "live_official_source"),
+        "unit_pattern":"test_public_claim_verifier.py",
+    },
+    "attention_budget":{
+        "title":"Proactive interruption budget",
+        "required":("unit", "real_notification_acceptance"),
+        "unit_pattern":"test_attention_budget.py",
+    },
 }
 _ALLOWED_SCOPES = {"unit","ios_simulator","physical_airpods","live_official_source",
                    "real_verified_fact_adapter","actual_voicestudio_audio",
-                   "rtx5080_benchmark","end_to_end_jarvis_tasks"}
+                   "rtx5080_benchmark","end_to_end_jarvis_tasks","real_notification_acceptance"}
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 

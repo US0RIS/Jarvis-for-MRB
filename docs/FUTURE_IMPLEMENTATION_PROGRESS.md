@@ -77,7 +77,7 @@ python -m jarvis_mrb.capability_evidence --run-unit user_belief_model
 ```
 
 The authenticated `GET /capabilities/evidence` endpoint and exact spoken
-question "What capabilities are verified?" report the five tracked feature
+question "What capabilities are verified?" report the seven tracked feature
 slices and **missing** acceptance scopes. A passing local unit test cannot
 claim hardware acceptance.
 

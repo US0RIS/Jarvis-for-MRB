@@ -1042,6 +1042,19 @@ def attention_budget_status(
     return status()
 
 
+@app.get("/build/provenance")
+def runtime_build_provenance(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    # This is the code actually present in the responding PC backend process,
+    # not the source version claimed by GitHub, feature docs or the iPhone app.
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.runtime_provenance import inspect
+    return inspect()
+
+
 @app.get("/capabilities/backlog")
 def capability_backlog_status(
     response: Response,

@@ -9,7 +9,7 @@ import sqlite3
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -228,6 +228,25 @@ def research_receipt(receipt_id: str = "latest", *, detail: str = "summary") -> 
     receipt = load_receipt(receipt_id)
     if not receipt:
         return "No Research Receipt was found."
+    if receipt.get("kind") == "primary_source_lookup":
+        status = primary_source_receipt_status(receipt)
+        lines = [
+            f"Primary-source lookup receipt {receipt.get('receipt_id', 'unknown')}",
+            f"Question: {receipt.get('question', '')}",
+            f"Outcome: {receipt.get('outcome', 'unknown')}",
+            f"Checked: {receipt.get('completed_at', 'unknown')}",
+            f"Freshness: {status['freshness']} (TTL {status['ttl_hours']} hours)",
+            f"Sources actually fetched: {len(receipt.get('sources') or [])}.",
+            "Proof of original social-media post or screenshot: NOT established.",
+        ]
+        for row in (receipt.get("sources") or [])[:8]:
+            lines.append(f"- {row.get('id', '?')}: {row.get('url', '')}")
+        integrity_ok, integrity_detail = verify_receipt_ledger(str(receipt.get("receipt_id") or ""))
+        lines.append("Ledger integrity: " + ("valid" if integrity_ok else "FAILED: " + integrity_detail))
+        return json.dumps({"receipt": receipt, "freshness": status,
+                           "ledger_valid": integrity_ok}, indent=2) if detail.lower() in {
+            "full", "json", "complete"
+        } else "\n".join(lines)
     if detail.lower() in {"full", "json", "complete"}:
         return json.dumps(receipt, ensure_ascii=False, indent=2)
     metrics = receipt.get("coverage") or {}
@@ -248,6 +267,40 @@ def research_receipt(receipt_id: str = "latest", *, detail: str = "summary") -> 
     lines.append("Stop reason: " + str(receipt.get("stop_reason") or "unknown"))
     lines.append("Ledger hash: " + str(receipt.get("ledger_final_hash") or ""))
     return "\n".join(lines)
+
+
+def primary_source_receipt_status(
+    receipt: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """A prior retrieval does not remain current indefinitely.
+
+    Freshness is a time classification, NOT proof that the checked page
+    actually entailed a claim. Negative search and screenshot authenticity
+    remain unresolved even while the receipt itself is fresh.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("Receipt freshness requires a timezone-aware time.")
+    if receipt.get("kind") != "primary_source_lookup":
+        return {"freshness": "not_applicable", "ttl_hours": None}
+    ttl = 6
+    try:
+        observed = datetime.fromisoformat(str(receipt.get("completed_at") or ""))
+    except (ValueError, TypeError):
+        observed = None
+    if observed is None or observed.tzinfo is None:
+        state = "unknown_timestamp"
+    elif observed > current:
+        state = "future_timestamp_invalid"
+    elif current - observed > timedelta(hours=ttl):
+        state = "stale_refresh_required"
+    else:
+        state = "fresh_lookup_only"
+    return {"freshness": state, "ttl_hours": ttl,
+            "as_of": str(receipt.get("completed_at") or ""),
+            "may_reuse_as_proof": False}
 
 
 def record_primary_source_check(

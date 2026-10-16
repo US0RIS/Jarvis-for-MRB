@@ -52,6 +52,7 @@ TOOL_RISK: dict[str, Risk] = {
     "gmail.send": "external_write",
     "web.status": "read",
     "web.search": "read",
+    "web.verify": "read",
     "vision.recall": "read",
     "vision.ocr_clipboard": "local_write",
     "expense.capture": "local_write",

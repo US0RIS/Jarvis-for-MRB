@@ -3262,7 +3262,9 @@ def meeting_finish(
 @app.get("/tts/status")
 def tts_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
     _check_auth(authorization)
-    return {"status": "ready" if tts_health() else "unavailable"}
+    from jarvis_mrb.tts_client import TTS_PROVIDER
+    return {"status": "ready" if tts_health() else "unavailable",
+            "provider": TTS_PROVIDER}
 
 
 @app.post("/tts")

@@ -41,6 +41,7 @@ TOOL_RISK: dict[str, Risk] = {
     "pc.context": "read",
     "system.resources": "read",
     "capabilities.status": "read",
+    "capabilities.backlog": "read",
     "google.status": "read",
     "contacts.resolve": "read",
     "gmail.query": "read",

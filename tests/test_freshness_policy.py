@@ -31,6 +31,14 @@ class FreshnessPolicyTests(unittest.TestCase):
         ambiguous = freshness_decision("Is this screenshot fake?")
         self.assertEqual(ambiguous.kind, "clarify")
 
+    def test_user_supplied_public_screenshot_triggers_verification(self) -> None:
+        decision=freshness_decision("I have a screenshot that shows Google announced Gemini 4 Argon.")
+        self.assertEqual(decision.kind,"verify")
+        self.assertEqual(decision.query,"Google Gemini 4 Argon official announcement post")
+        self.assertIsNone(freshness_decision(
+            "My private screenshots show my email about Gemini 4 Argon."
+        ))
+
     def test_current_availability_forces_lookup(self) -> None:
         self.assertEqual(
             freshness_decision("Is the iPhone 18 currently available?").kind,

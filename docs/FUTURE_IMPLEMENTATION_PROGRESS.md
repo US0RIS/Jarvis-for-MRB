@@ -20,6 +20,7 @@ user's devices.
 | Capability evidence ledger | Strictly scoped local unit execution receipts, per-commit/fixture validity, voice-query and authenticated evidence status | Trusted physical/production evidence adapters; all hardware and live external scopes remain unverified |
 | Shared interruption budget | Opt-in, process-memory-only 3-information-alerts/hour governor at the common proactive emitter. Warnings and urgent alerts bypass it | Human acceptance of rate and severity classification; default stays disabled |
 | Why-did-you-alert-me | Stored proactive emitter origin codes and read-only explanation of the most recent event, with strict distinction between internally emitted and actually delivered | Real proactive iPhone notification delivery; older history without origin remains unknown |
+| Runtime build provenance | Authenticated source-file SHA-256, checkout revision, process nonce and started-at value; PC revision displayed in iPhone Settings | Query actual deployed PC and compare installed iPhone build; disk hashes alone cannot prove loaded bytecode |
 
 ## Activation
 
@@ -80,9 +81,11 @@ python -m jarvis_mrb.capability_evidence --run-unit user_belief_model
 ```
 
 The authenticated `GET /capabilities/evidence` endpoint and exact spoken
-question "What capabilities are verified?" report the eight tracked feature
+question "What capabilities are verified?" report the nine tracked feature
 slices and **missing** acceptance scopes. A passing local unit test cannot
 claim hardware acceptance.
+
+The authenticated `GET /build/provenance` endpoint and iPhone Settings → **Verify Running Backend** display which PC checkout revision and process instance answered. A GitHub commit alone does not prove that code was deployed, and this diagnostic does not claim to identify the installed iPhone binary.
 
 Ask "Why did you tell me this?" or call authenticated `GET /proactive/last-receipt` to inspect the last recorded proactive alert and its known originating subsystem. This **does not** imply the phone displayed it or that the user heard it. Public claim lookups now generate hash-linked `V-...` receipts inspectable through the existing Research Receipt interface, and their six-hour lookup TTL does not turn retrieved page mentions into proof of a particular official post.
 

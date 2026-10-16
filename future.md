@@ -1880,7 +1880,9 @@ devices:
 - AirPods as an explicit iPhone Bluetooth HFP input preference, alongside
   Ray-Bans, with live route diagnostics and safe microphone fallback.
 - A first execution-level public-freshness gate shared by streaming and
-  non-streaming chat. It is **not** the full per-claim proof/TTL/entailment system.
+  non-streaming chat, plus a strict bounded first-party HTML verifier for
+  contested public announcements. This is **not** the full per-claim
+  proof/TTL/entailment system.
 - An opt-in User Belief Model with private evidence records, decision windows,
   conservative divergence evaluation, authenticated APIs and deletion. No
   automatic belief inference or provider-verified observation adapter yet.

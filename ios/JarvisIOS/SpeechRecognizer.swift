@@ -30,6 +30,7 @@ final class AudioRouteManager: ObservableObject {
     @Published private(set) var hasBluetoothHFP = false
     @Published private(set) var hasPreferredBluetoothHFP = false
     @Published private(set) var requestedBluetoothRouteUnavailable = false
+    @Published private(set) var preferredBluetoothInputNotActive = false
 
     private var routeChangeTask: Task<Void, Never>?
     private var inputsChangeTask: Task<Void, Never>?
@@ -44,7 +45,7 @@ final class AudioRouteManager: ObservableObject {
             return "\(currentInputName) (iPhone built-in mic) → \(currentOutputName)"
         }
         if isUsingBluetoothHFP {
-            return "\(currentInputName) (Bluetooth hands-free)"
+            return "\(currentInputName) (Bluetooth hands-free) → \(currentOutputName)"
         }
         return "\(currentInputName) → \(currentOutputName)"
     }
@@ -109,9 +110,14 @@ final class AudioRouteManager: ObservableObject {
         isUsingBluetoothHFP = input?.portType == .bluetoothHFP || output?.portType == .bluetoothHFP
         let available = session.availableInputs ?? []
         hasBluetoothHFP = available.contains { $0.portType == .bluetoothHFP }
-        hasPreferredBluetoothHFP = preferredBluetoothInput(in: available) != nil
+        let selectedInput = preferredBluetoothInput(in: available)
+        hasPreferredBluetoothHFP = selectedInput != nil
         let prefersBluetooth = UserDefaults.standard.object(forKey: "jarvis.preferBluetoothAudio") as? Bool ?? true
-        requestedBluetoothRouteUnavailable = prefersBluetooth && !hasPreferredBluetoothHFP
+        requestedBluetoothRouteUnavailable = prefersBluetooth && selectedInput == nil
+        // A connected headset is not proof that iOS actually routed capture
+        // through it. Detect mismatches using the system's active port UID.
+        preferredBluetoothInputNotActive = prefersBluetooth
+            && selectedInput != nil && input?.uid != selectedInput?.uid
     }
 
     private func preferredBluetoothInput(in inputs: [AVAudioSessionPortDescription]) -> AVAudioSessionPortDescription? {

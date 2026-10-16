@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from tempfile import TemporaryDirectory
 import json
 import sqlite3
@@ -68,6 +69,34 @@ class PrimarySourceReceiptTests(unittest.TestCase):
             integrity.record_primary_source_check("Q","primary_source_mentions_subject",[])
         with self.assertRaises(ValueError):
             integrity.record_primary_source_check("Q","definitely_fake",[])
+
+    def test_receipt_freshness_expires_but_never_promotes_to_proof(self):
+        when=datetime.now(timezone.utc).replace(microsecond=0)
+        rid=integrity.record_primary_source_check(
+            "Did Google announce Gemini 4 Argon today?", "unverified", []
+        )
+        receipt=integrity.load_receipt(rid)
+        receipt["completed_at"]=when.isoformat()
+        current=integrity.primary_source_receipt_status(
+            receipt,now=when+timedelta(hours=5)
+        )
+        self.assertEqual(current["freshness"],"fresh_lookup_only")
+        self.assertFalse(current["may_reuse_as_proof"])
+        expired=integrity.primary_source_receipt_status(
+            receipt,now=when+timedelta(hours=7)
+        )
+        self.assertEqual(expired["freshness"],"stale_refresh_required")
+        self.assertFalse(expired["may_reuse_as_proof"])
+
+    def test_explicit_receipt_readback_is_not_fake_research_coverage(self):
+        rid=integrity.record_primary_source_check(
+            "Did Google announce Gemini 4 Argon today?", "unverified", []
+        )
+        report=integrity.research_receipt(rid)
+        self.assertIn("Primary-source lookup receipt",report)
+        self.assertIn("NOT established",report)
+        self.assertIn("Ledger integrity: valid",report)
+        self.assertNotIn("Coverage: C",report)
 
     def test_event_tampering_breaks_receipt_verification(self):
         rid=integrity.record_primary_source_check(

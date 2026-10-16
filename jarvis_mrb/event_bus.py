@@ -101,6 +101,10 @@ def _record_proactive_occurrence(message: str, cue: str, severity: str) -> None:
 
 
 def emit_proactive(message: str, *, cue: str = "attention", severity: str = "info") -> None:
+    from jarvis_mrb.attention_budget import may_deliver
+    if not may_deliver(severity):
+        # Suppression must not masquerade as "alert delivered" in world history.
+        return
     _record_proactive_occurrence(message, cue, severity)
     companion_events.publish(
         {

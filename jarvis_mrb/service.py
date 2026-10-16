@@ -1020,6 +1020,18 @@ def belief_model_forget(
         raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
 
 
+@app.get("/capabilities/evidence")
+def capability_evidence_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Machine-readable implementation-vs-verification state, not product marketing."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.capability_evidence import inspect
+    return inspect()
+
+
 @app.get("/routing/status")
 def model_routing_status(
     authorization: Annotated[str | None, Header()] = None,

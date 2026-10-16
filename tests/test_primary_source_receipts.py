@@ -45,6 +45,9 @@ class PrimarySourceReceiptTests(unittest.TestCase):
         ok,final_hash=integrity.verify_receipt_ledger(rid)
         self.assertTrue(ok)
         self.assertEqual(final_hash,receipt["final_hash"])
+        deep_ok, deep_hash=integrity.verify_primary_source_receipt(receipt)
+        self.assertTrue(deep_ok)
+        self.assertEqual(deep_hash,receipt["final_hash"])
         on_disk=json.loads((self.out/(rid+".json")).read_text())
         self.assertEqual(on_disk["receipt_id"],rid)
 
@@ -97,6 +100,41 @@ class PrimarySourceReceiptTests(unittest.TestCase):
         self.assertIn("NOT established",report)
         self.assertIn("Ledger integrity: valid",report)
         self.assertNotIn("Coverage: C",report)
+
+    def test_official_receipt_rejects_forged_domain(self):
+        with self.assertRaises(ValueError):
+            integrity.record_primary_source_check(
+                "Did Google announce Gemini 4 Argon?",
+                "primary_source_mentions_subject",
+                [{"url":"https://blog.google.example/ai/gemini4","host":"blog.google.example"}],
+            )
+        with self.assertRaises(ValueError):
+            integrity.record_primary_source_check(
+                "Did Google announce Gemini 4 Argon?",
+                "primary_source_mentions_subject",
+                [{"url":"https://blog.google/ai/gemini4","host":"fake.example"}],
+            )
+
+    def test_receipt_payload_tampering_is_not_marked_valid(self):
+        rid=integrity.record_primary_source_check(
+            "Did Google announce Gemini 4 Argon?", "unverified", []
+        )
+        with sqlite3.connect(self.db) as db:
+            raw=db.execute(
+                "SELECT receipt_json FROM research_runs WHERE id=?",(rid,)
+            ).fetchone()[0]
+            modified=json.loads(raw)
+            modified["outcome"]="primary_source_mentions_subject"
+            modified["source_mentions_subject"]=True
+            db.execute(
+                "UPDATE research_runs SET receipt_json=? WHERE id=?",
+                (json.dumps(modified),rid),
+            )
+        receipt=integrity.load_receipt(rid)
+        ok,reason=integrity.verify_primary_source_receipt(receipt)
+        self.assertFalse(ok)
+        self.assertIn("outcome",reason)
+        self.assertIn("FAILED",integrity.research_receipt(rid))
 
     def test_event_tampering_breaks_receipt_verification(self):
         rid=integrity.record_primary_source_check(

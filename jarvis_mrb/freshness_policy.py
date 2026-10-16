@@ -140,6 +140,13 @@ def freshness_decision(
         )
 
     public = bool(_PUBLIC.search(text))
+    if (
+        public and _SAFE_PUBLIC_ENTITIES.search(text)
+        and re.search(r"\b(?:screenshot|social[- ]media post|official post)\b", text, re.I)
+        and re.search(r"\b(?:shows|claims|proves|confirms|posted|published|announced|announcing|release)\b",text,re.I)
+    ):
+        entities = list(dict.fromkeys(match.group(0) for match in _SAFE_PUBLIC_ENTITIES.finditer(text)))
+        return FreshnessDecision("verify",query=" ".join(entities[:4]) + " official announcement post")
     if _AUTHENTICITY.search(text) and (
         _POST_OR_ANNOUNCEMENT.search(text)
         or re.search(r"\b(?:gemini|gemma|gpt|claude|qwen)\b", text, re.I)

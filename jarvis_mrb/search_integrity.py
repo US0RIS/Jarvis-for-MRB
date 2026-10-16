@@ -450,7 +450,7 @@ def load_receipt(receipt_id: str = "latest") -> dict[str, Any] | None:
     with sqlite3.connect(AUDIT_DB) as con:
         if receipt_id.lower() == "latest":
             row = con.execute(
-                "SELECT receipt_json FROM research_runs WHERE receipt_json IS NOT NULL ORDER BY created_at DESC LIMIT 1"
+                "SELECT receipt_json FROM research_runs WHERE receipt_json IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1"
             ).fetchone()
         else:
             row = con.execute(

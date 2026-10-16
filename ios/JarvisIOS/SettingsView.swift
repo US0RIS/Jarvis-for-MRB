@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var isSavingAllowlist = false
     @State private var neuralVoiceStatus = "Not checked"
     @State private var runtimeProvenanceStatus = "Not checked"
+    @State private var capabilityEvidenceStatus = "Not checked"
     @State private var useFastPlanner = false
     @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
@@ -47,7 +48,10 @@ struct SettingsView: View {
                     LabeledContent("PC backend build", value: runtimeProvenanceStatus)
                         .font(.caption)
                     Button("Verify Running Backend") { Task { await checkRuntimeProvenance() } }
-                    Text("Shows the responding PC's checkout revision and process identity. It does not verify that this iPhone app was built from the same commit or that any physical feature passed testing.")
+                    LabeledContent("Feature acceptance", value: capabilityEvidenceStatus)
+                        .font(.caption)
+                    Button("Check Capability Evidence") { Task { await checkCapabilityEvidence() } }
+                    Text("These checks distinguish repository code, passing tests and real-world device verification. They do not mark a physical feature working merely because a commit exists.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -384,7 +388,8 @@ struct SettingsView: View {
                 async let voiceCheck: Void = checkNeuralVoice()
                 async let recipientsLoad: Void = loadAllowedRecipients()
                 async let buildCheck: Void = checkRuntimeProvenance()
-                _ = await (plannerLoad, voiceCheck, recipientsLoad, buildCheck)
+                async let evidenceCheck: Void = checkCapabilityEvidence()
+                _ = await (plannerLoad, voiceCheck, recipientsLoad, buildCheck, evidenceCheck)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -439,6 +444,18 @@ struct SettingsView: View {
         } catch {
             useFastPlanner = previousFastValue
             plannerModelStatus = "Model switch failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func checkCapabilityEvidence() async {
+        capabilityEvidenceStatus = "Checking…"
+        do {
+            let result = try await client.capabilityEvidence()
+            let total = result.capabilities.count
+            let verified = result.capabilities.values.filter { $0.status == "verified" }.count
+            capabilityEvidenceStatus = "\(verified) / \(total) fully verified"
+        } catch {
+            capabilityEvidenceStatus = "No current acceptance readback"
         }
     }
 

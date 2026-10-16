@@ -236,7 +236,7 @@ def consider(
             from jarvis_mrb.event_bus import emit_proactive
 
             def emitter_fn(value: str) -> None:
-                emit_proactive(value, cue="attention", severity=str(severity or "info"))
+                emit_proactive(value, cue="attention", severity=str(severity or "info"), origin="agency_attention")
         else:
             emitter_fn = emitter
         try:

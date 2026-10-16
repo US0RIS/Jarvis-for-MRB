@@ -594,6 +594,22 @@ struct TTSStatusResponse: Decodable {
     let provider: String?
 }
 
+struct CapabilityEvidenceResponse: Decodable {
+    struct Capability: Decodable {
+        let title: String
+        let status: String
+        let missingScopes: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case title, status
+            case missingScopes = "missing_scopes"
+        }
+    }
+
+    let capabilities: [String: Capability]
+}
+
+
 struct RuntimeProvenanceResponse: Decodable {
     let processStartedAt: String
     let runtimeInstance: String
@@ -2198,6 +2214,12 @@ struct JarvisAPIClient {
                 }
             }
         }
+    }
+
+    func capabilityEvidence() async throws -> CapabilityEvidenceResponse {
+        let (data, response) = try await get(path: "capabilities/evidence", timeout: 5)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(CapabilityEvidenceResponse.self, from: data)
     }
 
     func runtimeProvenance() async throws -> RuntimeProvenanceResponse {

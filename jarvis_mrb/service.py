@@ -79,6 +79,35 @@ class CommandRequest(BaseModel):
     text: str
     session_id: str | None = None
 
+# Evidence-bounded, deliberately opt-in User Belief Model.
+class BeliefWorldRecordRequest(BaseModel):
+    subject: str
+    predicate: str
+    value: str
+    evidence_id: str
+    observed_at: str | None = None
+
+
+class BeliefEvidenceRecordRequest(BeliefWorldRecordRequest):
+    kind: str
+
+
+class BeliefDecisionRequest(BaseModel):
+    subject: str
+    predicate: str
+    label: str
+    deadline: str
+    enrollment_id: str
+
+
+class BeliefDecisionIDRequest(BaseModel):
+    decision_id: str
+
+
+class BeliefForgetRequest(BaseModel):
+    confirm: str
+
+
 
 class ExternalWatchCreateRequest(BaseModel):
     scope: str = "personal"
@@ -878,6 +907,117 @@ def startup() -> None:
     _proactive_started = True
     record_runtime_success("proactive_monitor")
     _warm_fast_model()
+
+
+# Never expose private beliefs through unauthenticated health/routing diagnostics.
+# User-supplied facts are *attested*, not independently verified sources.
+@app.post("/belief-model/world")
+def belief_model_world(
+    request: BeliefWorldRecordRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.observe_world(
+            request.subject, request.predicate, request.value,
+            evidence_id=request.evidence_id, observed_at=request.observed_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/exposure")
+def belief_model_exposure(
+    request: BeliefEvidenceRecordRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.observe_belief(
+            request.subject, request.predicate, request.value,
+            kind=request.kind, evidence_id=request.evidence_id,
+            observed_at=request.observed_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/decision")
+def belief_model_decision(
+    request: BeliefDecisionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.enroll_decision(
+            request.subject, request.predicate, request.label,
+            deadline=request.deadline, enrollment_id=request.enrollment_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/decision/resolve")
+def belief_model_resolve(
+    request: BeliefDecisionIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.resolve_decision(request.decision_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.get("/belief-model/divergences")
+def belief_model_divergences(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.evaluate()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/forget")
+def belief_model_forget(
+    request: BeliefForgetRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    if request.confirm != "DELETE_USER_BELIEF_MODEL":
+        raise HTTPException(status_code=422, detail="Explicit delete confirmation required.")
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.forget()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
 
 
 @app.get("/routing/status")

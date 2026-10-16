@@ -435,8 +435,13 @@ struct SettingsView: View {
         do {
             let result = try await client.ttsStatus()
             let provider = result.provider == "voicestudio" ? "VoiceStudio" : (result.provider == "kokoro" ? "Kokoro" : "Local voice")
-            neuralVoiceStatus = result.status == "ready" ? "\(provider) ready"
-                : (result.status == "discovered" ? "\(provider) API reachable" : "\(provider) unavailable")
+            if result.status == "ready" {
+                neuralVoiceStatus = "\(provider) ready"
+            } else if result.status == "discovered" {
+                neuralVoiceStatus = "\(provider) API reachable"
+            } else {
+                neuralVoiceStatus = "\(provider) unavailable"
+            }
         } catch {
             neuralVoiceStatus = "Jarvis server offline"
         }

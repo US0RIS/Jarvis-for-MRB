@@ -117,25 +117,28 @@ def _check(state: dict[str, Any]) -> None:
                 f"GPU memory is at about {vram:.0f} percent. Heavy background work may start evicting models or increasing voice latency.",
                 cue="warning",
                 severity="warning",
+                origin="resource_pressure",
             )
         if temp >= 86 and _allowed("gpu-temp", 15 * 60):
             emit_proactive(
                 f"The GPU is unusually hot at about {temp:.0f} degrees Celsius.",
                 cue="warning",
                 severity="warning",
+                origin="resource_pressure",
             )
     cpu = float(state.get("cpu_percent") or 0)
     ram = float(state.get("ram_percent") or 0)
     queued = int(state.get("background_queued") or 0)
     if cpu >= 97 and _allowed("cpu", 10 * 60):
-        emit_proactive("PC CPU utilization is near saturation.", cue="warning", severity="warning")
+        emit_proactive("PC CPU utilization is near saturation.", cue="warning", severity="warning", origin="resource_pressure")
     if ram >= 94 and _allowed("ram", 15 * 60):
-        emit_proactive("PC system memory is above 94 percent utilization.", cue="warning", severity="warning")
+        emit_proactive("PC system memory is above 94 percent utilization.", cue="warning", severity="warning", origin="resource_pressure")
     if queued >= 6 and _allowed("queue", 10 * 60):
         emit_proactive(
             f"The Jarvis background queue has grown to {queued} waiting tasks.",
             cue="attention",
             severity="info",
+            origin="resource_pressure",
         )
 
 

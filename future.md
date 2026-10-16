@@ -1897,6 +1897,12 @@ devices:
   explicitly remain unverified.
 - An opt-in shared low-priority Attention Budget for the proactive event bus.
   Safety-severity events are never throttled by that initial policy.
+- A bounded "Why did you tell me this?" explanation route that reads the
+  last persisted proactive event and its machine-owned originating subsystem.
+  An emitted alert is not evidence that it reached the phone or the user.
+- Hash-linked receipts for strict first-party public-claim checks, with
+  six-hour retrieval freshness classification and explicit uncertainty about
+  screenshot/post authenticity. This is not a full claim-entailment engine.
 
 All other items remain future work unless separately proved by running code,
 tests and actual deployment receipts. No bulk "mark complete" operation

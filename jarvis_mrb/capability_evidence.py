@@ -62,10 +62,13 @@ def _utc() -> datetime:
 
 
 def _git_commit() -> str:
-    result=subprocess.run(
-        ["git","-C",str(_SOURCE_ROOT),"rev-parse","HEAD"],
-        capture_output=True,text=True,timeout=5,check=False,
-    )
+    try:
+        result=subprocess.run(
+            ["git","-C",str(_SOURCE_ROOT),"rev-parse","HEAD"],
+            capture_output=True,text=True,timeout=5,check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
     value=result.stdout.strip().lower()
     return value if result.returncode==0 and _COMMIT.fullmatch(value) else ""
 

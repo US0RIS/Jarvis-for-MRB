@@ -1228,7 +1228,8 @@ def handle_natural_language(
     if freshness is not None:
         if freshness.kind == "clarify":
             return AgentReply(True, freshness.message)
-        return _respectful(execute_tool("web.search", {"query": freshness.query, "num": 5}))
+        tool_name = "web.verify" if freshness.kind == "verify" else "web.search"
+        return _respectful(execute_tool(tool_name, {"query": freshness.query, "num": 8 if freshness.kind == "verify" else 5}))
 
     fast = _fast_path(text)
     if fast is not None:

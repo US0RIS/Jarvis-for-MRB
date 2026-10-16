@@ -11,12 +11,15 @@ user's devices.
 | Feature | Branch implementation | Evidence still required |
 |---|---|---|
 | AirPods headset audio | iPhone AudioRouteManager explicitly prefers named AirPods, Meta or automatic, with deterministic built-in-mic fallback and a settings diagnostic | iOS physical microphone/output, interruption, reconnect and background-state testing; arbitrary AirPods renames cannot be identified reliably |
-| Current public claim freshness | Deterministic pre-model check in normal and streaming chat; public-post contradictions trigger a stricter first-party verifier | Real official-source queries; universal per-claim evidence entailment, TTLs, image authenticity, complete false/true detection |\n| Official-source verifier | A bounded URL allowlist fetches primary HTML (not just snippets); reports only an official page's actual mention, never asserts an absent post is fake | Live source checks, broader issuer coverage, evidence-to-claim entailment and exact X-post authenticity |
+| Current public claim freshness | Deterministic pre-model check in normal and streaming chat; public-post contradictions trigger a stricter first-party verifier | Real official-source queries; universal per-claim evidence entailment, TTLs, image authenticity, complete false/true detection |
+| Official-source verifier | A bounded URL allowlist fetches primary HTML (not just snippets); reports only an official page's actual mention, never asserts an absent post is fake | Live source checks, broader issuer coverage, evidence-to-claim entailment and exact X-post authenticity |
+| Primary-source research receipts | Hash-linked first-party lookup events with strict six-hour receipt TTL, direct receipt inspection and explicit no-proof-of-social-post classification | Actual official-source network tests; exact claim entailment and screenshot authentication |
 | User Belief Model | Opt-in independent SQLite model for stated user beliefs, exposures, acknowledgments, operator-attested world observations, exact enrolled decisions and read-only divergence warnings | Actual independently verified world-fact adapter, end-to-end calendar/deadline linkage, real-world consent and intervention evaluation |
 | VoiceStudio alternate TTS | Optional OpenAI-compatible VoiceStudio provider with discovery-based availability and explicit URL/model/voice selection | VoiceStudio installed on user PC, correct engine/profile, spoken quality and latency tests, AirPods physical playback |
 | Gemma 4 planner | Real local Ollama benchmark command comparing candidate routing accuracy and measured token/TTFT latency | RTX 5080 measurements, multimodal test corpus, full Jarvis tool and context correctness, memory contention and deployment; **not promoted** |
 | Capability evidence ledger | Strictly scoped local unit execution receipts, per-commit/fixture validity, voice-query and authenticated evidence status | Trusted physical/production evidence adapters; all hardware and live external scopes remain unverified |
 | Shared interruption budget | Opt-in, process-memory-only 3-information-alerts/hour governor at the common proactive emitter. Warnings and urgent alerts bypass it | Human acceptance of rate and severity classification; default stays disabled |
+| Why-did-you-alert-me | Stored proactive emitter origin codes and read-only explanation of the most recent event, with strict distinction between internally emitted and actually delivered | Real proactive iPhone notification delivery; older history without origin remains unknown |
 
 ## Activation
 
@@ -77,9 +80,11 @@ python -m jarvis_mrb.capability_evidence --run-unit user_belief_model
 ```
 
 The authenticated `GET /capabilities/evidence` endpoint and exact spoken
-question "What capabilities are verified?" report the seven tracked feature
+question "What capabilities are verified?" report the eight tracked feature
 slices and **missing** acceptance scopes. A passing local unit test cannot
 claim hardware acceptance.
+
+Ask "Why did you tell me this?" or call authenticated `GET /proactive/last-receipt` to inspect the last recorded proactive alert and its known originating subsystem. This **does not** imply the phone displayed it or that the user heard it. Public claim lookups now generate hash-linked `V-...` receipts inspectable through the existing Research Receipt interface, and their six-hour lookup TTL does not turn retrieved page mentions into proof of a particular official post.
 
 Set `JARVIS_ATTENTION_BUDGET_ENABLED=1` to enable the three-per-hour budget
 for informational proactive alerts. This setting does not throttle warnings,

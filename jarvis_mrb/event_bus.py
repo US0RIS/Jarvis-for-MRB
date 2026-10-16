@@ -128,7 +128,6 @@ def emit_proactive(
     if not may_deliver(severity):
         # Suppression must not masquerade as "alert delivered" in world history.
         return
-    _record_proactive_occurrence(message, cue, severity, origin=origin)
     companion_events.publish(
         {
             "type": "proactive_alert",
@@ -137,3 +136,6 @@ def emit_proactive(
             "severity": severity,
         }
     )
+    # Persist only after publication was attempted. This is still not a
+    # delivery/reading acknowledgement from any iPhone or headset.
+    _record_proactive_occurrence(message, cue, severity, origin=origin)

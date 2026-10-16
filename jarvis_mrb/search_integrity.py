@@ -250,6 +250,81 @@ def research_receipt(receipt_id: str = "latest", *, detail: str = "summary") -> 
     return "\n".join(lines)
 
 
+def record_primary_source_check(
+    question: str,
+    outcome: str,
+    sources: list[dict[str, Any]],
+) -> str:
+    """Persist an inspectable primary-source lookup receipt with hash-linked events.
+
+    This is evidence of *retrieval activity*, not proof that an announcement,
+    screenshot or social-media post was authentic. Only the first-party verifier
+    should call this. A source mention cannot be escalated to truth by this API.
+    """
+    if not question or not isinstance(question, str) or len(question) > 1000:
+        raise ValueError("Invalid public verification question.")
+    if outcome not in {
+        "unsupported_official_domain", "search_unavailable", "unverified",
+        "primary_source_mentions_subject",
+    }:
+        raise ValueError("Unknown primary-source verification outcome.")
+    clean_sources: list[dict[str, str]] = []
+    for source in sources[:8]:
+        if not isinstance(source, dict):
+            raise ValueError("Source evidence must be a mapping.")
+        url = str(source.get("url") or "").strip()
+        host = str(source.get("host") or "").strip()
+        if not url or len(url) > 1000 or not host or len(host) > 200:
+            raise ValueError("Invalid primary-source provenance.")
+        clean_sources.append({
+            "url": url, "host": host,
+            "source_type": "first_party_page_fetched",
+        })
+    if outcome != "primary_source_mentions_subject" and clean_sources:
+        raise ValueError("Unverified checks cannot advertise primary-source matches.")
+    if outcome == "primary_source_mentions_subject" and not clean_sources:
+        raise ValueError("A primary-source mention must include a retrieved source.")
+    run_id = "V-" + uuid.uuid4().hex[:12].upper()
+    started = _now()
+    _ensure_store()
+    _start_run(run_id, " ".join(question.split())[:1000], started)
+    _append_event(run_id, "verification_started", {
+        "question": " ".join(question.split())[:1000],
+        "mode": "strict_first_party_retrieval",
+    })
+    for index, source in enumerate(clean_sources, 1):
+        _append_event(run_id, "first_party_page_fetched", {
+            "source_id": f"E{index}", **source, "claim_entailment": "not_evaluated",
+        })
+    final_hash = _append_event(run_id, "verification_outcome", {
+        "outcome": outcome,
+        "authenticated_social_post": False,
+        "proves_absence": False,
+        "proof_of_claim": False,
+    })
+    receipt = {
+        "receipt_id": run_id,
+        "question": " ".join(question.split())[:1000],
+        "created_at": started,
+        "completed_at": _now(),
+        "status": "completed",
+        "kind": "primary_source_lookup",
+        "outcome": outcome,
+        "sources": [
+            {"id": f"E{index}", **source} for index, source in enumerate(clean_sources, 1)
+        ],
+        "source_mentions_subject": bool(clean_sources),
+        "claim_entailment": "not_evaluated",
+        "authenticated_social_post": False,
+        "proves_absence": False,
+        "verification_scope": "fetching selected first-party pages only",
+        "final_hash": final_hash,
+    }
+    _finish_run(run_id, receipt, final_hash)
+    _write_receipt(receipt)
+    return run_id
+
+
 def load_receipt(receipt_id: str = "latest") -> dict[str, Any] | None:
     _ensure_store()
     with sqlite3.connect(AUDIT_DB) as con:

@@ -287,7 +287,7 @@ struct SettingsView: View {
                         Text("Neural voice")
                         Spacer()
                         Text(neuralVoiceStatus)
-                            .foregroundStyle(neuralVoiceStatus == "Kokoro ready" ? Color.green : Color.secondary)
+                            .foregroundStyle(neuralVoiceStatus.hasSuffix(" ready") ? Color.green : Color.secondary)
                     }
                     Button("Check Neural Voice") { Task { await checkNeuralVoice() } }
 
@@ -433,8 +433,9 @@ struct SettingsView: View {
     private func checkNeuralVoice() async {
         neuralVoiceStatus = "Checking…"
         do {
-            let status = try await client.ttsStatus()
-            neuralVoiceStatus = status == "ready" ? "Kokoro ready" : "Starting / unavailable"
+            let result = try await client.ttsStatus()
+            let provider = result.provider == "voicestudio" ? "VoiceStudio" : (result.provider == "kokoro" ? "Kokoro" : "Local voice")
+            neuralVoiceStatus = result.status == "ready" ? "\(provider) ready" : "\(provider) unavailable"
         } catch {
             neuralVoiceStatus = "Jarvis server offline"
         }

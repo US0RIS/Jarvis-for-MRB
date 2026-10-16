@@ -18,7 +18,7 @@ from typing import Sequence, Any
 
 @dataclass(frozen=True)
 class FreshnessDecision:
-    kind: str  # "search" or "clarify"
+    kind: str  # "search", "verify" or "clarify"
     query: str = ""
     message: str = ""
 
@@ -123,13 +123,13 @@ def freshness_decision(
     if _DISPUTED_POST.search(text):
         earlier = _last_public_user_claim(history)
         if earlier:
-            return FreshnessDecision("search", query=earlier)
+            return FreshnessDecision("verify", query=earlier)
         entities = list(dict.fromkeys(
             match.group(0) for match in _SAFE_PUBLIC_ENTITIES.finditer(text)
         ))
         if entities:
             return FreshnessDecision(
-                "search", query=" ".join(entities[:4]) + " official announcement post"
+                "verify", query=" ".join(entities[:4]) + " official announcement post"
             )
         return FreshnessDecision(
             "clarify",
@@ -155,12 +155,17 @@ def freshness_decision(
                 message="A screenshot alone cannot prove whether a public post is authentic. Which official account or announcement should I check?",
             )
         return FreshnessDecision(
-            "search", query=" ".join(entities[:4]) + " official announcement post"
+            "verify", query=" ".join(entities[:4]) + " official announcement post"
         )
 
     has_fresh_context = bool(_FRESH.search(text))
     has_event = bool(_EVENT.search(text))
     direct_event = bool(_DIRECT_EVENT.search(text))
+    public_announcement = bool(_SAFE_PUBLIC_ENTITIES.search(text)) and bool(
+        re.search(r"\b(?:post|posted|publish|published|announce|announced|release|released|launch|launched)\b",text,re.I)
+    )
+    if public_announcement and re.match(r"(?i)^(?:did|has|have|was|were|is)\b",text):
+        return FreshnessDecision("verify",query=text)
 
     if (public and has_event and (has_fresh_context or direct_event)) or (
         public and has_fresh_context and re.search(r"\b(?:what|who|when|is|has|did|any)\b", text, re.I)

@@ -263,6 +263,13 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "pc.open_path": return _result(open_path(str(args.get("path") or "")))
     if tool == "pc.context": return AgentReply(True, describe_pc_context())
     if tool == "system.resources": return AgentReply(True, describe_resources())
+    if tool == "capabilities.status":
+        from jarvis_mrb.capability_evidence import inspect
+        evidence = inspect()
+        tracked = evidence["capabilities"]
+        names = [f"{item['title']}: {item['status'].replace('_',' ')}; missing " + ", ".join(item["missing_scopes"])
+                 for item in tracked.values()]
+        return AgentReply(True, "This is a limited acceptance ledger, not a full inventory. " + "; ".join(names))
 
     if tool == "google.status": return _result(google_status())
     if tool == "contacts.resolve": return _result(resolve_contact(str(args.get("query") or "")))

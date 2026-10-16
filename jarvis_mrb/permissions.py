@@ -42,6 +42,7 @@ TOOL_RISK: dict[str, Risk] = {
     "system.resources": "read",
     "capabilities.status": "read",
     "capabilities.backlog": "read",
+    "proactive.explain_last": "read",
     "google.status": "read",
     "contacts.resolve": "read",
     "gmail.query": "read",

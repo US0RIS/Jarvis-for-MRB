@@ -72,6 +72,9 @@ def emit_thinking(active: bool) -> None:
 PROACTIVE_ORIGINS = {
     "calendar_prebrief": "Calendar prebrief with connected context",
     "gpu_pressure": "Observed local GPU resource threshold",
+    "resource_pressure": "Observed local hardware or job-queue resource threshold",
+    "urgent_mail": "Unread urgent-email subject filter",
+    "action_verification": "Failed or timed-out tracked action verification",
     "meeting_contradiction": "Potential discrepancy in meeting notes",
     "external_watch": "Enrolled external watch condition",
     "vision_anomaly": "Vision alert from a user-authorized camera source",

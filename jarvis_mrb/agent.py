@@ -263,6 +263,9 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "pc.open_path": return _result(open_path(str(args.get("path") or "")))
     if tool == "pc.context": return AgentReply(True, describe_pc_context())
     if tool == "system.resources": return AgentReply(True, describe_resources())
+    if tool == "proactive.explain_last":
+        from jarvis_mrb.proactive_explain import describe_latest
+        return AgentReply(True, describe_latest())
     if tool == "capabilities.backlog":
         from jarvis_mrb.feature_backlog import load
         inventory = load()

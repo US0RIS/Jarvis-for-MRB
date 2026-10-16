@@ -85,7 +85,7 @@ question "What capabilities are verified?" report the nine tracked feature
 slices and **missing** acceptance scopes. A passing local unit test cannot
 claim hardware acceptance.
 
-The authenticated `GET /build/provenance` endpoint and iPhone Settings → **Verify Running Backend** display which PC checkout revision and process instance answered. A GitHub commit alone does not prove that code was deployed, and this diagnostic does not claim to identify the installed iPhone binary.
+The authenticated `GET /build/provenance` endpoint and iPhone Settings → **Verify Running Backend** display which PC checkout revision and process instance answered. iPhone Settings → **Check Capability Evidence** also displays how many tracked capabilities have all required acceptance scopes. A GitHub commit alone does not prove that code was deployed, and neither diagnostic claims to identify the installed iPhone binary.
 
 Ask "Why did you tell me this?" or call authenticated `GET /proactive/last-receipt` to inspect the last recorded proactive alert and its known originating subsystem. This **does not** imply the phone displayed it or that the user heard it. Public claim lookups now generate hash-linked `V-...` receipts inspectable through the existing Research Receipt interface, and their six-hour lookup TTL does not turn retrieved page mentions into proof of a particular official post.
 

@@ -16,7 +16,7 @@ class FreshnessPolicyTests(unittest.TestCase):
     def test_new_public_model_release_forces_lookup(self) -> None:
         self.assertEqual(
             freshness_decision("Did Google announce Gemini 4 Argon today?").kind,
-            "search",
+            "verify",
         )
         self.assertEqual(
             freshness_decision("Gemma 4 was just released - is it any good?").kind,
@@ -25,7 +25,7 @@ class FreshnessPolicyTests(unittest.TestCase):
 
     def test_suspect_public_screenshot_is_verified_not_forged_from_pixels(self) -> None:
         decision = freshness_decision("Is the Gemini 4 Argon announcement fake?")
-        self.assertEqual(decision.kind, "search")
+        self.assertEqual(decision.kind, "verify")
         self.assertIn("Gemini 4 Argon", decision.query)
         self.assertNotIn("fake", decision.query)
         ambiguous = freshness_decision("Is this screenshot fake?")
@@ -55,7 +55,7 @@ class FreshnessPolicyTests(unittest.TestCase):
                 {"role": "assistant", "content": "That sounds fabricated."},
             ],
         )
-        self.assertEqual(decision.kind, "search")
+        self.assertEqual(decision.kind, "verify")
         self.assertIn("Google Gemini 4 Argon official announcement post", decision.query)
         self.assertNotIn("announced", decision.query)
 
@@ -89,7 +89,8 @@ class FreshnessPolicyTests(unittest.TestCase):
         stream_entry = streaming[streaming.index("def stream_natural_language("):]
         for text in (agent_entry, stream_entry):
             self.assertLess(text.index("freshness_decision("), text.index("_fast_path("))
-            self.assertIn('execute_tool("web.search"', text)
+            self.assertIn('tool_name = "web.verify"', text)
+            self.assertIn("execute_tool(tool_name", text)
 
     def test_normal_chat_calls_search_before_model(self) -> None:
         from jarvis_mrb import agent
@@ -101,7 +102,7 @@ class FreshnessPolicyTests(unittest.TestCase):
             result = agent.handle_natural_language("Did Google announce Gemini 4 Argon today?")
         self.assertIn("Verified by web search", result.message)
         tool.assert_called_once_with(
-            "web.search", {"query": "Did Google announce Gemini 4 Argon today?", "num": 5}
+            "web.verify", {"query": "Did Google announce Gemini 4 Argon today?", "num": 8}
         )
         planner.assert_not_called()
 
@@ -115,7 +116,7 @@ class FreshnessPolicyTests(unittest.TestCase):
             response = list(streaming_agent.stream_natural_language("Did Google announce Gemini 4 Argon today?"))
         self.assertIn("Verified by web search", " ".join(response))
         tool.assert_called_once_with(
-            "web.search", {"query": "Did Google announce Gemini 4 Argon today?", "num": 5}
+            "web.verify", {"query": "Did Google announce Gemini 4 Argon today?", "num": 8}
         )
 
     def test_airpods_selection_is_not_just_ui_label(self) -> None:

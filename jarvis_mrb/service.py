@@ -642,7 +642,7 @@ def _execute_job(command: str) -> str:
     message = reply.message
     normalized = command.lower()
     if message and ("briefing" in normalized or normalized.startswith("remind ")):
-        emit_proactive(message, cue="task_complete", severity="info")
+        emit_proactive(message, cue="task_complete", severity="info", origin="command_followup")
     return message
 
 

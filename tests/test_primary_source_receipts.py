@@ -73,6 +73,16 @@ class PrimarySourceReceiptTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             integrity.record_primary_source_check("Q","definitely_fake",[])
 
+    def test_latest_receipt_is_truly_latest_with_same_second_timestamps(self):
+        first=integrity.record_primary_source_check(
+            "Did Google announce Gemini 4 Argon?", "unverified", []
+        )
+        second=integrity.record_primary_source_check(
+            "Did Google announce Gemini 5?", "unverified", []
+        )
+        self.assertNotEqual(first,second)
+        self.assertEqual(integrity.load_receipt("latest")["receipt_id"],second)
+
     def test_receipt_freshness_expires_but_never_promotes_to_proof(self):
         when=datetime.now(timezone.utc).replace(microsecond=0)
         rid=integrity.record_primary_source_check(

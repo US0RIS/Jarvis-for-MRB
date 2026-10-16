@@ -78,7 +78,7 @@ class CapabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(output["scope"],"unit")
         unit_args=runner.call_args_list[1].args[0]
         self.assertEqual(unit_args[:4],[evidence.sys.executable,"-m","unittest","discover"])
-        self.assertEqual(unit_args[-1],"test_user_belief_model.py")
+        self.assertEqual(unit_args[-2],"test_user_belief_model.py")
         self.assertFalse(runner.call_args_list[1].kwargs.get("shell",False))
 
     def test_voice_self_description_uses_permissioned_deterministic_route(self):

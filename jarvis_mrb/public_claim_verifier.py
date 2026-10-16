@@ -52,15 +52,15 @@ def _target_phrase(query: str) -> str:
 def _safe_source(url: str, allowed: tuple[str,...]) -> bool:
     try:
         parts=urlsplit(url)
+        return bool(
+            parts.scheme=="https"
+            and parts.hostname in allowed
+            and not parts.username and not parts.password
+            and parts.port in {None,443}
+            and not parts.fragment
+        )
     except ValueError:
         return False
-    return bool(
-        parts.scheme=="https"
-        and parts.hostname in allowed
-        and not parts.username and not parts.password
-        and parts.port in {None,443}
-        and not parts.fragment
-    )
 
 
 def _page_text(content: bytes) -> str:

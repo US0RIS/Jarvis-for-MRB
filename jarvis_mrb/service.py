@@ -3275,7 +3275,8 @@ def meeting_finish(
 def tts_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
     _check_auth(authorization)
     from jarvis_mrb.tts_client import TTS_PROVIDER
-    return {"status": "ready" if tts_health() else "unavailable",
+    reachable = tts_health()
+    return {"status": ("discovered" if TTS_PROVIDER == "voicestudio" else "ready") if reachable else "unavailable",
             "provider": TTS_PROVIDER}
 
 

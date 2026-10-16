@@ -318,8 +318,20 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
         return _result(web_answer(str(args.get("query") or ""), num=int(args.get("num") or 5)))
     if tool == "web.verify":
         from jarvis_mrb.public_claim_verifier import verify_public_claim
-        result = verify_public_claim(str(args.get("query") or ""),num=int(args.get("num") or 8))
-        return AgentReply(bool(result["ok"]),str(result["message"]))
+        query = str(args.get("query") or "")
+        result = verify_public_claim(query, num=int(args.get("num") or 8))
+        receipt_suffix = ""
+        try:
+            from jarvis_mrb.search_integrity import record_primary_source_check
+            receipt_id = record_primary_source_check(
+                query, str(result["status"]), list(result.get("sources") or []),
+            )
+            receipt_suffix = f" Primary-source lookup receipt: {receipt_id}."
+        except Exception:
+            # Receipt storage must not turn an unavailable verification into a
+            # fabricated affirmative or negative claim about a public post.
+            receipt_suffix = " Verification receipt storage was unavailable."
+        return AgentReply(bool(result["ok"]), str(result["message"]) + receipt_suffix)
 
     if tool == "vision.recall":
         try:

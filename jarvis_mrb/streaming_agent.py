@@ -475,7 +475,8 @@ def stream_natural_language(
         if freshness.kind == "clarify":
             yield freshness.message
         else:
-            reply = _respectful(execute_tool("web.search", {"query": freshness.query, "num": 5}))
+            tool_name = "web.verify" if freshness.kind == "verify" else "web.search"
+            reply = _respectful(execute_tool(tool_name, {"query": freshness.query, "num": 8 if freshness.kind == "verify" else 5}))
             if reply.message and reply.message != "__EXIT__":
                 yield reply.message
         return

@@ -198,6 +198,12 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     if answer:
         return answer
     if lower in {
+        "how many future features are left", "how many future ideas are tracked",
+        "how many future features", "future backlog status",
+        "what is in the future feature backlog"
+    }:
+        return _tool("capability_backlog", "capabilities.backlog")
+    if lower in {
         "what can you do right now", "which of your features are actually verified",
         "what capabilities are verified", "show capability evidence",
         "what features have passed tests", "capability evidence status"

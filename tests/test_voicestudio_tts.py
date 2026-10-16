@@ -87,7 +87,8 @@ class VoiceStudioIntegrationTests(unittest.TestCase):
             with (
                 patch.object(tts,"tts_health",return_value=True),
                 patch.object(tts.httpx,"Client",FakeClient),
-            ),self.assertRaises(RuntimeError):
+                self.assertRaises(RuntimeError),
+            ):
                 tts.synthesize_wav("Hi")
         finally:
             FakeClient.result=FakeResponse()

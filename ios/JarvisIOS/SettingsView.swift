@@ -264,6 +264,10 @@ struct SettingsView: View {
                         Text("The selected Bluetooth hands-free microphone is unavailable. Check that the headset is connected, or select Automatic.")
                             .font(.caption)
                             .foregroundStyle(.orange)
+                    } else if audioRouteManager.preferredBluetoothInputNotActive {
+                        Text("The preferred Bluetooth headset is connected, but the current microphone route is different. The system has not confirmed that capture uses the selected headset. Restart listening or check the iPhone's audio route.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
                     Toggle("Adaptive whisper mode", isOn: $settings.adaptiveWhisperEnabled)
                     Toggle("Quiet-speech mode", isOn: $settings.subvocalModeEnabled)

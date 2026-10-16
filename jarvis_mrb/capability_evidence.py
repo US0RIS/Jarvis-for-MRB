@@ -122,6 +122,10 @@ def run_unit_acceptance(
         [sys.executable,"-m","unittest","discover","-s","tests","-p",pattern,"-v"],
         cwd=_SOURCE_ROOT,capture_output=True,text=True,check=False,timeout=timeout,
     )
+    # Unit discovery returning 0 tests is not evidence of anything passing.
+    observed_output=proc.stdout+"\n"+proc.stderr
+    discovered=re.search(r"Ran\s+([1-9][0-9]*)\s+tests?",observed_output)
+    passed=proc.returncode==0 and discovered is not None
     # Content hash proves *which fixture* was exercised, not that acceptance
     # against physical hardware occurred.
     fixture_sha=hashlib.sha256(suite.read_bytes()).hexdigest()
@@ -129,7 +133,7 @@ def run_unit_acceptance(
         "id":"r_"+uuid4().hex,
         "capability_id":capability_id,
         "scope":"unit",
-        "result":"passed" if proc.returncode==0 else "failed",
+        "result":"passed" if passed else "failed",
         "commit":commit,
         "fixture_sha256":fixture_sha,
         "observed_at":_utc().isoformat(),

@@ -1031,6 +1031,18 @@ def attention_budget_status(
     return status()
 
 
+@app.get("/capabilities/backlog")
+def capability_backlog_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.feature_backlog import load
+    result = load()
+    return {key: value for key, value in result.items() if key != "items"}
+
+
 @app.get("/capabilities/evidence")
 def capability_evidence_status(
     response: Response,

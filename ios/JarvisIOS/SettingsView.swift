@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var allowlistStatus = "Loading allowed recipients…"
     @State private var isSavingAllowlist = false
     @State private var neuralVoiceStatus = "Not checked"
+    @State private var runtimeProvenanceStatus = "Not checked"
     @State private var useFastPlanner = false
     @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
@@ -41,6 +42,12 @@ struct SettingsView: View {
                     SecureField("API token", text: $settings.apiToken)
                         .textInputAutocapitalization(.never)
                     Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("PC backend build", value: runtimeProvenanceStatus)
+                        .font(.caption)
+                    Button("Verify Running Backend") { Task { await checkRuntimeProvenance() } }
+                    Text("Shows the responding PC's checkout revision and process identity. It does not verify that this iPhone app was built from the same commit or that any physical feature passed testing.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -376,7 +383,8 @@ struct SettingsView: View {
                 async let plannerLoad: Void = loadPlannerModel()
                 async let voiceCheck: Void = checkNeuralVoice()
                 async let recipientsLoad: Void = loadAllowedRecipients()
-                _ = await (plannerLoad, voiceCheck, recipientsLoad)
+                async let buildCheck: Void = checkRuntimeProvenance()
+                _ = await (plannerLoad, voiceCheck, recipientsLoad, buildCheck)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -431,6 +439,17 @@ struct SettingsView: View {
         } catch {
             useFastPlanner = previousFastValue
             plannerModelStatus = "Model switch failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func checkRuntimeProvenance() async {
+        runtimeProvenanceStatus = "Checking…"
+        do {
+            let snapshot = try await client.runtimeProvenance()
+            let revision = snapshot.checkoutCommit.map { String($0.prefix(12)) } ?? "unknown"
+            runtimeProvenanceStatus = "\(revision) • \(snapshot.checkoutState)"
+        } catch {
+            runtimeProvenanceStatus = "Cannot verify PC backend"
         }
     }
 

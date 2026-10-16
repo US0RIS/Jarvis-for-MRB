@@ -137,6 +137,9 @@ class FreshnessPolicyTests(unittest.TestCase):
         self.assertIn("try session.setPreferredInput(builtInInput)", route)
         self.assertIn('Text("AirPods").tag("airpods")', ui)
         self.assertIn("audioRouteManager.routeSummary", ui)
+        self.assertIn("preferredBluetoothInputNotActive", route)
+        self.assertIn("input?.uid != selectedInput?.uid", route)
+        self.assertIn("audioRouteManager.preferredBluetoothInputNotActive", ui)
 
 
 if __name__ == "__main__":

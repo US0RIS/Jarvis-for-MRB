@@ -594,6 +594,20 @@ struct TTSStatusResponse: Decodable {
     let provider: String?
 }
 
+struct RuntimeProvenanceResponse: Decodable {
+    let processStartedAt: String
+    let runtimeInstance: String
+    let checkoutCommit: String?
+    let checkoutState: String
+
+    enum CodingKeys: String, CodingKey {
+        case processStartedAt = "process_started_at"
+        case runtimeInstance = "runtime_instance"
+        case checkoutCommit = "checkout_commit"
+        case checkoutState = "checkout_state"
+    }
+}
+
 struct PlannerModelResponse: Decodable {
     let model: String
     let autoRoute: Bool
@@ -2184,6 +2198,12 @@ struct JarvisAPIClient {
                 }
             }
         }
+    }
+
+    func runtimeProvenance() async throws -> RuntimeProvenanceResponse {
+        let (data, response) = try await get(path: "build/provenance", timeout: 5)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RuntimeProvenanceResponse.self, from: data)
     }
 
     func ttsStatus() async throws -> TTSStatusResponse {

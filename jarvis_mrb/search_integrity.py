@@ -241,7 +241,7 @@ def research_receipt(receipt_id: str = "latest", *, detail: str = "summary") -> 
         ]
         for row in (receipt.get("sources") or [])[:8]:
             lines.append(f"- {row.get('id', '?')}: {row.get('url', '')}")
-        integrity_ok, integrity_detail = verify_receipt_ledger(str(receipt.get("receipt_id") or ""))
+        integrity_ok, integrity_detail = verify_primary_source_receipt(receipt)
         lines.append("Ledger integrity: " + ("valid" if integrity_ok else "FAILED: " + integrity_detail))
         return json.dumps({"receipt": receipt, "freshness": status,
                            "ledger_valid": integrity_ok}, indent=2) if detail.lower() in {
@@ -376,6 +376,66 @@ def record_primary_source_check(
     _finish_run(run_id, receipt, final_hash)
     _write_receipt(receipt)
     return run_id
+
+
+def verify_primary_source_receipt(receipt: dict[str, Any]) -> tuple[bool, str]:
+    """Verify the receipt is consistent with its signed sequence of local events.
+
+    This checks tampering with evidence references, receipt outcome or event
+    chain. It does NOT verify the original remote webpage exists today or that
+    the page proves any announcement.
+    """
+    rid = str(receipt.get("receipt_id") or "")
+    if not re.fullmatch(r"V-[A-F0-9]{12}", rid):
+        return False, "invalid receipt ID"
+    linked, final_hash = verify_receipt_ledger(rid)
+    if not linked:
+        return False, final_hash
+    if str(receipt.get("final_hash") or "") != final_hash:
+        return False, "receipt final-hash mismatch"
+    with sqlite3.connect(AUDIT_DB) as db:
+        rows = db.execute(
+            "SELECT kind, payload_json FROM research_events WHERE run_id=? ORDER BY seq",
+            (rid,),
+        ).fetchall()
+        run = db.execute(
+            "SELECT final_hash FROM research_runs WHERE id=?", (rid,)
+        ).fetchone()
+    if not run or str(run[0] or "") != final_hash:
+        return False, "persisted run hash mismatch"
+    try:
+        expected_sources = []
+        outcomes = []
+        for kind, payload_json in rows:
+            payload = json.loads(payload_json)
+            if not isinstance(payload, dict):
+                return False, "malformed event payload"
+            if kind == "first_party_page_fetched":
+                expected_sources.append({
+                    "id": payload.get("source_id"),
+                    "url": payload.get("url"),
+                    "host": payload.get("host"),
+                    "source_type": payload.get("source_type"),
+                })
+            elif kind == "verification_outcome":
+                outcomes.append(payload)
+        if len(outcomes) != 1:
+            return False, "missing or duplicated outcome"
+        if receipt.get("sources") != expected_sources:
+            return False, "receipt sources differ from logged retrievals"
+        if receipt.get("outcome") != outcomes[0].get("outcome"):
+            return False, "receipt outcome differs from logged outcome"
+        if receipt.get("source_mentions_subject") is not bool(expected_sources):
+            return False, "source-mention summary mismatch"
+        if (
+            receipt.get("proves_absence") is not False
+            or receipt.get("authenticated_social_post") is not False
+            or receipt.get("claim_entailment") != "not_evaluated"
+        ):
+            return False, "unsupported proof claim in receipt"
+    except (ValueError, TypeError, KeyError):
+        return False, "unreadable event or receipt"
+    return True, final_hash
 
 
 def load_receipt(receipt_id: str = "latest") -> dict[str, Any] | None:

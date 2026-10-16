@@ -591,6 +591,7 @@ struct EmailAllowlistResponse: Decodable {
 
 struct TTSStatusResponse: Decodable {
     let status: String
+    let provider: String?
 }
 
 struct PlannerModelResponse: Decodable {
@@ -2185,10 +2186,10 @@ struct JarvisAPIClient {
         }
     }
 
-    func ttsStatus() async throws -> String {
+    func ttsStatus() async throws -> TTSStatusResponse {
         let (data, response) = try await get(path: "tts/status", timeout: 5)
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(TTSStatusResponse.self, from: data).status
+        return try JSONDecoder().decode(TTSStatusResponse.self, from: data)
     }
 
     func plannerModel() async throws -> PlannerModelResponse {

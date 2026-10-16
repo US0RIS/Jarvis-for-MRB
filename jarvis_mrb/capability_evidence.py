@@ -60,6 +60,11 @@ CATALOG: dict[str, dict[str, Any]] = {
         "required":("unit", "real_notification_acceptance"),
         "unit_pattern":"test_attention_budget.py",
     },
+    "proactive_explanation":{
+        "title":"Why-did-you-alert-me provenance receipt",
+        "required":("unit", "real_notification_acceptance"),
+        "unit_pattern":"test_proactive_explain.py",
+    },
 }
 _ALLOWED_SCOPES = {"unit","ios_simulator","physical_airpods","live_official_source",
                    "real_verified_fact_adapter","actual_voicestudio_audio",

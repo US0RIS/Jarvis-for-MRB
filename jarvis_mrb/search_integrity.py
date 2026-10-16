@@ -329,6 +329,13 @@ def record_primary_source_check(
         host = str(source.get("host") or "").strip()
         if not url or len(url) > 1000 or not host or len(host) > 200:
             raise ValueError("Invalid primary-source provenance.")
+        from urllib.parse import urlsplit
+        from jarvis_mrb.public_claim_verifier import _domains, _safe_source
+        if (
+            not _safe_source(url, _domains(question))
+            or urlsplit(url).hostname != host
+        ):
+            raise ValueError("Primary-source URL must match the official domain for the question.")
         clean_sources.append({
             "url": url, "host": host,
             "source_type": "first_party_page_fetched",

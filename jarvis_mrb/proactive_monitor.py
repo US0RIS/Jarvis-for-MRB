@@ -156,6 +156,7 @@ def _check_calendar() -> None:
                         str(prebrief.get("message") or ""),
                         cue="attention",
                         severity=str(prebrief.get("severity") or "info"),
+                        origin="calendar_prebrief",
                     )
                 continue
 
@@ -168,6 +169,7 @@ def _check_calendar() -> None:
                 f"You have {summary} in about {rounded} minutes{suffix}.",
                 cue="attention",
                 severity="warning",
+                origin="calendar_prebrief",
             )
         elif minutes <= 45:
             if not _dedup(f"calendar-soon:{event_id}", 2 * 3600):
@@ -177,6 +179,7 @@ def _check_calendar() -> None:
                 f"Your next event, {summary}, starts in about {rounded} minutes.",
                 cue="attention",
                 severity="info",
+                origin="calendar_prebrief",
             )
 
 
@@ -201,6 +204,7 @@ def _check_urgent_mail() -> None:
             f"There is an unread message from {sender} with the subject {subject}.",
             cue="attention",
             severity="warning",
+            origin="urgent_mail",
         )
 
 
@@ -223,7 +227,7 @@ def _check_action_verifications() -> None:
             message = f"I could not verify the outcome of a tracked action before its deadline: {tool}."
         if evidence:
             message += f" {evidence}"
-        emit_proactive(message, cue="error", severity="warning")
+        emit_proactive(message, cue="error", severity="warning", origin="action_verification")
 
 
 def _proactive_enabled() -> bool:

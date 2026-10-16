@@ -221,7 +221,7 @@ Only list objects you can actually see. Do not list people or fixed room surface
                     _last_alert_at = now
             if not duplicate:
                 cue = "urgent" if severity == "urgent" else ("warning" if severity == "warning" else "attention")
-                emit_proactive(alert, cue=cue, severity=severity)
+                emit_proactive(alert, cue=cue, severity=severity, origin="vision_anomaly")
     except (httpx.HTTPError, ValueError, TypeError, OSError) as exc:
         _last_error = str(exc)[:500]
         _last_analysis_ms = int((time.perf_counter() - started) * 1000)

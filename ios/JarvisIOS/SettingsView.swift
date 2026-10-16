@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var geofence: GeofenceManager
+    @ObservedObject var audioRouteManager: AudioRouteManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var allowedRecipients: [String] = []
@@ -10,6 +11,8 @@ struct SettingsView: View {
     @State private var allowlistStatus = "Loading allowed recipients…"
     @State private var isSavingAllowlist = false
     @State private var neuralVoiceStatus = "Not checked"
+    @State private var runtimeProvenanceStatus = "Not checked"
+    @State private var capabilityEvidenceStatus = "Not checked"
     @State private var useFastPlanner = false
     @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
@@ -40,6 +43,15 @@ struct SettingsView: View {
                     SecureField("API token", text: $settings.apiToken)
                         .textInputAutocapitalization(.never)
                     Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("PC backend build", value: runtimeProvenanceStatus)
+                        .font(.caption)
+                    Button("Verify Running Backend") { Task { await checkRuntimeProvenance() } }
+                    LabeledContent("Feature acceptance", value: capabilityEvidenceStatus)
+                        .font(.caption)
+                    Button("Check Capability Evidence") { Task { await checkCapabilityEvidence() } }
+                    Text("These checks distinguish repository code, passing tests and real-world device verification. They do not mark a physical feature working merely because a commit exists.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -247,7 +259,27 @@ struct SettingsView: View {
 
                 Section("Voice & Privacy") {
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
-                    Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
+                    Toggle("Use Bluetooth hands-free microphone", isOn: $settings.preferBluetoothAudio)
+                    Picker("Preferred headset", selection: $settings.bluetoothAudioDevicePreference) {
+                        Text("Automatic").tag("auto")
+                        Text("AirPods").tag("airpods")
+                        Text("Ray-Ban Meta").tag("meta")
+                    }
+                    .disabled(!settings.preferBluetoothAudio)
+                    Text("AirPods use the normal iPhone Bluetooth hands-free route; no separate AirPods app or pairing SDK is needed. When both headsets are connected, choose one above. An unavailable selection falls back to the iPhone microphone instead of silently switching headsets. iOS controls output routing. Changes apply to the next listening/speaking turn; use Control Center to select the output device when needed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("Active input/output", value: audioRouteManager.routeSummary)
+                        .font(.caption)
+                    if audioRouteManager.requestedBluetoothRouteUnavailable {
+                        Text("The selected Bluetooth hands-free microphone is unavailable. Check that the headset is connected, or select Automatic.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if audioRouteManager.preferredBluetoothInputNotActive {
+                        Text("The preferred Bluetooth headset is connected, but the current microphone route is different. The system has not confirmed that capture uses the selected headset. Restart listening or check the iPhone's audio route.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     Toggle("Adaptive whisper mode", isOn: $settings.adaptiveWhisperEnabled)
                     Toggle("Quiet-speech mode", isOn: $settings.subvocalModeEnabled)
                     Toggle("Adapt HUD cue volume to room noise", isOn: $settings.adaptiveCueVolumeEnabled)
@@ -270,7 +302,7 @@ struct SettingsView: View {
                         Text("Neural voice")
                         Spacer()
                         Text(neuralVoiceStatus)
-                            .foregroundStyle(neuralVoiceStatus == "Kokoro ready" ? Color.green : Color.secondary)
+                            .foregroundStyle(neuralVoiceStatus.hasSuffix(" ready") ? Color.green : Color.secondary)
                     }
                     Button("Check Neural Voice") { Task { await checkNeuralVoice() } }
 
@@ -355,7 +387,9 @@ struct SettingsView: View {
                 async let plannerLoad: Void = loadPlannerModel()
                 async let voiceCheck: Void = checkNeuralVoice()
                 async let recipientsLoad: Void = loadAllowedRecipients()
-                _ = await (plannerLoad, voiceCheck, recipientsLoad)
+                async let buildCheck: Void = checkRuntimeProvenance()
+                async let evidenceCheck: Void = checkCapabilityEvidence()
+                _ = await (plannerLoad, voiceCheck, recipientsLoad, buildCheck, evidenceCheck)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -413,11 +447,41 @@ struct SettingsView: View {
         }
     }
 
+    private func checkCapabilityEvidence() async {
+        capabilityEvidenceStatus = "Checking…"
+        do {
+            let result = try await client.capabilityEvidence()
+            let total = result.capabilities.count
+            let verified = result.capabilities.values.filter { $0.status == "verified" }.count
+            capabilityEvidenceStatus = "\(verified) / \(total) fully verified"
+        } catch {
+            capabilityEvidenceStatus = "No current acceptance readback"
+        }
+    }
+
+    private func checkRuntimeProvenance() async {
+        runtimeProvenanceStatus = "Checking…"
+        do {
+            let snapshot = try await client.runtimeProvenance()
+            let revision = snapshot.checkoutCommit.map { String($0.prefix(12)) } ?? "unknown"
+            runtimeProvenanceStatus = "\(revision) • \(snapshot.checkoutState)"
+        } catch {
+            runtimeProvenanceStatus = "Cannot verify PC backend"
+        }
+    }
+
     private func checkNeuralVoice() async {
         neuralVoiceStatus = "Checking…"
         do {
-            let status = try await client.ttsStatus()
-            neuralVoiceStatus = status == "ready" ? "Kokoro ready" : "Starting / unavailable"
+            let result = try await client.ttsStatus()
+            let provider = result.provider == "voicestudio" ? "VoiceStudio" : (result.provider == "kokoro" ? "Kokoro" : "Local voice")
+            if result.status == "ready" {
+                neuralVoiceStatus = "\(provider) ready"
+            } else if result.status == "discovered" {
+                neuralVoiceStatus = "\(provider) API reachable"
+            } else {
+                neuralVoiceStatus = "\(provider) unavailable"
+            }
         } catch {
             neuralVoiceStatus = "Jarvis server offline"
         }

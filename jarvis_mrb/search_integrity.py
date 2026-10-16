@@ -9,7 +9,7 @@ import sqlite3
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -228,6 +228,25 @@ def research_receipt(receipt_id: str = "latest", *, detail: str = "summary") -> 
     receipt = load_receipt(receipt_id)
     if not receipt:
         return "No Research Receipt was found."
+    if receipt.get("kind") == "primary_source_lookup":
+        status = primary_source_receipt_status(receipt)
+        lines = [
+            f"Primary-source lookup receipt {receipt.get('receipt_id', 'unknown')}",
+            f"Question: {receipt.get('question', '')}",
+            f"Outcome: {receipt.get('outcome', 'unknown')}",
+            f"Checked: {receipt.get('completed_at', 'unknown')}",
+            f"Freshness: {status['freshness']} (TTL {status['ttl_hours']} hours)",
+            f"Sources actually fetched: {len(receipt.get('sources') or [])}.",
+            "Proof of original social-media post or screenshot: NOT established.",
+        ]
+        for row in (receipt.get("sources") or [])[:8]:
+            lines.append(f"- {row.get('id', '?')}: {row.get('url', '')}")
+        integrity_ok, integrity_detail = verify_primary_source_receipt(receipt)
+        lines.append("Ledger integrity: " + ("valid" if integrity_ok else "FAILED: " + integrity_detail))
+        return json.dumps({"receipt": receipt, "freshness": status,
+                           "ledger_valid": integrity_ok}, indent=2) if detail.lower() in {
+            "full", "json", "complete"
+        } else "\n".join(lines)
     if detail.lower() in {"full", "json", "complete"}:
         return json.dumps(receipt, ensure_ascii=False, indent=2)
     metrics = receipt.get("coverage") or {}
@@ -250,12 +269,188 @@ def research_receipt(receipt_id: str = "latest", *, detail: str = "summary") -> 
     return "\n".join(lines)
 
 
+def primary_source_receipt_status(
+    receipt: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """A prior retrieval does not remain current indefinitely.
+
+    Freshness is a time classification, NOT proof that the checked page
+    actually entailed a claim. Negative search and screenshot authenticity
+    remain unresolved even while the receipt itself is fresh.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("Receipt freshness requires a timezone-aware time.")
+    if receipt.get("kind") != "primary_source_lookup":
+        return {"freshness": "not_applicable", "ttl_hours": None}
+    ttl = 6
+    try:
+        observed = datetime.fromisoformat(str(receipt.get("completed_at") or ""))
+    except (ValueError, TypeError):
+        observed = None
+    if observed is None or observed.tzinfo is None:
+        state = "unknown_timestamp"
+    elif observed > current:
+        state = "future_timestamp_invalid"
+    elif current - observed > timedelta(hours=ttl):
+        state = "stale_refresh_required"
+    else:
+        state = "fresh_lookup_only"
+    return {"freshness": state, "ttl_hours": ttl,
+            "as_of": str(receipt.get("completed_at") or ""),
+            "may_reuse_as_proof": False}
+
+
+def record_primary_source_check(
+    question: str,
+    outcome: str,
+    sources: list[dict[str, Any]],
+) -> str:
+    """Persist an inspectable primary-source lookup receipt with hash-linked events.
+
+    This is evidence of *retrieval activity*, not proof that an announcement,
+    screenshot or social-media post was authentic. Only the first-party verifier
+    should call this. A source mention cannot be escalated to truth by this API.
+    """
+    if not question or not isinstance(question, str) or len(question) > 1000:
+        raise ValueError("Invalid public verification question.")
+    if outcome not in {
+        "unsupported_official_domain", "search_unavailable", "unverified",
+        "primary_source_mentions_subject",
+    }:
+        raise ValueError("Unknown primary-source verification outcome.")
+    clean_sources: list[dict[str, str]] = []
+    for source in sources[:8]:
+        if not isinstance(source, dict):
+            raise ValueError("Source evidence must be a mapping.")
+        url = str(source.get("url") or "").strip()
+        host = str(source.get("host") or "").strip()
+        if not url or len(url) > 1000 or not host or len(host) > 200:
+            raise ValueError("Invalid primary-source provenance.")
+        from urllib.parse import urlsplit
+        from jarvis_mrb.public_claim_verifier import _domains, _safe_source
+        if (
+            not _safe_source(url, _domains(question))
+            or urlsplit(url).hostname != host
+        ):
+            raise ValueError("Primary-source URL must match the official domain for the question.")
+        clean_sources.append({
+            "url": url, "host": host,
+            "source_type": "first_party_page_fetched",
+        })
+    if outcome != "primary_source_mentions_subject" and clean_sources:
+        raise ValueError("Unverified checks cannot advertise primary-source matches.")
+    if outcome == "primary_source_mentions_subject" and not clean_sources:
+        raise ValueError("A primary-source mention must include a retrieved source.")
+    run_id = "V-" + uuid.uuid4().hex[:12].upper()
+    started = _now()
+    _ensure_store()
+    _start_run(run_id, " ".join(question.split())[:1000], started)
+    _append_event(run_id, "verification_started", {
+        "question": " ".join(question.split())[:1000],
+        "mode": "strict_first_party_retrieval",
+    })
+    for index, source in enumerate(clean_sources, 1):
+        _append_event(run_id, "first_party_page_fetched", {
+            "source_id": f"E{index}", **source, "claim_entailment": "not_evaluated",
+        })
+    final_hash = _append_event(run_id, "verification_outcome", {
+        "outcome": outcome,
+        "authenticated_social_post": False,
+        "proves_absence": False,
+        "proof_of_claim": False,
+    })
+    receipt = {
+        "receipt_id": run_id,
+        "question": " ".join(question.split())[:1000],
+        "created_at": started,
+        "completed_at": _now(),
+        "status": "completed",
+        "kind": "primary_source_lookup",
+        "outcome": outcome,
+        "sources": [
+            {"id": f"E{index}", **source} for index, source in enumerate(clean_sources, 1)
+        ],
+        "source_mentions_subject": bool(clean_sources),
+        "claim_entailment": "not_evaluated",
+        "authenticated_social_post": False,
+        "proves_absence": False,
+        "verification_scope": "fetching selected first-party pages only",
+        "final_hash": final_hash,
+    }
+    _finish_run(run_id, receipt, final_hash)
+    _write_receipt(receipt)
+    return run_id
+
+
+def verify_primary_source_receipt(receipt: dict[str, Any]) -> tuple[bool, str]:
+    """Verify the receipt is consistent with its signed sequence of local events.
+
+    This checks tampering with evidence references, receipt outcome or event
+    chain. It does NOT verify the original remote webpage exists today or that
+    the page proves any announcement.
+    """
+    rid = str(receipt.get("receipt_id") or "")
+    if not re.fullmatch(r"V-[A-F0-9]{12}", rid):
+        return False, "invalid receipt ID"
+    linked, final_hash = verify_receipt_ledger(rid)
+    if not linked:
+        return False, final_hash
+    if str(receipt.get("final_hash") or "") != final_hash:
+        return False, "receipt final-hash mismatch"
+    with sqlite3.connect(AUDIT_DB) as db:
+        rows = db.execute(
+            "SELECT kind, payload_json FROM research_events WHERE run_id=? ORDER BY seq",
+            (rid,),
+        ).fetchall()
+        run = db.execute(
+            "SELECT final_hash FROM research_runs WHERE id=?", (rid,)
+        ).fetchone()
+    if not run or str(run[0] or "") != final_hash:
+        return False, "persisted run hash mismatch"
+    try:
+        expected_sources = []
+        outcomes = []
+        for kind, payload_json in rows:
+            payload = json.loads(payload_json)
+            if not isinstance(payload, dict):
+                return False, "malformed event payload"
+            if kind == "first_party_page_fetched":
+                expected_sources.append({
+                    "id": payload.get("source_id"),
+                    "url": payload.get("url"),
+                    "host": payload.get("host"),
+                    "source_type": payload.get("source_type"),
+                })
+            elif kind == "verification_outcome":
+                outcomes.append(payload)
+        if len(outcomes) != 1:
+            return False, "missing or duplicated outcome"
+        if receipt.get("sources") != expected_sources:
+            return False, "receipt sources differ from logged retrievals"
+        if receipt.get("outcome") != outcomes[0].get("outcome"):
+            return False, "receipt outcome differs from logged outcome"
+        if receipt.get("source_mentions_subject") is not bool(expected_sources):
+            return False, "source-mention summary mismatch"
+        if (
+            receipt.get("proves_absence") is not False
+            or receipt.get("authenticated_social_post") is not False
+            or receipt.get("claim_entailment") != "not_evaluated"
+        ):
+            return False, "unsupported proof claim in receipt"
+    except (ValueError, TypeError, KeyError):
+        return False, "unreadable event or receipt"
+    return True, final_hash
+
+
 def load_receipt(receipt_id: str = "latest") -> dict[str, Any] | None:
     _ensure_store()
     with sqlite3.connect(AUDIT_DB) as con:
         if receipt_id.lower() == "latest":
             row = con.execute(
-                "SELECT receipt_json FROM research_runs WHERE receipt_json IS NOT NULL ORDER BY created_at DESC LIMIT 1"
+                "SELECT receipt_json FROM research_runs WHERE receipt_json IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1"
             ).fetchone()
         else:
             row = con.execute(

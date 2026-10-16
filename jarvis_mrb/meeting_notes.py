@@ -92,6 +92,7 @@ def _check_metric_claims(chunk: str) -> None:
                 verdict,
                 cue="attention",
                 severity="info",
+                origin="meeting_contradiction",
             )
 
 

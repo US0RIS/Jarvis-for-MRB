@@ -28,6 +28,9 @@ final class AudioRouteManager: ObservableObject {
     @Published private(set) var isUsingBluetoothHFP = false
     @Published private(set) var isUsingBuiltInMic = false
     @Published private(set) var hasBluetoothHFP = false
+    @Published private(set) var hasPreferredBluetoothHFP = false
+    @Published private(set) var requestedBluetoothRouteUnavailable = false
+    @Published private(set) var preferredBluetoothInputNotActive = false
 
     private var routeChangeTask: Task<Void, Never>?
     private var inputsChangeTask: Task<Void, Never>?
@@ -42,7 +45,7 @@ final class AudioRouteManager: ObservableObject {
             return "\(currentInputName) (iPhone built-in mic) → \(currentOutputName)"
         }
         if isUsingBluetoothHFP {
-            return "\(currentInputName) (Bluetooth hands-free)"
+            return "\(currentInputName) (Bluetooth hands-free) → \(currentOutputName)"
         }
         return "\(currentInputName) → \(currentOutputName)"
     }
@@ -52,18 +55,17 @@ final class AudioRouteManager: ObservableObject {
         try session.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.allowBluetoothHFP, .defaultToSpeaker]
+            options: [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
         )
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
-        if preferBluetooth,
-           let bluetoothInput = preferredBluetoothInput(in: session.availableInputs ?? []) {
-            try session.setPreferredInput(bluetoothInput)
-        } else if !preferBluetooth,
-                  let builtInInput = preferredBuiltInInput(in: session.availableInputs ?? []) {
-            // Explicitly leave HFP when the user has asked for the phone microphone.
-            // Merely omitting setPreferredInput() can leave the previous Ray-Ban HFP
-            // route active after a hands-free session.
+        let inputs = session.availableInputs ?? []
+        let selectedBluetooth = preferBluetooth ? preferredBluetoothInput(in: inputs) : nil
+        if let selectedBluetooth {
+            try session.setPreferredInput(selectedBluetooth)
+        } else if let builtInInput = preferredBuiltInInput(in: inputs) {
+            // No silent switch to the *other* Bluetooth headset if the selected
+            // AirPods/Ray-Bans are unavailable. Fall back to the iPhone mic.
             try session.setPreferredInput(builtInInput)
         }
 
@@ -106,15 +108,40 @@ final class AudioRouteManager: ObservableObject {
         currentOutputName = output?.portName ?? "No output"
         isUsingBuiltInMic = input?.portType == .builtInMic
         isUsingBluetoothHFP = input?.portType == .bluetoothHFP || output?.portType == .bluetoothHFP
-        hasBluetoothHFP = (session.availableInputs ?? []).contains { $0.portType == .bluetoothHFP }
+        let available = session.availableInputs ?? []
+        hasBluetoothHFP = available.contains { $0.portType == .bluetoothHFP }
+        let selectedInput = preferredBluetoothInput(in: available)
+        hasPreferredBluetoothHFP = selectedInput != nil
+        let prefersBluetooth = UserDefaults.standard.object(forKey: "jarvis.preferBluetoothAudio") as? Bool ?? true
+        requestedBluetoothRouteUnavailable = prefersBluetooth && selectedInput == nil
+        // A connected headset is not proof that iOS actually routed capture
+        // through it. Detect mismatches using the system's active port UID.
+        preferredBluetoothInputNotActive = prefersBluetooth
+            && selectedInput != nil && input?.uid != selectedInput?.uid
     }
 
     private func preferredBluetoothInput(in inputs: [AVAudioSessionPortDescription]) -> AVAudioSessionPortDescription? {
         let bluetoothInputs = inputs.filter { $0.portType == .bluetoothHFP }
-        return bluetoothInputs.first(where: {
-            let name = $0.portName.lowercased()
+        func isMeta(_ port: AVAudioSessionPortDescription) -> Bool {
+            let name = port.portName.lowercased()
             return name.contains("ray-ban") || name.contains("rayban") || name.contains("meta")
-        }) ?? bluetoothInputs.first
+        }
+        func isAirPods(_ port: AVAudioSessionPortDescription) -> Bool {
+            port.portName.localizedCaseInsensitiveContains("airpods")
+        }
+        switch UserDefaults.standard.string(forKey: "jarvis.bluetoothAudioDevicePreference") ?? "auto" {
+        case "airpods":
+            // If the user renamed their AirPods without "AirPods" in the name,
+            // iOS does not expose a dependable vendor identity here. "Auto"
+            // remains available instead of pretending an exact match exists.
+            return bluetoothInputs.first(where: isAirPods)
+        case "meta":
+            return bluetoothInputs.first(where: isMeta)
+        default:
+            return bluetoothInputs.first(where: isMeta)
+                ?? bluetoothInputs.first(where: isAirPods)
+                ?? bluetoothInputs.first
+        }
     }
 
     private func preferredBuiltInInput(in inputs: [AVAudioSessionPortDescription]) -> AVAudioSessionPortDescription? {

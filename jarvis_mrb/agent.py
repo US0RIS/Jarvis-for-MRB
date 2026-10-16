@@ -263,6 +263,25 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "pc.open_path": return _result(open_path(str(args.get("path") or "")))
     if tool == "pc.context": return AgentReply(True, describe_pc_context())
     if tool == "system.resources": return AgentReply(True, describe_resources())
+    if tool == "proactive.explain_last":
+        from jarvis_mrb.proactive_explain import describe_latest
+        return AgentReply(True, describe_latest())
+    if tool == "capabilities.backlog":
+        from jarvis_mrb.feature_backlog import load
+        inventory = load()
+        return AgentReply(
+            True,
+            f"future.md currently contains {inventory['total']} tracked bold-led ideas, "
+            "including research candidates. These entries are design backlog, not implemented "
+            "or verified capabilities. The live capability ledger is a separate source."
+        )
+    if tool == "capabilities.status":
+        from jarvis_mrb.capability_evidence import inspect
+        evidence = inspect()
+        tracked = evidence["capabilities"]
+        names = [f"{item['title']}: {item['status'].replace('_',' ')}; missing " + ", ".join(item["missing_scopes"])
+                 for item in tracked.values()]
+        return AgentReply(True, "This is a limited acceptance ledger, not a full inventory. " + "; ".join(names))
 
     if tool == "google.status": return _result(google_status())
     if tool == "contacts.resolve": return _result(resolve_contact(str(args.get("query") or "")))
@@ -300,6 +319,22 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "web.status": return _result(web_status())
     if tool == "web.search":
         return _result(web_answer(str(args.get("query") or ""), num=int(args.get("num") or 5)))
+    if tool == "web.verify":
+        from jarvis_mrb.public_claim_verifier import verify_public_claim
+        query = str(args.get("query") or "")
+        result = verify_public_claim(query, num=int(args.get("num") or 8))
+        receipt_suffix = ""
+        try:
+            from jarvis_mrb.search_integrity import record_primary_source_check
+            receipt_id = record_primary_source_check(
+                query, str(result["status"]), list(result.get("sources") or []),
+            )
+            receipt_suffix = f" Primary-source lookup receipt: {receipt_id}."
+        except Exception:
+            # Receipt storage must not turn an unavailable verification into a
+            # fabricated affirmative or negative claim about a public post.
+            receipt_suffix = " Verification receipt storage was unavailable."
+        return AgentReply(bool(result["ok"]), str(result["message"]) + receipt_suffix)
 
     if tool == "vision.recall":
         try:
@@ -1210,6 +1245,16 @@ def handle_natural_language(
     if n in {"quit", "exit"}: return AgentReply(True, "__EXIT__")
     if n in {"model", "what model are you using", "what model are you using?"}:
         return _respectful(AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}"))
+    # Current public claims must reach a live source before the model can
+    # deny an announcement or invent explanations from stale priors.
+    from jarvis_mrb.freshness_policy import freshness_decision
+    freshness = freshness_decision(text, history)
+    if freshness is not None:
+        if freshness.kind == "clarify":
+            return AgentReply(True, freshness.message)
+        tool_name = "web.verify" if freshness.kind == "verify" else "web.search"
+        return _respectful(execute_tool(tool_name, {"query": freshness.query, "num": 8 if freshness.kind == "verify" else 5}))
+
     fast = _fast_path(text)
     if fast is not None:
         return _respectful(fast)

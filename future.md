@@ -1866,3 +1866,45 @@ Complement private **Commentary Mode** with an explicitly selectable **Suggestio
 
 - After an unrelated minor mishap or setback: **“How is this going to affect local trout populations?”** The humor is an absurdly specific, irrelevant consequence; use sparingly so the callback retains surprise.
 - Dark, taboo observational humor can be part of private commentary when context warrants it; for example, in a retrospective, joking conversation about someone's parents divorcing: **“Probably told them it wasn't their fault too.”** Do not deploy this during an active disclosure of distress or treat private irreverence as automatically suitable for Suggestion Mode.
+
+
+## Implementation receipt — 2026-10-15 (feature branch; not deployed)
+
+The full set of ideas above is **not** implemented or verified. The ongoing
+`feat/airpods-freshness-20261012` branch now contains bounded implementation
+work for several of them. For each, consult
+[docs/FUTURE_IMPLEMENTATION_PROGRESS.md](docs/FUTURE_IMPLEMENTATION_PROGRESS.md)
+rather than assuming source code means the capability exists on the running
+devices:
+
+- AirPods as an explicit iPhone Bluetooth HFP input preference, alongside
+  Ray-Bans, with live route diagnostics and safe microphone fallback.
+- A first execution-level public-freshness gate shared by streaming and
+  non-streaming chat, plus a strict bounded first-party HTML verifier for
+  contested public announcements. This is **not** the full per-claim
+  proof/TTL/entailment system.
+- An opt-in User Belief Model with private evidence records, decision windows,
+  conservative divergence evaluation, authenticated APIs and deletion. No
+  automatic belief inference or provider-verified observation adapter yet.
+- An optional VoiceStudio OpenAI-compatible local TTS provider; Kokoro remains
+  the default. Real sound quality, voice cloning and AirPods playback require
+  physical testing.
+- An executable synthetic local-model bake-off for Gemma 4 12B versus current
+  Qwen planners. No inference engine switch or real-workflow benchmark result
+  is implied.
+- A source/hardware-separated Capability Evidence Ledger and a deterministic
+  "What capabilities are verified?" read command. Physical acceptance scopes
+  explicitly remain unverified.
+- An opt-in shared low-priority Attention Budget for the proactive event bus.
+  Safety-severity events are never throttled by that initial policy.
+- A bounded "Why did you tell me this?" explanation route that reads the
+  last persisted proactive event and its machine-owned originating subsystem.
+  An emitted alert is not evidence that it reached the phone or the user.
+- Hash-linked receipts for strict first-party public-claim checks, with
+  six-hour retrieval freshness classification and explicit uncertainty about
+  screenshot/post authenticity. This is not a full claim-entailment engine.
+- Authenticated runtime build provenance reporting the actual responding PC process ID (random nonce), start time, checkout commit and source hashes, with the revision shown in iPhone Settings. Disk hashes do not prove the installed phone build or in-memory bytecode.
+
+All other items remain future work unless separately proved by running code,
+tests and actual deployment receipts. No bulk "mark complete" operation
+is permitted.

@@ -63,7 +63,7 @@ struct MainView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) {
-                SettingsView(settings: appModel.settings, geofence: appModel.geofenceManager)
+                SettingsView(settings: appModel.settings, geofence: appModel.geofenceManager, audioRouteManager: appModel.audioRouteManager)
             }
             .alert("Jarvis", isPresented: Binding(
                 get: { appModel.errorMessage != nil },

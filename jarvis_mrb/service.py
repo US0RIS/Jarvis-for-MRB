@@ -79,6 +79,35 @@ class CommandRequest(BaseModel):
     text: str
     session_id: str | None = None
 
+# Evidence-bounded, deliberately opt-in User Belief Model.
+class BeliefWorldRecordRequest(BaseModel):
+    subject: str
+    predicate: str
+    value: str
+    evidence_id: str
+    observed_at: str | None = None
+
+
+class BeliefEvidenceRecordRequest(BeliefWorldRecordRequest):
+    kind: str
+
+
+class BeliefDecisionRequest(BaseModel):
+    subject: str
+    predicate: str
+    label: str
+    deadline: str
+    enrollment_id: str
+
+
+class BeliefDecisionIDRequest(BaseModel):
+    decision_id: str
+
+
+class BeliefForgetRequest(BaseModel):
+    confirm: str
+
+
 
 class ExternalWatchCreateRequest(BaseModel):
     scope: str = "personal"
@@ -613,7 +642,7 @@ def _execute_job(command: str) -> str:
     message = reply.message
     normalized = command.lower()
     if message and ("briefing" in normalized or normalized.startswith("remind ")):
-        emit_proactive(message, cue="task_complete", severity="info")
+        emit_proactive(message, cue="task_complete", severity="info", origin="command_followup")
     return message
 
 
@@ -878,6 +907,176 @@ def startup() -> None:
     _proactive_started = True
     record_runtime_success("proactive_monitor")
     _warm_fast_model()
+
+
+# Never expose private beliefs through unauthenticated health/routing diagnostics.
+# User-supplied facts are *attested*, not independently verified sources.
+@app.post("/belief-model/world")
+def belief_model_world(
+    request: BeliefWorldRecordRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.observe_world(
+            request.subject, request.predicate, request.value,
+            evidence_id=request.evidence_id, observed_at=request.observed_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/exposure")
+def belief_model_exposure(
+    request: BeliefEvidenceRecordRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.observe_belief(
+            request.subject, request.predicate, request.value,
+            kind=request.kind, evidence_id=request.evidence_id,
+            observed_at=request.observed_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/decision")
+def belief_model_decision(
+    request: BeliefDecisionRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.enroll_decision(
+            request.subject, request.predicate, request.label,
+            deadline=request.deadline, enrollment_id=request.enrollment_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/decision/resolve")
+def belief_model_resolve(
+    request: BeliefDecisionIDRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.resolve_decision(request.decision_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.get("/belief-model/divergences")
+def belief_model_divergences(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.evaluate()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.post("/belief-model/forget")
+def belief_model_forget(
+    request: BeliefForgetRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    if request.confirm != "DELETE_USER_BELIEF_MODEL":
+        raise HTTPException(status_code=422, detail="Explicit delete confirmation required.")
+    from jarvis_mrb import user_belief_model as model
+    try:
+        return model.forget()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200]) from exc
+
+
+@app.get("/proactive/last-receipt")
+def proactive_last_receipt(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.proactive_explain import latest_receipt
+    return latest_receipt()
+
+
+@app.get("/attention/budget")
+def attention_budget_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.attention_budget import status
+    return status()
+
+
+@app.get("/build/provenance")
+def runtime_build_provenance(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    # This is the code actually present in the responding PC backend process,
+    # not the source version claimed by GitHub, feature docs or the iPhone app.
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.runtime_provenance import inspect
+    return inspect()
+
+
+@app.get("/capabilities/backlog")
+def capability_backlog_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.feature_backlog import load
+    result = load()
+    return {key: value for key, value in result.items() if key != "items"}
+
+
+@app.get("/capabilities/evidence")
+def capability_evidence_status(
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Machine-readable implementation-vs-verification state, not product marketing."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.capability_evidence import inspect
+    return inspect()
 
 
 @app.get("/routing/status")
@@ -3122,7 +3321,10 @@ def meeting_finish(
 @app.get("/tts/status")
 def tts_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
     _check_auth(authorization)
-    return {"status": "ready" if tts_health() else "unavailable"}
+    from jarvis_mrb.tts_client import TTS_PROVIDER
+    reachable = tts_health()
+    return {"status": ("discovered" if TTS_PROVIDER == "voicestudio" else "ready") if reachable else "unavailable",
+            "provider": TTS_PROVIDER}
 
 
 @app.post("/tts")

@@ -314,7 +314,7 @@ struct JarvisPhysicalHubView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         NavigationLink("Configure ambient presence") {
-                            SettingsView(settings: appModel.settings, geofence: appModel.geofenceManager)
+                            SettingsView(settings: appModel.settings, geofence: appModel.geofenceManager, audioRouteManager: appModel.audioRouteManager)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

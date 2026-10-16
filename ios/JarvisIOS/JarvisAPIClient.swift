@@ -591,6 +591,37 @@ struct EmailAllowlistResponse: Decodable {
 
 struct TTSStatusResponse: Decodable {
     let status: String
+    let provider: String?
+}
+
+struct CapabilityEvidenceResponse: Decodable {
+    struct Capability: Decodable {
+        let title: String
+        let status: String
+        let missingScopes: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case title, status
+            case missingScopes = "missing_scopes"
+        }
+    }
+
+    let capabilities: [String: Capability]
+}
+
+
+struct RuntimeProvenanceResponse: Decodable {
+    let processStartedAt: String
+    let runtimeInstance: String
+    let checkoutCommit: String?
+    let checkoutState: String
+
+    enum CodingKeys: String, CodingKey {
+        case processStartedAt = "process_started_at"
+        case runtimeInstance = "runtime_instance"
+        case checkoutCommit = "checkout_commit"
+        case checkoutState = "checkout_state"
+    }
 }
 
 struct PlannerModelResponse: Decodable {
@@ -2185,10 +2216,22 @@ struct JarvisAPIClient {
         }
     }
 
-    func ttsStatus() async throws -> String {
+    func capabilityEvidence() async throws -> CapabilityEvidenceResponse {
+        let (data, response) = try await get(path: "capabilities/evidence", timeout: 5)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(CapabilityEvidenceResponse.self, from: data)
+    }
+
+    func runtimeProvenance() async throws -> RuntimeProvenanceResponse {
+        let (data, response) = try await get(path: "build/provenance", timeout: 5)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(RuntimeProvenanceResponse.self, from: data)
+    }
+
+    func ttsStatus() async throws -> TTSStatusResponse {
         let (data, response) = try await get(path: "tts/status", timeout: 5)
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(TTSStatusResponse.self, from: data).status
+        return try JSONDecoder().decode(TTSStatusResponse.self, from: data)
     }
 
     func plannerModel() async throws -> PlannerModelResponse {

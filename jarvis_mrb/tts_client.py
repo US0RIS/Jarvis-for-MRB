@@ -6,13 +6,40 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 from typing import BinaryIO
 
 import httpx
 
-TTS_URL = os.environ.get("JARVIS_TTS_URL", "http://127.0.0.1:8880").rstrip("/")
-TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "kokoro")
-TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "bm_george")
+# VoiceStudio is opt-in. We do not change the current proven Kokoro default.
+TTS_PROVIDER = os.environ.get("JARVIS_TTS_PROVIDER", "kokoro").strip().lower()
+TTS_URL = os.environ.get("JARVIS_TTS_URL", "http://127.0.0.1:3900" if TTS_PROVIDER == "voicestudio" else "http://127.0.0.1:8880").rstrip("/")
+TTS_MODEL = os.environ.get("JARVIS_TTS_MODEL", "tts-1" if TTS_PROVIDER == "voicestudio" else "kokoro")
+TTS_VOICE = os.environ.get("JARVIS_TTS_VOICE", "alloy" if TTS_PROVIDER == "voicestudio" else "bm_george")
+VOICESTUDIO_API_KEY = os.environ.get("JARVIS_VOICESTUDIO_API_KEY", "").strip()
+
+
+def _voicestudio_headers() -> dict[str,str]:
+    if not VOICESTUDIO_API_KEY:
+        return {}
+    parts = urlsplit(TTS_URL)
+    if parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}):
+        raise RuntimeError("VoiceStudio API key requires HTTPS or loopback transport.")
+    return {"Authorization": "Bearer " + VOICESTUDIO_API_KEY}
+
+
+def _voicestudio_health() -> bool:
+    try:
+        response = httpx.get(
+            f"{TTS_URL}/.well-known/voicestudio-speech",
+            headers=_voicestudio_headers(), timeout=0.65
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return isinstance(payload, dict) and payload.get("protocol") == "voicestudio.speech.v1"
+    except (httpx.HTTPError, ValueError, RuntimeError):
+        return False
+
 TTS_SPEED = float(os.environ.get("JARVIS_TTS_SPEED", "1.04"))
 _TTS_LAST_HEALTHY: bool | None = None
 _TTS_PROCESS: subprocess.Popen | None = None
@@ -44,6 +71,13 @@ def tts_health() -> bool:
     older Qwen3-TTS server if it is still occupying port 8880 so Jarvis does not
     report a false-positive healthy voice and then fail every synthesis request.
     """
+    if TTS_PROVIDER == "voicestudio":
+        ready = _voicestudio_health()
+        _record_health_transition(ready)
+        return ready
+    if TTS_PROVIDER != "kokoro":
+        _record_health_transition(False)
+        return False
     healthy = False
     try:
         response = httpx.get(f"{TTS_URL}/health", timeout=0.20)
@@ -241,6 +275,10 @@ def _ensure_monitor(process: subprocess.Popen) -> None:
 def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
     global _TTS_PROCESS, _TTS_LOG_HANDLE
 
+    # External local VoiceStudio service owns its own lifecycle. Never start a
+    # second Kokoro process when a different provider was explicitly chosen.
+    if TTS_PROVIDER != "kokoro":
+        return tts_health()
     if tts_health():
         return True
     if os.environ.get("JARVIS_TTS_AUTOSTART", "1").strip().lower() in {"0", "false", "no"}:
@@ -285,12 +323,12 @@ def ensure_tts_server(wait_seconds: float = 0.0) -> bool:
 
 
 def synthesize_wav(text: str) -> bytes:
-    """Synthesize one short Jarvis speech segment with Kokoro-82M."""
+    """Synthesize via the selected local OpenAI-compatible speech provider."""
     cleaned = " ".join(text.strip().split())
     if not cleaned:
         raise ValueError("TTS text is empty")
     if not tts_health() and not ensure_tts_server(wait_seconds=0.8):
-        raise RuntimeError("Local Kokoro voice model is not ready")
+        raise RuntimeError(f"Local {TTS_PROVIDER} voice service is not ready")
 
     payload = {
         "model": TTS_MODEL,
@@ -300,10 +338,13 @@ def synthesize_wav(text: str) -> bytes:
         "speed": TTS_SPEED,
     }
     timeout = httpx.Timeout(20.0, connect=1.0)
+    headers = _voicestudio_headers() if TTS_PROVIDER == "voicestudio" else {}
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(f"{TTS_URL}/v1/audio/speech", json=payload)
+        response = client.post(
+            f"{TTS_URL}/v1/audio/speech", json=payload, headers=headers
+        )
         response.raise_for_status()
         data = response.content
-    if len(data) < 44:
-        raise RuntimeError("Kokoro returned an invalid WAV response")
+    if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise RuntimeError(f"{TTS_PROVIDER} returned an invalid WAV response")
     return data

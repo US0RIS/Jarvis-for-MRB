@@ -67,7 +67,26 @@ def emit_thinking(active: bool) -> None:
     )
 
 
-def _record_proactive_occurrence(message: str, cue: str, severity: str) -> None:
+# Machine-owned labels describe the producing subsystem, not an inference
+# that a user noticed or understood the resulting notification.
+PROACTIVE_ORIGINS = {
+    "calendar_prebrief": "Calendar prebrief with connected context",
+    "gpu_pressure": "Observed local GPU resource threshold",
+    "resource_pressure": "Observed local hardware or job-queue resource threshold",
+    "urgent_mail": "Unread urgent-email subject filter",
+    "action_verification": "Failed or timed-out tracked action verification",
+    "meeting_contradiction": "Potential discrepancy in meeting notes",
+    "external_watch": "Enrolled external watch condition",
+    "vision_anomaly": "Vision alert from a user-authorized camera source",
+    "agency_attention": "Agency attention mechanism",
+    "command_followup": "Proactive response to a command",
+    "unknown": "Source was not recorded",
+}
+
+
+def _record_proactive_occurrence(
+    message: str, cue: str, severity: str, origin: str = "unknown"
+) -> None:
     """Best-effort durable record of a meaningful unsolicited Jarvis alert.
 
     Thinking/cue traffic is deliberately not persisted. A proactive alert, however,
@@ -89,6 +108,7 @@ def _record_proactive_occurrence(message: str, cue: str, severity: str) -> None:
                 "cue": str(cue)[:120],
                 "severity": str(severity)[:80],
                 "occurrence_id": occurrence,
+                "origin": origin if origin in PROACTIVE_ORIGINS else "unknown",
             },
             evidence="Jarvis emitted this proactive alert to the companion event channel.",
             confidence=1.0,
@@ -100,8 +120,14 @@ def _record_proactive_occurrence(message: str, cue: str, severity: str) -> None:
         pass
 
 
-def emit_proactive(message: str, *, cue: str = "attention", severity: str = "info") -> None:
-    _record_proactive_occurrence(message, cue, severity)
+def emit_proactive(
+    message: str, *, cue: str = "attention", severity: str = "info",
+    origin: str = "unknown",
+) -> None:
+    from jarvis_mrb.attention_budget import may_deliver
+    if not may_deliver(severity):
+        # Suppression must not masquerade as "alert delivered" in world history.
+        return
     companion_events.publish(
         {
             "type": "proactive_alert",
@@ -110,3 +136,6 @@ def emit_proactive(message: str, *, cue: str = "attention", severity: str = "inf
             "severity": severity,
         }
     )
+    # Persist only after publication was attempted. This is still not a
+    # delivery/reading acknowledgement from any iPhone or headset.
+    _record_proactive_occurrence(message, cue, severity, origin=origin)

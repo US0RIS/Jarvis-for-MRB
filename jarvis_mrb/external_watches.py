@@ -489,7 +489,7 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
             + " in published camera " + safe_label
             + " (two distinct stills, local ML classification). Unconfirmed; "
               "capture times unknown. Inspect the source; do not treat as an emergency finding.",
-            cue="attention", severity="info",
+            cue="attention", severity="info", origin="external_watch",
         )
     if changed and current["kind"] in {"sec_filings", "nws_alerts", "usgs_earthquakes", "air_quality"}:
         from jarvis_mrb.event_bus import emit_proactive
@@ -497,7 +497,7 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
         emit_proactive(
             "Independent public source changed for " + safe_label
             + ". Review Jarvis's external watch evidence; this is not a legal or safety conclusion.",
-            cue="attention", severity="info",
+            cue="attention", severity="info", origin="external_watch",
         )
     return {
         "status": status, "watch_id": watch_id,

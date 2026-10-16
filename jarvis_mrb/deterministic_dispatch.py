@@ -197,6 +197,24 @@ def dispatch(text: str, *, now: datetime | None = None) -> Route | None:
     answer = _clock(lower, current) or _arithmetic(lower)
     if answer:
         return answer
+    if lower in {
+        "why did you alert me", "why did you tell me that",
+        "why did you tell me this", "explain your last alert",
+        "what triggered your last alert", "why did you interrupt me"
+    }:
+        return _tool("proactive_explain", "proactive.explain_last")
+    if lower in {
+        "how many future features are left", "how many future ideas are tracked",
+        "how many future features", "future backlog status",
+        "what is in the future feature backlog"
+    }:
+        return _tool("capability_backlog", "capabilities.backlog")
+    if lower in {
+        "what can you do right now", "which of your features are actually verified",
+        "what capabilities are verified", "show capability evidence",
+        "what features have passed tests", "capability evidence status"
+    }:
+        return _tool("capability_evidence", "capabilities.status")
     if lower in _EXACT:
         family, tool, arguments = _EXACT[lower]
         return Route(family, tool, dict(arguments))

@@ -65,10 +65,15 @@ CATALOG: dict[str, dict[str, Any]] = {
         "required":("unit", "real_notification_acceptance"),
         "unit_pattern":"test_proactive_explain.py",
     },
+    "runtime_provenance":{
+        "title":"Actually responding backend process fingerprint",
+        "required":("unit", "real_deployment_readback"),
+        "unit_pattern":"test_runtime_provenance.py",
+    },
 }
 _ALLOWED_SCOPES = {"unit","ios_simulator","physical_airpods","live_official_source",
                    "real_verified_fact_adapter","actual_voicestudio_audio",
-                   "rtx5080_benchmark","end_to_end_jarvis_tasks","real_notification_acceptance"}
+                   "rtx5080_benchmark","end_to_end_jarvis_tasks","real_notification_acceptance","real_deployment_readback"}
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 

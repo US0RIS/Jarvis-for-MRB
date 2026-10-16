@@ -263,6 +263,15 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "pc.open_path": return _result(open_path(str(args.get("path") or "")))
     if tool == "pc.context": return AgentReply(True, describe_pc_context())
     if tool == "system.resources": return AgentReply(True, describe_resources())
+    if tool == "capabilities.backlog":
+        from jarvis_mrb.feature_backlog import load
+        inventory = load()
+        return AgentReply(
+            True,
+            f"future.md currently contains {inventory['total']} tracked bold-led ideas, "
+            "including research candidates. These entries are design backlog, not implemented "
+            "or verified capabilities. The live capability ledger is a separate source."
+        )
     if tool == "capabilities.status":
         from jarvis_mrb.capability_evidence import inspect
         evidence = inspect()

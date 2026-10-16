@@ -307,6 +307,10 @@ def _execute_unchecked(tool: str, args: dict[str, Any]) -> AgentReply:
     if tool == "web.status": return _result(web_status())
     if tool == "web.search":
         return _result(web_answer(str(args.get("query") or ""), num=int(args.get("num") or 5)))
+    if tool == "web.verify":
+        from jarvis_mrb.public_claim_verifier import verify_public_claim
+        result = verify_public_claim(str(args.get("query") or ""),num=int(args.get("num") or 8))
+        return AgentReply(bool(result["ok"]),str(result["message"]))
 
     if tool == "vision.recall":
         try:

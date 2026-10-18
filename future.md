@@ -5,6 +5,16 @@ scheduled, prioritized, or committed to — this is a place to dump ideas before
 lost, not a roadmap. Move an idea out of this file and into a real design
 doc (or just implement it) once someone decides to act on it.
 
+> **Implementation status (2026-10-18).** Every bold idea in this file now has a deterministic,
+> tested software core or evaluation harness in [`jarvis_mrb/horus`](jarvis_mrb/horus), and
+> [`jarvis_mrb/horus/registry.py`](jarvis_mrb/horus/registry.py) maps each title here to the code that
+> implements it (`jarvis-horus lookup "<idea>"`). External repositories are recorded as research
+> candidates, not dependencies. Hardware bake-offs have harnesses, but no measurements yet.
+> Nothing is an observed-deployed claim until it is wired into the live service and accepted on the
+> real devices. See [docs/HORUS_PRIMITIVES.md](docs/HORUS_PRIMITIVES.md). The ideas stay in
+> this file for lineage. `tests/test_horus_registry.py` fails if a new idea is added without a
+> mapping.
+
 ## HORUS naming architecture
 
 **HORUS** is the product/system name. "A real-world Jarvis" remains useful shorthand for explaining

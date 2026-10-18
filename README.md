@@ -16,6 +16,17 @@ HORUS uses story-driven user-facing names while retaining stable internal module
 mythology theme. Existing `jarvis_mrb`, `JARVIS_*` environment variables, persisted paths, and protocol
 identifiers remain compatibility surfaces until deliberately migrated.
 
+### HORUS primitive library
+
+[`jarvis_mrb/horus`](jarvis_mrb/horus) contains stdlib-only, deterministic implementations of every idea in
+[`future.md`](future.md): epistemic freshness gating, the User Belief Model, ACH/investigation, a bitemporal truth
+model, standing queries and the Reality Compiler, attention arbitration, memory capture and resurfacing, life-admin
+extraction, spatial anchors, capability and model routing, continuity, end-user automation, SRE-style reliability,
+scoped emergency authority, emergency playbooks, provider normalisers, measured bake-off harnesses, private humor
+modes and a repository radar. `registry.py` maps each future.md idea to its implementation, and
+`jarvis-horus check` verifies the mapping. These are source-level capabilities, not observed-deployed claims.
+Details: [docs/HORUS_PRIMITIVES.md](docs/HORUS_PRIMITIVES.md).
+
 ## World Armor — merge status (2026-09-26)
 
 The thirteen stacked World Armor draft PRs (#7–#21) plus the reconciled

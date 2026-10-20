@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-for-mrb"
-version = "0.13.0"
-description = "Personal agent backend for Ray-Ban Meta glasses"
+version = "0.14.0"
+description = "Local-first Horus AI and communication backend"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#10191e">
+  <title>Callless — Horus</title>
+  <link rel="stylesheet" href="/callless/client.css">
+  <script src="/callless/client.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div><small>HORUS / COMMUNICATIONS</small><h1>Callless</h1><p>Reach someone without placing a conventional call.</p></div><span id="connection" class="connection">Disconnected</span></header>
+    <section id="auth-panel" class="panel">
+      <h2>Sign in to your hub</h2>
+      <p class="description">Both people need an account on this same Horus hub. New here? Choose Register.</p>
+      <form id="auth-form">
+        <div class="fields"><label>Handle<input id="handle" autocomplete="username" pattern="[a-zA-Z][a-zA-Z0-9_]{2,27}" required maxlength="28" placeholder="alex"></label>
+          <label id="display-name-field" hidden>Display name<input id="display-name" maxlength="70" placeholder="Alex"></label></div>
+        <label>Password<input id="password" type="password" autocomplete="current-password" minlength="12" maxlength="256" required></label>
+        <div class="actions"><button type="submit" id="auth-submit" class="primary">Sign in</button>
+          <button type="button" id="auth-mode">Create an account</button></div>
+      </form>
+      <p class="description fine">For remote access, host the hub behind HTTPS. Callless identity is independent of the Horus PC API token.</p>
+    </section>
+    <div id="session-panel" hidden>
+      <section class="panel two-column">
+        <div><h2 id="my-identity">Your availability</h2><p class="description">Open permits approved contacts to request an immediate audio connection. Horus doesn't keep your microphone open while idle.</p></div>
+        <div><label for="status">Callless status</label><select id="status"><option value="closed">Closed</option><option value="ask">Ask first</option><option value="open">Open</option></select>
+        <p id="status-help" class="fine">Status is closed until you change it.</p></div>
+      </section>
+      <section class="panel">
+        <div class="section-title"><h2>Contacts</h2><button id="refresh">Refresh</button></div>
+        <div id="contacts" class="contacts"><p class="description">No approved contacts yet.</p></div>
+        <div class="invite-grid">
+          <div><h3>Invite someone</h3><p class="fine">Share a short-lived invitation code privately. Whoever redeems it becomes an approved contact.</p><button id="generate-invite">Generate invitation</button><p id="invite-code" class="code"></p></div>
+          <div><h3>Connect to someone</h3><p class="fine">Paste an invitation code another Horus user shared with you.</p><form id="accept-form"><label>Invitation code<input id="accept-code" autocomplete="off" spellcheck="false" required></label><button type="submit">Add contact</button></form></div>
+        </div>
+      </section>
+      <section class="panel call-panel">
+        <div class="section-title"><h2>Conversation</h2><span id="call-state">Idle</span></div>
+        <p id="call-text">Choose an online approved contact above to connect.</p>
+        <div class="actions"><button id="join" class="primary" hidden>Join conversation</button><button id="hangup" class="danger" hidden>Disconnect</button><button id="enable-audio" hidden>Enable speaker audio</button></div>
+        <audio id="remote-audio" autoplay playsinline></audio>
+      </section>
+      <footer><span>No calls recorded by the hub · WebRTC media uses encrypted transport</span><button id="logout">Sign out</button></footer>
+    </div>
+    <p id="message" class="notification" role="status" aria-live="polite"></p>
+    <p class="disclaimer">Browser limitations: a recipient must tap Join to grant microphone access, even when Open. Full automatic pickup requires a separate native calling integration. Remote use needs HTTPS, and restrictive networks may need a configured TURN server.</p>
+  </main>
+</body>
+</html>

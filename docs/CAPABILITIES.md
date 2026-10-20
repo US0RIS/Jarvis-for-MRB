@@ -14,6 +14,7 @@
 | Callless native calling | Not implemented | CallKit/PushKit/APNs device validation |
 | Callless policy/screener/bypass/recording | Design only | [Callless design](CALLLESS_DESIGN.md) and gated implementation |
 | World Armor / executive research subsystems | Significant experimental source | Independent production provider, sensor and real-action validation |
+| Shadow Reality P06-005 (mission ETA what-if slice) | Read-only conditional scenario engine and private endpoints source-implemented; synthetic/unit and endpoint regressions added | Local arithmetic smoke passed; CI/regression verdict and live provider/device acceptance outstanding. No autonomous action or forecast. |
 | Hosted identity, mobile-only Horus, global relay | Not released | Security, infrastructure, cost and distribution gates |
 
 **Release stages:** proposed → source merged → isolated tests → CI green → real-device validated → deployed/released. No feature should skip a stage. The [legacy long README](archive/README_LEGACY_2026_10.md) is history, not release authority.

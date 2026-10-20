@@ -56,6 +56,17 @@ POST /mesh/graph/missions/delete
 
 The backend returns a mission ID, *not* an execution grant. Append is replay-idempotent for **identical observation IDs and contents**; conflicting reuse is rejected. Only fixed typed fields are stored. No raw camera pixels, arbitrary provider JSON, message contents or recipient identity fields. Each mission has up to 400 retained events; each reduction uses the 100 most recent; each append at most 20 records; at most 24 active missions. Stopped missions remain inspectable until deleted or lazily pruned. The ledger prunes expired missions after an additional 72-hour grace period on a subsequent create; there is no claim of a continuously running erase daemon or secure SSD overwrite. Use delete if immediate logical removal is needed. The SQLite file may also be present in local backups/WAL until ordinary database maintenance.
 
+## Shadow Reality: P06-005 first vertical slice
+
+**Source-implemented, not physically/provider-validated.** Shadow Reality provides two read-only authenticated `POST` routes, with `Cache-Control: private, no-store`:
+
+- `/mesh/graph/mission/shadow` takes `mission`, `observations` (the same fields as `/mesh/graph/mission`) and `branches`. No data is stored.
+- `/mesh/graph/missions/shadow` takes `mission_id` and `branches`, reads the existing separately opted-in Reality Graph mission ledger, and does **not** persist branches. Without `JARVIS_REALITY_GRAPH_MISSIONS_ENABLED=1`, it returns 503.
+
+For either route, `branches` is a list of one to six unique entries such as `[{"id":"leave_early","eta_shift_minutes":-10},{"id":"wait","eta_shift_minutes":15}]`. Only `id` and whole-number `eta_shift_minutes` from -120 to +120 are accepted; other fields (including action instructions) are rejected. A fresh, future-deadline mission and a **fresh reported courier ETA** in the Reality Graph are required. The result includes the observed baseline deadline margin, source/evidence ID, and separate *conditional* margins for each ETA shift. An earlier ETA increases remaining margin; a later ETA decreases it. Each branch explicitly states `prediction: false`, `action_authority: none`. Observations, graph history and provider timestamps are never rewritten by a scenario.
+
+No evidence, expired observations, stopped/expired missions, already reported delivery, missing future deadline and stale snapshots produce `insufficient_evidence` with `unknown` branch outcomes instead of a plausible guess. Scenarios **do not** predict traffic or validate an adapter's source labels; the existing ledger labels client-supplied observations as unauthenticated. No action executor, navigation launch, device control or third-party communication is connected. This is only the deterministic mission-ETA slice of the original multi-domain Shadow Reality proposal; travel/route models, weather trajectories, infrastructure failure and device simulations remain unimplemented.
+
 ## Spoken model-free mission readback
 
 When the persisted ledger is enabled, the existing Jarvis speech/text path can answer `Jarvis, show my reality graph missions`, `Jarvis, is my delivery late?`, `Jarvis, has my delivery arrived?`, `Jarvis, why is my delivery delayed?`, and `Jarvis, reality graph rg_<returned-id> status` **before Qwen is invoked**. The generic delivery phrases select a mission only if exactly one active goal refers to delivery/dinner/food/courier. If multiple goals match, Jarvis asks for the exact returned ID rather than mixing separate deliveries.

@@ -447,6 +447,17 @@ class RealityGraphStoredRequest(BaseModel):
     question: str = ""
 
 
+class RealityGraphShadowRequest(BaseModel):
+    mission: dict[str, Any]
+    observations: list[dict[str, Any]]
+    branches: list[dict[str, Any]]
+
+
+class RealityGraphStoredShadowRequest(BaseModel):
+    mission_id: str
+    branches: list[dict[str, Any]]
+
+
 
 class NearbyPublicCameraRequest(BaseModel):
     latitude: float
@@ -2423,6 +2434,24 @@ def reality_graph_mission(
     }
 
 
+@app.post("/mesh/graph/mission/shadow")
+def reality_graph_mission_shadow(
+    request: RealityGraphShadowRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Read-only conditional ETA shifts over a fresh ephemeral Reality Graph."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph import build_mission_graph
+    from jarvis_mrb.reality_shadow import simulate_eta_branches
+    try:
+        graph = build_mission_graph(request.mission, request.observations)
+        return simulate_eta_branches(graph, request.branches)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:200]) from exc
+
+
 def _stored_graph_error(exc: Exception) -> None:
     from jarvis_mrb.reality_graph_missions import GraphUnavailable
     if isinstance(exc, KeyError):
@@ -2475,6 +2504,23 @@ def reality_graph_stored_snapshot(
     from jarvis_mrb.reality_graph_missions import snapshot
     try:
         return snapshot(request.mission_id, question=request.question)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/shadow")
+def reality_graph_stored_shadow(
+    request: RealityGraphStoredShadowRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Read an enrolled mission snapshot; no persistence of any what-if branch."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import snapshot
+    from jarvis_mrb.reality_shadow import simulate_eta_branches
+    try:
+        return simulate_eta_branches(snapshot(request.mission_id)["graph"], request.branches)
     except (KeyError, ValueError, RuntimeError) as exc:
         _stored_graph_error(exc)
 

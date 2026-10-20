@@ -461,6 +461,22 @@ class RealityGraphRewindRequest(BaseModel):
     mission_id: str
     at: str
 
+class RealityGraphDiffRequest(BaseModel):
+    mission_id: str
+    before: str
+    after: str
+
+
+class WorldAssertionEnrollRequest(BaseModel):
+    mission_id: str
+    definition: dict[str, Any]
+
+
+class WorldAssertionIdentityRequest(BaseModel):
+    mission_id: str
+    assertion_id: str
+
+
 
 
 class NearbyPublicCameraRequest(BaseModel):
@@ -2541,6 +2557,82 @@ def reality_graph_stored_rewind(
     from jarvis_mrb.reality_graph_missions import rewind
     try:
         return rewind(request.mission_id, at=request.at)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/diff")
+def reality_graph_stored_diff(
+    request: RealityGraphDiffRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Read-only comparison of two event-time mission views."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_diff import diff
+    try:
+        return diff(request.mission_id, before=request.before, after=request.after)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/assertions/enroll")
+def reality_graph_assertion_enroll(
+    request: WorldAssertionEnrollRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_assertions import enroll
+    try:
+        return enroll(request.mission_id, request.definition)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/assertions/check")
+def reality_graph_assertion_check(
+    request: RealityGraphStoredRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_assertions import check
+    try:
+        return check(request.mission_id)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/assertions/history")
+def reality_graph_assertion_history(
+    request: WorldAssertionIdentityRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_assertions import history
+    try:
+        return history(request.mission_id, request.assertion_id)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/assertions/revoke")
+def reality_graph_assertion_revoke(
+    request: WorldAssertionIdentityRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.world_assertions import revoke
+    try:
+        return revoke(request.mission_id, request.assertion_id)
     except (KeyError, ValueError, RuntimeError) as exc:
         _stored_graph_error(exc)
 

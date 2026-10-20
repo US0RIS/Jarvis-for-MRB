@@ -6,11 +6,10 @@
 
 - macOS with Xcode
 - iPhone running a current iOS release (deployment target is iOS 17+)
-- Meta AI app on the iPhone
-- compatible Meta AI glasses paired to Meta AI
-- Developer Mode enabled for the glasses
 - Apple developer signing team selected in Xcode
-- Jarvis Windows backend reachable from the phone
+- Horus Windows backend reachable from the phone for backend commands
+- Optional: paired AirPods / Bluetooth headset for hands-free audio output
+- Optional: Meta AI, compatible Meta glasses and Developer Mode **only** for Meta camera features
 
 The Xcode project includes Meta Wearables DAT through Swift Package Manager:
 
@@ -28,11 +27,11 @@ Allow Xcode to resolve Swift packages. Select the `JarvisIOS` target, choose the
 
 ## Connect to the Windows service
 
-On Windows:
-
-```powershell
-py -3.14 -m jarvis_mrb.remote_setup
-```
+On Windows, run `setup_horus.cmd` at the repository root for an isolated
+Python environment and guided private-network setup. For an existing Python
+installation, `py -3.14 -m jarvis_mrb.remote_setup` remains available;
+rerunning it now **reuses** the saved token, while `--rotate` deliberately
+invalidates existing iPhone credentials.
 
 In iPhone Settings enter:
 
@@ -104,12 +103,38 @@ Jarvis: ...
 You: Close it.
 ```
 
+## Privacy-first voice and iPhone Action Button
+
+**Push to Talk is the default.** The app does not require an idle wake-word
+recognizer. Tap **Push to Talk**, speak, and the command is sent after about
+2.3 seconds with no new recognition update; **Stop & Send** remains available
+for dictation, and **Cancel** discards an unfinished capture. If no speech is
+detected, the microphone is closed after 15 seconds.
+
+On an iPhone with an Action Button:
+
+1. Install and open Horus once, and grant microphone/speech permissions when requested.
+2. In **iOS Settings → Action Button → Shortcut**, select **Talk to Horus**.
+3. Press the Action Button and speak. The shortcut opens Horus and requests
+   a single capture session; it does **not** toggle an active capture off.
+
+On other iPhones, add **Talk to Horus** in the Shortcuts app and invoke it using
+a supported shortcut surface. A third-party app cannot provide Siri's
+privileged indicator-free always-on iOS wake word. While Horus is capturing
+or running separately opted-in Meeting Notes / Room Listening, the normal iOS
+microphone indicator can appear.
+
+**Always-listening wake mode is optional** and keeps microphone recognition
+active while enabled. Separately opted-in ambient sound features can also
+use the microphone while foregrounded. They are not silently enabled by
+Push to Talk.
+
 ## Hands-free voice
 
 The app has:
 
-- **Push to Talk** for explicit one-shot commands
-- **Hands-free Jarvis** for a continuous conversation loop
+- **Push to Talk** for explicit one-shot commands (default)
+- **Hands-free Jarvis** for an optional continuous conversation loop
 
 Hands-free mode uses an iOS `playAndRecord` / `voiceChat` session and explicitly prefers an available Bluetooth HFP microphone. With the Ray-Bans exposed as an HFP input, Jarvis selects them and routes playback back to the matching hands-free output.
 

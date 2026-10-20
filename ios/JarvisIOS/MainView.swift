@@ -105,6 +105,13 @@ struct MainView: View {
                     }
                     .buttonStyle(.bordered)
                 }
+                if appModel.settings.baseURL.contains("127.0.0.1") || appModel.settings.apiToken.isEmpty {
+                    Text("First-time setup: connect a Windows Horus host. Run setup_horus.cmd on the PC, then enter its private LAN URL and API token in Settings. No Meta glasses required.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Connect Horus host") { showingSettings = true }
+                        .buttonStyle(.bordered)
+                }
                 LabeledContent("Companion", value: persistentPresence.companionStatus)
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Route probe", value: frontend.connectivityStatus)
@@ -138,15 +145,22 @@ struct MainView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(appModel.handsFreeEnabled || meetingCapture.isActive || FrontendOperationsController.shared.roomListening.isActive)
-
-                    Toggle("Hands-free Jarvis", isOn: Binding(
-                        get: { appModel.handsFreeEnabled },
-                        set: { enabled in Task { await appModel.setHandsFreeEnabled(enabled) } }
-                    ))
-                    .labelsHidden()
                     .disabled(meetingCapture.isActive || FrontendOperationsController.shared.roomListening.isActive)
+                    if appModel.isListening && !appModel.handsFreeEnabled {
+                        Button("Cancel") { appModel.cancelPushToTalk() }
+                            .buttonStyle(.bordered)
+                    }
                 }
+
+                Toggle("Always-listening wake mode (optional)", isOn: Binding(
+                    get: { appModel.handsFreeEnabled },
+                    set: { enabled in Task { await appModel.setHandsFreeEnabled(enabled) } }
+                ))
+                .disabled(meetingCapture.isActive || FrontendOperationsController.shared.roomListening.isActive)
+
+                Text("Default: microphone idle. Tap Push to Talk once, speak, and Horus sends after a pause. For hands-free activation, assign the Talk to Horus shortcut to your iPhone Action Button in Settings. Always-listening mode keeps the microphone active.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
                     Image(systemName: appModel.handsFreeEnabled ? "waveform.circle.fill" : "waveform.circle")

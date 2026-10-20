@@ -213,6 +213,7 @@ final class SpeechRecognizer: ObservableObject {
         lastError = nil
         transcriptionConfidence = 0
         lastResultWasFinal = false
+        lastRecognitionUpdate = nil
 
         guard let recognizer, recognizer.isAvailable else {
             throw NSError(domain: "JarvisSpeech", code: 3, userInfo: [NSLocalizedDescriptionKey: "Speech recognition is temporarily unavailable."])

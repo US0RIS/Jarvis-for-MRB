@@ -55,6 +55,7 @@ final class JarvisAppModel: ObservableObject {
     private lazy var navigationController = JarvisNavigationController(appModel: self)
     var isCurrentlyNavigating: Bool { navigationController.isNavigating }
     private var wakeWordTask: Task<Void, Never>?
+    private var pushToTalkTask: Task<Void, Never>?
     private var confirmationFollowUpDeadline: Date?
     private var conversationalFollowUpDeadline: Date?
     private var currentCommandStartedAt: Date?
@@ -1102,25 +1103,82 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func togglePushToTalk() async {
-        guard !handsFreeEnabled else { return }
-
-        if isListening {
+        if isListening && !handsFreeEnabled {
             stopListeningAndSend()
-            return
+        } else {
+            await activatePushToTalk()
         }
+    }
+
+    /// Idempotent entry point for the iPhone Action Button / App Shortcut.
+    /// Repeated shortcut delivery must never stop and accidentally send a command.
+    func activatePushToTalk() async {
+        if handsFreeEnabled { stopWakeWordMode() }
+        guard !isListening && !speechRecognizer.isActive else { return }
 
         do {
             try await speechRecognizer.requestPermissions()
             try speechRecognizer.startListening(preferBluetooth: settings.preferBluetoothAudio)
             isListening = true
+            voiceStatus = "Listening — speak now"
+            pushToTalkTask?.cancel()
+            pushToTalkTask = Task { [weak self] in
+                await self?.monitorPushToTalk()
+            }
         } catch {
             errorMessage = error.localizedDescription
+            voiceStatus = "Microphone unavailable"
         }
     }
 
+    /// A single Action Button press is sufficient: transcribed speech is sent
+    /// after a short period without recognition updates. Users can still use
+    /// Stop & Send for dictation with long pauses.
+    private func monitorPushToTalk() async {
+        let startedAt = Date()
+        while !Task.isCancelled && isListening && !handsFreeEnabled {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled && isListening && !handsFreeEnabled else { return }
+            let now = Date()
+            let spoken = !speechRecognizer.transcript
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+            if spoken && !speechRecognizer.isActive {
+                stopListeningAndSend()
+                return
+            }
+            if spoken, let updated = speechRecognizer.lastRecognitionUpdate,
+               now.timeIntervalSince(updated) >= 2.3 {
+                stopListeningAndSend()
+                return
+            }
+            if now.timeIntervalSince(startedAt) >= (spoken ? 90 : 15) {
+                if spoken {
+                    stopListeningAndSend()
+                } else {
+                    cancelPushToTalk()
+                }
+                return
+            }
+        }
+    }
+
+    func cancelPushToTalk() {
+        pushToTalkTask?.cancel()
+        pushToTalkTask = nil
+        if isListening || speechRecognizer.isActive {
+            _ = speechRecognizer.stopListening()
+        }
+        isListening = false
+        voiceStatus = "Push to Talk ready — microphone idle"
+    }
+
     func stopListeningAndSend() {
+        pushToTalkTask?.cancel()
+        pushToTalkTask = nil
         let text = speechRecognizer.stopListening().trimmingCharacters(in: .whitespacesAndNewlines)
         isListening = false
+        voiceStatus = "Push to Talk ready — microphone idle"
         guard !text.isEmpty else { return }
         Task { await sendCommand(text) }
     }
@@ -1162,6 +1220,8 @@ final class JarvisAppModel: ObservableObject {
     }
 
     func stopWakeWordMode() {
+        pushToTalkTask?.cancel()
+        pushToTalkTask = nil
         wakeWordTask?.cancel()
         wakeWordTask = nil
         confirmationFollowUpDeadline = nil

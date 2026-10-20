@@ -622,7 +622,12 @@ final class FrontendIntelligenceController: ObservableObject {
         guard let action = FrontendActionMailbox.take() else { return }
         switch action {
         case "talk":
-            await appModel.togglePushToTalk()
+            // App Shortcut / Action Button always STARTS voice. It is not a
+            // toggle: duplicate deliveries cannot silently send a partial turn.
+            if !(meetingCapture?.isActive ?? false)
+                && !FrontendOperationsController.shared.roomListening.isActive {
+                await appModel.activatePushToTalk()
+            }
         case "scan":
             _ = await scanLatestFrame(copyText: false)
         case "read_text":

@@ -246,8 +246,16 @@ struct SettingsView: View {
                 }
 
                 Section("Voice & Privacy") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Push to Talk is the default", systemImage: "mic.badge.plus")
+                            .font(.headline)
+                        Text("No idle wake-word microphone is needed. To use the iPhone Action Button: open iOS Settings → Action Button → Shortcut → Talk to Horus. Press once and speak; Horus sends after a pause. Alternatively run Talk to Horus from Shortcuts.")
+                        Text("The Action Button works only on supported iPhones. iOS may need to open Horus before capture begins. Meeting Notes, Room Listening, and optional always-listening mode use the microphone separately when enabled.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
                     Toggle("Speak Jarvis responses", isOn: $settings.speakResponses)
-                    Toggle("Prefer Ray-Ban / Bluetooth microphone", isOn: $settings.preferBluetoothAudio)
+                    Toggle("Prefer Bluetooth microphone (AirPods, headsets or Ray-Bans)", isOn: $settings.preferBluetoothAudio)
                     Toggle("Adaptive whisper mode", isOn: $settings.adaptiveWhisperEnabled)
                     Toggle("Quiet-speech mode", isOn: $settings.subvocalModeEnabled)
                     Toggle("Adapt HUD cue volume to room noise", isOn: $settings.adaptiveCueVolumeEnabled)

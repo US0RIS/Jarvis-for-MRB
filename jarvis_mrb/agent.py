@@ -1167,6 +1167,13 @@ Return one JSON object only: {{"tool":"name or null","arguments":{{}},"response"
             messages.append({"role": item.role, "content": item.content})
     messages.append({"role": "user", "content": text})
 
+    from jarvis_mrb.inference import ProviderError, get_inference_config, plan_with_provider
+    if get_inference_config()["provider"] != "ollama":
+        try:
+            return plan_with_provider(messages), ""
+        except ProviderError as exc:
+            return None, str(exc)
+
     payload = {
         "model": OLLAMA_MODEL,
         "stream": False,
@@ -1209,7 +1216,11 @@ def handle_natural_language(
     if not n: return AgentReply(True, "")
     if n in {"quit", "exit"}: return AgentReply(True, "__EXIT__")
     if n in {"model", "what model are you using", "what model are you using?"}:
-        return _respectful(AgentReply(True, f"Planner model: {OLLAMA_MODEL} via Ollama at {OLLAMA_URL}; thinking off; keep-alive {OLLAMA_KEEP_ALIVE}"))
+        from jarvis_mrb.inference import inference_status
+        status = inference_status()
+        if not status["local"]:
+            return _respectful(AgentReply(True, f"Planner: {status['model']} via {status['provider']} (BYOK)."))
+        return _respectful(AgentReply(True, f"Planner model: {OLLAMA_MODEL} via local Ollama."))
     fast = _fast_path(text)
     if fast is not None:
         return _respectful(fast)

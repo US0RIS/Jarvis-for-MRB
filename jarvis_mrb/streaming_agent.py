@@ -455,9 +455,9 @@ def stream_natural_language(
     if normalized in {"quit", "exit"}:
         return
     if normalized in {"model", "what model are you using", "what model are you using?"}:
-        yield _respectful(
-            AgentReply(True, f"Planner model: {active_model}; thinking off; keep-alive {active_keep_alive}")
-        ).message
+        from jarvis_mrb.inference import inference_status
+        status = inference_status()
+        yield f"Planner model: {status['model']} via {status['provider']}."
         return
 
     # Selection/completeness-risk questions bypass the LLM planner. This makes
@@ -473,6 +473,52 @@ def stream_natural_language(
         message = _respectful(fast).message
         if message and message != "__EXIT__":
             yield message
+        return
+
+    # Hosted providers use the exact same local tool authorization and deterministic
+    # fast paths. The first BYOK version returns a completed plan/answer instead
+    # of emulating an Ollama newline-delimited token stream.
+    from jarvis_mrb.inference import ProviderError, get_inference_config, answer_with_provider
+    if get_inference_config()["provider"] != "ollama":
+        selected_history = _history_for_current_turn(stripped, history)
+        if is_explicit_in_context_opinion(stripped):
+            now = datetime.now().astimezone().isoformat()
+            messages = [{"role": "system", "content": (
+                full_personality_context() + "\nCurrent local date/time: " + now +
+                "\nAnswer directly; no tools. Do not invent verification."
+            )}]
+            messages.extend({"role": item.role, "content": item.content} for item in selected_history)
+            messages.append({"role": "user", "content": stripped})
+            try:
+                yield answer_with_provider(messages)
+            except ProviderError as exc:
+                yield str(exc)
+            return
+
+        # The planner still chooses tools, but untrusted tool selections are
+        # filtered by the established authorization and semantic guards.
+        from jarvis_mrb.agent import _ollama_plan
+        plan, error = _ollama_plan(stripped, history=selected_history)
+        if plan is None:
+            yield error
+            return
+        tool = plan.get("tool")
+        args = plan.get("arguments") or {}
+        if tool:
+            name = str(tool)
+            safe_args = args if isinstance(args, dict) else {}
+            if not (_tool_is_justified(name, stripped)
+                    or _executive_tool_is_justified(name, safe_args, stripped)):
+                yield "I can't justify that action from your request."
+                return
+            if not allow_background and name == "background.submit":
+                yield "That background task is already running."
+                return
+            reply = _respectful(execute_tool(name, safe_args))
+            if reply.message and reply.message != "__EXIT__":
+                yield reply.message
+            return
+        yield str(plan.get("response") or "I'm listening.")
         return
 
     # Standalone requests for a take on the ideas already being discussed do

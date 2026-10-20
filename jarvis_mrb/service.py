@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -46,6 +46,7 @@ from jarvis_mrb.runtime_health import record_success as record_runtime_success
 from jarvis_mrb.runtime_health import status as runtime_health_status_data
 from jarvis_mrb.sandbox import status as sandbox_status_data
 from jarvis_mrb.server_config import load_server_config
+from jarvis_mrb.inference import configure_inference, get_inference_config, inference_status, ProviderError
 from jarvis_mrb.spatial_memory import status as spatial_status_data
 from jarvis_mrb.streaming_agent import stream_natural_language
 from jarvis_mrb.tools.web import web_status
@@ -512,6 +513,12 @@ class PlannerModelResponse(BaseModel):
     options: list[str]
 
 
+class InferenceConfigRequest(BaseModel):
+    provider: str
+    model: str = ""
+    api_key: str | None = None
+
+
 class TTSRequest(BaseModel):
     text: str
 
@@ -873,11 +880,13 @@ def startup() -> None:
         _ensure_world_armor_guard()
     except Exception as exc:
         record_runtime_failure("world_armor_guard", exc)
-    _start_tts_in_background()
+    if get_inference_config()["provider"] == "ollama":
+        _start_tts_in_background()
     start_proactive_monitor()
     _proactive_started = True
     record_runtime_success("proactive_monitor")
-    _warm_fast_model()
+    if get_inference_config()["provider"] == "ollama":
+        _warm_fast_model()
 
 
 @app.get("/routing/status")
@@ -913,6 +922,7 @@ def health() -> dict[str, Any]:
         "web_search": "ready" if web_status().ok else "unconfigured",
         "planner_model": settings["model"],
         "auto_route": settings["auto_route"],
+        "inference": inference_status(),
         "sandbox": "ready" if sandbox_state.get("docker") else "docker-unavailable",
         "visual_history": "ready",
         "resource_guardrails": "active",
@@ -2989,7 +2999,10 @@ def command_stream(
     try:
         session_id = request.session_id or "default"
         effective_text = _command_alias(request.text)
-        route = choose_model(effective_text)
+        from jarvis_mrb.model_router import RouteDecision
+        provider = get_inference_config()
+        route = (choose_model(effective_text) if provider["provider"] == "ollama"
+                 else RouteDecision(model=provider["model"], reason="BYOK " + provider["provider"]))
         history_limit = 8 if route.model == FAST_MODEL else 20
         history = _contextual_history(session_id, effective_text, limit=history_limit)
     except Exception:
@@ -3038,7 +3051,7 @@ def command_stream(
                 append_message(session_id, "assistant", full)
                 remember_exchange_async(session_id, request.text, full)
 
-            if get_auto_route() and route.model == QUALITY_MODEL:
+            if get_inference_config()["provider"] == "ollama" and get_auto_route() and route.model == QUALITY_MODEL:
                 threading.Thread(
                     target=_warm_selected_model,
                     args=(QUALITY_MODEL, FAST_MODEL),
@@ -3136,6 +3149,35 @@ def tts(request: TTSRequest, authorization: Annotated[str | None, Header()] = No
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Local TTS is unavailable: {exc}") from exc
     return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/settings/inference")
+def get_inference_setting(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    return inference_status()
+
+
+@app.put("/settings/inference")
+def put_inference_setting(
+    request: InferenceConfigRequest,
+    http_request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    # Never accept plaintext BYOK credentials over unauthenticated LAN HTTP.
+    # Direct local configuration through the installed Windows UI is supported.
+    if request.api_key is not None and http_request.url.scheme != "https":
+        host = (http_request.client.host if http_request.client else "")
+        if host not in {"127.0.0.1", "::1"}:
+            raise HTTPException(status_code=403, detail="Use HTTPS or configure the key locally on the Windows PC.")
+    try:
+        return configure_inference(request.provider, request.model, request.api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/settings/planner-model", response_model=PlannerModelResponse)

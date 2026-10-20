@@ -14,6 +14,7 @@ dependencies = [
   "fastapi>=0.116.0",
   "uvicorn>=0.35.0",
   "httpx>=0.28.0",
+  "keyring>=25.0",  # Windows Credential Manager / macOS Keychain for BYOK
   "h2>=4.2.0",  # HTTP/2 transport for APNs
   "cryptography>=45.0.0",  # ES256 APNs provider-token signing
   "websockets>=15.0.0",  # server-side AISStream movement adapter

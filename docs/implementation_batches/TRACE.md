@@ -1,8 +1,8 @@
-# Future ideas — complete source trace
+# Complete Future Ideas source trace
 
-Every one of **480** Markdown bullet or numbered entries in the unchanged [long-form idea archive](../archive/FUTURE_IDEAS_2026_10.md) belongs to exactly one of **178** scoped implementation/evaluation packets. A linked entry may be a requirement, test fixture or external library candidate, not necessarily a separate deliverable. The original surrounding prose remains in the archive.
+All **480 original bullet and numbered entries** appear **exactly once** in **189 implementation/evaluation packets**. The archive remains unchanged. Paragraphs and long-form requirements outside bullets are still part of the linked source section. A source entry may represent a test, design term or library evaluation rather than a finished product feature.
 
-| Original line | Batch | Original idea / criterion |
+| Original source | Prompt batch | Source description |
 |---|---|---|
 | [L14](../archive/FUTURE_IDEAS_2026_10.md#L14) | [P01-001](01_FOUNDATIONS.md#p01-001) | Kant |
 | [L15](../archive/FUTURE_IDEAS_2026_10.md#L15) | [P01-001](01_FOUNDATIONS.md#p01-001) | Carcosa |
@@ -62,19 +62,19 @@ Every one of **480** Markdown bullet or numbered entries in the unchanged [long-
 | [L294](../archive/FUTURE_IDEAS_2026_10.md#L294) | [P03-005](03_MEMORY.md#p03-005) | Opt-in family safety beacon. |
 | [L299](../archive/FUTURE_IDEAS_2026_10.md#L299) | [P03-005](03_MEMORY.md#p03-005) | **Unified "ask everything I know" search with source/freshness |
 | [L308](../archive/FUTURE_IDEAS_2026_10.md#L308) | [P06-005](06_PHYSICAL_WORLD.md#p06-005) | Counterfactual Engine / Shadow Reality. |
-| [L313](../archive/FUTURE_IDEAS_2026_10.md#L313) | [P06-005](06_PHYSICAL_WORLD.md#p06-005) | Reality Rewind / physical-world DVR. |
-| [L317](../archive/FUTURE_IDEAS_2026_10.md#L317) | [P06-005](06_PHYSICAL_WORLD.md#p06-005) | Reality Diff. |
-| [L321](../archive/FUTURE_IDEAS_2026_10.md#L321) | [P06-006](06_PHYSICAL_WORLD.md#p06-006) | World Assertions / desired-state controller. |
-| [L326](../archive/FUTURE_IDEAS_2026_10.md#L326) | [P06-006](06_PHYSICAL_WORLD.md#p06-006) | Reality Compiler. |
-| [L330](../archive/FUTURE_IDEAS_2026_10.md#L330) | [P06-006](06_PHYSICAL_WORLD.md#p06-006) | Universal Object Interface. |
-| [L335](../archive/FUTURE_IDEAS_2026_10.md#L335) | [P06-007](06_PHYSICAL_WORLD.md#p06-007) | Spatial Bookmarks. |
-| [L338](../archive/FUTURE_IDEAS_2026_10.md#L338) | [P06-007](06_PHYSICAL_WORLD.md#p06-007) | Physical Ctrl-F. |
-| [L342](../archive/FUTURE_IDEAS_2026_10.md#L342) | [P06-007](06_PHYSICAL_WORLD.md#p06-007) | World Search. |
-| [L347](../archive/FUTURE_IDEAS_2026_10.md#L347) | [P06-008](06_PHYSICAL_WORLD.md#p06-008) | Sensor-Fusion Superresolution. |
-| [L351](../archive/FUTURE_IDEAS_2026_10.md#L351) | [P06-008](06_PHYSICAL_WORLD.md#p06-008) | Autonomous Investigation. |
-| [L355](../archive/FUTURE_IDEAS_2026_10.md#L355) | [P06-008](06_PHYSICAL_WORLD.md#p06-008) | Physical Macros. |
-| [L359](../archive/FUTURE_IDEAS_2026_10.md#L359) | [P06-009](06_PHYSICAL_WORLD.md#p06-009) | Mission Mode. |
-| [L364](../archive/FUTURE_IDEAS_2026_10.md#L364) | [P06-009](06_PHYSICAL_WORLD.md#p06-009) | Closed-loop Outcome Mode. |
+| [L313](../archive/FUTURE_IDEAS_2026_10.md#L313) | [P06-006](06_PHYSICAL_WORLD.md#p06-006) | Reality Rewind / physical-world DVR. |
+| [L317](../archive/FUTURE_IDEAS_2026_10.md#L317) | [P06-007](06_PHYSICAL_WORLD.md#p06-007) | Reality Diff. |
+| [L321](../archive/FUTURE_IDEAS_2026_10.md#L321) | [P06-008](06_PHYSICAL_WORLD.md#p06-008) | World Assertions / desired-state controller. |
+| [L326](../archive/FUTURE_IDEAS_2026_10.md#L326) | [P06-009](06_PHYSICAL_WORLD.md#p06-009) | Reality Compiler. |
+| [L330](../archive/FUTURE_IDEAS_2026_10.md#L330) | [P06-010](06_PHYSICAL_WORLD.md#p06-010) | Universal Object Interface. |
+| [L335](../archive/FUTURE_IDEAS_2026_10.md#L335) | [P06-011](06_PHYSICAL_WORLD.md#p06-011) | Spatial Bookmarks. |
+| [L338](../archive/FUTURE_IDEAS_2026_10.md#L338) | [P06-012](06_PHYSICAL_WORLD.md#p06-012) | Physical Ctrl-F. |
+| [L342](../archive/FUTURE_IDEAS_2026_10.md#L342) | [P06-013](06_PHYSICAL_WORLD.md#p06-013) | World Search. |
+| [L347](../archive/FUTURE_IDEAS_2026_10.md#L347) | [P06-014](06_PHYSICAL_WORLD.md#p06-014) | Sensor-Fusion Superresolution. |
+| [L351](../archive/FUTURE_IDEAS_2026_10.md#L351) | [P06-015](06_PHYSICAL_WORLD.md#p06-015) | Autonomous Investigation. |
+| [L355](../archive/FUTURE_IDEAS_2026_10.md#L355) | [P06-016](06_PHYSICAL_WORLD.md#p06-016) | Physical Macros. |
+| [L359](../archive/FUTURE_IDEAS_2026_10.md#L359) | [P06-017](06_PHYSICAL_WORLD.md#p06-017) | Mission Mode. |
+| [L364](../archive/FUTURE_IDEAS_2026_10.md#L364) | [P06-018](06_PHYSICAL_WORLD.md#p06-018) | Closed-loop Outcome Mode. |
 | [L370](../archive/FUTURE_IDEAS_2026_10.md#L370) | [P01-004](01_FOUNDATIONS.md#p01-004) | "Why did you tell me this?" |
 | [L372](../archive/FUTURE_IDEAS_2026_10.md#L372) | [P01-004](01_FOUNDATIONS.md#p01-004) | Attention budget. |
 | [L374](../archive/FUTURE_IDEAS_2026_10.md#L374) | [P01-004](01_FOUNDATIONS.md#p01-004) | Observation TTLs. |
@@ -182,25 +182,25 @@ Every one of **480** Markdown bullet or numbered entries in the unchanged [long-
 | [L679](../archive/FUTURE_IDEAS_2026_10.md#L679) | [P01-017](01_FOUNDATIONS.md#p01-017) | Eventual-Reconciliation Ledger. |
 | [L682](../archive/FUTURE_IDEAS_2026_10.md#L682) | [P01-017](01_FOUNDATIONS.md#p01-017) | Local Mesh Sync. |
 | [L684](../archive/FUTURE_IDEAS_2026_10.md#L684) | [P01-017](01_FOUNDATIONS.md#p01-017) | Long-Now Export. |
-| [L690](../archive/FUTURE_IDEAS_2026_10.md#L690) | [P06-010](06_PHYSICAL_WORLD.md#p06-010) | Alarm Rationalization. |
-| [L693](../archive/FUTURE_IDEAS_2026_10.md#L693) | [P06-010](06_PHYSICAL_WORLD.md#p06-010) | Alarm Flood Mode. |
-| [L695](../archive/FUTURE_IDEAS_2026_10.md#L695) | [P06-010](06_PHYSICAL_WORLD.md#p06-010) | First-Out Analysis. |
-| [L697](../archive/FUTURE_IDEAS_2026_10.md#L697) | [P06-011](06_PHYSICAL_WORLD.md#p06-011) | Intervention Timeline. |
-| [L700](../archive/FUTURE_IDEAS_2026_10.md#L700) | [P06-011](06_PHYSICAL_WORLD.md#p06-011) | Condition-Based Maintenance for Jarvis Hardware. |
-| [L704](../archive/FUTURE_IDEAS_2026_10.md#L704) | [P06-011](06_PHYSICAL_WORLD.md#p06-011) | Degradation Trend Detector. |
-| [L706](../archive/FUTURE_IDEAS_2026_10.md#L706) | [P06-012](06_PHYSICAL_WORLD.md#p06-012) | Operating Envelope Model. |
-| [L708](../archive/FUTURE_IDEAS_2026_10.md#L708) | [P06-012](06_PHYSICAL_WORLD.md#p06-012) | Maintenance Verification. |
-| [L713](../archive/FUTURE_IDEAS_2026_10.md#L713) | [P06-013](06_PHYSICAL_WORLD.md#p06-013) | Persistent World Layer. |
-| [L716](../archive/FUTURE_IDEAS_2026_10.md#L716) | [P06-013](06_PHYSICAL_WORLD.md#p06-013) | Cross-Device Spatial Anchor Abstraction. |
-| [L719](../archive/FUTURE_IDEAS_2026_10.md#L719) | [P06-013](06_PHYSICAL_WORLD.md#p06-013) | Anchor Confidence + Drift. |
-| [L722](../archive/FUTURE_IDEAS_2026_10.md#L722) | [P06-014](06_PHYSICAL_WORLD.md#p06-014) | Walk-Into Interfaces. |
-| [L725](../archive/FUTURE_IDEAS_2026_10.md#L725) | [P06-014](06_PHYSICAL_WORLD.md#p06-014) | Live Physical Labels. |
-| [L728](../archive/FUTURE_IDEAS_2026_10.md#L728) | [P06-014](06_PHYSICAL_WORLD.md#p06-014) | Spatial Inbox. |
-| [L730](../archive/FUTURE_IDEAS_2026_10.md#L730) | [P06-015](06_PHYSICAL_WORLD.md#p06-015) | Shared Spatial Context. |
-| [L733](../archive/FUTURE_IDEAS_2026_10.md#L733) | [P06-015](06_PHYSICAL_WORLD.md#p06-015) | Spatial Procedure Overlay. |
-| [L736](../archive/FUTURE_IDEAS_2026_10.md#L736) | [P06-015](06_PHYSICAL_WORLD.md#p06-015) | Visual Change Memory. |
-| [L738](../archive/FUTURE_IDEAS_2026_10.md#L738) | [P06-016](06_PHYSICAL_WORLD.md#p06-016) | Semantic Room Map. |
-| [L741](../archive/FUTURE_IDEAS_2026_10.md#L741) | [P06-016](06_PHYSICAL_WORLD.md#p06-016) | Place-Bound Live Data. |
+| [L690](../archive/FUTURE_IDEAS_2026_10.md#L690) | [P06-019](06_PHYSICAL_WORLD.md#p06-019) | Alarm Rationalization. |
+| [L693](../archive/FUTURE_IDEAS_2026_10.md#L693) | [P06-019](06_PHYSICAL_WORLD.md#p06-019) | Alarm Flood Mode. |
+| [L695](../archive/FUTURE_IDEAS_2026_10.md#L695) | [P06-019](06_PHYSICAL_WORLD.md#p06-019) | First-Out Analysis. |
+| [L697](../archive/FUTURE_IDEAS_2026_10.md#L697) | [P06-020](06_PHYSICAL_WORLD.md#p06-020) | Intervention Timeline. |
+| [L700](../archive/FUTURE_IDEAS_2026_10.md#L700) | [P06-020](06_PHYSICAL_WORLD.md#p06-020) | Condition-Based Maintenance for Jarvis Hardware. |
+| [L704](../archive/FUTURE_IDEAS_2026_10.md#L704) | [P06-020](06_PHYSICAL_WORLD.md#p06-020) | Degradation Trend Detector. |
+| [L706](../archive/FUTURE_IDEAS_2026_10.md#L706) | [P06-021](06_PHYSICAL_WORLD.md#p06-021) | Operating Envelope Model. |
+| [L708](../archive/FUTURE_IDEAS_2026_10.md#L708) | [P06-021](06_PHYSICAL_WORLD.md#p06-021) | Maintenance Verification. |
+| [L713](../archive/FUTURE_IDEAS_2026_10.md#L713) | [P06-022](06_PHYSICAL_WORLD.md#p06-022) | Persistent World Layer. |
+| [L716](../archive/FUTURE_IDEAS_2026_10.md#L716) | [P06-023](06_PHYSICAL_WORLD.md#p06-023) | Cross-Device Spatial Anchor Abstraction. |
+| [L719](../archive/FUTURE_IDEAS_2026_10.md#L719) | [P06-023](06_PHYSICAL_WORLD.md#p06-023) | Anchor Confidence + Drift. |
+| [L722](../archive/FUTURE_IDEAS_2026_10.md#L722) | [P06-023](06_PHYSICAL_WORLD.md#p06-023) | Walk-Into Interfaces. |
+| [L725](../archive/FUTURE_IDEAS_2026_10.md#L725) | [P06-024](06_PHYSICAL_WORLD.md#p06-024) | Live Physical Labels. |
+| [L728](../archive/FUTURE_IDEAS_2026_10.md#L728) | [P06-024](06_PHYSICAL_WORLD.md#p06-024) | Spatial Inbox. |
+| [L730](../archive/FUTURE_IDEAS_2026_10.md#L730) | [P06-025](06_PHYSICAL_WORLD.md#p06-025) | Shared Spatial Context. |
+| [L733](../archive/FUTURE_IDEAS_2026_10.md#L733) | [P06-026](06_PHYSICAL_WORLD.md#p06-026) | Spatial Procedure Overlay. |
+| [L736](../archive/FUTURE_IDEAS_2026_10.md#L736) | [P06-027](06_PHYSICAL_WORLD.md#p06-027) | Visual Change Memory. |
+| [L738](../archive/FUTURE_IDEAS_2026_10.md#L738) | [P06-027](06_PHYSICAL_WORLD.md#p06-027) | Semantic Room Map. |
+| [L741](../archive/FUTURE_IDEAS_2026_10.md#L741) | [P06-027](06_PHYSICAL_WORLD.md#p06-027) | Place-Bound Live Data. |
 | [L746](../archive/FUTURE_IDEAS_2026_10.md#L746) | [P02-009](02_INTERFACES.md#p02-009) | Input-Modality Independence. |
 | [L750](../archive/FUTURE_IDEAS_2026_10.md#L750) | [P02-009](02_INTERFACES.md#p02-009) | Output-Modality Independence. |
 | [L753](../archive/FUTURE_IDEAS_2026_10.md#L753) | [P02-009](02_INTERFACES.md#p02-009) | Interaction Capability Negotiation. |

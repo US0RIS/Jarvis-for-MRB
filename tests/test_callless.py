@@ -68,6 +68,7 @@ class CalllessStoreTests(unittest.TestCase):
         from jarvis_mrb import callless_api
         app = FastAPI()
         app.include_router(callless_api.router)
+        app.include_router(callless_api.api_router)
         with patch.object(callless_api, "store", self.store):
             callless_api.connections.clear()
             callless_api.sessions.clear()
@@ -107,6 +108,7 @@ class CalllessStoreTests(unittest.TestCase):
         from jarvis_mrb import callless_api
         app = FastAPI()
         app.include_router(callless_api.router)
+        app.include_router(callless_api.api_router)
         with TestClient(app, base_url="http://example.invalid", client=("203.0.113.55", 50000)) as client:
             result = client.get("/callless/v1/me")
             self.assertEqual(result.status_code, 403)

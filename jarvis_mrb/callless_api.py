@@ -357,5 +357,5 @@ async def socket_channel(ws: WebSocket) -> None:
                     peer = session["callee"] if user["id"] == session["caller"] else session["caller"]
                     await _emit(peer, {"type": "ended", "session_id": sid, "reason": "disconnected"})
 
-# Mount API routes after declarations so their TLS dependency is enforced.
-router.include_router(api_router)
+# Import and mount api_router alongside router at the application level.
+# Avoid nested includes so service.app.routes contains only concrete routes.

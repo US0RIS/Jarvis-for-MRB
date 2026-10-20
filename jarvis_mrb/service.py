@@ -69,8 +69,9 @@ app = FastAPI(title="Horus", version="0.14.0")
 
 # Callless has its own per-person credentials and explicit contact grants.
 # It deliberately does not share the machine-wide Horus backend API token.
-from jarvis_mrb.callless_api import router as callless_router
+from jarvis_mrb.callless_api import router as callless_router, api_router as callless_api_router
 app.include_router(callless_router)
+app.include_router(callless_api_router)
 _scheduler_started = False
 _external_watches_started = False
 _tts_start_attempted = False

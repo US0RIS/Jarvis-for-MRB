@@ -3,7 +3,8 @@
   const $ = (id) => document.getElementById(id);
   const root = "/callless/v1/";
   const localKey = "horus.callless.access";
-  let token = sessionStorage.getItem(localKey) || "";
+  const requestedContact = new URLSearchParams(location.search).get("contact")?.toLowerCase() || "";
+  let token = localStorage.getItem(localKey) || "";
   let myUser = null;
   let socket = null;
   let heartbeat = null;
@@ -43,7 +44,7 @@
   async function initSession(data) {
     myUser = data.user;
     token = data.token || token;
-    sessionStorage.setItem(localKey, token);
+    localStorage.setItem(localKey, token);
     renderLogin();
     $("status").value = myUser.status;
     $("status-help").textContent = myUser.status === "open" ? "Approved contacts can reach you while this page is connected." :
@@ -76,7 +77,8 @@
       sub.textContent = item.blocked ? "Blocked" : item.online ? (item.status === "closed" ? "Closed" : item.status === "ask" ? "Ask first · online" : "Open · online") : "Offline";
       info.append(title, sub);
       const controls = document.createElement("div"); controls.className = "controls";
-      const connect = document.createElement("button"); connect.textContent = "Connect";
+      const connect = document.createElement("button");
+      connect.textContent = requestedContact === item.handle ? "Connect to @" + item.handle : "Connect";
       connect.disabled = item.blocked || !item.online || item.status === "closed" || !!session || !socket || socket.readyState !== WebSocket.OPEN;
       connect.addEventListener("click", () => call(item.handle));
       const block = document.createElement("button");
@@ -86,6 +88,7 @@
         catch (e) { msg(e.message); }
       });
       controls.append(connect, block); row.append(info, controls); container.append(row);
+      if (requestedContact === item.handle) msg("Contact selected: @" + item.handle + ". Tap Connect to activate your microphone.");
     }
   }
 
@@ -281,11 +284,11 @@
     try {await api("POST","logout");} catch (_) {}
     if (socket) {socket.close();socket=null;}
     clearTimeout(reconnect);clearInterval(heartbeat);
-    cleanup();sessionStorage.removeItem(localKey);token="";myUser=null;renderLogin();msg("Signed out.");
+    cleanup();localStorage.removeItem(localKey);token="";myUser=null;renderLogin();msg("Signed out.");
   });
 
   renderLogin();
   if (token) api("GET","me").then(async data => initSession(data)).catch(() => {
-    sessionStorage.removeItem(localKey);token="";myUser=null;renderLogin();
+    localStorage.removeItem(localKey);token="";myUser=null;renderLogin();
   });
 })();

@@ -1,5 +1,17 @@
 import Foundation
 
+struct HorusInferenceSettings: Decodable {
+    let provider: String
+    let model: String
+    let keyConfigured: Bool
+    let providers: [String]
+    let local: Bool
+    enum CodingKeys: String, CodingKey {
+        case provider, model, providers, local
+        case keyConfigured = "key_configured"
+    }
+}
+
 struct LifeFabricRecord: Decodable, Identifiable {
     struct Detail: Decodable {
         let description: String?
@@ -2189,6 +2201,34 @@ struct JarvisAPIClient {
         let (data, response) = try await get(path: "tts/status", timeout: 5)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(TTSStatusResponse.self, from: data).status
+    }
+
+    func inferenceSettings() async throws -> HorusInferenceSettings {
+        let (data, response) = try await get(path: "settings/inference", timeout: 10)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(HorusInferenceSettings.self, from: data)
+    }
+
+    func updateInference(provider: String, model: String, apiKey: String?) async throws -> HorusInferenceSettings {
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent("settings/inference") else {
+            throw JarvisAPIError.badURL
+        }
+        // API keys never travel over ordinary LAN HTTP.
+        if apiKey != nil && url.scheme != "https" {
+            throw JarvisAPIError.server("Use the Windows Horus setup UI to enter keys on LAN HTTP, or configure HTTPS.")
+        }
+        var payload: [String: String] = ["provider": provider, "model": model]
+        if let apiKey, !apiKey.isEmpty { payload["api_key"] = apiKey }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthorization(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(HorusInferenceSettings.self, from: data)
     }
 
     func plannerModel() async throws -> PlannerModelResponse {

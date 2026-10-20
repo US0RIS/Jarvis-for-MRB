@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import MapKit
+import UIKit
 
 @MainActor
 final class JarvisAppModel: ObservableObject {
@@ -660,9 +661,41 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
+    private static func calllessRecipient(_ raw: String) -> String? {
+        let pattern = #"(?i)^(?:horus[, ]+)?(?:get me to|connect me to|callless with)\\s+([a-z][a-z0-9_]{2,27})[.?!]?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let result = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let range = Range(result.range(at: 1), in: raw) else { return nil }
+        return String(raw[range]).lowercased()
+    }
+
+    private func openCallless(recipient: String) -> Bool {
+        let specified = settings.calllessHubURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = specified.isEmpty ? settings.baseURL : specified
+        guard let base = URL(string: address),
+              ["https", "http"].contains(base.scheme?.lowercased() ?? "") else { return false }
+        var components = URLComponents(url: base.appendingPathComponent("callless"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "contact", value: recipient)]
+        guard let url = components?.url else { return false }
+        UIApplication.shared.open(url)
+        return true
+    }
+
     private func performCommand(_ rawText: String, fromHandsFree: Bool) async {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+
+        if let target = Self.calllessRecipient(text) {
+            let opened = openCallless(recipient: target)
+            await finishLocalResponse(
+                opened
+                    ? "Opening Callless for \(target). Confirm Connect in the browser to enable your microphone."
+                    : "Set a valid Callless hub URL in Settings.",
+                command: text, fromHandsFree: fromHandsFree,
+                routeReason: "iPhone Callless contact handoff"
+            )
+            return
+        }
 
         // The Personal Notecard is an explicit local fact source. Handle direct
         // additions, lookups, and answers to a fact Jarvis just requested before

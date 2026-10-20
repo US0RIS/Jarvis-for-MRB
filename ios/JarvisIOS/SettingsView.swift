@@ -4,6 +4,7 @@ struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var geofence: GeofenceManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @State private var allowedRecipients: [String] = []
     @State private var newAllowedRecipient = ""
@@ -14,6 +15,11 @@ struct SettingsView: View {
     @State private var autoRoutePlanner = true
     @State private var plannerModelStatus = "Loading planner model…"
     @State private var isSwitchingPlanner = false
+    @State private var inferenceProvider = "ollama"
+    @State private var inferenceModel = ""
+    @State private var inferenceKey = ""
+    @State private var inferenceStatus = "Loading inference configuration…"
+    @State private var isSavingInference = false
 
     private let fastPlannerModel = "qwen3:8b"
     private let qualityPlannerModel = "qwen3.8:27b"
@@ -42,6 +48,45 @@ struct SettingsView: View {
                     Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("AI Provider / BYOK") {
+                    Picker("Inference provider", selection: $inferenceProvider) {
+                        Text("Local Ollama").tag("ollama")
+                        Text("OpenAI").tag("openai")
+                        Text("Anthropic").tag("anthropic")
+                        Text("OpenRouter").tag("openrouter")
+                    }
+                    .onChange(of: inferenceProvider) { _, next in
+                        switch next {
+                        case "openai": inferenceModel = "gpt-5.5"
+                        case "anthropic": inferenceModel = "claude-sonnet-4-5"
+                        case "openrouter": inferenceModel = "openai/gpt-5.5"
+                        default: inferenceModel = "qwen3:8b"
+                        }
+                    }
+                    TextField("Model identifier", text: $inferenceModel)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if inferenceProvider != "ollama" {
+                        SecureField("API key (optional if saved)", text: $inferenceKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    Button("Save inference settings") { Task { await saveInference() } }
+                        .disabled(isSavingInference)
+                    Text(inferenceStatus).font(.caption).foregroundStyle(.secondary)
+                    Text("BYOK sends prompts and relevant conversation context to the provider. Keys live in the PC credential store. When connecting over HTTP LAN, enter keys using the Windows Horus .exe setup instead of your phone.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Callless") {
+                    TextField("Shared hub URL (optional)", text: $settings.calllessHubURL)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    Button("Open Callless") { openCallless() }
+                    Text("Both people must use the same hub and approve each other. Browser audio needs HTTPS outside localhost, and the recipient taps Join to activate the microphone. Native iPhone background pickup is not yet available.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("AI Planner") {
@@ -360,14 +405,56 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
+                async let inferenceLoad: Void = loadInference()
                 async let plannerLoad: Void = loadPlannerModel()
                 async let voiceCheck: Void = checkNeuralVoice()
                 async let recipientsLoad: Void = loadAllowedRecipients()
-                _ = await (plannerLoad, voiceCheck, recipientsLoad)
+                _ = await (inferenceLoad, plannerLoad, voiceCheck, recipientsLoad)
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+        }
+    }
+
+    private func openCallless() {
+        let configured = settings.calllessHubURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = configured.isEmpty ? settings.baseURL : configured
+        guard let base = URL(string: address),
+              ["https", "http"].contains(base.scheme?.lowercased() ?? "") else {
+            inferenceStatus = "Enter a valid Callless hub URL."
+            return
+        }
+        openURL(base.appendingPathComponent("callless"))
+    }
+
+    private func loadInference() async {
+        do {
+            let current = try await client.inferenceSettings()
+            inferenceProvider = current.provider
+            inferenceModel = current.model
+            inferenceStatus = current.keyConfigured
+                ? "Ready: \(current.provider) / \(current.model)"
+                : "An API key is required for \(current.provider)."
+        } catch {
+            inferenceStatus = "Unable to load provider settings: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveInference() async {
+        guard !isSavingInference else { return }
+        isSavingInference = true
+        defer { isSavingInference = false }
+        do {
+            let key = inferenceKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let response = try await client.updateInference(
+                provider: inferenceProvider, model: inferenceModel,
+                apiKey: key.isEmpty ? nil : key
+            )
+            inferenceKey = ""
+            inferenceStatus = "Saved: \(response.provider) / \(response.model)."
+        } catch {
+            inferenceStatus = "Could not save: \(error.localizedDescription)"
         }
     }
 

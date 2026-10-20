@@ -207,3 +207,18 @@ Authenticated Jarvis API
         +-- Gmail / Contacts / Calendar
         +-- persistent jobs
 ```
+
+## BYOK and Callless on iOS
+
+iPhone Settings now exposes backend local/hosted inference provider selection.
+A new API key must travel over HTTPS, or be entered on the Windows PC in
+the Horus .exe setup window; the key stays in Windows Credential Manager.
+
+Settings provides a shared Callless hub URL and **Open Callless** button.
+Both users need accounts on the same hub and a mutual contact invitation.
+WebRTC peer media uses encrypted DTLS-SRTP, with no audio stored at the hub.
+Saying `get me to alex` opens the Callless web UI with that contact selected.
+Browser recipients must still tap Join for microphone access; HTTPS (outside
+localhost), a TURN relay in some networks and a foreground browser are
+required. Native CallKit, APNs wakeup, background pickup and federation
+are not yet implemented.

@@ -201,6 +201,9 @@ def append(mission_id: str, observations: list[dict[str, Any]]) -> dict[str, Any
         for row in rows:
             db.execute("INSERT OR IGNORE INTO graph_observations(mission_id,id,observed_at,data_json) VALUES(?,?,?,?)",
                        (mid, row["id"], row["observed_at"], json.dumps(row, separators=(",", ":"), sort_keys=True)))
+        # Update only explicitly enrolled, non-actuating desired-state checks.
+        from jarvis_mrb.world_assertions import _on_append
+        _on_append(db, mid, now)
         db.commit()
         count = db.execute("SELECT COUNT(*) FROM graph_observations WHERE mission_id = ?", (mid,)).fetchone()[0]
     return {"mission_id": mid, "observations": count, "accepted": len(rows),
@@ -351,6 +354,8 @@ def delete(mission_id: str) -> dict[str, Any]:
             raise KeyError("No such Reality Graph mission.")
         db.execute("DELETE FROM graph_observations WHERE mission_id = ?", (mid,))
         db.execute("DELETE FROM graph_missions WHERE id = ?", (mid,))
+        from jarvis_mrb.world_assertions import _on_mission_delete
+        _on_mission_delete(db, mid)
         db.commit()
     return {"mission_id": mid, "state": "deleted", "action_authority": "none"}
 

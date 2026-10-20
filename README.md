@@ -16,6 +16,8 @@ HORUS uses story-driven user-facing names while retaining stable internal module
 mythology theme. Existing `jarvis_mrb`, `JARVIS_*` environment variables, persisted paths, and protocol
 identifiers remain compatibility surfaces until deliberately migrated.
 
+**Current architecture / scope:** [Callless product and systems design](docs/CALLLESS_DESIGN.md) (proposed, not shipped) · [Horus scope and housekeeping plan](docs/HORUS_HOUSEKEEPING.md) · [Shipping status and deployment](docs/SHIPPING.md). These documents distinguish feature ideas from implementation and verified real-device behavior.
+
 ## Quick start (Windows host + iPhone)
 
 1. On Windows, install Python 3.12 or 3.14, then double-click

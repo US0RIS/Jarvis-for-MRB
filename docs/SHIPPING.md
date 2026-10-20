@@ -39,6 +39,8 @@ API balance is exhausted, the user sees a provider error, not a silent
 switch to a different provider. Remote setting of API keys requires TLS
 (HTTPS); enter keys on the installed Windows UI when using LAN HTTP.
 
+> **Future Callless changes:** See [Callless product and systems design](CALLLESS_DESIGN.md) for directed permissions, calendar-driven availability, held calls, screening, bypass, urgency, recording, non-user fallback and native calling. These are proposed improvements—not part of this 0.14 shipping checklist.
+
 ## Callless self-hosted hub
 
 The same Horus backend now hosts **`/callless/`**, a responsive web

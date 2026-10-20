@@ -1118,6 +1118,7 @@ final class JarvisAppModel: ObservableObject {
 
         do {
             try await speechRecognizer.requestPermissions()
+            speechSynthesizer.stopSpeaking()
             try speechRecognizer.startListening(preferBluetooth: settings.preferBluetoothAudio)
             isListening = true
             voiceStatus = "Listening — speak now"
@@ -1169,6 +1170,7 @@ final class JarvisAppModel: ObservableObject {
         if isListening || speechRecognizer.isActive {
             _ = speechRecognizer.stopListening()
         }
+        audioRouteManager.releaseOneShotVoiceSession()
         isListening = false
         voiceStatus = "Push to Talk ready — microphone idle"
     }
@@ -1177,6 +1179,7 @@ final class JarvisAppModel: ObservableObject {
         pushToTalkTask?.cancel()
         pushToTalkTask = nil
         let text = speechRecognizer.stopListening().trimmingCharacters(in: .whitespacesAndNewlines)
+        audioRouteManager.releaseOneShotVoiceSession()
         isListening = false
         voiceStatus = "Push to Talk ready — microphone idle"
         guard !text.isEmpty else { return }

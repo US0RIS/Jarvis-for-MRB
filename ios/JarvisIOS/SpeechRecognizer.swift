@@ -97,6 +97,15 @@ final class AudioRouteManager: ObservableObject {
         refresh()
     }
 
+    /// Release a finished one-shot input session instead of holding a
+    /// playAndRecord route open while Horus is idle.
+    func releaseOneShotVoiceSession() {
+        try? AVAudioSession.sharedInstance().setActive(
+            false, options: .notifyOthersOnDeactivation
+        )
+        refresh()
+    }
+
     func refresh() {
         let session = AVAudioSession.sharedInstance()
         let input = session.currentRoute.inputs.first

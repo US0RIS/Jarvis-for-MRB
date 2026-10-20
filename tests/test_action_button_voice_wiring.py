@@ -21,6 +21,7 @@ class ActionButtonVoiceWiringTests(unittest.TestCase):
         self.assertIn('func activatePushToTalk() async', model)
         self.assertIn('guard !isListening && !speechRecognizer.isActive else { return }', model)
         self.assertIn('func cancelPushToTalk()', model)
+        self.assertIn('audioRouteManager.releaseOneShotVoiceSession()', model)
         self.assertIn('now.timeIntervalSince(updated) >= 2.3', model)
         self.assertIn('(spoken ? 90 : 15)', model)
         app = (ROOT / "JarvisIOSApp.swift").read_text(encoding="utf-8")

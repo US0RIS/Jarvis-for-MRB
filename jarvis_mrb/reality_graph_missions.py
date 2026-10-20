@@ -284,9 +284,12 @@ def rewind(mission_id: str, *, at: str) -> dict[str, Any]:
         "id": mid, "goal": mission_row["goal"],
         "deadline": mission_row["deadline"], "status": historical_status,
     }
-    graph = build_mission_graph(
-        mission, [json.loads(r["data_json"]) for r in reversed(stored)], now=requested,
-    )
+    ordered_observations = [json.loads(r["data_json"]) for r in reversed(stored)]
+    graph = build_mission_graph(mission, ordered_observations, now=requested)
+    # Every stored normalized row maps to one evidence entry in the mission
+    # reducer. Preserve stable source event IDs alongside its local graph IDs.
+    for evidence, observation in zip(graph["evidence"], ordered_observations):
+        evidence["source_observation_id"] = observation["id"]
     graph["source_attestation"] = "client_supplied_not_provider_verified"
     graph["mission_expires_at"] = mission_row["expires_at"]
     graph["observation_count"] = total

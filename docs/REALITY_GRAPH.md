@@ -70,28 +70,28 @@ No evidence, expired observations, stopped/expired missions, already reported de
 ## Reality Rewind: P06-006 first vertical slice
 
 **Source-implemented, not a physical-world DVR or provider-validated history.**
-With the existing explicit \`JARVIS_REALITY_GRAPH_MISSIONS_ENABLED=1\` opt-in and
+With the existing explicit `JARVIS_REALITY_GRAPH_MISSIONS_ENABLED=1` opt-in and
 private Mesh bearer authentication, call:
 
-\`\`\`json
+```json
 POST /mesh/graph/missions/rewind
 {"mission_id":"rg_<returned-id>","at":"2026-10-19T19:00:00+00:00"}
-\`\`\`
+```
 
-\`at\` must be an offset-aware ISO 8601 timestamp, no later than the server clock
+`at` must be an offset-aware ISO 8601 timestamp, no later than the server clock
 and within the enrolled mission's creation-to-expiry window. The read-only
-endpoint returns \`jarvis.reality_rewind.mission.v1\` with the reconstructed
-\`graph\`, exact \`as_of\` time, \`reconstructed_at\` server time, evidence
-freshness *relative to that historical instant*, and explicit \`coverage\`.
-\`Cache-Control: private, no-store\` applies; disabled storage returns 503,
+endpoint returns `jarvis.reality_rewind.mission.v1` with the reconstructed
+`graph`, exact `as_of` time, `reconstructed_at` server time, evidence
+freshness *relative to that historical instant*, and explicit `coverage`.
+`Cache-Control: private, no-store` applies; disabled storage returns 503,
 missing/deleted mission 404, and invalid/out-of-range times 422.
 
-Replay is deterministic across retained typed \`order\`, \`courier\`, \`traffic\`,
-\`camera\` and \`device\` observations. Queries select only records whose
-\`observed_at <= at\`, then reduce the newest 100 **at that instant**; up
+Replay is deterministic across retained typed `order`, `courier`, `traffic`,
+`camera` and `device` observations. Queries select only records whose
+`observed_at <= at`, then reduce the newest 100 **at that instant**; up
 to 400 records exist per mission. Newer events are never used to infer earlier
-facts. Fresh facts keep original evidence IDs, source names and timestamps.
-No observations or no fresh evidence returns \`insufficient_evidence\` rather
+facts. Fresh evidence retains each source observation ID, source label and reported timestamp, without authenticating the reporter.
+No observations or no fresh evidence returns `insufficient_evidence` rather
 than inventing world state. Record counts and truncation flags expose gaps
 instead of implying continuous recording.
 

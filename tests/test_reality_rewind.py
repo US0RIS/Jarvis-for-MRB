@@ -61,6 +61,7 @@ class RealityRewindTests(unittest.TestCase):
         self.assertEqual(later["coverage"]["observations_at_or_before"], 2)
         self.assertEqual(early["as_of"], iso(-80))
         self.assertEqual(early["graph"]["generated_at"], iso(-80))
+        self.assertEqual(early["graph"]["evidence"][0]["source_observation_id"], "pickup")
         self.assertEqual(early["source_attestation"], "client_supplied_not_provider_verified")
         self.assertEqual(early["model_calls"], 0)
         self.assertEqual(early["action_authority"], "none")

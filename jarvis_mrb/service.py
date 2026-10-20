@@ -65,7 +65,12 @@ _INITIAL_MODEL = get_planner_model()
 agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 streaming_agent_module.OLLAMA_MODEL = _INITIAL_MODEL
 
-app = FastAPI(title="Jarvis for MRB", version="0.13.0")
+app = FastAPI(title="Horus", version="0.14.0")
+
+# Callless has its own per-person credentials and explicit contact grants.
+# It deliberately does not share the machine-wide Horus backend API token.
+from jarvis_mrb.callless_api import router as callless_router
+app.include_router(callless_router)
 _scheduler_started = False
 _external_watches_started = False
 _tts_start_attempted = False

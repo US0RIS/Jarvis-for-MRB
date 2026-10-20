@@ -54,3 +54,6 @@ jarvis-agency-real-gate = "jarvis_mrb.agency_real_acceptance_check:main"
 
 [tool.setuptools.packages.find]
 include = ["jarvis_mrb*"]
+
+[tool.setuptools.package-data]
+jarvis_mrb = ["callless_ui.html", "callless_ui.js", "callless_ui.css"]

@@ -70,7 +70,7 @@ class RealityDiffTests(unittest.TestCase):
         mid = self.mission()
         with patch.object(store, "_utc", return_value=NOW - timedelta(seconds=300)):
             store.append(mid, [row("old", -301, status="picked_up")])
-        result = diff(mid, before=iso(-299), after=iso(-1))
+        result = diff(mid, before=iso(-299), after=iso(0))
         self.assertEqual(result["changes"][0]["kind"], "no_recent_evidence")
         self.assertIsNone(result["changes"][0]["after"])
         self.assertFalse(result["changes"][0]["physical_change_verified"])

@@ -4,6 +4,7 @@ Repository root documentation is limited to [README](../README.md) and the [shor
 Original long documents are retained, not discarded.
 
 ## Current reference
+- [Implementation batches](implementation_batches/README.md) — copyable bounded task prompts and full [source map](implementation_batches/TRACE.md)
 - [Capabilities and verification](CAPABILITIES.md)
 - [Current shipping and deployment](SHIPPING.md)
 - [Callless design](CALLLESS_DESIGN.md)

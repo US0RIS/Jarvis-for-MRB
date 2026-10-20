@@ -45,3 +45,5 @@ See [Callless specification](docs/CALLLESS_DESIGN.md).
 A feature moves from "future" only with a named owner, scoped authorization, user-visible permissions, regression tests, real-device evidence when relevant, and a clear disable/revoke path. **Code merged is not proof of product release.**
 
 [Scope and housekeeping](docs/HORUS_HOUSEKEEPING.md) · [Full idea archive](docs/archive/FUTURE_IDEAS_2026_10.md)
+
+[All implementation batches](docs/implementation_batches/README.md) · [480-item traceability](docs/implementation_batches/TRACE.md).

@@ -49,7 +49,7 @@ class MissionControlContractTests(unittest.TestCase):
             'missions.filter({ $0.eligibleForReview }).count < 5',
         ):
             if value == 'No raw GPS history':
-                self.assertIn('No raw GPS history', (ROOT / 'MISSION_CONTROL.md').read_text(encoding="utf-8"))
+                self.assertIn('No raw GPS history', (ROOT / 'docs/MISSION_CONTROL.md').read_text(encoding="utf-8"))
             else:
                 self.assertIn(value, self.mission)
         self.assertNotIn('sendEnvironment(', self.mission)
@@ -76,7 +76,7 @@ class MissionControlContractTests(unittest.TestCase):
         self.assertIn('private static func ambiguousAlias(_ raw: String)', self.mission)
         self.assertIn('!Self.ambiguousAlias(event.location)', self.mission)
         self.assertIn('mission.status = "Unknown: no fresh high-accuracy phone fix;', self.mission)
-        self.assertIn('route estimates', (ROOT / "MISSION_CONTROL.md").read_text(encoding="utf-8"))
+        self.assertIn('route estimates', (ROOT / "docs/MISSION_CONTROL.md").read_text(encoding="utf-8"))
 
     def test_narrow_automatic_intervention_and_receipt_are_not_faked(self):
         for value in (

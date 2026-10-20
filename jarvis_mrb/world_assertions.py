@@ -51,7 +51,7 @@ def _schema(db: sqlite3.Connection) -> None:
 
 
 def _definition(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or value.get("kind") not in _KINDS:
+    if not isinstance(value, dict) or not isinstance(value.get("kind"), str) or value["kind"] not in _KINDS:
         raise ValueError("Use an explicitly supported desired-state predicate.")
     kind = value["kind"]
     if kind == "order_status_equals":
@@ -85,7 +85,7 @@ def _evaluate(definition: dict[str, Any], mission: sqlite3.Row, observations: li
         return "unknown", None
     latest = max(relevant, key=lambda r: (r["observed_at"], r["id"]))
     age = (now - missions._stamp(latest["observed_at"])).total_seconds()
-    if not -30 <= age <= missions._TTL[wanted]:
+    if not 0 <= age <= missions._TTL[wanted]:
         return "unknown", None
     state: bool | None = None
     if kind == "order_status_equals":
@@ -240,3 +240,15 @@ def _on_mission_delete(db: sqlite3.Connection, mission_id: str) -> None:
         "DELETE FROM world_assertion_events WHERE assertion_id IN "
         "(SELECT id FROM world_assertions WHERE mission_id=?)", (mission_id,))
     db.execute("DELETE FROM world_assertions WHERE mission_id=?", (mission_id,))
+
+
+def _on_prune(db: sqlite3.Connection, cutoff: str) -> None:
+    """Discard assertion and audit rows for missions aged out by retention."""
+    _schema(db)
+    db.execute(
+        "DELETE FROM world_assertion_events WHERE assertion_id IN "
+        "(SELECT id FROM world_assertions WHERE mission_id IN "
+        "(SELECT id FROM graph_missions WHERE expires_at < ?))", (cutoff,))
+    db.execute(
+        "DELETE FROM world_assertions WHERE mission_id IN "
+        "(SELECT id FROM graph_missions WHERE expires_at < ?)", (cutoff,))

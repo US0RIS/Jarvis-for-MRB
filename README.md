@@ -16,6 +16,37 @@ HORUS uses story-driven user-facing names while retaining stable internal module
 mythology theme. Existing `jarvis_mrb`, `JARVIS_*` environment variables, persisted paths, and protocol
 identifiers remain compatibility surfaces until deliberately migrated.
 
+## Quick start (Windows host + iPhone)
+
+1. On Windows, install Python 3.12 or 3.14, then double-click
+   [`setup_horus.cmd`](setup_horus.cmd). The script creates a private
+   `.venv`, installs backend dependencies, and offers private-network
+   configuration and start-at-sign-in. It does **not** install local AI
+   models, guarantee that external services are configured, or provision
+   paid AI providers.
+2. If you opt into phone connectivity, keep the PC on a trusted private
+   network. Copy the LAN URL and bearer token displayed by setup into
+   the native iPhone app's Settings. Never port-forward the unauthenticated
+   network edge or expose the HTTP service to the public internet. Rerunning
+   `jarvis-remote-setup` keeps existing paired-client tokens; use
+   `jarvis-remote-setup --rotate` to revoke the old token.
+3. Build `ios/JarvisIOS.xcodeproj` on a Mac with Xcode and an Apple
+   signing team. Meta glasses are **optional**. On Action Button-capable
+   iPhones, select **Settings → Action Button → Shortcut → Talk to Horus**.
+   Press once, speak, and Horus automatically submits after a short pause.
+   On other iPhones run the same App Shortcut through Shortcuts.
+
+Voice privacy: **push-to-talk is the default**. The iOS microphone is
+not continuously opened to listen for a wake word, and a one-shot capture is
+cancelled if Horus goes into the background. Opting into hands-free wake mode,
+room listening, meeting notes, or separately enabled sound analysis is a
+distinct microphone-use decision. iOS controls the microphone indicator.
+
+Current shipping boundary: this is still a developer build, not a signed
+App Store package or a standalone iPhone AI. It requires a separately
+configured backend; BYOK/provider selection and Callless networking are
+future product work rather than completed capabilities.
+
 ## World Armor — merge status (2026-09-26)
 
 The thirteen stacked World Armor draft PRs (#7–#21) plus the reconciled

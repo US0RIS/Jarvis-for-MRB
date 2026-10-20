@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
@@ -34,7 +34,7 @@ def _secure(request) -> bool:
     return request.url.scheme in {"https", "wss"} or host in {"127.0.0.1", "::1"}
 
 
-def _require_secure(request) -> None:
+def _require_secure(request: Request) -> None:
     if not _secure(request):
         raise HTTPException(status_code=403, detail="Callless accounts and audio require HTTPS outside localhost.")
 
@@ -58,6 +58,10 @@ def _limit_login(request: Request) -> None:
     if len(bucket) >= 8:
         raise HTTPException(status_code=429, detail="Too many sign-in attempts; retry later.")
     bucket.append(now)
+
+
+# Account and bearer-token requests require TLS outside localhost.
+api_router = APIRouter(prefix="/callless/v1", dependencies=[Depends(_require_secure)])
 
 
 class Credentials(BaseModel):
@@ -124,7 +128,7 @@ def client_css() -> Response:
     return Response(content=css, media_type="text/css", headers={"Cache-Control": "no-store"})
 
 
-@router.post("/callless/v1/register", status_code=201)
+@api_router.post("/register", status_code=201)
 def register(request: Request, body: Credentials) -> dict:
     _require_secure(request)
     _limit_login(request)
@@ -135,7 +139,7 @@ def register(request: Request, body: Credentials) -> dict:
     return {"user": user, "token": token}
 
 
-@router.post("/callless/v1/login")
+@api_router.post("/login")
 def login(request: Request, body: Credentials) -> dict:
     _require_secure(request)
     _limit_login(request)
@@ -146,20 +150,20 @@ def login(request: Request, body: Credentials) -> dict:
     return {"user": user, "token": token}
 
 
-@router.post("/callless/v1/logout")
+@api_router.post("/logout")
 def logout(authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
     store.logout(authorization[7:])
     return {"ok": True}
 
 
-@router.get("/callless/v1/me")
+@api_router.get("/me")
 def me(authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     return {"user": user, "online": user["id"] in connections}
 
 
-@router.put("/callless/v1/presence")
+@api_router.put("/presence")
 async def presence(body: PresenceRequest, authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     try:
@@ -176,7 +180,7 @@ async def presence(body: PresenceRequest, authorization: str | None = Header(def
     return {"user": updated}
 
 
-@router.get("/callless/v1/contacts")
+@api_router.get("/contacts")
 def contacts(authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     items = store.contacts(user["id"])
@@ -185,13 +189,13 @@ def contacts(authorization: str | None = Header(default=None)) -> dict:
     return {"contacts": items}
 
 
-@router.post("/callless/v1/invite")
+@api_router.post("/invite")
 def invite(authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     return {"code": store.invitation(user["id"]), "expires_seconds": 900}
 
 
-@router.post("/callless/v1/accept")
+@api_router.post("/accept")
 def accept(body: InviteRequest, authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     try:
@@ -201,7 +205,7 @@ def accept(body: InviteRequest, authorization: str | None = Header(default=None)
     return {"contact": added}
 
 
-@router.put("/callless/v1/block")
+@api_router.put("/block")
 async def block(body: ContactRequest, authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     try:
@@ -217,7 +221,7 @@ async def block(body: ContactRequest, authorization: str | None = Header(default
     return {"ok": True}
 
 
-@router.get("/callless/v1/ice")
+@api_router.get("/ice")
 def ice(authorization: str | None = Header(default=None)) -> dict:
     _auth(authorization)
     # The default STUN server is not a relay. Operators can supply a TURN
@@ -234,7 +238,7 @@ def ice(authorization: str | None = Header(default=None)) -> dict:
     return {"ice_servers": servers}
 
 
-@router.post("/callless/v1/sessions")
+@api_router.post("/sessions")
 async def call(body: SessionRequest, authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     peer = store.lookup(body.target)
@@ -247,6 +251,9 @@ async def call(body: SessionRequest, authorization: str | None = Header(default=
     if peer["id"] == user["id"]:
         raise HTTPException(status_code=400, detail="Cannot connect to yourself.")
     async with session_lock:
+        for stale_id, existing in list(sessions.items()):
+            if time.monotonic() - existing["created"] > 4 * 3600:
+                sessions.pop(stale_id, None)
         for existing in sessions.values():
             if user["id"] in (existing["caller"], existing["callee"]) or peer["id"] in (existing["caller"], existing["callee"]):
                 raise HTTPException(status_code=409, detail="One participant is already in a session.")
@@ -260,7 +267,7 @@ async def call(body: SessionRequest, authorization: str | None = Header(default=
     return {"session_id": sid, "status": status, "contact": peer["handle"]}
 
 
-@router.post("/callless/v1/sessions/{sid}/accept")
+@api_router.post("/sessions/{sid}/accept")
 async def accept_call(sid: str, authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     session = sessions.get(sid)
@@ -271,7 +278,7 @@ async def accept_call(sid: str, authorization: str | None = Header(default=None)
     return {"session_id": sid, "status": "connected"}
 
 
-@router.post("/callless/v1/sessions/{sid}/end")
+@api_router.post("/sessions/{sid}/end")
 async def end_call(sid: str, authorization: str | None = Header(default=None)) -> dict:
     user = _auth(authorization)
     session = sessions.get(sid)
@@ -298,7 +305,7 @@ async def socket_channel(ws: WebSocket) -> None:
     user = None
     try:
         first = await asyncio.wait_for(ws.receive_json(), timeout=8)
-        if first.get("type") != "auth":
+        if not isinstance(first, dict) or first.get("type") != "auth":
             await ws.close(code=4401)
             return
         user = store.authenticate(str(first.get("token") or ""))
@@ -349,3 +356,6 @@ async def socket_channel(ws: WebSocket) -> None:
                     sessions.pop(sid, None)
                     peer = session["callee"] if user["id"] == session["caller"] else session["caller"]
                     await _emit(peer, {"type": "ended", "session_id": sid, "reason": "disconnected"})
+
+# Mount API routes after declarations so their TLS dependency is enforced.
+router.include_router(api_router)

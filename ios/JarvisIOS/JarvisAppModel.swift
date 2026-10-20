@@ -662,7 +662,7 @@ final class JarvisAppModel: ObservableObject {
     }
 
     private static func calllessRecipient(_ raw: String) -> String? {
-        let pattern = #"(?i)^(?:horus[, ]+)?(?:get me to|connect me to|callless with)\\s+([a-z][a-z0-9_]{2,27})[.?!]?$"#
+        let pattern = #"(?i)^(?:horus[, ]+)?(?:get me to|connect me to|callless with)\s+([a-z][a-z0-9_]{2,27})[.?!]?$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let result = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
               let range = Range(result.range(at: 1), in: raw) else { return nil }

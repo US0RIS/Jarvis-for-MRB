@@ -7,6 +7,7 @@ Horus PC administrator token.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import hmac
 import re
 import secrets
@@ -67,11 +68,19 @@ class CalllessStore:
                 );
             """)
 
+    @contextmanager
     def _db(self):
         conn = sqlite3.connect(str(self.path), timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     @staticmethod
     def public(row: sqlite3.Row) -> dict:

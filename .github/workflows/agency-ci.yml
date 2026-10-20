@@ -36,6 +36,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Compile Python sources
         run: python -m compileall -q jarvis_mrb tests
+      - name: Enforce documentation housekeeping
+        run: python -m unittest discover -s tests -p "test_docs_hygiene.py" -v
 
   agency-smoke:
     runs-on: windows-latest

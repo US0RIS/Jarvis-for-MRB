@@ -138,6 +138,8 @@ def _db():
 
 def _prune(db: sqlite3.Connection, now: datetime) -> None:
     cutoff = (now - timedelta(hours=_MAX_LIFETIME_HOURS)).isoformat()
+    from jarvis_mrb.world_assertions import _on_prune
+    _on_prune(db, cutoff)
     db.execute("DELETE FROM graph_observations WHERE mission_id IN (SELECT id FROM graph_missions WHERE expires_at < ?)", (cutoff,))
     db.execute("DELETE FROM graph_missions WHERE expires_at < ?", (cutoff,))
 

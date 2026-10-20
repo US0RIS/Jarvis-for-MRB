@@ -63,7 +63,11 @@ def get_inference_config() -> dict[str, Any]:
     provider = str(data.get("provider") or "ollama")
     if provider not in PROVIDERS:
         provider = "ollama"
-    model = str(data.get("model") or DEFAULT_MODELS.get(provider) or "")
+    if provider == "ollama":
+        from jarvis_mrb.planner_model import get_planner_model
+        model = get_planner_model()
+    else:
+        model = str(data.get("model") or DEFAULT_MODELS[provider])
     return {"provider": provider, "model": model}
 
 
@@ -87,6 +91,11 @@ def configure_inference(provider: str, model: str = "", api_key: str | None = No
     if provider not in PROVIDERS:
         raise ValueError("Unknown provider.")
     model = model.strip() or DEFAULT_MODELS.get(provider) or ""
+    if provider == "ollama":
+        from jarvis_mrb.planner_model import SUPPORTED_MODELS, get_planner_model, set_planner_model
+        model = model or get_planner_model()
+        if model not in SUPPORTED_MODELS:
+            raise ValueError("Select a supported local Ollama planner model.")
     if provider != "ollama" and not re.fullmatch(r"[A-Za-z0-9_./:+-]{2,100}", model):
         raise ValueError("Invalid model identifier.")
     if api_key is not None:
@@ -103,6 +112,8 @@ def configure_inference(provider: str, model: str = "", api_key: str | None = No
                 raise ProviderError("Cannot save the API key in the operating-system credential store.") from exc
         elif provider != "ollama" and not _credential(provider):
             raise ValueError("Enter an API key for this provider first.")
+        if provider == "ollama":
+            set_planner_model(model)
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         temporary = SETTINGS_PATH.with_suffix(".tmp")
         temporary.write_text(json.dumps({"provider": provider, "model": model}, indent=2), encoding="utf-8")

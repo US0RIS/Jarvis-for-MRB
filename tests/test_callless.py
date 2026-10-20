@@ -61,6 +61,56 @@ class CalllessStoreTests(unittest.TestCase):
             with self.assertRaises(CalllessError):
                 self.store.accept_invitation(self.b["id"], code)
 
+    def test_session_api_enforces_pairing_presence_and_signaling(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        from jarvis_mrb import callless_api
+        app = FastAPI()
+        app.include_router(callless_api.router)
+        with patch.object(callless_api, "store", self.store):
+            callless_api.connections.clear()
+            callless_api.sessions.clear()
+            callless_api.failures.clear()
+            self.store.accept_invitation(self.b["id"], self.store.invitation(self.a["id"]))
+            self.store.set_status(self.b["id"], "open")
+            with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+                header_a = {"Authorization": "Bearer " + self.ta}
+                header_b = {"Authorization": "Bearer " + self.tb}
+                unavailable = client.post("/callless/v1/sessions", json={"target": "bob"}, headers=header_a)
+                self.assertEqual(unavailable.status_code, 409)
+                with client.websocket_connect("/callless/v1/socket") as alice:
+                    alice.send_json({"type": "auth", "token": self.ta})
+                    self.assertEqual(alice.receive_json()["type"], "ready")
+                    with client.websocket_connect("/callless/v1/socket") as bob:
+                        bob.send_json({"type": "auth", "token": self.tb})
+                        self.assertEqual(bob.receive_json()["type"], "ready")
+                        result = client.post("/callless/v1/sessions", json={"target": "bob"}, headers=header_a)
+                        self.assertEqual(result.status_code, 200, result.text)
+                        sid = result.json()["session_id"]
+                        self.assertEqual(result.json()["status"], "connected")
+                        incoming = bob.receive_json()
+                        self.assertEqual(incoming["type"], "incoming")
+                        self.assertEqual(incoming["session_id"], sid)
+                        attacker = client.post("/callless/v1/sessions/" + sid + "/end", headers={"Authorization": "Bearer unknown"})
+                        self.assertEqual(attacker.status_code, 401)
+                        bob.send_json({"type": "signal", "session_id": sid, "payload": {"type": "ready"}})
+                        message = alice.receive_json()
+                        self.assertEqual(message["type"], "signal")
+                        self.assertEqual(message["payload"]["type"], "ready")
+                        self.assertEqual(client.post("/callless/v1/sessions/" + sid + "/end", headers=header_a).status_code, 200)
+                        self.assertEqual(bob.receive_json()["type"], "ended")
+
+    def test_insecure_remote_account_request_rejected(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from jarvis_mrb import callless_api
+        app = FastAPI()
+        app.include_router(callless_api.router)
+        with TestClient(app, base_url="http://example.invalid", client=("203.0.113.55", 50000)) as client:
+            result = client.get("/callless/v1/me")
+            self.assertEqual(result.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

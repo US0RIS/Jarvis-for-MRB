@@ -42,10 +42,14 @@ cancelled if Horus goes into the background. Opting into hands-free wake mode,
 room listening, meeting notes, or separately enabled sound analysis is a
 distinct microphone-use decision. iOS controls the microphone indicator.
 
-Current shipping boundary: this is still a developer build, not a signed
-App Store package or a standalone iPhone AI. It requires a separately
-configured backend; BYOK/provider selection and Callless networking are
-future product work rather than completed capabilities.
+Current shipping boundary: Windows now has a self-contained unsigned
+`HorusSetup-0.14.0.exe` built by the
+[installer workflow](https://github.com/US0RIS/Jarvis-for-MRB/actions/workflows/windows-installer.yml)
+and downloadable as a run artifact. Windows can use BYOK without local
+Ollama inference. The iOS app still needs Xcode signing. Callless now has a
+self-hosted browser/audio hub with approved contacts and presence; native
+CallKit/background delivery, automatic pickup, federation and managed hosting
+remain unimplemented. See [distribution and Callless deployment](docs/SHIPPING.md).
 
 ## World Armor — merge status (2026-09-26)
 

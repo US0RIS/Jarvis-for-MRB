@@ -40,7 +40,7 @@ class WorldArmorPushTests(unittest.TestCase):
         self.assertTrue(result["enabled"])
         self.assertFalse(result["token_reflected"])
         self.assertNotIn(TOKEN, str(result))
-        state = push.status(db_path=self.db)
+        state = push.status(db_path=self.db, now=NOW)
         self.assertEqual(state["registered_devices"], 1)
 
     def test_only_warning_or_urgent_events_enter_outbox(self):
@@ -56,7 +56,7 @@ class WorldArmorPushTests(unittest.TestCase):
             }, db_path=self.db, now=NOW)
         self.assertEqual(low["queued"], 0)
         self.assertEqual(high["queued"], 1)
-        self.assertEqual(push.status(db_path=self.db)["pending"], 1)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 1)
 
     def test_durable_outbox_marks_success_only_after_apns_200_equivalent(self):
         with patch.object(push, "start_worker", return_value=True):
@@ -69,7 +69,7 @@ class WorldArmorPushTests(unittest.TestCase):
             result = push.drain_once(db_path=self.db, now=NOW)
         self.assertEqual(result["attempted"], 1)
         self.assertEqual(result["sent"], 1)
-        self.assertEqual(push.status(db_path=self.db)["pending"], 0)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 0)
 
     def test_transient_failure_retries_with_backoff(self):
         with patch.object(push, "start_worker", return_value=True):
@@ -81,7 +81,7 @@ class WorldArmorPushTests(unittest.TestCase):
         with patch.object(push, "_send_one", return_value=(False, "ConnectError")):
             result = push.drain_once(db_path=self.db, now=NOW)
         self.assertEqual(result["failed"], 1)
-        self.assertEqual(push.status(db_path=self.db)["pending"], 1)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 1)
         with patch.object(push, "_send_one", return_value=(True, "")):
             early = push.drain_once(
                 db_path=self.db, now=NOW + timedelta(seconds=1)
@@ -102,17 +102,31 @@ class WorldArmorPushTests(unittest.TestCase):
         with patch.object(push, "_send_one", return_value=(False, "BadDeviceToken")):
             result = push.drain_once(db_path=self.db, now=NOW)
         self.assertEqual(result["failed"], 1)
-        state = push.status(db_path=self.db)
+        state = push.status(db_path=self.db, now=NOW)
         self.assertEqual(state["registered_devices"], 0)
         self.assertEqual(state["pending"], 0)
         self.assertEqual(state["dead"], 1)
+
+    def test_status_prunes_expired_events_using_supplied_clock(self):
+        with patch.object(push, "start_worker", return_value=True):
+            push.register_device(TOKEN, db_path=self.db, now=NOW)
+            push.enqueue_world_event({
+                "event_id": "expire-me", "seq": 6, "priority": "warning",
+                "summary": "time-sensitive notification",
+            }, db_path=self.db, now=NOW)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["pending"], 1)
+        expired = push.status(db_path=self.db, now=NOW + timedelta(hours=25))
+        self.assertEqual(expired["pending"], 0)
+        self.assertEqual(expired["dead"], 1)
+        purged = push.status(db_path=self.db, now=NOW + timedelta(days=8))
+        self.assertEqual(purged["dead"], 0)
 
     def test_unregister_disables_delivery(self):
         with patch.object(push, "start_worker", return_value=True):
             push.register_device(TOKEN, db_path=self.db, now=NOW)
         result = push.unregister_device(TOKEN, db_path=self.db)
         self.assertTrue(result["disabled"])
-        self.assertEqual(push.status(db_path=self.db)["registered_devices"], 0)
+        self.assertEqual(push.status(db_path=self.db, now=NOW)["registered_devices"], 0)
 
 
 if __name__ == "__main__":

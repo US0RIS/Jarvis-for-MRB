@@ -95,7 +95,7 @@ class WorldAssertionsTests(unittest.TestCase):
     def test_validation_and_per_mission_limit(self):
         mid = self.mission()
         invalid = [
-            {}, {"kind": "execute_command", "command": "unlock"},
+            {}, {"kind": "execute_command", "command": "unlock"}, {"kind": ["order_status_equals"]},
             {"kind": "order_status_equals", "expected": ""},
             {"kind": "order_status_equals", "expected": "delivered", "notify": True},
             {"kind": "route_delay_at_most", "route_id": "../etc", "max_seconds": 30},
@@ -154,6 +154,28 @@ class WorldAssertionsTests(unittest.TestCase):
             assertions.check(mid)
         with self.assertRaises(store.GraphUnavailable):
             assertions.enroll(mid, {"kind": "order_status_equals", "expected": "done"})
+
+    def test_future_dated_client_report_cannot_preempt_actual_state(self):
+        mid = self.mission()
+        assertions.enroll(mid, {"kind": "order_status_equals", "expected": "delivered"})
+        # The ingest layer permits at most 30 seconds of client clock skew.
+        # Desired-state evaluation must not mistake that as a current observation.
+        store.append(mid, [row("future", 20, status="delivered")])
+        self.assertEqual(assertions.check(mid)["assertions"][0]["state"], "unknown")
+        with patch.object(store, "_utc", return_value=NOW + timedelta(seconds=21)):
+            self.assertEqual(assertions.check(mid)["assertions"][0]["state"], "met")
+
+    def test_retention_prune_removes_assertions_and_history(self):
+        with patch.object(store, "_utc", return_value=NOW - timedelta(hours=100)):
+            mid = store.create("Old private observation", lifetime_hours=1)["id"]
+            a = assertions.enroll(mid, {"kind": "order_status_equals", "expected": "done"})
+        with store._LOCK, store._db() as db:
+            store._prune(db, NOW)
+            db.commit()
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM world_assertions "
+                                        "WHERE mission_id=?", (mid,)).fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM world_assertion_events "
+                                        "WHERE assertion_id=?", (a["id"],)).fetchone()[0], 0)
 
     def test_private_endpoints_authorization_revoke_history(self):
         from fastapi.testclient import TestClient

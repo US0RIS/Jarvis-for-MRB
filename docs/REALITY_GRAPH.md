@@ -67,6 +67,45 @@ For either route, `branches` is a list of one to six unique entries such as `[{"
 
 No evidence, expired observations, stopped/expired missions, already reported delivery, missing future deadline and stale snapshots produce `insufficient_evidence` with `unknown` branch outcomes instead of a plausible guess. Scenarios **do not** predict traffic or validate an adapter's source labels; the existing ledger labels client-supplied observations as unauthenticated. No action executor, navigation launch, device control or third-party communication is connected. This is only the deterministic mission-ETA slice of the original multi-domain Shadow Reality proposal; travel/route models, weather trajectories, infrastructure failure and device simulations remain unimplemented.
 
+## Reality Rewind: P06-006 first vertical slice
+
+**Source-implemented, not a physical-world DVR or provider-validated history.**
+With the existing explicit \`JARVIS_REALITY_GRAPH_MISSIONS_ENABLED=1\` opt-in and
+private Mesh bearer authentication, call:
+
+\`\`\`json
+POST /mesh/graph/missions/rewind
+{"mission_id":"rg_<returned-id>","at":"2026-10-19T19:00:00+00:00"}
+\`\`\`
+
+\`at\` must be an offset-aware ISO 8601 timestamp, no later than the server clock
+and within the enrolled mission's creation-to-expiry window. The read-only
+endpoint returns \`jarvis.reality_rewind.mission.v1\` with the reconstructed
+\`graph\`, exact \`as_of\` time, \`reconstructed_at\` server time, evidence
+freshness *relative to that historical instant*, and explicit \`coverage\`.
+\`Cache-Control: private, no-store\` applies; disabled storage returns 503,
+missing/deleted mission 404, and invalid/out-of-range times 422.
+
+Replay is deterministic across retained typed \`order\`, \`courier\`, \`traffic\`,
+\`camera\` and \`device\` observations. Queries select only records whose
+\`observed_at <= at\`, then reduce the newest 100 **at that instant**; up
+to 400 records exist per mission. Newer events are never used to infer earlier
+facts. Fresh facts keep original evidence IDs, source names and timestamps.
+No observations or no fresh evidence returns \`insufficient_evidence\` rather
+than inventing world state. Record counts and truncation flags expose gaps
+instead of implying continuous recording.
+
+This reconstructs **event-time knowledge from presently retained records**,
+not what the process *actually knew at the instant*: existing ledger rows do
+not store ingestion timestamps, so a late-arriving report can appear in an
+earlier event-time view. Mission stop time is also not recorded; stopped
+missions report historical status as unknown rather than retroactively
+asserting they were stopped. Deleted/pruned records are unavailable, and
+past expiry is not queried. There is no camera recording, arbitrary place
+timeline, identity tracking, interpolated motion, continuous sampling,
+live provider verification, model execution, or action authority. Those
+broader parts of the original Reality Rewind vision remain future work.
+
 ## Spoken model-free mission readback
 
 When the persisted ledger is enabled, the existing Jarvis speech/text path can answer `Jarvis, show my reality graph missions`, `Jarvis, is my delivery late?`, `Jarvis, has my delivery arrived?`, `Jarvis, why is my delivery delayed?`, and `Jarvis, reality graph rg_<returned-id> status` **before Qwen is invoked**. The generic delivery phrases select a mission only if exactly one active goal refers to delivery/dinner/food/courier. If multiple goals match, Jarvis asks for the exact returned ID rather than mixing separate deliveries.

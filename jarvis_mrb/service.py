@@ -457,6 +457,10 @@ class RealityGraphStoredShadowRequest(BaseModel):
     mission_id: str
     branches: list[dict[str, Any]]
 
+class RealityGraphRewindRequest(BaseModel):
+    mission_id: str
+    at: str
+
 
 
 class NearbyPublicCameraRequest(BaseModel):
@@ -2521,6 +2525,22 @@ def reality_graph_stored_shadow(
     from jarvis_mrb.reality_shadow import simulate_eta_branches
     try:
         return simulate_eta_branches(snapshot(request.mission_id)["graph"], request.branches)
+    except (KeyError, ValueError, RuntimeError) as exc:
+        _stored_graph_error(exc)
+
+
+@app.post("/mesh/graph/missions/rewind")
+def reality_graph_stored_rewind(
+    request: RealityGraphRewindRequest,
+    response: Response,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Rebuild a bounded event-time mission view without adding observations."""
+    _check_mesh_auth(authorization)
+    response.headers["Cache-Control"] = "private, no-store"
+    from jarvis_mrb.reality_graph_missions import rewind
+    try:
+        return rewind(request.mission_id, at=request.at)
     except (KeyError, ValueError, RuntimeError) as exc:
         _stored_graph_error(exc)
 

@@ -42,15 +42,15 @@ Each numbered packet is one actionable request. **Large multi-system concepts ar
 
 ### P06-005
 
-- [ ] **Counterfactual Engine / Shadow Reality.** — [source L308](../archive/FUTURE_IDEAS_2026_10.md#L308)
+- [x] **Counterfactual Engine / Shadow Reality.** — [source L308](../archive/FUTURE_IDEAS_2026_10.md#L308)
 
-**Done:** a small tested, permission-bounded implementation with honest real-world verification status; retain other subsystems. This is only the first vertical slice of a large feature.
+**Delivered P06-005 slice:** read-only, bounded mission ETA conditional branches; 8 new tests passed in 854-test Linux CI; provider/device validation and Windows regression outstanding at latest check. Full multi-domain simulation remains future work.
 
 ### P06-006
 
-- [ ] **Reality Rewind / physical-world DVR.** — [source L313](../archive/FUTURE_IDEAS_2026_10.md#L313)
+- [x] **Reality Rewind / physical-world DVR.** — [source L313](../archive/FUTURE_IDEAS_2026_10.md#L313)
 
-**Done:** a small tested, permission-bounded implementation with honest real-world verification status; retain other subsystems. This is only the first vertical slice of a large feature.
+**Delivered P06-006 slice:** read-only historical event-time replay of retained mission observations, tested for leakage, coverage, auth and retention boundaries. CI and physical-world validation status is tracked in the capabilities ledger; not a continuous place/camera DVR.
 
 ### P06-007
 

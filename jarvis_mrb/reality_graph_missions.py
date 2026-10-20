@@ -243,6 +243,88 @@ def snapshot(mission_id: str, *, question: str = "") -> dict[str, Any]:
     return result
 
 
+def rewind(mission_id: str, *, at: str) -> dict[str, Any]:
+    """Rebuild an enrolled mission's event-time view, without mutating history.
+
+    This is a retrospective view of *observed_at*, not a record of when this
+    service first learned a fact: legacy observations lack an ingestion timestamp.
+    There is no claim of continuous recording, object tracking or provider trust.
+    """
+    _require_enabled()
+    mid = _identity(mission_id, "Mission id")
+    requested = _stamp(at)
+    now = _utc()
+    if requested > now:
+        raise ValueError("Rewind time must not be in the future.")
+    with _LOCK, _db() as db:
+        mission_row = db.execute("SELECT * FROM graph_missions WHERE id = ?", (mid,)).fetchone()
+        if mission_row is None:
+            raise KeyError("No such Reality Graph mission.")
+        started = _stamp(mission_row["created_at"])
+        expires = _stamp(mission_row["expires_at"])
+        if not started <= requested < expires:
+            raise ValueError("Rewind time must fall within the enrolled mission lifetime.")
+        # Query BEFORE limiting: newest records today must never mask an
+        # older as-of instant, and later observations must never leak backwards.
+        total = db.execute(
+            "SELECT COUNT(*) FROM graph_observations "
+            "WHERE mission_id = ? AND observed_at <= ?",
+            (mid, requested.isoformat()),
+        ).fetchone()[0]
+        stored = db.execute(
+            "SELECT observed_at, data_json FROM graph_observations "
+            "WHERE mission_id = ? AND observed_at <= ? "
+            "ORDER BY observed_at DESC, id DESC LIMIT 100",
+            (mid, requested.isoformat()),
+        ).fetchall()
+    # Stop is recorded as a current flag without a stop timestamp in legacy
+    # storage. Never back-date it as a historical state transition.
+    historical_status = "active" if mission_row["state"] == "active" else "unknown"
+    mission = {
+        "id": mid, "goal": mission_row["goal"],
+        "deadline": mission_row["deadline"], "status": historical_status,
+    }
+    graph = build_mission_graph(
+        mission, [json.loads(r["data_json"]) for r in reversed(stored)], now=requested,
+    )
+    graph["source_attestation"] = "client_supplied_not_provider_verified"
+    graph["mission_expires_at"] = mission_row["expires_at"]
+    graph["observation_count"] = total
+    graph["observations_reduced"] = len(stored)
+    graph["observations_truncated_to_recent"] = total > len(stored)
+    fresh = sum(row.get("freshness") == "fresh" for row in graph["evidence"])
+    return {
+        "schema": "jarvis.reality_rewind.mission.v1",
+        "mission_id": mid,
+        "as_of": requested.isoformat(),
+        "reconstructed_at": now.isoformat(),
+        "status": "observed" if fresh else "insufficient_evidence",
+        "graph": graph,
+        "coverage": {
+            "mode": "event_time_observation_replay",
+            "continuous_recording": False,
+            "ingestion_time_known": False,
+            "observations_at_or_before": total,
+            "observations_reduced": len(stored),
+            "truncated_to_recent_100": total > len(stored),
+            "fresh_evidence_count": fresh,
+            "fresh_observation_kinds": graph["fresh_observation_kinds"],
+            "latest_observed_at": stored[0]["observed_at"] if stored else None,
+            "historical_mission_status_known": historical_status != "unknown",
+        },
+        "source_attestation": "client_supplied_not_provider_verified",
+        "action_authority": "none",
+        "model_calls": 0,
+        "limitations": [
+            "Only enrolled, retained, client-supplied mission observations are replayed.",
+            "Event time is not ingestion time; late-submitted records may appear in a historical view.",
+            "No unobserved intervals, camera footage, place history or physical continuity are reconstructed.",
+            "Historical stop time is unavailable; a stopped mission's earlier status is unknown.",
+            "Source labels are not provider authentication or independent verification.",
+        ],
+    }
+
+
 def stop(mission_id: str) -> dict[str, Any]:
     _require_enabled()
     mid = _identity(mission_id, "Mission id")

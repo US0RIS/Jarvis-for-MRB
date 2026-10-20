@@ -3,6 +3,7 @@ name: MemoMind iOS bridge
 on:
   push:
     branches:
+      - main
       - jarvis/memomind-prep
       - jarvis/human-extension-v1
       - jarvis/life-friction-fabric

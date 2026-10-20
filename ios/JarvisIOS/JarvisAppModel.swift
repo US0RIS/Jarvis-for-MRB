@@ -11,7 +11,7 @@ final class JarvisAppModel: ObservableObject {
     @Published var connectionStatus = "Not checked"
     @Published var errorMessage: String?
     @Published private(set) var handsFreeEnabled = false
-    @Published private(set) var voiceStatus = "Hands-free Horus is off"
+    @Published private(set) var voiceStatus = "Push to Talk ready — microphone idle"
     @Published private(set) var lastHeardCommand = ""
     @Published private(set) var conversationLog: [FrontendConversationTurn] = FrontendConversationStore.load()
     @Published private(set) var lastLatency = JarvisLatencySnapshot()
@@ -1232,7 +1232,7 @@ final class JarvisAppModel: ObservableObject {
             _ = speechRecognizer.stopListening()
         }
         isListening = false
-        voiceStatus = "Hands-free Horus is off"
+        voiceStatus = "Push to Talk ready — microphone idle"
     }
 
     private func runHandsFreeLoop() async {

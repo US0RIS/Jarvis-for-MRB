@@ -29,6 +29,7 @@ final class WorldArmorPushAppDelegate: NSObject, UIApplicationDelegate {
 
 @main
 struct JarvisIOSApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(WorldArmorPushAppDelegate.self) private var appDelegate
     @StateObject private var appModel: JarvisAppModel
     @StateObject private var persistentPresence: PersistentPresenceController
@@ -151,6 +152,12 @@ struct JarvisIOSApp: App {
             .environmentObject(localProductivity)
             .environmentObject(localIntelligence)
             .environmentObject(capabilityArchitecture)
+            // A one-shot Action Button capture must not continue after the app is backgrounded.
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active && appModel.isListening && !appModel.handsFreeEnabled {
+                    appModel.cancelPushToTalk()
+                }
+            }
             .task {
                 await persistentPresence.start()
                 await frontendIntelligence.start()

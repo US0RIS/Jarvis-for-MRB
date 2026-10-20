@@ -3,6 +3,7 @@ name: Agency 1.0 CI
 on:
   push:
     branches:
+      - main
       - jarvis/agency-1.0
       - jarvis/situation-evidence-unification
       - jarvis/world-armor-phase1-kernel

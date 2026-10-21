@@ -21,7 +21,7 @@ class VoiceTurnContextTests(unittest.TestCase):
         with turn_context("s1", None) as turn:
             self.assertIsNone(turn.location)
             self.assertIn("no phone location", turn.location_note)
-        self.assertEqual(current_turn().session_id, "default")
+        self.assertTrue(current_turn().session_id.startswith("anon-"))
 
     def test_recent_fix_accepted_stale_and_invalid_rejected(self):
         with turn_context("s1", _ctx()) as turn:
@@ -65,15 +65,19 @@ class VoiceTurnContextTests(unittest.TestCase):
     def test_failing_handler_reports_failure_not_success(self):
         def boom(text, turn):
             raise RuntimeError("x")
+        # Restore both the handler list and the loaded flag: skipping the real handler
+        # import here would otherwise leave later tests without their capabilities.
+        saved_handlers = list(voice_router._HANDLERS)
+        saved_loaded = voice_router._LOADED
         voice_router._LOADED = True
-        saved = list(voice_router._HANDLERS)
         voice_router._HANDLERS[:] = [("broken_family", boom)]
         try:
             family, message = voice_router.route("anything")
             self.assertEqual(family, "broken_family")
             self.assertIn("failed", message)
         finally:
-            voice_router._HANDLERS[:] = saved
+            voice_router._HANDLERS[:] = saved_handlers
+            voice_router._LOADED = saved_loaded
 
 
 if __name__ == "__main__":

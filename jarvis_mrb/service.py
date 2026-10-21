@@ -50,6 +50,7 @@ from jarvis_mrb.inference import configure_inference, get_inference_config, infe
 from jarvis_mrb.spatial_memory import status as spatial_status_data
 from jarvis_mrb.streaming_agent import stream_natural_language
 from jarvis_mrb.voice_router import (
+    isolated_session_id,
     bound_stream as voice_bound_stream,
     observe as voice_observe,
     turn_context as voice_turn_context,
@@ -3258,7 +3259,7 @@ def command(request: CommandRequest, authorization: Annotated[str | None, Header
     _check_auth(authorization)
     emit_thinking(True)
     try:
-        session_id = request.session_id or "default"
+        session_id = isolated_session_id(request.session_id)
         effective_text = _command_alias(request.text)
         history = _contextual_history(session_id, effective_text, limit=12)
         with voice_turn_context(session_id, request.context):
@@ -3284,7 +3285,7 @@ def command_stream(
     _check_auth(authorization)
     emit_thinking(True)
     try:
-        session_id = request.session_id or "default"
+        session_id = isolated_session_id(request.session_id)
         effective_text = _command_alias(request.text)
         from jarvis_mrb.model_router import RouteDecision
         provider = get_inference_config()

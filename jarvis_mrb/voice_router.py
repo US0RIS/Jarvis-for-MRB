@@ -21,6 +21,7 @@ import contextvars
 import math
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
@@ -42,9 +43,19 @@ class PhoneLocation:
         return max(0.0, (instant - self.captured_at).total_seconds())
 
 
+def isolated_session_id(session_id: str | None) -> str:
+    """Return the caller's session, or a fresh private one when none was given.
+
+    Requests without a stable session identifier must never share follow-up focus,
+    pending confirmations or conversation history with one another.
+    """
+    value = str(session_id or "").strip()[:120]
+    return value or f"anon-{uuid.uuid4().hex}"
+
+
 @dataclass
 class VoiceTurn:
-    session_id: str = "default"
+    session_id: str = field(default_factory=lambda: isolated_session_id(None))
     location: PhoneLocation | None = None
     location_note: str = ""
     channel: str = "text"
@@ -98,7 +109,7 @@ def _make_turn(session_id: str | None, context: dict[str, Any] | None) -> VoiceT
     location, note = _parse_location(context)
     channel = str((context or {}).get("channel") or "text")[:20]
     return VoiceTurn(
-        session_id=(session_id or "default")[:120],
+        session_id=isolated_session_id(session_id),
         location=location,
         location_note=note,
         channel=channel if channel in {"text", "voice", "conversation"} else "text",

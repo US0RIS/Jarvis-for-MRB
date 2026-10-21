@@ -52,3 +52,9 @@ In-process FastAPI `TestClient`, Linux container, temporary storage, mocked publ
 ## Not verified on real hardware or live services
 
 Real AirPods HFP/A2DP routing and disconnect timing; barge-in echo behavior; Action Button invocation on hardware; iOS interruption recovery; live NWS/USGS/Open-Meteo/OpenSky payloads; APNs delivery; the companion actually speaking `proactive_alert` events; two-device Callless audio over real NAT/TURN; iOS Safari mic behavior. Watch times like "until 6" use the server's clock; a "near me" watch stays at the creation point.
+
+
+## Deletion and sessions
+
+- **Forget / forget-all** erase the local object-memory records and their derived copies in the world model (the `memory.user_reported_location` events and `user_reported_place` beliefs). Entities are removed only when no other record references them. **Chat transcripts that mention an item are kept**; the spoken confirmation says so.
+- **Session isolation.** A `/command` or `/command/stream` request without `session_id` gets its own private session. It cannot continue another client's follow-up, answer its pending confirmation, or read its conversation history. Clients that need multi-turn context (the iOS app does) must send a stable `session_id`.

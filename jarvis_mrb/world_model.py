@@ -350,6 +350,58 @@ def record_event(
     return event_id
 
 
+def erase_event_keys(event_keys: Sequence[str]) -> dict[str, int]:
+    """Hard-delete derived copies of specific events, their beliefs and orphaned entities.
+
+    Only the named events are removed. Beliefs sourced from them are deleted (the
+    schema would otherwise keep them with a null source). An entity that these
+    events touched is removed only when nothing else in the world model still
+    references it, so shared people, places and documents are never erased.
+    Foreign-key cascades remove the linker and term rows that point at the events.
+    """
+    keys = [str(k) for k in event_keys if k]
+    result = {"events": 0, "beliefs": 0, "entities": 0}
+    if not keys:
+        return result
+    conn = _connect()
+    try:
+        with _LOCK, conn:
+            marks = ",".join("?" * len(keys))
+            ids = [int(r["id"]) for r in conn.execute(
+                f"SELECT id FROM events WHERE event_key IN ({marks})", keys).fetchall()]
+            if not ids:
+                return result
+            idm = ",".join("?" * len(ids))
+            touched = {str(r["entity_id"]) for r in conn.execute(
+                f"SELECT DISTINCT entity_id FROM event_entities WHERE event_id IN ({idm})", ids).fetchall()}
+            result["beliefs"] = conn.execute(
+                f"DELETE FROM beliefs WHERE source_event_id IN ({idm})", ids).rowcount
+            result["events"] = conn.execute(
+                f"DELETE FROM events WHERE id IN ({idm})", ids).rowcount
+            # Every table with a foreign key into entities, except the entity's own
+            # identifiers and aliases (those go away with the entity itself).
+            own = {"external_ids", "aliases"}
+            refs: list[tuple[str, str]] = []
+            for table_row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+                table = str(table_row["name"])
+                if table in own:
+                    continue
+                for fk in conn.execute(f"PRAGMA foreign_key_list({table})").fetchall():
+                    if str(fk["table"]) == "entities":
+                        refs.append((table, str(fk["from"])))
+            for entity_id in touched:
+                referenced = any(
+                    conn.execute(f"SELECT 1 FROM {t} WHERE {c}=? LIMIT 1", (entity_id,)).fetchone()
+                    for t, c in refs
+                )
+                if not referenced:
+                    result["entities"] += conn.execute(
+                        "DELETE FROM entities WHERE id=?", (entity_id,)).rowcount
+    finally:
+        conn.close()
+    return result
+
+
 def _belief_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": int(row["id"]),

@@ -470,7 +470,26 @@ def items_at(place: str, *, exclude: Iterable[str] = ()) -> list[dict[str, Any]]
     return out
 
 
+def _mirror_keys(conn: sqlite3.Connection, object_ids: Iterable[str]) -> list[str]:
+    keys: list[str] = []
+    for object_id in object_ids:
+        for row in conn.execute("SELECT id FROM assertions WHERE object_id=?", (object_id,)):
+            keys.append(f"object_memory:{int(row['id'])}")
+    return keys
+
+
+def _erase_mirror(keys: list[str]) -> None:
+    # Erase the world-model copy first. If that fails, the local record remains and
+    # the caller reports a failure instead of claiming the memory was forgotten.
+    if MIRROR_WORLD and keys:
+        from jarvis_mrb.world_model import erase_event_keys
+        erase_event_keys(keys)
+
+
 def forget(object_id: str) -> bool:
+    with _LOCK, _open() as conn:
+        keys = _mirror_keys(conn, [object_id])
+    _erase_mirror(keys)
     with _LOCK, _open() as conn:
         deleted = conn.execute("DELETE FROM objects WHERE id=?", (object_id,)).rowcount
         conn.commit()
@@ -478,6 +497,10 @@ def forget(object_id: str) -> bool:
 
 
 def forget_all() -> int:
+    with _LOCK, _open() as conn:
+        ids = [str(r["id"]) for r in conn.execute("SELECT id FROM objects")]
+        keys = _mirror_keys(conn, ids)
+    _erase_mirror(keys)
     with _LOCK, _open() as conn:
         count = int(conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0])
         conn.execute("DELETE FROM objects")
@@ -744,7 +767,8 @@ def handle(text: str, turn: VoiceTurn) -> str | None:
     if get_focus("object_memory.forget_all", session_id=turn.session_id):
         if n in {"yes", "yes forget them", "yes forget them all", "yes delete them", "confirm forget all", "yes, forget them all"}:
             set_focus("object_memory.forget_all", None, session_id=turn.session_id)
-            return f"Done. I forgot {forget_all()} remembered items."
+            return (f"Done. I forgot {forget_all()} remembered items, including their copies in your "
+                    "world history. Chat transcripts that mention them are kept.")
         if n in {"no", "never mind", "cancel", "keep them"}:
             set_focus("object_memory.forget_all", None, session_id=turn.session_id)
             return "Okay, I kept them."
@@ -766,7 +790,8 @@ def handle(text: str, turn: VoiceTurn) -> str | None:
         for object_id in ids:
             forget(object_id)
         _remember_focus(turn, objects=[])
-        return f"Forgotten. I deleted what you told me about your {_join(names)}."
+        return (f"Forgotten. I deleted the saved location records for your {_join(names)}, "
+                "including their copies in your world history. Chat transcripts that mention them are kept.")
 
     if _LIST.match(n):
         objects = list_objects(limit=50)

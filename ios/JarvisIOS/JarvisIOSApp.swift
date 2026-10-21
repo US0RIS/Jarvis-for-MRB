@@ -157,6 +157,11 @@ struct JarvisIOSApp: App {
                 if phase != .active && appModel.isListening && !appModel.handsFreeEnabled {
                     appModel.cancelPushToTalk()
                 }
+                // Conversation mode is foreground-only: leaving the app also cancels any
+                // pending follow-up window so the microphone never reopens in the background.
+                if phase != .active {
+                    appModel.noteSceneLeftForeground()
+                }
             }
             .task {
                 await persistentPresence.start()

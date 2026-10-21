@@ -11,6 +11,9 @@ final class SettingsStore: ObservableObject {
     @Published var homeRadius: Double { didSet { defaults.set(homeRadius, forKey: "jarvis.homeRadius") } }
     @Published var speakResponses: Bool { didSet { defaults.set(speakResponses, forKey: "jarvis.speakResponses") } }
     @Published var preferBluetoothAudio: Bool { didSet { defaults.set(preferBluetoothAudio, forKey: "jarvis.preferBluetoothAudio") } }
+    // Optional, off by default. When on, the microphone re-opens once after Horus finishes
+    // speaking (foreground only, visibly indicated, closes after a silent follow-up window).
+    @Published var conversationModeEnabled: Bool { didSet { defaults.set(conversationModeEnabled, forKey: "jarvis.conversationModeEnabled") } }
     @Published var passiveVisionEnabled: Bool { didSet { defaults.set(passiveVisionEnabled, forKey: "jarvis.passiveVisionEnabled") } }
     @Published var adaptiveBandwidthEnabled: Bool { didSet { defaults.set(adaptiveBandwidthEnabled, forKey: "jarvis.adaptiveBandwidthEnabled") } }
     @Published var ambientCuesEnabled: Bool { didSet { defaults.set(ambientCuesEnabled, forKey: "jarvis.ambientCuesEnabled") } }
@@ -94,6 +97,7 @@ final class SettingsStore: ObservableObject {
         homeRadius = defaults.object(forKey: "jarvis.homeRadius") as? Double ?? 150
         speakResponses = defaults.object(forKey: "jarvis.speakResponses") as? Bool ?? true
         preferBluetoothAudio = defaults.object(forKey: "jarvis.preferBluetoothAudio") as? Bool ?? true
+        conversationModeEnabled = defaults.object(forKey: "jarvis.conversationModeEnabled") as? Bool ?? false
         passiveVisionEnabled = defaults.object(forKey: "jarvis.passiveVisionEnabled") as? Bool ?? false
         adaptiveBandwidthEnabled = defaults.object(forKey: "jarvis.adaptiveBandwidthEnabled") as? Bool ?? true
         ambientCuesEnabled = defaults.object(forKey: "jarvis.ambientCuesEnabled") as? Bool ?? true

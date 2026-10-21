@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -207,7 +208,7 @@ class CaptureAndRecallTests(ObjectMemoryBase):
 
     def test_schema_records_provenance_columns(self):
         self.say("I put my passport in the safe")
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             row = conn.execute(
                 "SELECT source_kind, channel, utterance, asserted_at FROM assertions").fetchone()
         self.assertEqual(row[0], "user_spoken")

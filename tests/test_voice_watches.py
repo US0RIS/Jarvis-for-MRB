@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 import os
 import sqlite3
 import tempfile
@@ -32,6 +33,12 @@ PUSH_ENV = {
     "JARVIS_APNS_BUNDLE_ID": "com.example.horus",
     "JARVIS_APNS_KEY_FILE": "/not-read-in-tests.p8",
 }
+
+
+def _outbox_body() -> str:
+    """Read one outbox body and close the file (Windows keeps open files undeletable)."""
+    with closing(sqlite3.connect(push.PUSH_STORE)) as conn:
+        return str(conn.execute("SELECT body FROM push_outbox").fetchone()[0])
 
 
 def fix(minutes_old: float = 1, lat: float = 37.77, lon: float = -122.42) -> dict:
@@ -553,7 +560,7 @@ class DeliveryTests(Isolated):
             self.assertEqual(item["push_state"], "queued")
             self.assertFalse(item["confirmed_delivery"])
             self.assertIn("weather.gov", push.delivery_state(item["push_event_id"]) and
-                          sqlite3.connect(push.PUSH_STORE).execute("SELECT body FROM push_outbox").fetchone()[0])
+                          _outbox_body())
             self.assertEqual(push.delivery_state(item["push_event_id"])["pending"], 1)
             with patch.object(push, "_send_one", return_value=(True, "")) as sent:
                 push.drain_once()

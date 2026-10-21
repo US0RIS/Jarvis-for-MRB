@@ -4,6 +4,7 @@ from __future__ import annotations
 behavior is exercised separately and is not claimed by these tests."""
 
 import tempfile
+from contextlib import closing
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -159,7 +160,7 @@ class SituationalTests(SituationalBase):
         first = self.say("What's changed since I was here?")
         self.assertIn("don't have an earlier check", first)
         old = (NOW - timedelta(hours=3)).isoformat()
-        with sv._connect() as conn:
+        with closing(sv._connect()) as conn, conn:
             conn.execute("UPDATE snapshots SET checked_at=?", (old,))
             conn.commit()
         sv._CACHE.clear()
@@ -172,7 +173,7 @@ class SituationalTests(SituationalBase):
 
     def test_new_alert_flagged_as_new_relative_to_last_check(self):
         self.say("anything happening around me?")
-        with sv._connect() as conn:
+        with closing(sv._connect()) as conn, conn:
             conn.execute("UPDATE snapshots SET checked_at=?", ((NOW - timedelta(hours=1)).isoformat(),))
             conn.commit()
         sv._CACHE.clear()

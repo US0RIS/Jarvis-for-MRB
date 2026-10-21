@@ -57,4 +57,4 @@ Real AirPods HFP/A2DP routing and disconnect timing; barge-in echo behavior; Act
 ## Deletion and sessions
 
 - **Forget / forget-all** erase the local object-memory records and their derived copies in the world model (the `memory.user_reported_location` events and `user_reported_place` beliefs). Entities are removed only when no other record references them. **Chat transcripts that mention an item are kept**; the spoken confirmation says so.
-- **Session isolation.** A `/command` or `/command/stream` request without `session_id` gets its own private session. It cannot continue another client's follow-up, answer its pending confirmation, or read its conversation history. Clients that need multi-turn context (the iOS app does) must send a stable `session_id`.
+- **Session isolation.** A `/command` or `/command/stream` request without `session_id`, or using the legacy unscoped ID `default`, gets its own private session. It cannot continue another client's follow-up, answer its pending confirmation, or read its conversation history. Clients that need multi-turn context (the iOS app does) must send a stable non-default `session_id`.

@@ -113,6 +113,52 @@ class VoiceErasureTests(ErasureBase):
         self.assertTrue(object_memory.resolve("passport")[0]["history"])
 
 
+    def test_concurrent_record_cannot_recreate_a_forgotten_world_mirror(self):
+        from threading import Event, Thread
+
+        entered_mirror, release_mirror, delete_complete = Event(), Event(), Event()
+        errors = []
+        original_mirror = object_memory._mirror_world
+
+        def suspended_mirror(record):
+            entered_mirror.set()
+            if not release_mirror.wait(5):
+                raise TimeoutError("mirroring never resumed")
+            original_mirror(record)
+
+        def writer():
+            try:
+                object_memory.record_placement("passport", "the safe")
+            except Exception as exc:
+                errors.append(exc)
+
+        def deleter():
+            try:
+                object_memory.forget_all()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                delete_complete.set()
+
+        with mock.patch.object(object_memory, "_mirror_world", side_effect=suspended_mirror):
+            writing = Thread(target=writer, daemon=True)
+            writing.start()
+            self.assertTrue(entered_mirror.wait(5), "writer never reached mirroring")
+            deleting = Thread(target=deleter, daemon=True)
+            deleting.start()
+            self.assertFalse(delete_complete.wait(0.1), "forget raced with the in-flight mirror")
+            release_mirror.set()
+            writing.join(5)
+            deleting.join(5)
+        self.assertFalse(writing.is_alive())
+        self.assertFalse(deleting.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(object_memory.status()["objects"], 0)
+        self.assertEqual(self.mirrored_events(), [])
+        self.assertEqual(self.mirrored_beliefs(), [])
+
+
+
 class RestErasureTests(ErasureBase):
     def setUp(self):
         super().setUp()
@@ -204,6 +250,16 @@ class SessionIsolationTests(ErasureBase):
         self.assertIn("confirm", self.command("forget all my object memories", session="owner"))
         self.assertIn("forgot", self.command("yes, forget them all", session="owner").lower())
         self.assertEqual(object_memory.status()["objects"], 0)
+
+    def test_legacy_default_id_is_not_a_shared_confirmation_channel(self):
+        self.assertIn("confirm", self.command(
+            "forget all my object memories", session="default"))
+        self.assert_stays_unforgotten(self.stream(
+            "yes, forget them all", session="default"))
+        self.assertNotEqual(
+            voice_router.isolated_session_id("default"),
+            voice_router.isolated_session_id("default"),
+        )
 
     def test_requests_without_session_get_distinct_sessions(self):
         with turn_context(voice_router.isolated_session_id(None), None) as a:

@@ -8,7 +8,7 @@
 
 ## P0 — Make what exists reliable
 
-- [ ] Prove camera-free AirPods/headset-first interaction: explicit invocation, fast private audio, barge-in/stop, clear microphone state and reliable camera-off fallback.
+- [ ] Prove camera-free AirPods/headset-first interaction: explicit invocation, fast private audio, barge-in/stop, clear microphone state and reliable camera-off fallback. Source and tests exist ([Earpiece](docs/EARPIECE.md)); real-device acceptance outstanding.
 
 - [ ] Keep all Python, simulator, installer and security-contract CI checks green.
 - [ ] Test Windows installer on a clean PC; verify BYOK, permissions, upgrade/uninstall.
@@ -43,8 +43,8 @@ See [Callless specification](docs/CALLLESS_DESIGN.md).
 - [ ] Agent-to-agent calling, party lines, mid-call handoff and whisper-in.
 - [ ] Metered caller-pays inference and optional phone/SMS.
 - [ ] Physical access/door actions only under separate safety authorization.
-- [ ] User Belief Model, evidence freshness, proactive assistance.
-- [ ] Camera-free spoken place/object memory, world search and optional enrolled radio/sensors; separate opt-in camera/AR/wearable adapters only when independently verified.
+- [ ] User Belief Model, evidence freshness, proactive assistance. First narrow slice (document-figure belief gaps, scored briefings, voice watches) is in source; broader belief modelling stays future.
+- [ ] Camera-free spoken place/object memory, world search and optional enrolled radio/sensors; separate opt-in camera/AR/wearable adapters only when independently verified. Spoken object memory and situational questions are in source; enrolled sensors remain future.
 
 ## Promotion rule
 

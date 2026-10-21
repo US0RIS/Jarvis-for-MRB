@@ -113,6 +113,16 @@ class ExternalWatchLookupRequest(BaseModel):
     scope: str = "personal"
 
 
+class ProactivePreferencesRequest(BaseModel):
+    briefings_enabled: bool | None = None
+    snooze_minutes: int | None = None  # 0 clears a snooze
+    quiet_start: str | None = None     # "HH:MM"; "" clears quiet hours
+    quiet_end: str | None = None
+    hourly_budget: int | None = None
+    briefing_threshold: float | None = None
+    briefing_lead_minutes: int | None = None
+
+
 class DiligenceMatterRequest(BaseModel):
     label: str
     project_entity_id: str = ""
@@ -2916,6 +2926,103 @@ def external_watch_history(
         return {"observations": watch_history(request.id, request.scope)}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/watch/pause")
+def external_watch_pause(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import pause_watch
+    try:
+        return pause_watch(request.id, request.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/watch/resume")
+def external_watch_resume(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import resume_watch
+    try:
+        return resume_watch(request.id, request.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/proactive/watches")
+def proactive_watches(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Personal watches (voice-created ones carry their compiled rule) and runner health."""
+    _check_auth(authorization)
+    from jarvis_mrb.voice_watches import watches_view
+    return watches_view()
+
+
+@app.get("/proactive/ledger")
+def proactive_ledger(
+    limit: int = 50,
+    kind: str | None = None,
+    decision: str | None = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Every proactive watch alert/briefing, spoken or suppressed, with per-transport delivery state."""
+    _check_auth(authorization)
+    from jarvis_mrb.proactive_attention import budget_status, ledger
+    return {"items": ledger(limit=limit, kind=kind, decision=decision), "budget": budget_status()}
+
+
+@app.get("/proactive/why")
+def proactive_why(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.proactive_attention import explain, recent_emitted
+    items = recent_emitted(within_seconds=24 * 3600, limit=1)
+    if not items:
+        return {"item": None, "explanation": "No proactive alert or briefing in the last 24 hours."}
+    return {"item": items[0], "explanation": explain(items[0])}
+
+
+@app.get("/proactive/preferences")
+def proactive_preferences_get(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.proactive_attention import budget_status, get_prefs
+    return {"preferences": get_prefs(), "budget": budget_status()}
+
+
+@app.post("/proactive/preferences")
+def proactive_preferences_set(
+    request: ProactivePreferencesRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from datetime import datetime, timedelta, timezone
+    from jarvis_mrb.proactive_attention import budget_status, set_prefs
+    updates: dict[str, Any] = {}
+    for name in ("briefings_enabled", "quiet_start", "quiet_end", "hourly_budget",
+                 "briefing_threshold", "briefing_lead_minutes"):
+        value = getattr(request, name)
+        if value is not None:
+            updates[name] = value
+    if request.snooze_minutes is not None:
+        if not 0 <= request.snooze_minutes <= 7 * 24 * 60:
+            raise HTTPException(status_code=422, detail="snooze_minutes must be 0-10080.")
+        updates["snooze_until"] = (
+            "" if request.snooze_minutes == 0
+            else datetime.now(timezone.utc) + timedelta(minutes=request.snooze_minutes)
+        )
+    try:
+        return {"preferences": set_prefs(**updates), "budget": budget_status()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
 
 
 @app.post("/external/diligence/list")

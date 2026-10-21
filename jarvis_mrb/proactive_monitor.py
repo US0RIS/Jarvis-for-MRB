@@ -148,15 +148,16 @@ def _check_calendar() -> None:
         if 3 <= minutes <= 8:
             _prefetch_for_event(event_id, summary)
 
-        if 12 < minutes <= 35:
-            prebrief = _contextual_prebrief(event_id, summary)
-            if prebrief:
-                if _dedup(f"calendar-context:{event_id}", 4 * 3600):
-                    emit_proactive(
-                        str(prebrief.get("message") or ""),
-                        cue="attention",
-                        severity=str(prebrief.get("severity") or "info"),
-                    )
+        if 8 < minutes <= 35:
+            # Evidence-scored briefing ~15 minutes before start. Delivery,
+            # preferences (disable/snooze/quiet hours), the shared hourly
+            # budget and the delivery ledger live in proactive_briefing.
+            from jarvis_mrb.proactive_briefing import consider_event
+            outcome = consider_event(
+                event_id, summary, start, now=now,
+                evidence_provider=_contextual_prebrief,
+            )
+            if outcome.get("decision") in {"emitted", "duplicate"}:
                 continue
 
         if minutes <= 12:

@@ -176,6 +176,8 @@ def _load_handlers() -> None:
         "jarvis_mrb.object_memory",
         "jarvis_mrb.saved_places",
         "jarvis_mrb.situational_voice",
+        "jarvis_mrb.voice_watches",
+        "jarvis_mrb.proactive_briefing",
     ):
         try:
             __import__(module)

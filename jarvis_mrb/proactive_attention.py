@@ -346,6 +346,18 @@ def submit(
     return {"decision": "emitted", "reason": "", "item_id": item_id, "delivery": delivery}
 
 
+def record_suppressed(item: ProactiveItem, reason: str, *, now: datetime | None = None) -> dict[str, Any]:
+    """Store an item the caller judged not worth an interruption (for inspection).
+
+    Used for relevance decisions made before submission (e.g. weak briefing
+    evidence). Nothing is delivered. Repeats of the same item and reason are
+    collapsed into one row with a seen counter."""
+    instant = _utc(now)
+    with _LOCK, _db() as conn:
+        item_id = _record_suppressed(conn, item, reason, instant)
+    return {"decision": "suppressed", "reason": reason, "item_id": item_id}
+
+
 # --------------------------------------------------------------- delivery ---
 
 def _publish_live(item: ProactiveItem) -> tuple[str, int, str]:

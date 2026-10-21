@@ -403,68 +403,6 @@ def erase_event_keys(event_keys: Sequence[str]) -> dict[str, int]:
 
 
 
-def forget_object_location_reports(source_refs: Iterable[str]) -> int:
-    """Erase exactly the mirrored object location reports and derived beliefs.
-
-    Unrelated observations, commitments, and shared place/entity identities
-    survive. Callers must erase their primary memory only after this succeeds.
-    """
-    refs = list(dict.fromkeys(str(ref) for ref in source_refs))
-    if not refs:
-        return 0
-    if any(re.fullmatch(r"object_memory:\d+", ref) is None for ref in refs):
-        raise ValueError("Invalid object-memory provenance reference.")
-    deleted = 0
-    with _LOCK:
-        conn = _connect()
-        try:
-            with conn:
-                for start in range(0, len(refs), 300):
-                    group = refs[start:start + 300]
-                    slots = ",".join("?" for _ in group)
-                    rows = conn.execute(
-                        "SELECT id FROM events WHERE event_type='memory.user_reported_location' "
-                        "AND source_kind='user_report' AND source_ref IN (" + slots + ")",
-                        group,
-                    ).fetchall()
-                    event_ids = [int(row["id"]) for row in rows]
-                    if not event_ids:
-                        continue
-                    event_slots = ",".join("?" for _ in event_ids)
-                    participants = conn.execute(
-                        "SELECT DISTINCT entity_id FROM event_entities WHERE event_id IN ("
-                        + event_slots + ") AND role IN ('subject','reported_location')",
-                        event_ids,
-                    ).fetchall()
-                    candidates = {str(row["entity_id"]) for row in participants}
-                    # Delete the derived belief before the event: otherwise
-                    # ON DELETE SET NULL obscures its original provenance.
-                    conn.execute(
-                        "DELETE FROM beliefs WHERE predicate='user_reported_place' "
-                        "AND source_event_id IN (" + event_slots + ")",
-                        event_ids,
-                    )
-                    conn.execute("DELETE FROM events WHERE id IN (" + event_slots + ")", event_ids)
-                    deleted += len(event_ids)
-                    for entity_id in candidates:
-                        if entity_id in {SELF_ID, WORLD_ID}:
-                            continue
-                        conn.execute(
-                            """
-                            DELETE FROM entities WHERE id=? AND kind IN ('object','place')
-                              AND NOT EXISTS (SELECT 1 FROM event_entities WHERE entity_id=entities.id)
-                              AND NOT EXISTS (SELECT 1 FROM external_ids WHERE entity_id=entities.id)
-                              AND NOT EXISTS (SELECT 1 FROM beliefs WHERE
-                                              subject_id=entities.id OR object_id=entities.id)
-                              AND NOT EXISTS (SELECT 1 FROM commitments WHERE owner_id=entities.id)
-                            """,
-                            (entity_id,),
-                        )
-            return deleted
-        finally:
-            conn.close()
-
-
 def _belief_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": int(row["id"]),

@@ -29,7 +29,7 @@
 
 - [ ] Directional contact grants and timed, group-scoped availability.
 - [ ] Calendar Free/Busy overlay without meeting-detail exposure.
-- [ ] Decline, wait, leave-message and non-user guest access.
+- [ ] Decline, wait and leave-message (non-user guest access deferred past v1).
 - [ ] Receiver-controlled BYOK/local screener with privacy disclosure and quotas.
 - [ ] Native OS-compliant incoming calls, honest delivery states and connection tone.
 - [ ] Urgent pushes and independently authorized, audited bypass privileges.

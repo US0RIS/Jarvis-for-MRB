@@ -3449,6 +3449,35 @@ def spatial_status(authorization: Annotated[str | None, Header()] = None) -> dic
     return spatial_status_data()
 
 
+@app.get("/memory/objects")
+def object_memory_list(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    """User-reported object locations with full assertion history (private)."""
+    _check_auth(authorization)
+    from jarvis_mrb import object_memory
+    return {"status": object_memory.status(), "objects": object_memory.list_objects(limit=500)}
+
+
+@app.delete("/memory/objects/{object_id}")
+def object_memory_forget(object_id: str, authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb import object_memory
+    if not object_memory.forget(object_id):
+        raise HTTPException(status_code=404, detail="No remembered object with that id.")
+    return {"deleted": object_id}
+
+
+@app.delete("/memory/objects")
+def object_memory_forget_all(
+    confirm: str = "",
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    if confirm != "forget-all":
+        raise HTTPException(status_code=400, detail="Pass confirm=forget-all to delete every object memory.")
+    from jarvis_mrb import object_memory
+    return {"deleted_objects": object_memory.forget_all()}
+
+
 @app.get("/sandbox/status")
 def sandbox_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
     _check_auth(authorization)

@@ -174,6 +174,7 @@ def _load_handlers() -> None:
     # break ordinary voice commands, so each import is isolated.
     for module in (
         "jarvis_mrb.object_memory",
+        "jarvis_mrb.saved_places",
         "jarvis_mrb.situational_voice",
     ):
         try:

@@ -265,3 +265,12 @@ class ObjectMemoryApiTests(ObjectMemoryBase):
             self.assertEqual(client.delete(f"/memory/objects/{object_id}", headers=headers).status_code, 404)
             gone = client.post("/command", json={**body, "text": "where's my passport?"}, headers=headers).json()
             self.assertIn("I don't have any record", gone["message"])
+
+
+class ParkingTests(ObjectMemoryBase):
+    def test_parking_capture_and_recall(self):
+        self.assertEqual(self.say("I parked on level 3 of the airport garage"), "Got it.")
+        self.assertIn("on level 3 of the airport garage", self.say("Where did I park?"))
+        self.say("I just parked my bike at the rack by the library")
+        self.assertIn("at the rack by the library", self.say("where's my bike parked"))
+        self.assertIn("on level 3", self.say("where did I park my car"))

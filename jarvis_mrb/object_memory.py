@@ -526,6 +526,9 @@ _WHERE = re.compile(
     r"|\s+have\s+i\s+(?:put|left|stored)|\s+would\s+i\s+have\s+(?:put|left)|\s+can\s+i\s+find|\s+should\s+i\s+look\s+for)\s+(.+?)"
     r"(?:\s+(?:is|are))?(?:\s+again)?(?:\s+now)?$"
 )
+_VEHICLE = r"(?:my |the |our )?(car|truck|van|bike|bicycle|motorcycle|scooter)"
+_PARKED = re.compile(rf"^i(?:\s+just|'ve|\s+have)?\s+parked(?:\s+{_VEHICLE})?\s+({_PREP_RE})\s+(.+)$")
+_WHERE_PARKED = re.compile(rf"^where\s+(?:did\s+i|have\s+i)\s+park(?:ed)?(?:\s+{_VEHICLE})?$|^where(?:'s|\s+is)\s+{_VEHICLE}\s+parked$")
 _SEEN = re.compile(r"^have you seen\s+(.+?)$")
 _IN_PLACE = re.compile(
     rf"^what(?:'s|\s+is|\s+did\s+i\s+(?:put|leave|store|pack)|\s+have\s+i\s+(?:put|stored|packed)|\s+do\s+i\s+have|\s+things?\s+(?:are|did\s+i\s+put))\s+({_PREP_RE})\s+(.+)$"
@@ -775,6 +778,10 @@ def handle(text: str, turn: VoiceTurn) -> str | None:
     if rm:
         body = rm.group(1)
         prefixed = True
+    m = _PARKED.match(body)
+    if m:
+        vehicle = m.group(1) or "car"
+        return _capture([vehicle], m.group(3), _relation(m.group(2)), turn, text)
     m = _MOVED_FROM.match(body)
     if m:
         objects = _split_objects(m.group(1))
@@ -845,6 +852,9 @@ def handle(text: str, turn: VoiceTurn) -> str | None:
                 return _describe(view)
 
     # Lookups.
+    m = _WHERE_PARKED.match(n)
+    if m:
+        return _lookup(m.group(1) or m.group(2) or "car", turn, definitive=True)
     m = _WHERE.match(n) or _SEEN.match(n)
     if m:
         target = m.group(1).strip()

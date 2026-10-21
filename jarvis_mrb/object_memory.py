@@ -298,33 +298,34 @@ def record_placement(
     instant = now or _now()
     source_kind = "user_spoken" if channel in {"voice", "conversation"} else "user_typed"
     clean_place = " ".join(str(place or "").split())[:200]
-    with _LOCK, _open() as conn:
-        object_id, display = _resolve_or_create(conn, name)
-        previous = _active(conn, object_id)
-        cursor = conn.execute(
-            """INSERT INTO assertions(object_id,kind,relation,place,place_key,asserted_at,
-               source_kind,channel,session_ref,utterance) VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (object_id, kind, relation if kind == "placement" else "", clean_place,
-             _place_key(clean_place), _iso(instant), source_kind, channel[:20],
-             str(session_id)[:120], " ".join(str(utterance).split())[:MAX_UTTERANCE]),
-        )
-        new_id = int(cursor.lastrowid)
-        if previous is not None:
-            conn.execute(
-                "UPDATE assertions SET status=?, ended_at=?, ended_by=? WHERE id=?",
-                ("corrected" if correction else "superseded", _iso(instant), new_id, int(previous["id"])),
+    with _LOCK:
+        with _open() as conn:
+            object_id, display = _resolve_or_create(conn, name)
+            previous = _active(conn, object_id)
+            cursor = conn.execute(
+                """INSERT INTO assertions(object_id,kind,relation,place,place_key,asserted_at,
+                   source_kind,channel,session_ref,utterance) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (object_id, kind, relation if kind == "placement" else "", clean_place,
+                 _place_key(clean_place), _iso(instant), source_kind, channel[:20],
+                 str(session_id)[:120], " ".join(str(utterance).split())[:MAX_UTTERANCE]),
             )
-        conn.commit()
-    record = {
-        "assertion_id": new_id, "object_id": object_id, "object": display, "kind": kind,
-        "relation": relation, "place": clean_place, "asserted_at": _iso(instant),
-        "source_kind": source_kind, "previous_assertion_id": int(previous["id"]) if previous else None,
-        "previous_place": str(previous["place"]) if previous else None,
-        "previous_relation": str(previous["relation"]) if previous else None,
-        "previous_ended_as": ("corrected" if correction else "superseded") if previous else None,
-    }
-    _mirror_world(record)
-    return record
+            new_id = int(cursor.lastrowid)
+            if previous is not None:
+                conn.execute(
+                    "UPDATE assertions SET status=?, ended_at=?, ended_by=? WHERE id=?",
+                    ("corrected" if correction else "superseded", _iso(instant), new_id, int(previous["id"])),
+                )
+            conn.commit()
+        record = {
+            "assertion_id": new_id, "object_id": object_id, "object": display, "kind": kind,
+            "relation": relation, "place": clean_place, "asserted_at": _iso(instant),
+            "source_kind": source_kind, "previous_assertion_id": int(previous["id"]) if previous else None,
+            "previous_place": str(previous["place"]) if previous else None,
+            "previous_relation": str(previous["relation"]) if previous else None,
+            "previous_ended_as": ("corrected" if correction else "superseded") if previous else None,
+        }
+        _mirror_world(record)
+        return record
 
 
 def _mirror_world(record: dict[str, Any]) -> None:
@@ -487,22 +488,22 @@ def _erase_mirror(keys: list[str]) -> None:
 
 
 def forget(object_id: str) -> bool:
+    # Serialize the read, mirror erasure and local deletion with new placements.
+    # A concurrent new report cannot reintroduce a supposedly forgotten item.
     with _LOCK, _open() as conn:
-        keys = _mirror_keys(conn, [object_id])
-    _erase_mirror(keys)
-    with _LOCK, _open() as conn:
-        deleted = conn.execute("DELETE FROM objects WHERE id=?", (object_id,)).rowcount
+        if conn.execute("SELECT 1 FROM objects WHERE id=?", (object_id,)).fetchone() is None:
+            return False
+        _erase_mirror(_mirror_keys(conn, [object_id]))
+        conn.execute("DELETE FROM objects WHERE id=?", (object_id,))
         conn.commit()
-    return bool(deleted)
+    return True
 
 
 def forget_all() -> int:
     with _LOCK, _open() as conn:
-        ids = [str(r["id"]) for r in conn.execute("SELECT id FROM objects")]
-        keys = _mirror_keys(conn, ids)
-    _erase_mirror(keys)
-    with _LOCK, _open() as conn:
-        count = int(conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0])
+        ids = [str(row["id"]) for row in conn.execute("SELECT id FROM objects")]
+        _erase_mirror(_mirror_keys(conn, ids))
+        count = len(ids)
         conn.execute("DELETE FROM objects")
         conn.commit()
     return count

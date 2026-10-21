@@ -49,7 +49,11 @@ from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.inference import configure_inference, get_inference_config, inference_status, ProviderError
 from jarvis_mrb.spatial_memory import status as spatial_status_data
 from jarvis_mrb.streaming_agent import stream_natural_language
-from jarvis_mrb.voice_router import bound_stream as voice_bound_stream, turn_context as voice_turn_context
+from jarvis_mrb.voice_router import (
+    bound_stream as voice_bound_stream,
+    observe as voice_observe,
+    turn_context as voice_turn_context,
+)
 from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
 from jarvis_mrb.vision import status as vision_status_data, submit_frame
@@ -3151,8 +3155,11 @@ def command(request: CommandRequest, authorization: Annotated[str | None, Header
         effective_text = _command_alias(request.text)
         history = _contextual_history(session_id, effective_text, limit=12)
         with voice_turn_context(session_id, request.context):
+            preface = voice_observe(effective_text)
             reply = handle_natural_language(effective_text, history=history)
         message = _voice_safe_confirmation(reply.message)
+        if preface and message and message != "__EXIT__":
+            message = preface + " " + message
         append_message(session_id, "user", request.text)
         if message and message != "__EXIT__":
             append_message(session_id, "assistant", message)
@@ -3194,6 +3201,13 @@ def command_stream(
                     "route_reason": route.reason,
                 }
             ) + "\n"
+            with voice_turn_context(session_id, request.context):
+                preface = voice_observe(effective_text)
+            if preface:
+                first_output = False
+                emit_thinking(False)
+                pieces.append(preface + " ")
+                yield json.dumps({"type": "delta", "text": preface + " "}, ensure_ascii=False) + "\n"
             for piece in voice_bound_stream(session_id, request.context, lambda: stream_natural_language(
                 effective_text,
                 history=history,

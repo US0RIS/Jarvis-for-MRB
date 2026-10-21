@@ -177,6 +177,7 @@ def _load_handlers() -> None:
         "jarvis_mrb.saved_places",
         "jarvis_mrb.situational_voice",
         "jarvis_mrb.conversation_refine",
+        "jarvis_mrb.belief_gap",
     ):
         try:
             __import__(module)
@@ -185,13 +186,43 @@ def _load_handlers() -> None:
 
 
 _LOADED = False
+_OBSERVERS: list[tuple[str, Handler]] = []
 
 
-def route(text: str) -> tuple[str, str] | None:
+def register_observer(family: str, observer: Handler) -> None:
+    """An observer may add a short spoken preface to *any* turn (e.g. a
+    belief-gap warning) without taking over the user's actual request."""
+    if any(name == family for name, _ in _OBSERVERS):
+        return
+    _OBSERVERS.append((family, observer))
+
+
+def _ensure_loaded() -> None:
     global _LOADED
     if not _LOADED:
         _load_handlers()
         _LOADED = True
+
+
+def observe(text: str) -> str:
+    _ensure_loaded()
+    stripped = " ".join(str(text or "").split())
+    if not stripped:
+        return ""
+    turn = current_turn()
+    prefaces = []
+    for _family, observer in list(_OBSERVERS):
+        try:
+            preface = observer(stripped, turn)
+        except Exception:
+            continue
+        if preface:
+            prefaces.append(preface)
+    return " ".join(prefaces)
+
+
+def route(text: str) -> tuple[str, str] | None:
+    _ensure_loaded()
     stripped = " ".join(str(text or "").split())
     if not stripped:
         return None

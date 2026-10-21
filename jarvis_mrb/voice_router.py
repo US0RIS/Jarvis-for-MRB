@@ -50,7 +50,7 @@ def isolated_session_id(session_id: str | None) -> str:
     pending confirmations or conversation history with one another.
     """
     value = str(session_id or "").strip()[:120]
-    return value or f"anon-{uuid.uuid4().hex}"
+    return value if value and value.lower() != "default" else f"anon-{uuid.uuid4().hex}"
 
 
 @dataclass

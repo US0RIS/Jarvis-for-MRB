@@ -16,6 +16,11 @@ import jarvis_mrb.voice_watches as vw
 import jarvis_mrb.world_armor_push as push
 import jarvis_mrb.world_model as world_model
 from jarvis_mrb import event_bus, voice_router
+# Import the runtime service once at collection time, before any test patches the
+# world-model path. Importing it lazily inside a patched test runs the migrations
+# against the wrong database. The full suite does the same thing implicitly.
+import jarvis_mrb.proactive_monitor  # noqa: F401  (runs the world migrations once, unpatched)
+from jarvis_mrb import service
 from jarvis_mrb.voice_router import turn_context
 
 NOW = datetime(2026, 10, 21, 15, 10).astimezone()
@@ -554,8 +559,60 @@ class DeliveryTests(Isolated):
                 push.drain_once()
             self.assertEqual(sent.call_args.args[3:], ("horus-watch", "watch"))
             settled = attention.ledger()[0]
-            self.assertEqual(settled["push_state"], "sent")
-            self.assertTrue(settled["confirmed_delivery"])
+            # APNs HTTP 200 is acceptance by Apple's service, never device receipt.
+            self.assertEqual(settled["push_state"], "accepted_by_apns")
+            self.assertTrue(settled["accepted_by_apns"])
+            self.assertFalse(settled["confirmed_delivery"])
+            self.assertIn("device receipt is not confirmed", settled["push_detail"])
+
+    def test_apns_200_alone_never_claims_device_delivery(self) -> None:
+        with patch.dict(os.environ, PUSH_ENV), patch.object(push, "start_worker", return_value=False):
+            push.register_device("a1" * 32)
+            watch = self.make()
+            self.alert(watch)
+            with patch.object(push, "_send_one", return_value=(True, "")):
+                push.drain_once()
+            item = attention.ledger()[0]
+            self.assertEqual(item["push_state"], "accepted_by_apns")
+            self.assertFalse(item["confirmed_delivery"])
+            summary = attention.delivery_summary(item)
+            self.assertIn("not confirmed", summary)
+            for claim in ("delivered", "received", "heard", "seen"):
+                self.assertNotIn(claim, summary.lower())
+
+    def test_device_acknowledged_is_the_only_confirmed_state(self) -> None:
+        # No code path produces this state yet; the mapping is pinned so that a future
+        # device receipt is the sole source of confirmed_delivery.
+        watch = self.make()
+        self.alert(watch)
+        with attention._db() as conn:
+            conn.execute("UPDATE items SET push_state='device_acknowledged'")
+        item = attention.ledger()[0]
+        self.assertTrue(item["confirmed_delivery"])
+        with attention._db() as conn:
+            conn.execute("UPDATE items SET push_state='accepted_by_apns'")
+        self.assertFalse(attention.ledger()[0]["confirmed_delivery"])
+
+    def test_legacy_sent_rows_migrate_to_accepted_not_delivered(self) -> None:
+        watch = self.make()
+        self.alert(watch)
+        with attention._db() as conn:
+            conn.execute("UPDATE items SET push_state='sent'")
+        item = attention.ledger()[0]
+        self.assertEqual(item["push_state"], "accepted_by_apns")
+        self.assertFalse(item["confirmed_delivery"])
+
+    def test_transport_exhaustion_is_unknown_not_rejected(self) -> None:
+        with patch.dict(os.environ, PUSH_ENV), patch.object(push, "start_worker", return_value=False), \
+                patch.object(push, "_MAX_ATTEMPTS", 1):
+            push.register_device("a2" * 32)
+            watch = self.make()
+            self.alert(watch)
+            with patch.object(push, "_send_one", return_value=(False, "ConnectError")):
+                push.drain_once()
+            item = attention.ledger()[0]
+            self.assertEqual(item["push_state"], "delivery_unknown")
+            self.assertFalse(item["confirmed_delivery"])
 
     def test_apns_failure_is_recorded_as_failed(self) -> None:
         with patch.dict(os.environ, PUSH_ENV), patch.object(push, "start_worker", return_value=False):
@@ -565,7 +622,7 @@ class DeliveryTests(Isolated):
             with patch.object(push, "_send_one", return_value=(False, "BadDeviceToken")):
                 push.drain_once()
             item = attention.ledger()[0]
-            self.assertEqual(item["push_state"], "failed")
+            self.assertEqual(item["push_state"], "rejected_by_apns")
             self.assertIn("BadDeviceToken", item["push_detail"])
             self.assertFalse(item["confirmed_delivery"])
 
@@ -627,7 +684,6 @@ class DeliveryTests(Isolated):
     def test_service_background_runner_and_api(self) -> None:
         import inspect
         from fastapi import HTTPException
-        from jarvis_mrb import service
         self.assertIn("run_due_watches", inspect.getsource(service._external_watch_loop))
         self.assertIn("_ensure_external_watch_runner()", inspect.getsource(service.startup))
         watch = self.make()

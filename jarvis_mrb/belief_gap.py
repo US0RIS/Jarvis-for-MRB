@@ -52,7 +52,7 @@ _WORD_NUMBERS = {
     "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
     "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100,
 }
-_GENERIC = {"draft", "revised", "revision", "rev", "updated", "update", "final", "clean", "redline", "v",
+_GENERIC = {"draft", "revised", "revision", "rev", "updated", "update", "final", "clean", "redline", "v", "project",
             "copy", "new", "latest", "working", "version", "the", "and", "of", "pdf", "docx", "doc", "xlsx"}
 _VALUE = re.compile(
     r"(?<![\w.])([$€£])?\s?(\d[\d,]*(?:\.\d+)?)\s*(%|percent\b|per cent\b|bps\b|basis points\b|"
@@ -136,9 +136,9 @@ def doc_tokens(family: str, title: str = "") -> list[str]:
 def mentions_document(text: str, tokens: Iterable[str]) -> bool:
     words = set(re.split(r"[^a-z0-9]+", str(text or "").lower()))
     toks = list(tokens)
-    hits = sum(1 for t in toks if t in words or t.rstrip("s") in words or t + "s" in words)
-    # Users say "the Chronos purchase agreement", not the full file title.
-    return bool(toks) and hits >= min(2, len(toks))
+    # Every distinctive token must be present. Shared generic words ("purchase",
+    # "agreement") must never tie one document's mention to another document.
+    return bool(toks) and all(t in words or t.rstrip("s") in words or t + "s" in words for t in toks)
 
 
 def _parse(raw: Any) -> datetime | None:

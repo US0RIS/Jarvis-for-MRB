@@ -145,6 +145,16 @@ class SituationalTests(SituationalBase):
         self.say("anything happening around me?")
         self.assertEqual(sorted(self.calls), ["conditions", "quakes"])
 
+    def test_outage_is_not_cached_so_the_next_question_retries(self):
+        self.data["conditions"] = {"air_quality": {"status": "unavailable"},
+                                   "weather_alerts": {"status": "unavailable"}}
+        first = self.say("anything happening around me?")
+        self.assertIn("couldn't reach", first)
+        self.data["conditions"] = conditions()
+        second = self.say("anything happening around me?")
+        self.assertEqual(self.calls.count("conditions"), 2)
+        self.assertNotIn("couldn't reach NWS", second)
+
     def test_whats_changed_compares_against_previous_check(self):
         first = self.say("What's changed since I was here?")
         self.assertIn("don't have an earlier check", first)

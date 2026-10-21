@@ -119,7 +119,7 @@ class EarpieceAcceptance(unittest.TestCase):
 
         from jarvis_mrb import proactive_attention
         item = proactive_attention.ledger(limit=5)[0]
-        self.assertNotEqual(item.get("push_state"), "sent")   # no APNs configured: never "delivered"
+        self.assertNotIn(item.get("push_state"), ("accepted_by_apns", "device_acknowledged"))  # no APNs configured
         self.assertFalse(item.get("confirmed_delivery"))
 
         why = self.say("Why did you tell me that?")

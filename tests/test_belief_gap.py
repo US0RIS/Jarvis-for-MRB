@@ -14,6 +14,11 @@ import jarvis_mrb.world_document_versions as wdv
 import jarvis_mrb.world_linker as world_linker
 import jarvis_mrb.world_model as world_model
 from jarvis_mrb import belief_gap
+# Import the runtime service once at collection time, before any test patches the
+# world-model path. Importing it lazily inside a patched test runs the migrations
+# against the wrong database. The full suite does the same thing implicitly.
+import jarvis_mrb.proactive_monitor  # noqa: F401  (runs the world migrations once, unpatched)
+from jarvis_mrb import service
 from jarvis_mrb.voice_router import clear_focus, current_turn, observe, turn_context
 
 NOW = datetime.now(timezone.utc)
@@ -153,6 +158,14 @@ class BeliefGapTests(unittest.TestCase):
         self.assertEqual(belief_gap.upcoming_decision_gaps(
             [{"title": "Chronos purchase agreement signing", "start": start.isoformat()}], now=NOW), [])
 
+    def test_unrelated_document_sharing_generic_words_never_creates_a_gap(self):
+        self.versions()
+        # Same two generic words ("purchase agreement") and the same old figure,
+        # but a different document. Must not be read as exposure to Chronos.
+        self.turn("Acme purchase agreement cap?", "The Acme purchase agreement cap is 10%.", 7)
+        self.assertEqual(belief_gap.find_gaps(), [])
+        self.assertEqual(self.warn("the Acme purchase agreement cap is 10%"), "")
+
     def test_no_document_change_no_warning(self):
         self.turn("Chronos purchase agreement cap?", "The Chronos purchase agreement cap is 10%.", 7)
         self.assertEqual(self.warn("the Chronos purchase agreement cap is 10%"), "")
@@ -164,7 +177,6 @@ class BeliefGapTests(unittest.TestCase):
 
     def test_command_endpoint_prefixes_warning_without_replacing_answer(self):
         from fastapi.testclient import TestClient
-        from jarvis_mrb import service
         from jarvis_mrb.agent import AgentReply
 
         self.versions()

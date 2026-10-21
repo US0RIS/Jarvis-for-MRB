@@ -14,11 +14,28 @@ Truthfulness rules enforced here:
   reason so it can be inspected ("what did you hold back?").
 * Delivery states are per transport and never over-claim. ``live_published``
   means the item was handed to N connected companion sessions (not that anyone
-  heard it); ``queued`` means rows wait in the durable APNs outbox; only
-  ``sent`` means APNs accepted the push (HTTP 200). ``not_configured`` and
-  ``failed`` are recorded as such. ``confirmed_delivery`` is true only for
-  ``sent``.
+  heard it); ``queued`` means rows wait in the durable APNs outbox.
+
+APNs push states, from least to most specific:
+
+* ``queued`` - waiting in the outbox; APNs has not answered yet.
+* ``accepted_by_apns`` - APNs answered HTTP 200. This means Apple's service
+  accepted the request. It does NOT mean the iPhone received, displayed,
+  heard or acted on it.
+* ``rejected_by_apns`` - APNs answered with an error reason (for example a
+  bad or unregistered device token).
+* ``delivery_unknown`` - retries ended without APNs ever answering (network
+  or transport failure), or the outbox record disappeared.
+* ``device_acknowledged`` - reserved for an explicit device receipt. No device
+  acknowledgement channel exists for pushes yet, so no code path sets it.
+* ``failed`` - Horus could not enqueue the push at all.
+* ``not_configured`` - push disabled, credentials missing or no device.
+
+``confirmed_delivery`` (kept for API compatibility) is true only for
+``device_acknowledged``, so it is always false today. ``accepted_by_apns``
+is exposed as its own boolean.
 """
+
 
 import hashlib
 import json
@@ -116,6 +133,9 @@ def _db() -> Iterator[sqlite3.Connection]:
         );
         """
     )
+    # Earlier builds called an APNs HTTP 200 "sent", which read as delivery.
+    conn.execute(
+        "UPDATE items SET push_state='accepted_by_apns' WHERE push_state='sent'")
     conn.commit()
     try:
         with conn:
@@ -234,7 +254,10 @@ def _row(row: sqlite3.Row) -> dict[str, Any]:
         out["evidence"] = json.loads(out.pop("evidence_json") or "{}")
     except ValueError:
         out["evidence"] = {}
-    out["confirmed_delivery"] = out.get("push_state") == "sent"
+    # Device receipt is the only thing that counts as confirmed delivery. APNs
+    # HTTP 200 is exposed separately so it can never be mistaken for it.
+    out["accepted_by_apns"] = out.get("push_state") == "accepted_by_apns"
+    out["confirmed_delivery"] = out.get("push_state") == "device_acknowledged"
     return out
 
 
@@ -410,7 +433,26 @@ def _deliver(item_id: str, item: ProactiveItem, instant: datetime) -> dict[str, 
             (live_state, clients, live_detail, push_state, push_detail, event_id,
              instant.isoformat(), item_id))
     return {"live": live_state, "live_clients": clients, "push": push_state,
-            "push_detail": push_detail, "confirmed_delivery": False}
+            "push_detail": push_detail, "accepted_by_apns": False,
+            "confirmed_delivery": False}
+
+
+_APNS_REASONS = {
+    "BadCollapseId", "BadDeviceToken", "BadExpirationDate", "BadMessageId", "BadPriority",
+    "BadTopic", "DeviceTokenNotForTopic", "DuplicateHeaders", "ExpiredProviderToken",
+    "ExpiredToken", "Forbidden", "InvalidProviderToken", "InternalServerError", "MethodNotAllowed",
+    "MissingDeviceToken", "MissingTopic", "PayloadEmpty", "PayloadTooLarge", "ServiceUnavailable",
+    "Shutdown", "TooManyProviderTokenUpdates", "TooManyRequests", "TopicDisallowed", "Unregistered",
+    "BadCertificate", "BadCertificateEnvironment", "MissingProviderToken",
+}
+
+
+def _apns_answered(reason: str) -> bool:
+    """True when APNs itself replied (a documented reason or an HTTP status).
+
+    Transport exceptions (for example ``ConnectError``) mean APNs was never
+    reached, so the outcome is unknown rather than a rejection."""
+    return reason in _APNS_REASONS or reason.startswith("http_")
 
 
 def reconcile_push() -> int:
@@ -429,16 +471,21 @@ def reconcile_push() -> int:
             if state["pending"] > 0:
                 continue
             if state["sent"] > 0:
-                new_state = "sent"
-                detail = f"APNs accepted the push for {state['sent']} of {state['total']} device(s)"
+                new_state = "accepted_by_apns"
+                detail = (f"APNs accepted the push for {state['sent']} of {state['total']} device(s); "
+                          "device receipt is not confirmed")
             elif state["dead"] > 0:
-                new_state = "failed"
-                detail = "APNs retries ended without acceptance" + (
-                    ": " + state["last_error"] if state["last_error"] else "")
+                reason = str(state["last_error"] or "")
+                if _apns_answered(reason):
+                    new_state = "rejected_by_apns"
+                    detail = "APNs rejected the push" + (": " + reason if reason else "")
+                else:
+                    new_state = "delivery_unknown"
+                    detail = "APNs was never reached" + (": " + reason if reason else "")
             else:
                 created = datetime.fromisoformat(str(row["created_at"]))
                 if (datetime.now(timezone.utc) - created).total_seconds() > 3600:
-                    new_state, detail = "failed", "outbox record is gone; delivery cannot be confirmed"
+                    new_state, detail = "delivery_unknown", "outbox record is gone; delivery cannot be determined"
                 else:
                     continue
             conn.execute("UPDATE items SET push_state=?,push_detail=?,push_updated_at=? WHERE id=?",
@@ -512,9 +559,12 @@ def delivery_summary(item: dict[str, Any]) -> str:
         "failed": "live publish failed",
     }.get(str(item.get("live_state")), "live delivery not attempted")
     push = {
-        "sent": "iPhone push accepted by APNs",
-        "queued": "iPhone push queued, not yet accepted by APNs",
-        "failed": "iPhone push failed",
+        "accepted_by_apns": "iPhone push accepted by Apple's service (device receipt not confirmed)",
+        "rejected_by_apns": "iPhone push rejected by Apple's service",
+        "delivery_unknown": "iPhone push outcome unknown (Apple's service was not reached)",
+        "device_acknowledged": "iPhone confirmed receipt",
+        "queued": "iPhone push queued, not yet answered by Apple's service",
+        "failed": "iPhone push could not be queued",
         "not_configured": "iPhone push not configured (" + str(item.get("push_detail") or "no detail") + ")",
     }.get(str(item.get("push_state")), "iPhone push not attempted")
     return live + "; " + push

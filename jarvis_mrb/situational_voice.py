@@ -75,6 +75,13 @@ PROVIDERS: dict[str, Callable[[float, float], dict[str, Any]]] = {
 }
 
 
+def _has_data(source: str, result: dict[str, Any]) -> bool:
+    if source == "conditions":
+        return any((result.get(part) or {}).get("status") in {"ok", "partial", "stale"}
+                   for part in ("air_quality", "weather_alerts"))
+    return result.get("status") in {"ok", "partial", "stale", "unsupported_region"}
+
+
 def _fetch(source: str, place: ResolvedPlace) -> dict[str, Any]:
     key = (source, round(place.latitude, 2), round(place.longitude, 2))
     now = time.monotonic()
@@ -86,9 +93,8 @@ def _fetch(source: str, place: ResolvedPlace) -> dict[str, Any]:
         result = PROVIDERS[source](place.latitude, place.longitude)
     except Exception as exc:
         result = {"status": "unavailable", "source_note": f"{source} failed: {type(exc).__name__}"}
-    # Cache any answered provider call (conditions has no top-level status);
-    # never cache an outage, so the next question retries the source.
-    if result.get("status") != "unavailable":
+    # Cache only answers that carry data; an outage is retried on the next question.
+    if _has_data(source, result):
         with _LOCK:
             _CACHE[key] = (now + CACHE_SECONDS.get(source, 300), result)
     return result

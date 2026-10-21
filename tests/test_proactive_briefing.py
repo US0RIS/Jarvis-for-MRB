@@ -12,6 +12,10 @@ import jarvis_mrb.proactive_briefing as briefing
 import jarvis_mrb.world_armor_push as push
 import jarvis_mrb.world_model as world_model
 from jarvis_mrb import event_bus
+# Import the runtime service once at collection time, before any test patches the
+# world-model path. Importing it lazily inside a patched test runs the migrations
+# against the wrong database. The full suite does the same thing implicitly.
+import jarvis_mrb.proactive_monitor as monitor  # runs the world migrations once, unpatched
 from jarvis_mrb.voice_router import turn_context
 
 # Local-aware so quiet-hours (evaluated in local time) are deterministic.
@@ -259,7 +263,6 @@ class WhyTests(BriefingBase):
 
 class MonitorIntegrationTests(BriefingBase):
     def test_calendar_check_routes_prebrief_through_scored_briefing(self) -> None:
-        import jarvis_mrb.proactive_monitor as monitor
 
         class Result:
             ok = True

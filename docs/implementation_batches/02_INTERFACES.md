@@ -6,6 +6,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P02-001
 
+**AirPods-first acceptance (binding):** Private earbud spoken next-event/status is the primary UI; glanceable HUD, phone and desktop widgets optional.
+
 - [ ] **"What can you do?" self-describing capability statement.** — [archived requirement L95](../archive/FUTURE_IDEAS_2026_10.md#L95)
 - [ ] **Nearest-obligation glanceable HUD.** — [archived requirement L102](../archive/FUTURE_IDEAS_2026_10.md#L102)
 - [ ] **Passive system status indicators.** — [archived requirement L107](../archive/FUTURE_IDEAS_2026_10.md#L107)
@@ -14,6 +16,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P02-002
 
+**AirPods-first acceptance (binding):** Prioritize reliable instant audio stop/barge-in and explicit handset fallback over a visual action tray.
+
 - [ ] **Action tray / quick-action palette.** — [archived requirement L112](../archive/FUTURE_IDEAS_2026_10.md#L112)
 - [ ] **Explicit, guaranteed "stop talking" barge-in command.** — [archived requirement L117](../archive/FUTURE_IDEAS_2026_10.md#L117)
 - [ ] **Named preset/loadout invocation.** — [archived requirement L121](../archive/FUTURE_IDEAS_2026_10.md#L121)
@@ -21,6 +25,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 **Done:** narrow end-to-end implementation or documented research result, guarded by regression and permission tests; no unrelated refactoring.
 
 ### P02-003
+
+**AirPods-first acceptance (binding):** Conversational world summaries and optional drill-down replace a mandatory persistent command center.
 
 - [ ] **Context-gated capability sets.** — [archived requirement L126](../archive/FUTURE_IDEAS_2026_10.md#L126)
 - [ ] **Command-center / world-model dashboard as a real destination view.** — [archived requirement L131](../archive/FUTURE_IDEAS_2026_10.md#L131)
@@ -39,6 +45,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 ## Adjacent-field idea mining — 2026-09-26 — Attention, command, and situational awareness
 
 ### P02-005
+
+**AirPods-first acceptance (binding):** Attention Commander decides whether to speak, signal, notify or remain silent; maps/camera dashboards only optional display surfaces.
 
 - [ ] **Attention Commander.** — [archived requirement L574](../archive/FUTURE_IDEAS_2026_10.md#L574)
 - [ ] **Dynamic Common Operating Picture.** — [archived requirement L579](../archive/FUTURE_IDEAS_2026_10.md#L579)
@@ -72,6 +80,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P02-009
 
+**AirPods-first acceptance (binding):** Voice-first with real OS microphone/headset capabilities, no guessed always-on capture; text/touch fallback must exist.
+
 - [ ] **Input-Modality Independence.** — [archived requirement L746](../archive/FUTURE_IDEAS_2026_10.md#L746)
 - [ ] **Output-Modality Independence.** — [archived requirement L750](../archive/FUTURE_IDEAS_2026_10.md#L750)
 - [ ] **Interaction Capability Negotiation.** — [archived requirement L753](../archive/FUTURE_IDEAS_2026_10.md#L753)
@@ -80,6 +90,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P02-010
 
+**AirPods-first acceptance (binding):** Describe a place from approved map/sensor/user context, NOT an unseen current visual scene. If user asks 'what am I looking at', admit the absence of imagery or request explicit optional photo. Digital GUI uses DOM/accessibility.
+
 - [ ] **Describe-on-Demand.** — [archived requirement L756](../archive/FUTURE_IDEAS_2026_10.md#L756)
 - [ ] **Navigation Landmark Memory.** — [archived requirement L758](../archive/FUTURE_IDEAS_2026_10.md#L758)
 - [ ] **Interface Semantic Overlay.** — [archived requirement L760](../archive/FUTURE_IDEAS_2026_10.md#L760)
@@ -87,6 +99,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 **Done:** narrow end-to-end implementation or documented research result, guarded by regression and permission tests; no unrelated refactoring.
 
 ### P02-011
+
+**AirPods-first acceptance (binding):** Audio-only is a core supported experience, not a degraded class of user. Accessibility pathways must be independent of glasses or screen.
 
 - [ ] **Accessibility as Core Architecture.** — [archived requirement L762](../archive/FUTURE_IDEAS_2026_10.md#L762)
 

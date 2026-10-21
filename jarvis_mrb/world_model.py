@@ -378,9 +378,10 @@ def erase_event_keys(event_keys: Sequence[str]) -> dict[str, int]:
                 f"DELETE FROM beliefs WHERE source_event_id IN ({idm})", ids).rowcount
             result["events"] = conn.execute(
                 f"DELETE FROM events WHERE id IN ({idm})", ids).rowcount
-            # Every table with a foreign key into entities, except the entity's own
-            # identifiers and aliases (those go away with the entity itself).
-            own = {"external_ids", "aliases"}
+            # Aliases are derived labels, but an external ID represents an
+            # independently enrolled identity. Preserve entities that another
+            # identity system still references.
+            own = {"aliases"}
             refs: list[tuple[str, str]] = []
             for table_row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
                 table = str(table_row["name"])

@@ -90,6 +90,31 @@ class VoiceErasureTests(ErasureBase):
         self.assertTrue(self.entity_named("the safe"), "place still referenced elsewhere")
         self.assertEqual(self.entity_named("passport"), [])
 
+
+    def test_independently_registered_object_identity_survives_forget(self):
+        self.say("I put my passport in the safe")
+        # Attach an independent inventory identity to the same graph object.
+        object_id = world_model.ensure_entity(
+            "object", "passport",
+            external_namespace="personal_inventory",
+            external_id="passport-asset-001",
+        )
+        self.assertTrue(self.world(
+            "SELECT entity_id FROM external_ids WHERE namespace=? AND external_id=?",
+            ("personal_inventory", "passport-asset-001"),
+        ))
+        self.say("Forget where I put my passport")
+        # The location observation must go, but the independently enrolled
+        # entity and its external ID are not part of that memory's deletion.
+        self.assertEqual(self.mirrored_events(), [])
+        self.assertEqual(self.mirrored_beliefs(), [])
+        self.assertTrue(self.world(
+            "SELECT id FROM entities WHERE id=?", (object_id,),
+        ))
+        self.assertTrue(self.world(
+            "SELECT entity_id FROM external_ids WHERE entity_id=?", (object_id,),
+        ))
+
     def test_superseded_history_is_erased_too(self):
         self.say("I put my passport in the top drawer")
         self.say("I moved my passport into my suitcase")

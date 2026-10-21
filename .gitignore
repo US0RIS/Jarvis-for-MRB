@@ -11,3 +11,6 @@ __pycache__/
 jarvis_google_credentials.json
 google_credentials.json
 google_token.json
+
+# Local editable-install metadata
+*.egg-info/

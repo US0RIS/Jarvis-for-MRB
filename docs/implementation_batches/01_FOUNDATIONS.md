@@ -47,6 +47,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P01-006
 
+**AirPods-first acceptance (binding):** Coverage means accessible source footprints, gaps and source freshness, presented in speech; do not imply a camera sees an area. Phone map optional.
+
 - [ ] **Coverage map.** — [archived requirement L382](../archive/FUTURE_IDEAS_2026_10.md#L382)
 - [ ] **Capability graph.** — [archived requirement L384](../archive/FUTURE_IDEAS_2026_10.md#L384)
 - [ ] **Cost-aware sensing.** — [archived requirement L386](../archive/FUTURE_IDEAS_2026_10.md#L386)
@@ -55,6 +57,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P01-007
 
+**AirPods-first acceptance (binding):** Speak evidence provenance/uncertainty so a HUD color is not the only carrier of truth state.
+
 - [ ] **Model router by cognitive difficulty.** — [archived requirement L388](../archive/FUTURE_IDEAS_2026_10.md#L388)
 - [ ] **Evidence snapshots.** — [archived requirement L390](../archive/FUTURE_IDEAS_2026_10.md#L390)
 - [ ] **Uncertainty UI.** — [archived requirement L392](../archive/FUTURE_IDEAS_2026_10.md#L392)
@@ -62,6 +66,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 **Done:** narrow end-to-end implementation or documented research result, guarded by regression and permission tests; no unrelated refactoring.
 
 ### P01-008
+
+**AirPods-first acceptance (binding):** Watches follow exact named entities and authorized data sources, not a camera viewport or gaze target.
 
 - [ ] **One-command temporary watch.** — [archived requirement L394](../archive/FUTURE_IDEAS_2026_10.md#L394)
 - [ ] **Follow-the-entity.** — [archived requirement L396](../archive/FUTURE_IDEAS_2026_10.md#L396)
@@ -173,6 +179,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P01-021
 
+**AirPods-first acceptance (binding):** Camera-free room context is optional enrolled sensor data, named spaces and explicit user statements. Do not force purchase or installation of CSI/mmWave/ESP32 hardware to use Horus; unknown room is valid.
+
 - [ ] **Conversation/Execution Split.** — [archived requirement L1413](../archive/FUTURE_IDEAS_2026_10.md#L1413)
 - [ ] **Direct-Observation Tier.** — [archived requirement L1417](../archive/FUTURE_IDEAS_2026_10.md#L1417)
 - [ ] **Camera-Free Room Model.** — [archived requirement L1420](../archive/FUTURE_IDEAS_2026_10.md#L1420)
@@ -180,6 +188,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 **Done:** narrow end-to-end implementation or documented research result, guarded by regression and permission tests; no unrelated refactoring.
 
 ### P01-022
+
+**AirPods-first acceptance (binding):** Use source-qualified RF/telemetry prediction and independent verification as the baseline. PTZ targeting and optical lock remain optional hardware research.
 
 - [ ] **Physical Sensor Gateway on Pi 5.** — [archived requirement L1423](../archive/FUTURE_IDEAS_2026_10.md#L1423)
 - [ ] **RF Reality Layer.** — [archived requirement L1426](../archive/FUTURE_IDEAS_2026_10.md#L1426)
@@ -189,6 +199,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P01-023
 
+**AirPods-first acceptance (binding):** Website control uses API/DOM/accessibility first; screenshots only on approved computer as digital-UI fallback. Standing queries need no POV video.
+
 - [ ] **Compiled Website Capability.** — [archived requirement L1433](../archive/FUTURE_IDEAS_2026_10.md#L1433)
 - [ ] **Capability Evidence Ledger.** — [archived requirement L1437](../archive/FUTURE_IDEAS_2026_10.md#L1437)
 - [ ] **Standing Query Reality Engine.** — [archived requirement L1441](../archive/FUTURE_IDEAS_2026_10.md#L1441)
@@ -196,6 +208,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 **Done:** narrow end-to-end implementation or documented research result, guarded by regression and permission tests; no unrelated refactoring.
 
 ### P01-024
+
+**AirPods-first acceptance (binding):** Voice, offline knowledge, cached maps and permitted enrolled devices must work without camera or specialized sensor.
 
 - [ ] **Offline World Core.** — [archived requirement L1445](../archive/FUTURE_IDEAS_2026_10.md#L1445)
 - [ ] **Model-independent Interaction Bus.** — [archived requirement L1448](../archive/FUTURE_IDEAS_2026_10.md#L1448)

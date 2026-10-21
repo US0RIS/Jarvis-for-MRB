@@ -6,6 +6,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 
 ### P05-001
 
+**AirPods-first acceptance (binding):** Bind calendar locations from exact user-approved destinations and phone location access, not POV/Reality Lens imagery. Spoken premeeting reminders need no display.
+
 - [ ] **Push, don't pull, the pre-meeting brief.** — [source L43](../archive/FUTURE_IDEAS_2026_10.md#L43)
 - [ ] **Bind calendar events to exact Reality Lens coordinates.** — [source L51](../archive/FUTURE_IDEAS_2026_10.md#L51)
 - [ ] **Real-time Guardian alerting, not just read-only evidence.** — [source L57](../archive/FUTURE_IDEAS_2026_10.md#L57)
@@ -13,6 +15,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 **Done:** smallest verifiable implementation, a rollback or opt-out path, failure and trust-boundary tests, and explicit remaining gaps.
 
 ### P05-002
+
+**AirPods-first acceptance (binding):** Indoor context needs user-stated room, deliberately scanned NFC/QR, opted-in geofence or enrolled sensors. No false claims of vision-based room identity.
 
 - [ ] **Health-aware scheduling flags.** — [source L63](../archive/FUTURE_IDEAS_2026_10.md#L63)
 - [ ] **Indoor / place-of-context awareness.** — [source L68](../archive/FUTURE_IDEAS_2026_10.md#L68)
@@ -23,6 +27,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 
 ### P05-003
 
+**AirPods-first acceptance (binding):** Send private earbud speech/cues or choose silence by default; any HUD/room display is optional.
+
 - [ ] **Contextual Delivery / Follow-Me Information.** — [source L427](../archive/FUTURE_IDEAS_2026_10.md#L427)
 - [ ] **Ambient Output Fabric.** — [source L432](../archive/FUTURE_IDEAS_2026_10.md#L432)
 - [ ] **Social Context Modes.** — [source L437](../archive/FUTURE_IDEAS_2026_10.md#L437)
@@ -31,6 +37,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 
 ### P05-004
 
+**AirPods-first acceptance (binding):** Invocation uses OS-permitted voice/action and consented location/device state, not gaze. Conversation handoff uses actual earbud/phone/car routing rather than assumed glasses.
+
 - [ ] **Temporary Delegated Capability.** — [source L441](../archive/FUTURE_IDEAS_2026_10.md#L441)
 - [ ] **Presence-as-Invocation.** — [source L445](../archive/FUTURE_IDEAS_2026_10.md#L445)
 - [ ] **Conversation Handoff.** — [source L448](../archive/FUTURE_IDEAS_2026_10.md#L448)
@@ -38,6 +46,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 **Done:** smallest verifiable implementation, a rollback or opt-out path, failure and trust-boundary tests, and explicit remaining gaps.
 
 ### P05-005
+
+**AirPods-first acceptance (binding):** Spoken note and share-sheet capture are primary; selected photos/visible digital screen may be attached only intentionally and with provenance. No continuous wearable vision.
 
 - [ ] **Interruptibility as a primitive.** — [source L451](../archive/FUTURE_IDEAS_2026_10.md#L451)
 - [ ] **Zero-Friction Capture Bus.** — [source L453](../archive/FUTURE_IDEAS_2026_10.md#L453)
@@ -55,6 +65,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 
 ### P05-007
 
+**AirPods-first acceptance (binding):** Learn repeated digital events or user-declared routines; earbuds do not observe uninstrumented physical routines.
+
 - [ ] **Routine Learning Without Programming.** — [source L471](../archive/FUTURE_IDEAS_2026_10.md#L471)
 - [ ] **Counterfactual Automation Testing.** — [source L474](../archive/FUTURE_IDEAS_2026_10.md#L474)
 - [ ] **Behavioral Automation Success Metrics.** — [source L477](../archive/FUTURE_IDEAS_2026_10.md#L477)
@@ -70,6 +82,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 **Done:** smallest verifiable implementation, a rollback or opt-out path, failure and trust-boundary tests, and explicit remaining gaps.
 
 ### P05-009
+
+**AirPods-first acceptance (binding):** Auto-resolved tasks require exact digital receipts, authorized device readback or user attestation; never infer physical success from absence of an image.
 
 - [ ] **Auto-Resolving Tasks.** — [source L489](../archive/FUTURE_IDEAS_2026_10.md#L489)
 - [ ] **Condition-Relative Recurrence.** — [source L492](../archive/FUTURE_IDEAS_2026_10.md#L492)
@@ -94,6 +108,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 **Done:** smallest verifiable implementation, a rollback or opt-out path, failure and trust-boundary tests, and explicit remaining gaps.
 
 ### P05-012
+
+**AirPods-first acceptance (binding):** Physical status vocabulary becomes earcons, private speech or phone notification first; room lights/HUD optional.
 
 - [ ] **Personalized Environment Profiles.** — [source L516](../archive/FUTURE_IDEAS_2026_10.md#L516)
 - [ ] **World-Aware Media.** — [source L519](../archive/FUTURE_IDEAS_2026_10.md#L519)
@@ -143,6 +159,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 
 ### P05-018
 
+**AirPods-first acceptance (binding):** Demonstrated computer workflows use API/DOM/accessibility and verified action traces. User-performed physical procedure must be described or separately instrumented.
+
 - [ ] **Demonstrate -> Compile -> Verify.** — [source L768](../archive/FUTURE_IDEAS_2026_10.md#L768)
 - [ ] **Just-in-Time Automation.** — [source L772](../archive/FUTURE_IDEAS_2026_10.md#L772)
 - [ ] **Automation Generalization Dialog.** — [source L775](../archive/FUTURE_IDEAS_2026_10.md#L775)
@@ -158,6 +176,8 @@ Implement one packet (up to three requirements) at a time. See [execution rules]
 **Done:** smallest verifiable implementation, a rollback or opt-out path, failure and trust-boundary tests, and explicit remaining gaps.
 
 ### P05-020
+
+**AirPods-first acceptance (binding):** Crystallize recurring intents into phrases/shortcuts; optional screen views only when user selects them.
 
 - [ ] **Personal Micro-App Generator.** — [source L785](../archive/FUTURE_IDEAS_2026_10.md#L785)
 - [ ] **Interface-by-Use.** — [source L788](../archive/FUTURE_IDEAS_2026_10.md#L788)

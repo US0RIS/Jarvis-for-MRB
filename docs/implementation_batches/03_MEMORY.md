@@ -24,6 +24,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 
 ### P03-003
 
+**AirPods-first acceptance (binding):** Voice memory of 'this' requires a resolvable user-mentioned entity/place/document; otherwise ask what to remember. No background POV camera/mic assumption.
+
 - [ ] **Package/delivery correlation.** — [archived requirement L260](../archive/FUTURE_IDEAS_2026_10.md#L260)
 - [ ] **Ambient "remember this" voice capture** — [archived requirement L264](../archive/FUTURE_IDEAS_2026_10.md#L264)
 - [ ] **Self-hosted backup/failover for your own services.** — [archived requirement L268](../archive/FUTURE_IDEAS_2026_10.md#L268)
@@ -33,6 +35,8 @@ One packet = one scoped coding prompt, at most three original entries. Read the 
 ## More scope (round 3) — More scope (round 3)
 
 ### P03-004
+
+**AirPods-first acceptance (binding):** Trip correlations prefer ticket/reservation messages, weather, wildfire alerts, transport and official feeds. Optional remote cameras may augment only with source-qualified results.
 
 - [ ] **Meeting document freshness check.** — [archived requirement L275](../archive/FUTURE_IDEAS_2026_10.md#L275)
 - [ ] **Trip timeline fusion.** — [archived requirement L280](../archive/FUTURE_IDEAS_2026_10.md#L280)

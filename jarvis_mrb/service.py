@@ -49,6 +49,7 @@ from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.inference import configure_inference, get_inference_config, inference_status, ProviderError
 from jarvis_mrb.spatial_memory import status as spatial_status_data
 from jarvis_mrb.streaming_agent import stream_natural_language
+from jarvis_mrb.voice_router import bound_stream as voice_bound_stream, turn_context as voice_turn_context
 from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
 from jarvis_mrb.vision import status as vision_status_data, submit_frame
@@ -89,6 +90,9 @@ _world_armor_guard_started = False
 class CommandRequest(BaseModel):
     text: str
     session_id: str | None = None
+    # Optional per-turn context the client chose to attach under its own OS
+    # permissions (phone location fix, input channel). Never required.
+    context: dict[str, Any] | None = None
 
 
 class ExternalWatchCreateRequest(BaseModel):
@@ -3146,7 +3150,8 @@ def command(request: CommandRequest, authorization: Annotated[str | None, Header
         session_id = request.session_id or "default"
         effective_text = _command_alias(request.text)
         history = _contextual_history(session_id, effective_text, limit=12)
-        reply = handle_natural_language(effective_text, history=history)
+        with voice_turn_context(session_id, request.context):
+            reply = handle_natural_language(effective_text, history=history)
         message = _voice_safe_confirmation(reply.message)
         append_message(session_id, "user", request.text)
         if message and message != "__EXIT__":
@@ -3189,12 +3194,12 @@ def command_stream(
                     "route_reason": route.reason,
                 }
             ) + "\n"
-            for piece in stream_natural_language(
+            for piece in voice_bound_stream(session_id, request.context, lambda: stream_natural_language(
                 effective_text,
                 history=history,
                 model_override=route.model,
                 announce_analysis=route.announce_analysis,
-            ):
+            )):
                 if not piece:
                     continue
                 delivered_piece = _voice_safe_confirmation(piece)

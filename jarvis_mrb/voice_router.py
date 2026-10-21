@@ -230,13 +230,20 @@ def route(text: str) -> tuple[str, str] | None:
     if not stripped:
         return None
     turn = current_turn()
+    # Which capability answered the previous turn in this session, so a bare
+    # follow-up ("no, the bottom drawer") is only applied when it really
+    # continues that capability's exchange.
+    turn.extras["previous_family"] = get_focus("router.last_family", session_id=turn.session_id)
     for family, handler in list(_HANDLERS):
         try:
             answer = handler(stripped, turn)
         except Exception as exc:
+            set_focus("router.last_family", family, session_id=turn.session_id)
             return family, f"That {family.replace('_', ' ')} request failed: {type(exc).__name__}."
         if answer is not None:
+            set_focus("router.last_family", family, session_id=turn.session_id)
             return family, answer
+    set_focus("router.last_family", None, session_id=turn.session_id)
     return None
 
 

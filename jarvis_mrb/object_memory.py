@@ -813,7 +813,8 @@ def handle(text: str, turn: VoiceTurn) -> str | None:
 
     # Corrections right after a capture, or updates right after a lookup.
     m = _CORRECTION.match(n)
-    if m and _focus_objects(turn):
+    continuing = turn.extras.get("previous_family", "object_memory") == "object_memory"
+    if m and continuing and _focus_objects(turn):
         rest = m.group(1).strip()
         if rest:
             captured_at = get_focus("object_memory.captured_at", session_id=turn.session_id)

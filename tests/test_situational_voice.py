@@ -19,7 +19,9 @@ NOW = datetime.now(timezone.utc)
 
 def fix():
     return {"latitude": 39.74, "longitude": -104.99, "location_accuracy_m": 25,
-            "location_captured_at": NOW.isoformat(), "channel": "voice"}
+            # Stamp at call time: the phone-fix freshness limit is 15 minutes, and a long
+            # run (a slow Windows runner) must not age a module-level timestamp past it.
+            "location_captured_at": datetime.now(timezone.utc).isoformat(), "channel": "voice"}
 
 
 def conditions(alerts=(), aqi=35, alert_status="ok", air_status="ok"):

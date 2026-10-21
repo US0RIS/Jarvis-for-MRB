@@ -94,6 +94,11 @@ def _database() -> Any:
         ("last_image_hash", "TEXT NOT NULL DEFAULT ''"),
         ("camera_positive_streak", "INTEGER NOT NULL DEFAULT 0"),
         ("camera_alert_armed", "INTEGER NOT NULL DEFAULT 1"),
+        # Pause is distinct from cancel (enabled=0) and from expiry: a paused
+        # watch keeps its original expires_at, so pausing can never extend it.
+        ("paused", "INTEGER NOT NULL DEFAULT 0"),
+        ("paused_at", "TEXT"),
+        ("cancelled_at", "TEXT"),
     ):
         if column not in columns:
             conn.execute("ALTER TABLE watches ADD COLUMN " + column + " " + spec)
@@ -166,6 +171,7 @@ def create_watch(
     *,
     interval_seconds: int = 3600,
     expires_hours: int = 24,
+    expires_at: datetime | None = None,
 ) -> dict[str, Any]:
     if not 1 <= len(label.strip()) <= 120:
         raise ValueError("Watch label must contain 1–120 characters.")
@@ -173,8 +179,18 @@ def create_watch(
         raise ValueError("Watch configuration too large.")
     interval_seconds = int(interval_seconds)
     expires_hours = int(expires_hours)
-    safe = _validate(scope, kind, config, interval_seconds, expires_hours)
     now = _now()
+    if expires_at is not None:
+        # Sub-hour / exact-time expiry (voice watches such as "until 6 PM").
+        if expires_at.tzinfo is None:
+            raise ValueError("Watch expiry must be timezone-aware.")
+        expires_at = expires_at.astimezone(timezone.utc)
+        seconds = (expires_at - now).total_seconds()
+        if not 300 <= seconds <= 168 * 3600:
+            raise ValueError("A watch must expire between 5 minutes and 168 hours from now.")
+        expires_hours = 1  # validated above; the exact instant is stored below
+    safe = _validate(scope, kind, config, interval_seconds, expires_hours)
+    final_expiry = expires_at if expires_at is not None else now + timedelta(hours=expires_hours)
     with _LOCK, _database() as conn:
         if conn.execute(
             "SELECT count(*) FROM watches WHERE enabled=1 AND expires_at>?", (_iso(now),)
@@ -186,7 +202,7 @@ def create_watch(
             (id,scope,kind,label,config_json,interval_seconds,created_at,expires_at,next_check_at)
             VALUES(?,?,?,?,?,?,?,?,?)""",
             (uid, scope, kind, label.strip(), json.dumps(safe, sort_keys=True),
-             interval_seconds, _iso(now), _iso(now + timedelta(hours=expires_hours)), _iso(now)),
+             interval_seconds, _iso(now), _iso(final_expiry), _iso(now)),
         )
         conn.commit()
     return get_watch(uid, scope)
@@ -195,8 +211,24 @@ def create_watch(
 def _view(row: sqlite3.Row) -> dict[str, Any]:
     result = {name: row[name] for name in row.keys()}
     result["enabled"] = bool(result["enabled"])
+    result["paused"] = bool(result.get("paused"))
     result["config"] = json.loads(result.pop("config_json"))
+    result["state"] = watch_state(result)
     return result
+
+
+def watch_state(row: dict[str, Any], *, now: datetime | None = None) -> str:
+    """One honest lifecycle label: active | paused | cancelled | expired."""
+    instant = _iso(now or _now())
+    if row.get("cancelled_at"):
+        return "cancelled"
+    if row["expires_at"] <= instant:
+        return "expired"
+    if not row["enabled"]:
+        # Disabled before its expiry by a user stop (legacy rows have no
+        # cancelled_at) rather than by the expiry sweep.
+        return "cancelled"
+    return "paused" if row.get("paused") else "active"
 
 
 def get_watch(watch_id: str, scope: str) -> dict[str, Any]:
@@ -225,7 +257,37 @@ def stop_watch(watch_id: str, scope: str) -> dict[str, Any]:
     get_watch(watch_id, scope)
     with _LOCK, _database() as conn:
         conn.execute(
-            "UPDATE watches SET enabled=0 WHERE id=? AND scope=?", (watch_id, scope)
+            "UPDATE watches SET enabled=0,cancelled_at=COALESCE(cancelled_at,?) "
+            "WHERE id=? AND scope=?", (_iso(_now()), watch_id, scope)
+        )
+        conn.commit()
+    return get_watch(watch_id, scope)
+
+
+def pause_watch(watch_id: str, scope: str) -> dict[str, Any]:
+    """Pause checking/alerting. Expiry is NOT extended and no check runs."""
+    current = get_watch(watch_id, scope)
+    if current["state"] not in {"active", "paused"}:
+        raise ValueError("That watch is " + current["state"] + " and cannot be paused.")
+    with _LOCK, _database() as conn:
+        conn.execute(
+            "UPDATE watches SET paused=1,paused_at=COALESCE(paused_at,?) "
+            "WHERE id=? AND scope=? AND enabled=1", (_iso(_now()), watch_id, scope)
+        )
+        conn.commit()
+    return get_watch(watch_id, scope)
+
+
+def resume_watch(watch_id: str, scope: str) -> dict[str, Any]:
+    """Resume a paused, unexpired watch. The next check is a fresh baseline so
+    anything that changed during the pause is not reported as a new event."""
+    current = get_watch(watch_id, scope)
+    if current["state"] not in {"active", "paused"}:
+        raise ValueError("That watch is " + current["state"] + " and cannot be resumed.")
+    with _LOCK, _database() as conn:
+        conn.execute(
+            "UPDATE watches SET paused=0,paused_at=NULL,last_digest=NULL,next_check_at=? "
+            "WHERE id=? AND scope=? AND enabled=1", (_iso(_now()), watch_id, scope)
         )
         conn.commit()
     return get_watch(watch_id, scope)
@@ -376,6 +438,8 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
         now = _now()
         if not current["enabled"] or current["expires_at"] <= _iso(now):
             return {"status": "stopped_or_expired", "watch_id": watch_id}
+        if current["paused"]:
+            return {"status": "paused", "watch_id": watch_id}
         # Reserve the next run *before* remote IO. A server with multiple workers
         # should still use a single configured scheduler per deployment.
         with _database() as conn:
@@ -417,13 +481,24 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
         # Consent must still hold AFTER public HTTP/model IO. A stop during
         # a slow remote response cannot leave a new receipt or attention cue.
         authorization = conn.execute(
-            "SELECT enabled,expires_at FROM watches WHERE id=? AND scope=?",
+            "SELECT enabled,expires_at,paused FROM watches WHERE id=? AND scope=?",
             (watch_id, scope),
         ).fetchone()
         if (previous is None or authorization is None
                 or not authorization["enabled"]
                 or authorization["expires_at"] <= checked_at):
             return {"status": "stopped_or_expired", "watch_id": watch_id}
+        if authorization["paused"]:
+            # Paused during remote IO: discard the sample entirely.
+            return {"status": "paused", "watch_id": watch_id}
+        prior_row = conn.execute(
+            "SELECT payload_json FROM watch_observations WHERE watch_id=? ORDER BY id DESC LIMIT 1",
+            (watch_id,),
+        ).fetchone()
+        try:
+            previous_payload = json.loads(prior_row["payload_json"]) if prior_row else None
+        except ValueError:
+            previous_payload = None  # truncated historical payload: no diff available
         old_hash = str(previous["last_image_hash"] or "")
         streak = int(previous["camera_positive_streak"] or 0)
         armed = bool(previous["camera_alert_armed"])
@@ -491,7 +566,19 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
               "capture times unknown. Inspect the source; do not treat as an emergency finding.",
             cue="attention", severity="info",
         )
-    if changed and current["kind"] in {"sec_filings", "nws_alerts", "usgs_earthquakes", "air_quality"}:
+    # Voice-created watches own their alerting: they diff against the previous
+    # observation, dedupe, apply cooldown/budget and keep a delivery ledger.
+    # Anything else (API-created watches) keeps the generic notice below.
+    owned_by_voice = False
+    if change_kind in {"baseline", "changed"}:
+        try:
+            from jarvis_mrb.voice_watches import on_watch_change
+            owned_by_voice = bool(on_watch_change(
+                current, evidence, change_kind, previous_payload, checked_at))
+        except Exception:
+            owned_by_voice = False
+    if (changed and not owned_by_voice
+            and current["kind"] in {"sec_filings", "nws_alerts", "usgs_earthquakes", "air_quality"}):
         from jarvis_mrb.event_bus import emit_proactive
         safe_label = current["label"] if scope == "personal" else "matter-scoped external watch"
         emit_proactive(
@@ -507,15 +594,44 @@ def check_watch(watch_id: str, scope: str, *, scheduled: bool = False) -> dict[s
     }
 
 
+_RUNNER: dict[str, Any] = {"last_tick": None, "last_error": ""}
+RUNNER_STALE_SECONDS = 300
+
+
+def runner_status(*, now: datetime | None = None) -> dict[str, Any]:
+    """Whether the background loop in THIS process has recently run.
+
+    Watches only fire while the service's runner is alive; callers use this so
+    Horus never claims monitoring that is not actually happening."""
+    tick = _RUNNER["last_tick"]
+    instant = now or _now()
+    age = (instant - tick).total_seconds() if tick else None
+    return {
+        "active": age is not None and age <= RUNNER_STALE_SECONDS,
+        "last_tick_at": _iso(tick) if tick else None,
+        "age_seconds": None if age is None else int(age),
+        "last_error": _RUNNER["last_error"],
+    }
+
+
 def run_due_watches(*, limit: int = 2) -> list[dict[str, Any]]:
+    _RUNNER["last_tick"] = _now()
     now = _iso(_now())
     with _database() as conn:
         due = conn.execute(
             """SELECT id,scope FROM watches
-               WHERE enabled=1 AND next_check_at<=? AND expires_at>?
+               WHERE enabled=1 AND paused=0 AND next_check_at<=? AND expires_at>?
                ORDER BY next_check_at LIMIT ?""",
             (now, now, max(1, min(int(limit), 5))),
         ).fetchall()
         conn.execute("UPDATE watches SET enabled=0 WHERE enabled=1 AND expires_at<=?", (now,))
         conn.commit()
-    return [check_watch(str(row["id"]), str(row["scope"]), scheduled=True) for row in due]
+    results = [check_watch(str(row["id"]), str(row["scope"]), scheduled=True) for row in due]
+    try:
+        # Settle queued APNs deliveries into the truthful ledger state.
+        from jarvis_mrb.proactive_attention import reconcile_push
+        reconcile_push()
+        _RUNNER["last_error"] = ""
+    except Exception as exc:
+        _RUNNER["last_error"] = type(exc).__name__
+    return results

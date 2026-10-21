@@ -30,6 +30,11 @@ class CompanionEventBus:
         with self._lock:
             self._subscribers.pop(sid, None)
 
+    def subscriber_count(self) -> int:
+        """Connected companion clients right now (publish success is not receipt)."""
+        with self._lock:
+            return len(self._subscribers)
+
     def publish(self, event: dict[str, Any]) -> None:
         payload = dict(event)
         with self._lock:

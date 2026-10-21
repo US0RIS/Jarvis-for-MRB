@@ -128,6 +128,31 @@ class BeliefGapTests(unittest.TestCase):
         self.assertIn("One important thing", text)
         self.assertEqual(belief_gap.upcoming_decision_gaps([soon]), [])  # cooldown after delivery
 
+    def test_upcoming_meeting_briefing_carries_the_gap_and_is_silent_without_it(self):
+        from jarvis_mrb import event_bus, proactive_briefing
+
+        start = NOW + timedelta(minutes=15)
+        with mock.patch.object(event_bus, "emit_proactive") as emit:
+            quiet = proactive_briefing.consider_event(
+                "evt-1", "Chronos purchase agreement signing", start, now=NOW,
+                evidence_provider=lambda *_: None, watch_alert_provider=lambda _n: [])
+            self.assertNotEqual(quiet["decision"], "emitted")   # no change/exposure evidence yet
+            emit.assert_not_called()
+
+            self.versions()
+            self.turn("Chronos purchase agreement cap?", "The Chronos purchase agreement cap is 10%.", 7)
+            result = proactive_briefing.consider_event(
+                "evt-2", "Chronos purchase agreement signing", start, now=NOW,
+                evidence_provider=lambda *_: None, watch_alert_provider=lambda _n: [])
+        self.assertEqual(result["decision"], "emitted")
+        self.assertIn("starts in fifteen minutes", result["text"])
+        self.assertIn("now says 15%", result["text"])
+        self.assertIn("I don't know whether you've seen the update", result["text"])
+        emit.assert_called_once()
+        # Delivered once; the same gap is not repeated for a second event right away.
+        self.assertEqual(belief_gap.upcoming_decision_gaps(
+            [{"title": "Chronos purchase agreement signing", "start": start.isoformat()}], now=NOW), [])
+
     def test_no_document_change_no_warning(self):
         self.turn("Chronos purchase agreement cap?", "The Chronos purchase agreement cap is 10%.", 7)
         self.assertEqual(self.warn("the Chronos purchase agreement cap is 10%"), "")
@@ -154,6 +179,7 @@ class BeliefGapTests(unittest.TestCase):
                 "context": {"channel": "voice"}}).json()
         self.assertTrue(body["message"].startswith("One important thing"))
         self.assertTrue(body["message"].endswith("Drafted."))
+
 
 
 if __name__ == "__main__":

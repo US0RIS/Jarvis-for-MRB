@@ -42,6 +42,12 @@ def _default_watch_alerts(now: datetime) -> list[dict[str, Any]]:
     return attention.recent_emitted(kind="watch_alert", within_seconds=WATCH_ALERT_LOOKBACK_SECONDS, now=now, limit=3)
 
 
+def _default_belief_gaps(summary: str, start: datetime, now: datetime) -> list[Any]:
+    from jarvis_mrb import belief_gap
+    return [gap for gap, _event in belief_gap.upcoming_decision_gaps(
+        [{"title": summary, "start": start.isoformat()}], now=now)]
+
+
 def score_evidence(evidence: dict[str, Any], watch_alerts: list[dict[str, Any]]) -> tuple[float, list[str]]:
     """Relevance 0-100 with a readable breakdown. Only evidence flags count."""
     score = 0.0
@@ -105,6 +111,7 @@ def consider_event(
     now: datetime | None = None,
     evidence_provider: EvidenceProvider | None = None,
     watch_alert_provider: WatchAlertProvider | None = None,
+    belief_gap_provider: Any = None,
 ) -> dict[str, Any]:
     """Decide whether this upcoming event deserves a spoken briefing.
 
@@ -134,6 +141,14 @@ def consider_event(
     except Exception as exc:
         evidence = None
         base["evidence_lines"] = [f"evidence lookup failed: {type(exc).__name__}"]
+    # A belief gap (a figure the user last discussed has since changed in a
+    # document this event is about) is independent, evidence-backed context.
+    try:
+        gaps = list((belief_gap_provider or _default_belief_gaps)(summary, start, instant))[:1]
+    except Exception:
+        gaps = []
+    if gaps and not evidence:
+        evidence = {"facts": []}
     if not evidence:
         item = attention.ProactiveItem(
             **{**base, "evidence_lines": base.get("evidence_lines") or ["no usable evidence was found for this event"]},
@@ -147,6 +162,14 @@ def consider_event(
         alerts = []
     score, breakdown = score_evidence(evidence, alerts)
     text = _compose_text(summary, minutes, evidence, alerts)
+    gap_evidence: dict[str, Any] = {}
+    if gaps:
+        from jarvis_mrb import belief_gap
+        gap = gaps[0]
+        score = min(100.0, score + 60)
+        breakdown.append("the last recorded reference to a related document used a figure that has since changed (+60)")
+        text = _compact(f"{text} {belief_gap.warning_text(gap, instant)}", 640)
+        gap_evidence = dict(gap.evidence)
     severity = "warning" if evidence.get("severity") == "warning" else "info"
     item = attention.ProactiveItem(
         **base, text=text, severity=severity, score=score,
@@ -154,11 +177,15 @@ def consider_event(
         evidence={"facts": evidence.get("facts"), "flags": {k: evidence.get(k) for k in (
             "has_commitments", "has_intentions", "has_recent_evidence", "has_document_change",
             "has_term_conflict")}, "watch_alert_ids": [a.get("id") for a in alerts],
-            "event_summary": summary, "minutes_before_start": round(minutes, 1)})
+            "event_summary": summary, "minutes_before_start": round(minutes, 1),
+            "belief_gap": gap_evidence or None})
     if score < threshold:
         out = attention.record_suppressed(item, "weak_evidence", now=instant)
         return {**out, "score": score}
     out = attention.submit(item, now=instant)
+    if gaps and out.get("decision") == "emitted":
+        from jarvis_mrb import belief_gap
+        belief_gap._record_warning(gaps[0], "upcoming_event_briefing", instant)
     return {**out, "score": score, "text": text}
 
 

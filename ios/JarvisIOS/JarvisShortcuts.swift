@@ -1,9 +1,18 @@
 import AppIntents
 import Foundation
 
+extension Notification.Name {
+    /// Posted when an App Intent leaves a pending action in `FrontendActionMailbox`.
+    static let horusShortcutActionPosted = Notification.Name("horus.shortcutActionPosted")
+}
+
+/// The one-action earpiece entry point (iPhone Action Button, Siri, Shortcuts, Back Tap).
+/// It only asks the foreground app to open the microphone once: it never records on its
+/// own, never toggles an active capture off, and the app closes the microphone again
+/// after the utterance, on Stop/Cancel, or when the app leaves the foreground.
 struct TalkToHorusIntent: AppIntent {
     static var title: LocalizedStringResource = "Talk to Horus"
-    static var description = IntentDescription("Open Horus and begin a local push-to-talk interaction.")
+    static var description = IntentDescription("Open Horus and begin a one-shot push-to-talk interaction through your AirPods or phone microphone.")
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {

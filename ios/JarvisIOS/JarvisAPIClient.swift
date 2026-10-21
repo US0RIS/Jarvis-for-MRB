@@ -629,6 +629,11 @@ struct MeetingStartResponse: Decodable {
     }
 }
 
+/// Lets the caller abort an in-flight `/command/stream` request (stop button, new turn).
+final class JarvisStreamCancelHandle {
+    var cancel: (() -> Void)?
+}
+
 enum JarvisStreamEvent {
     case start(model: String?, routeReason: String?)
     case delta(String)
@@ -1993,14 +1998,28 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(MemoMindCommandSnapshot.self, from: data)
     }
 
-    func command(_ text: String) async throws -> JarvisAPIResponse {
-        let response = try await post(path: "command", body: ["text": text, "session_id": sessionID])
-        return JarvisAPIResponse(ok: response.ok, message: Self.collapseRepeatedSir(response.message))
+    /// `context` is the optional backend `context` object: `channel` plus, only when the app
+    /// holds a fresh authorized fix, `latitude`/`longitude`/`location_accuracy_m`/`location_captured_at`.
+    private func commandBody(_ text: String, context: [String: Any]?) -> [String: Any] {
+        var body: [String: Any] = ["text": text, "session_id": sessionID]
+        if let context, !context.isEmpty { body["context"] = context }
+        return body
     }
 
-    func streamCommandEvents(_ text: String) -> AsyncThrowingStream<JarvisStreamEvent, Error> {
+    func command(_ text: String, context: [String: Any]? = nil) async throws -> JarvisAPIResponse {
+        let (data, response) = try await postData(path: "command", body: commandBody(text, context: context))
+        try validate(response: response, data: data)
+        let decoded = try JSONDecoder().decode(JarvisAPIResponse.self, from: data)
+        return JarvisAPIResponse(ok: decoded.ok, message: Self.collapseRepeatedSir(decoded.message))
+    }
+
+    func streamCommandEvents(
+        _ text: String,
+        context: [String: Any]? = nil,
+        cancelHandle: JarvisStreamCancelHandle? = nil
+    ) -> AsyncThrowingStream<JarvisStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 var resolvedBase = ""
                 do {
                     resolvedBase = try await activeBaseURL()
@@ -2013,10 +2032,9 @@ struct JarvisAPIClient {
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
                     addAuthorization(to: &request)
-                    request.httpBody = try JSONSerialization.data(withJSONObject: [
-                        "text": text,
-                        "session_id": sessionID,
-                    ])
+                    request.httpBody = try JSONSerialization.data(
+                        withJSONObject: commandBody(text, context: context)
+                    )
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
@@ -2058,6 +2076,7 @@ struct JarvisAPIClient {
                             if !sawTextDelta {
                                 try await recoverFromEmptyStream(
                                     originalText: text,
+                                    context: context,
                                     backendOK: packet.ok,
                                     continuation: continuation
                                 )
@@ -2082,28 +2101,36 @@ struct JarvisAPIClient {
                     if !sawTextDelta && !reachedDonePacket {
                         try await recoverFromEmptyStream(
                             originalText: text,
+                            context: context,
                             backendOK: nil,
                             continuation: continuation
                         )
                     }
                     continuation.finish()
                 } catch {
-                    if !resolvedBase.isEmpty {
+                    // A deliberate cancel (stop button / new turn) says nothing about the endpoint.
+                    let cancelledByCaller = Task.isCancelled
+                        || error is CancellationError
+                        || (error as? URLError)?.code == .cancelled
+                    if !resolvedBase.isEmpty && !cancelledByCaller {
                         await JarvisEndpointResolver.shared.invalidate(resolvedBase)
                     }
                     continuation.finish(throwing: error)
                 }
             }
+            cancelHandle?.cancel = { task.cancel() }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 
     private func recoverFromEmptyStream(
         originalText: String,
+        context: [String: Any]?,
         backendOK: Bool?,
         continuation: AsyncThrowingStream<JarvisStreamEvent, Error>.Continuation
     ) async throws {
         if Self.safeToRetryAsReadOnlyRequest(originalText) {
-            let response = try await command(originalText)
+            let response = try await command(originalText, context: context)
             let message = response.message.trimmingCharacters(in: .whitespacesAndNewlines)
             if !message.isEmpty {
                 continuation.yield(.delta(response.message))

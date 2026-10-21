@@ -49,6 +49,12 @@ from jarvis_mrb.server_config import load_server_config
 from jarvis_mrb.inference import configure_inference, get_inference_config, inference_status, ProviderError
 from jarvis_mrb.spatial_memory import status as spatial_status_data
 from jarvis_mrb.streaming_agent import stream_natural_language
+from jarvis_mrb.voice_router import (
+    isolated_session_id,
+    bound_stream as voice_bound_stream,
+    observe as voice_observe,
+    turn_context as voice_turn_context,
+)
 from jarvis_mrb.tools.web import web_status
 from jarvis_mrb.tts_client import ensure_tts_server, synthesize_wav, tts_health
 from jarvis_mrb.vision import status as vision_status_data, submit_frame
@@ -89,6 +95,9 @@ _world_armor_guard_started = False
 class CommandRequest(BaseModel):
     text: str
     session_id: str | None = None
+    # Optional per-turn context the client chose to attach under its own OS
+    # permissions (phone location fix, input channel). Never required.
+    context: dict[str, Any] | None = None
 
 
 class ExternalWatchCreateRequest(BaseModel):
@@ -103,6 +112,16 @@ class ExternalWatchCreateRequest(BaseModel):
 class ExternalWatchLookupRequest(BaseModel):
     id: str = ""
     scope: str = "personal"
+
+
+class ProactivePreferencesRequest(BaseModel):
+    briefings_enabled: bool | None = None
+    snooze_minutes: int | None = None  # 0 clears a snooze
+    quiet_start: str | None = None     # "HH:MM"; "" clears quiet hours
+    quiet_end: str | None = None
+    hourly_budget: int | None = None
+    briefing_threshold: float | None = None
+    briefing_lead_minutes: int | None = None
 
 
 class DiligenceMatterRequest(BaseModel):
@@ -2910,6 +2929,103 @@ def external_watch_history(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/external/watch/pause")
+def external_watch_pause(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import pause_watch
+    try:
+        return pause_watch(request.id, request.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/external/watch/resume")
+def external_watch_resume(
+    request: ExternalWatchLookupRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.external_watches import resume_watch
+    try:
+        return resume_watch(request.id, request.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/proactive/watches")
+def proactive_watches(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Personal watches (voice-created ones carry their compiled rule) and runner health."""
+    _check_auth(authorization)
+    from jarvis_mrb.voice_watches import watches_view
+    return watches_view()
+
+
+@app.get("/proactive/ledger")
+def proactive_ledger(
+    limit: int = 50,
+    kind: str | None = None,
+    decision: str | None = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Every proactive watch alert/briefing, spoken or suppressed, with per-transport delivery state."""
+    _check_auth(authorization)
+    from jarvis_mrb.proactive_attention import budget_status, ledger
+    return {"items": ledger(limit=limit, kind=kind, decision=decision), "budget": budget_status()}
+
+
+@app.get("/proactive/why")
+def proactive_why(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.proactive_attention import explain, recent_emitted
+    items = recent_emitted(within_seconds=24 * 3600, limit=1)
+    if not items:
+        return {"item": None, "explanation": "No proactive alert or briefing in the last 24 hours."}
+    return {"item": items[0], "explanation": explain(items[0])}
+
+
+@app.get("/proactive/preferences")
+def proactive_preferences_get(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb.proactive_attention import budget_status, get_prefs
+    return {"preferences": get_prefs(), "budget": budget_status()}
+
+
+@app.post("/proactive/preferences")
+def proactive_preferences_set(
+    request: ProactivePreferencesRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    from datetime import datetime, timedelta, timezone
+    from jarvis_mrb.proactive_attention import budget_status, set_prefs
+    updates: dict[str, Any] = {}
+    for name in ("briefings_enabled", "quiet_start", "quiet_end", "hourly_budget",
+                 "briefing_threshold", "briefing_lead_minutes"):
+        value = getattr(request, name)
+        if value is not None:
+            updates[name] = value
+    if request.snooze_minutes is not None:
+        if not 0 <= request.snooze_minutes <= 7 * 24 * 60:
+            raise HTTPException(status_code=422, detail="snooze_minutes must be 0-10080.")
+        updates["snooze_until"] = (
+            "" if request.snooze_minutes == 0
+            else datetime.now(timezone.utc) + timedelta(minutes=request.snooze_minutes)
+        )
+    try:
+        return {"preferences": set_prefs(**updates), "budget": budget_status()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
+
+
 @app.post("/external/diligence/list")
 def external_diligence_list(
     authorization: Annotated[str | None, Header()] = None,
@@ -3143,11 +3259,15 @@ def command(request: CommandRequest, authorization: Annotated[str | None, Header
     _check_auth(authorization)
     emit_thinking(True)
     try:
-        session_id = request.session_id or "default"
+        session_id = isolated_session_id(request.session_id)
         effective_text = _command_alias(request.text)
         history = _contextual_history(session_id, effective_text, limit=12)
-        reply = handle_natural_language(effective_text, history=history)
+        with voice_turn_context(session_id, request.context):
+            preface = voice_observe(effective_text)
+            reply = handle_natural_language(effective_text, history=history)
         message = _voice_safe_confirmation(reply.message)
+        if preface and message and message != "__EXIT__":
+            message = preface + " " + message
         append_message(session_id, "user", request.text)
         if message and message != "__EXIT__":
             append_message(session_id, "assistant", message)
@@ -3165,7 +3285,7 @@ def command_stream(
     _check_auth(authorization)
     emit_thinking(True)
     try:
-        session_id = request.session_id or "default"
+        session_id = isolated_session_id(request.session_id)
         effective_text = _command_alias(request.text)
         from jarvis_mrb.model_router import RouteDecision
         provider = get_inference_config()
@@ -3189,12 +3309,19 @@ def command_stream(
                     "route_reason": route.reason,
                 }
             ) + "\n"
-            for piece in stream_natural_language(
+            with voice_turn_context(session_id, request.context):
+                preface = voice_observe(effective_text)
+            if preface:
+                first_output = False
+                emit_thinking(False)
+                pieces.append(preface + " ")
+                yield json.dumps({"type": "delta", "text": preface + " "}, ensure_ascii=False) + "\n"
+            for piece in voice_bound_stream(session_id, request.context, lambda: stream_natural_language(
                 effective_text,
                 history=history,
                 model_override=route.model,
                 announce_analysis=route.announce_analysis,
-            ):
+            )):
                 if not piece:
                     continue
                 delivered_piece = _voice_safe_confirmation(piece)
@@ -3442,6 +3569,35 @@ def knowledge_status(authorization: Annotated[str | None, Header()] = None) -> d
 def spatial_status(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
     _check_auth(authorization)
     return spatial_status_data()
+
+
+@app.get("/memory/objects")
+def object_memory_list(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    """User-reported object locations with full assertion history (private)."""
+    _check_auth(authorization)
+    from jarvis_mrb import object_memory
+    return {"status": object_memory.status(), "objects": object_memory.list_objects(limit=500)}
+
+
+@app.delete("/memory/objects/{object_id}")
+def object_memory_forget(object_id: str, authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
+    _check_auth(authorization)
+    from jarvis_mrb import object_memory
+    if not object_memory.forget(object_id):
+        raise HTTPException(status_code=404, detail="No remembered object with that id.")
+    return {"deleted": object_id}
+
+
+@app.delete("/memory/objects")
+def object_memory_forget_all(
+    confirm: str = "",
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    _check_auth(authorization)
+    if confirm != "forget-all":
+        raise HTTPException(status_code=400, detail="Pass confirm=forget-all to delete every object memory.")
+    from jarvis_mrb import object_memory
+    return {"deleted_objects": object_memory.forget_all()}
 
 
 @app.get("/sandbox/status")

@@ -29,18 +29,52 @@ This is the consolidation of the Callless improvement list. The ordering below i
 
 ## 1. Current state and non-goals
 
-Existing source:
-- `jarvis_mrb/callless_core.py`: single-hub accounts, local SQLite password/token/invite hashes, symmetric contact approval, blocking, and `open | ask | closed`.
-- `jarvis_mrb/callless_api.py`: single-process WebSocket presence, invitation endpoints, explicit accept/end and WebRTC SDP/ICE signaling.
-- `jarvis_mrb/callless_ui.{html,js,css}`: foreground browser with user-click microphone activation.
+Existing source (see [Implementation status (2026-10)](#implementation-status-2026-10) for what changed):
+- `jarvis_mrb/callless_core.py`: single-hub accounts, local SQLite password/token/invite hashes, symmetric contact approval, blocking, directional per-contact grants and global `open | ask | closed`.
+- `jarvis_mrb/callless_session.py`: the pure session state machine.
+- `jarvis_mrb/callless_api.py`: single-process WebSocket presence, invitation endpoints, explicit accept/end, WebRTC SDP/ICE signaling and media-state enforcement.
+- `jarvis_mrb/callless_voice.py`: backend voice-turn handler (never claims a connection).
+- `jarvis_mrb/callless_ui.{html,js,css}`: foreground browser with user-click microphone activation, tones and end indication.
 - `ios/JarvisIOS/JarvisAppModel.swift`: "get me to X" opens the browser; no native incoming Callless call handler.
 - `docs/SHIPPING.md`: limited prototype deployment, separate from a hosted service.
 
-**Not yet implemented:** non-Horus fallback, one-way permissions, calendar policy, hold/voicemail/screener, urgency and bypass, recording consent, model-disclosure gates, native VoIP delivery, group calls, device handoff, voice whisper-in, agent-to-agent calling, physical access control, metered caller billing, or global federation.
+**Not yet implemented:** non-Horus fallback (intentionally deferred, see the 2026-10-21 note in section 5), groups/timed rules, calendar policy, hold/voicemail/screener, urgency and bypass, recording consent, model-disclosure gates, native VoIP delivery, group calls, device handoff, voice whisper-in, agent-to-agent calling, physical access control, metered caller billing, or global federation.
 
 **Preserve:** no idle phone microphone on the ordinary push-to-talk path; no media recording in the hub by default; exact, revocable authorization; clear "who/what/where" for model processing; existing Windows/iOS functionality; a private local-only mode that never requires joining Callless.
 
 **Not goals for the first release:** guaranteed silent pickup under iOS background restrictions; making a Callless account the only way to speak to someone; turning Tailscale into a permanent required consumer dependency; a hidden universal social graph; unreviewed autonomous physical actions; anonymous unlimited interruption.
+
+
+## Implementation status (2026-10)
+
+**Level: implemented with in-process automated tests only. Not device-tested, not released.** Everything below was exercised with FastAPI's `TestClient` and scripted WebSocket clients, never with two physical devices or a real network.
+
+### Implemented (code + automated tests)
+
+- **Directional grants.** Each contact row carries `grant_level` (`open | ask | closed`): what *that user* lets *that peer* do when the peer requests them. A granting B says nothing about B granting A. `PUT /callless/v1/grants {handle, level}` sets my grant; `GET /contacts` returns `my_grant` and deliberately omits the peer's own status and grant.
+- **Precedence.** `effective(caller -> callee) = min(callee's per-contact grant to caller, callee's global status)` with `closed < ask < open`; missing contact link or a block by either side is `closed`. A global `open` never upgrades a per-contact `ask` (immediate access must be knowingly granted per contact); a global `ask` or `closed` caps every grant.
+- **Semantics.** `open`: no ring, but only when the receiver's client is online, advertises the `media-v1` capability and has *armed* microphone consent on its current WebSocket (`{"type":"arm"}`, sent after a user tap that obtained mic permission and released it). If not armed the request falls back to `ask`, never to a silent connect. `ask`: the receiver gets an incoming request and must accept. `closed`, a block by the peer, an offline peer and an unsupported client all return the same message ("Contact is not currently reachable.").
+- **Migration.** `CalllessStore._migrate` guards `ALTER TABLE contacts ADD COLUMN grant_level ... DEFAULT 'ask'` with `PRAGMA table_info`; existing contacts become `ask` in both directions even if both users' global status was already `open`. New invitations create `ask` rows.
+- **Revocation.** Lowering a grant, blocking, or closing global status re-evaluates every live session immediately; offending sessions end for both parties with reason `revoked` (or `unavailable`). Every later signal/media/mute message re-checks authorization, so in-flight offers are not relayed.
+- **State machine** (`callless_session.py`): `requested -> ringing (ask) | authorized (open) -> signaling -> media_connected -> ended(reason) | failed(reason)`. Media loss demotes `media_connected` back to `signaling`. Reasons: `hangup, declined, cancelled, no_answer, timeout, network, media, error, peer_left, revoked, unavailable`. A session that never had live audio and ends for `network/media/timeout/error` is `failed`; otherwise `ended`.
+- **WebSocket signaling is not audio.** `media_connected` is reported only after **both** clients send `{"type":"media","state":"connected"}`. The browser sends it only when `RTCPeerConnection.connectionState === "connected"` *and* `getStats()` shows inbound-rtp audio `packetsReceived` increasing; it reports `lost` after three stalled seconds. Media reports before signaling or while ringing are ignored. These are client attestations; the hub cannot verify them.
+- **Timing.** The hub records monotonic marks for each transition; `connect_ms` (request -> first `media_connected`), `authorized_ms` and `duration_ms` are stored in the metadata-only `session_log` table (30-day retention, no SDP/ICE/audio) and exposed by `GET /callless/v1/sessions/recent` (live sessions first).
+- **Watchdogs.** Unanswered request: `no_answer` after 60 s. Authorized/signaling without media: `failed(timeout)` after 30 s. Hard maximum 4 h.
+- **Browser client.** Synthesized WebAudio connect tone only on the hub's `media_connected`; a distinct lower, descending end tone plus a persistent "Conversation ended" banner on both sides for every end reason (hangup, peer left, revoked, network, WebSocket loss). Mute (disables the local track, relayed as `peer_muted`). One ICE restart within 10 s on disconnect/stall, then end with reason `network`; a dropped WebSocket ends the session honestly on both sides. Contact names such as `?contact=alex` resolve against handle or display name.
+- **Voice.** `callless_voice.py` registers `callless` with `voice_router.register()` when the router exists. With `CALLLESS_LOCAL_HANDLE` set it resolves a spoken handle/display name against that account's contacts and says only whether the contact looks reachable, telling the user that Callless itself must confirm live audio. "End the Callless conversation" really ends the linked account's live session through the hub. With no linked account it says the iPhone app opens Callless and media must be confirmed there. It ignores "get me to the airport" unless a contact matches or "Callless" is said. The iPhone handoff regex also accepts one- or two-word display names.
+
+### Mocked in tests
+
+WebRTC itself (no `RTCPeerConnection`, no audio, no `getStats`): tests play the part of both browsers by sending the exact `signal`, `media`, `mute`, `arm` and `hangup` messages. SDP/ICE payloads are dummy strings. Timing numbers from tests (tens of milliseconds) are in-process TestClient latencies, not network measurements. The JavaScript is syntax-checked with `node --check` and statically checked for a single connect-tone call site; its behavior is **not** executed in any test.
+
+### Unverified
+
+- Two physical devices, on different networks, with real microphones and speakers.
+- Real NAT traversal, TURN relay and corporate-firewall behavior; the default STUN-only configuration is not a relay.
+- iOS Safari behavior: whether `getUserMedia` succeeds without a tap after arming, how long the tab and WebSocket survive in the background or with the screen locked, audio routing to AirPods/Bluetooth, and the real `getStats` packet counters (including Opus DTX while muted).
+- The ICE-restart path and the 10 s window under genuine network loss.
+- **Not implemented:** native CallKit/PushKit/APNs incoming-call delivery, background microphone activation, automatic pickup when the page is not open, guest/non-user access (deferred), groups, calendar rules, screener, and TURN provisioning. Browsers require a user gesture for microphone permission; "armed" Open access still depends on the tab being open and online, and Horus does not claim that an iPhone microphone is ever activated in the background.
+- Multi-worker deployment: `connections`, `armed` and `sessions` are process-global.
 
 ## 2. Personas and core interaction
 
@@ -154,6 +188,8 @@ Two independent fallback options, separately enabled:
 2. **Time-limited guest web invite** tied to a single recipient-accepted session, with short expiry and a one-time token. Guest receives *no* broad contact graph, screening context, calendar status, model access, or bypass.
 
 Neither fallback should require the other person's Horus installation or permanent Callless account. Prevent open-guest-link forwarding/replay and rate-limit enumeration. A free guest path is a product priority; PSTN/SMS may be a later paid integration.
+
+> **Note (2026-10-21): guest access intentionally deferred for v1.** The text above is the historical requirement and is kept unchanged. The current implementation assignment targets two parties who both have Horus/Callless accounts and deliberately builds **no** guest or non-user fallback. Do not read "guest" items in the roadmap or phase table as scheduled for the first release; revisit them only after account-to-account audio is device-tested.
 
 ## 6. Screener: receiver-controlled AI, bounded and transparent
 

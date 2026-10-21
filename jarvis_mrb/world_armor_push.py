@@ -108,6 +108,15 @@ def _connect(path: Path = PUSH_STORE) -> sqlite3.Connection:
           ON push_outbox(state,next_attempt_at,created_at);
         """
     )
+    # Additive migration: generic (non World Armor) notifications such as voice
+    # watch alerts and meeting briefings share this durable outbox.
+    columns = {str(row["name"]) for row in con.execute("PRAGMA table_info(push_outbox)")}
+    for column, spec in (
+        ("thread_id", "TEXT NOT NULL DEFAULT 'world-armor'"),
+        ("category", "TEXT NOT NULL DEFAULT 'world_armor'"),
+    ):
+        if column not in columns:
+            con.execute("ALTER TABLE push_outbox ADD COLUMN " + column + " " + spec)
     con.commit()
     return con
 
@@ -242,6 +251,81 @@ def enqueue_world_event(
     return {"queued": queued, "reason": "queued" if queued else "no_enabled_devices"}
 
 
+def enqueue_notification(
+    event_id: str,
+    title: str,
+    body: str,
+    *,
+    category: str,
+    thread_id: str,
+    priority: str = "warning",
+    db_path: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Queue a non-World-Armor notification in the same durable APNs outbox.
+
+    Returns what was actually queued; ``queued`` > 0 only means rows are
+    waiting for APNs, never that anything was delivered. Use
+    :func:`delivery_state` to learn the transport outcome.
+    """
+    if not enabled():
+        return {"queued": 0, "reason": "push_disabled"}
+    if not configured():
+        return {"queued": 0, "reason": "provider_not_configured"}
+    if priority not in {"warning", "urgent"}:
+        raise ValueError("Notification priority must be warning or urgent.")
+    event_id = str(event_id or "").strip()
+    body = str(body or "").strip()
+    title = str(title or "").strip()
+    if not event_id or not body or not title:
+        raise ValueError("A notification needs an event_id, title and body.")
+    if not re.fullmatch(r"[a-z0-9_-]{1,40}", category) or not re.fullmatch(r"[a-z0-9_-]{1,40}", thread_id):
+        raise ValueError("Invalid notification category or thread id.")
+    instant = _now(now)
+    path = Path(db_path) if db_path is not None else PUSH_STORE
+    queued = 0
+    with closing(_connect(path)) as con, con:
+        _prune(con, instant)
+        devices = con.execute(
+            "SELECT id FROM push_devices WHERE enabled=1 ORDER BY created_at"
+        ).fetchall()
+        for device in devices:
+            cur = con.execute(
+                """INSERT OR IGNORE INTO push_outbox
+                   (id,device_id,event_id,event_seq,priority,title,body,
+                    created_at,next_attempt_at,attempts,state,thread_id,category)
+                   VALUES(?,?,?,NULL,?,?,?,?,?,0,'pending',?,?)""",
+                (uuid4().hex, device["id"], event_id, priority, title[:120],
+                 body[:700], instant.isoformat(), instant.isoformat(),
+                 thread_id, category),
+            )
+            queued += max(0, int(cur.rowcount))
+    if queued:
+        start_worker(db_path=path)
+    return {"queued": queued, "reason": "queued" if queued else "no_enabled_devices"}
+
+
+def delivery_state(event_id: str, *, db_path: Path | None = None) -> dict[str, Any]:
+    """Aggregate outbox outcome for one event across devices.
+
+    ``sent`` rows were accepted by APNs (HTTP 200). ``pending`` are still being
+    retried. ``dead`` exhausted retries, expired or were disabled."""
+    path = Path(db_path) if db_path is not None else PUSH_STORE
+    counts = {"pending": 0, "sent": 0, "dead": 0}
+    last_error = ""
+    if path.exists():
+        with closing(_connect(path)) as con:
+            for row in con.execute(
+                "SELECT state,last_error FROM push_outbox WHERE event_id=?", (event_id,)
+            ):
+                counts[str(row["state"])] = counts.get(str(row["state"]), 0) + 1
+                if row["last_error"]:
+                    last_error = str(row["last_error"])
+    counts["total"] = counts["pending"] + counts["sent"] + counts["dead"]
+    counts["last_error"] = last_error
+    return counts
+
+
 def status(*, db_path: Path | None = None, now: datetime | None = None) -> dict[str, Any]:
     path = Path(db_path) if db_path is not None else PUSH_STORE
     devices = pending = dead = sent = 0
@@ -337,17 +421,22 @@ def _endpoint(token: str) -> str:
     return f"{host}/3/device/{token}"
 
 
-def _send_one(token: str, title: str, body: str) -> tuple[bool, str]:
+def _send_one(token: str, title: str, body: str,
+              thread_id: str = "world-armor",
+              category: str = "world_armor") -> tuple[bool, str]:
     jwt = _provider_jwt()
     bundle = os.environ["JARVIS_APNS_BUNDLE_ID"].strip()
-    payload = {
+    payload: dict[str, Any] = {
         "aps": {
             "alert": {"title": title[:120], "body": body[:700]},
             "sound": "default",
-            "thread-id": "world-armor",
+            "thread-id": thread_id,
         },
-        "world_armor": True,
     }
+    if category == "world_armor":
+        payload["world_armor"] = True
+    else:
+        payload["horus_proactive"] = category
     try:
         with httpx.Client(http2=True, timeout=12.0) as client:
             response = client.post(
@@ -404,7 +493,10 @@ def drain_once(
         ).fetchall()
     sent = failed = 0
     for row in rows:
-        ok, reason = _send_one(row["token"], row["title"], row["body"])
+        ok, reason = _send_one(
+            row["token"], row["title"], row["body"],
+            row["thread_id"], row["category"],
+        )
         completed = _now() if now is None else instant
         with closing(_connect(path)) as con, con:
             if ok:

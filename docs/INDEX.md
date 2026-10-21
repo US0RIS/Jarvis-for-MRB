@@ -8,6 +8,7 @@ Original long documents are retained, not discarded.
 - [Capabilities and verification](CAPABILITIES.md)
 - [Current shipping and deployment](SHIPPING.md)
 - [Callless design](CALLLESS_DESIGN.md)
+- [Earpiece: camera-free AirPods-first capabilities](EARPIECE.md)
 - [Housekeeping and architectural separation](HORUS_HOUSEKEEPING.md)
 - [iOS guide](../ios/README.md)
 

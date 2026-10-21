@@ -72,35 +72,44 @@ class CalllessStoreTests(unittest.TestCase):
         with patch.object(callless_api, "store", self.store):
             callless_api.connections.clear()
             callless_api.sessions.clear()
+            callless_api.client_caps.clear()
+            callless_api.armed.clear()
             callless_api.failures.clear()
             self.store.accept_invitation(self.b["id"], self.store.invitation(self.a["id"]))
             self.store.set_status(self.b["id"], "open")
+            self.store.set_grant(self.b["id"], "alice", "open")     # directional, explicit
             with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
                 header_a = {"Authorization": "Bearer " + self.ta}
                 header_b = {"Authorization": "Bearer " + self.tb}
                 unavailable = client.post("/callless/v1/sessions", json={"target": "bob"}, headers=header_a)
                 self.assertEqual(unavailable.status_code, 409)
                 with client.websocket_connect("/callless/v1/socket") as alice:
-                    alice.send_json({"type": "auth", "token": self.ta})
+                    alice.send_json({"type": "auth", "token": self.ta, "caps": ["media-v1"]})
                     self.assertEqual(alice.receive_json()["type"], "ready")
                     with client.websocket_connect("/callless/v1/socket") as bob:
-                        bob.send_json({"type": "auth", "token": self.tb})
+                        bob.send_json({"type": "auth", "token": self.tb, "caps": ["media-v1"]})
                         self.assertEqual(bob.receive_json()["type"], "ready")
+                        bob.send_json({"type": "arm", "armed": True})
+                        self.assertEqual(bob.receive_json()["armed"], True)
                         result = client.post("/callless/v1/sessions", json={"target": "bob"}, headers=header_a)
                         self.assertEqual(result.status_code, 200, result.text)
                         sid = result.json()["session_id"]
-                        self.assertEqual(result.json()["status"], "connected")
+                        # Authorized to proceed, NOT connected: no audio has been reported yet.
+                        self.assertEqual(result.json()["state"], "authorized")
                         incoming = bob.receive_json()
                         self.assertEqual(incoming["type"], "incoming")
                         self.assertEqual(incoming["session_id"], sid)
                         attacker = client.post("/callless/v1/sessions/" + sid + "/end", headers={"Authorization": "Bearer unknown"})
                         self.assertEqual(attacker.status_code, 401)
                         bob.send_json({"type": "signal", "session_id": sid, "payload": {"type": "ready"}})
+                        self.assertEqual(alice.receive_json()["state"], "signaling")
                         message = alice.receive_json()
                         self.assertEqual(message["type"], "signal")
                         self.assertEqual(message["payload"]["type"], "ready")
                         self.assertEqual(client.post("/callless/v1/sessions/" + sid + "/end", headers=header_a).status_code, 200)
-                        self.assertEqual(bob.receive_json()["type"], "ended")
+                        self.assertEqual(bob.receive_json()["type"], "state")   # signaling
+                        ended = bob.receive_json()
+                        self.assertEqual((ended["type"], ended["reason"]), ("ended", "hangup"))
 
     def test_insecure_remote_account_request_rejected(self):
         from fastapi import FastAPI

@@ -53,10 +53,16 @@ jobs:
         run: python -m unittest discover -s tests -p "test_sensor_opportunities.py" -v
       - name: Verify iPhone microphone/GPS/privacy and enrolled HomeKit actuator wiring
         run: python -m unittest discover -s tests -p "test_sensor_frontend_wiring.py" -v
+      - name: Verify AirPods-first earpiece route, interruption, barge-in and conversation-mode wiring
+        run: python -m unittest discover -s tests -p "test_earpiece_ios_wiring.py" -v
       - name: Verify Counterfactual Guardian evidence, exact grants and non-sending authority
         run: python -m unittest discover -s tests -p "test_counterfactual_guardian.py" -v
       - name: Verify explicit objective anticipation, deadline evidence and live consent
         run: python -m unittest discover -s tests -p "test_guardian_objectives.py" -v
+      - name: Verify earpiece voice router context, focus isolation and stream binding
+        run: python -m unittest discover -s tests -p "test_voice_router.py" -v
+      - name: Verify explicit saved places and honest place resolution
+        run: python -m unittest discover -s tests -p "test_saved_places.py" -v
       - name: Verify Mission Control outcomes, exact grants and real tool-policy inventory
         run: python -m unittest discover -s tests -p "test_mission_control.py" -v
       - name: Verify Reality Mesh Mac protocol, private screen consent and node/coverage fabric

@@ -897,6 +897,15 @@ def _current_goals_reply() -> AgentReply:
 
 def _fast_path(text: str) -> AgentReply | None:
     n = _normalize(text)
+    # Camera-free earpiece capabilities (spoken object memory, situational
+    # questions, watches, briefings) answer from authorized state before any
+    # other route, so "where are my keys" is a user-reported memory, never an
+    # implied visual sighting.
+    from jarvis_mrb.voice_router import route as voice_route
+    voice_reply = voice_route(text)
+    if voice_reply is not None:
+        note_routed(voice_reply[0])
+        return AgentReply(True, voice_reply[1])
     # An enrolled Reality Graph answer is a deterministic read, not a model
     # planner decision. This same path is used by streaming and non-streaming.
     from jarvis_mrb.reality_graph_dialogue import answer as graph_dialogue_answer

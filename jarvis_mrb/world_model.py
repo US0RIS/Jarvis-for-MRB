@@ -390,13 +390,21 @@ def erase_event_keys(event_keys: Sequence[str]) -> dict[str, int]:
                     if str(fk["table"]) == "entities":
                         refs.append((table, str(fk["from"])))
             for entity_id in touched:
+                # A remembered location event also points to SELF_ID. Its
+                # deletion must never remove the user/system seed identities.
+                if entity_id in {SELF_ID, WORLD_ID}:
+                    continue
                 referenced = any(
                     conn.execute(f"SELECT 1 FROM {t} WHERE {c}=? LIMIT 1", (entity_id,)).fetchone()
                     for t, c in refs
                 )
                 if not referenced:
+                    # The memory mirror only creates object/place entities;
+                    # other kinds can predate it and are never ours to prune.
                     result["entities"] += conn.execute(
-                        "DELETE FROM entities WHERE id=?", (entity_id,)).rowcount
+                        "DELETE FROM entities WHERE id=? AND kind IN ('object', 'place')",
+                        (entity_id,),
+                    ).rowcount
     finally:
         conn.close()
     return result

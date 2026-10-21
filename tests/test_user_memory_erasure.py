@@ -70,6 +70,9 @@ class VoiceErasureTests(ErasureBase):
         self.assertEqual(self.mirrored_events(), [])
         self.assertEqual(self.mirrored_beliefs(), [])
         self.assertEqual(self.entity_named("passport"), [])
+        self.assertTrue(self.world(
+            "SELECT id FROM entities WHERE id=?", (world_model.SELF_ID,)
+        ), "forget must never remove the world-model user identity")
 
     def test_shared_entities_and_other_objects_survive(self):
         self.say("I put my passport in the safe")

@@ -172,6 +172,34 @@ final class LocalContextSensorManager: NSObject, ObservableObject, CLLocationMan
         if enabled { start() } else { stop() }
     }
 
+    /// True only when iOS location access is already granted. This never prompts.
+    var isLocationAuthorized: Bool {
+        let status = location.authorizationStatus
+        return status == .authorizedAlways || status == .authorizedWhenInUse
+    }
+
+    /// The most recent cached GPS fix, or nil. It is attached to a command only when
+    /// the user already authorized location and enabled local sensor context; asking
+    /// for it never starts a new location request.
+    func recentAuthorizedFix(maxAge: TimeInterval) -> CLLocation? {
+        guard started,
+              isLocationAuthorized,
+              let coordinate,
+              let at = lastLocationAt,
+              CLLocationCoordinate2DIsValid(coordinate),
+              let accuracy = horizontalAccuracyMeters,
+              accuracy >= 0 else { return nil }
+        let age = Date().timeIntervalSince(at)
+        guard age >= -60, age <= maxAge else { return nil }
+        return CLLocation(
+            coordinate: coordinate,
+            altitude: 0,
+            horizontalAccuracy: accuracy,
+            verticalAccuracy: -1,
+            timestamp: at
+        )
+    }
+
     private func start() {
         guard !started else { return }
         started = true
@@ -275,6 +303,7 @@ final class FrontendIntelligenceController: ObservableObject {
     private weak var meetingCapture: MeetingCaptureController?
     var isMeetingActive: Bool { meetingCapture?.isActive ?? false }
     private var loopTask: Task<Void, Never>?
+    private var shortcutObserverTask: Task<Void, Never>?
     private var started = false
     private var lastSnapshotAt = Date.distantPast
     private var lastPerceptionAt = Date.distantPast
@@ -302,6 +331,20 @@ final class FrontendIntelligenceController: ObservableObject {
             self?.offlineQueue.enqueue(command)
         }
         sensors.setEnabled(appModel.settings.localSensorContextEnabled)
+        appModel.recentLocationProvider = { [weak self] in
+            guard let self, self.appModel.settings.localSensorContextEnabled else { return nil }
+            return self.sensors.recentAuthorizedFix(maxAge: 600)
+        }
+
+        // The Action Button intent posts a notification so the mic opens immediately
+        // instead of waiting for the next 350 ms poll of the mailbox.
+        shortcutObserverTask?.cancel()
+        shortcutObserverTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .horusShortcutActionPosted) {
+                guard !Task.isCancelled, let self else { return }
+                await self.processPendingShortcutAction()
+            }
+        }
 
         loopTask = Task { [weak self] in
             guard let self else { return }
@@ -313,6 +356,9 @@ final class FrontendIntelligenceController: ObservableObject {
         started = false
         loopTask?.cancel()
         loopTask = nil
+        shortcutObserverTask?.cancel()
+        shortcutObserverTask = nil
+        appModel.recentLocationProvider = nil
         sensors.setEnabled(false)
         AmbientSoundCapture.shared.stop()
     }
@@ -734,6 +780,7 @@ enum FrontendActionMailbox {
 
     static func post(_ action: String) {
         UserDefaults.standard.set(action, forKey: key)
+        NotificationCenter.default.post(name: .horusShortcutActionPosted, object: nil)
     }
 
     static func take() -> String? {

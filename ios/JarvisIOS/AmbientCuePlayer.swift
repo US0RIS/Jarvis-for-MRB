@@ -1,6 +1,16 @@
 import AVFoundation
 import Foundation
 
+/// Earpiece cue vocabulary (kept deliberately small so cues stay learnable by ear):
+///
+/// - `listening_start`  two rising notes: the microphone is now open.
+/// - `listening_end`    two falling notes: the microphone has been released.
+/// - `response_complete` descending resolution: the spoken answer is finished.
+/// - `warning`          two low falling notes: speech was cut (for example headphones
+///                      disconnected) or the request needs attention.
+/// - `error`            a low pair: the action failed or voice input is unavailable.
+///
+/// `thinking` and the task/urgent cues come from the backend presence channel.
 @MainActor
 final class AmbientCuePlayer {
     private let audioRouteManager: AudioRouteManager
@@ -34,16 +44,29 @@ final class AmbientCuePlayer {
         }
     }
 
-    func play(_ cue: String, preferBluetooth: Bool) {
-        do {
-            try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
-        } catch {
-            // The currently active route can still play a cue.
+    /// - Parameter prepareRoute: pass false when the voice session is already configured
+    ///   (for example right after the microphone opened or just before it is released) so a
+    ///   cue never reconfigures the route underneath a running capture.
+    func play(_ cue: String, preferBluetooth: Bool, prepareRoute: Bool = true) {
+        // Never play a cue on the loudspeaker after the user's headphones disconnected.
+        guard !audioRouteManager.privateOutputLost else { return }
+        if prepareRoute {
+            do {
+                try audioRouteManager.prepareForVoice(preferBluetooth: preferBluetooth)
+            } catch {
+                // The currently active route can still play a cue.
+            }
         }
 
         let notes: [(Double, Double)]
         let baseVolume: Float
         switch cue {
+        case "listening_start":
+            notes = [(620, 0.045), (880, 0.06)]
+            baseVolume = 0.30
+        case "listening_end":
+            notes = [(880, 0.04), (620, 0.06)]
+            baseVolume = 0.26
         case "thinking":
             notes = [(470, 0.055), (560, 0.065)]
             baseVolume = 0.18

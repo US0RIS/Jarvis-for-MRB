@@ -16,20 +16,135 @@ enum BargeInBuffer {
     }
 }
 
+/// Input path of a turn. Sent to the backend as `context.channel`.
+enum VoiceChannel: String {
+    case voice
+    case conversation
+    case text
+}
+
+/// Single user-visible state of the earpiece interaction.
+enum EarpieceState: String {
+    case idle
+    case listening
+    case thinking
+    case speaking
+
+    var label: String {
+        switch self {
+        case .idle: return "Idle - microphone off"
+        case .listening: return "Listening"
+        case .thinking: return "Thinking"
+        case .speaking: return "Speaking"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .idle: return "ear"
+        case .listening: return "mic.fill"
+        case .thinking: return "ellipsis.circle"
+        case .speaking: return "speaker.wave.2.fill"
+        }
+    }
+}
+
+/// Why the most recent spoken output ended early.
+enum SpokenInterruptionKind: Equatable {
+    case none
+    /// "wait" / "hold on": speech stopped, nothing was asked.
+    case pause
+    /// "stop" / "cancel" / "never mind" / "be quiet": speech stopped and the turn is dropped.
+    case cancel
+    /// The user spoke a real follow-up over the answer.
+    case utterance
+    /// Headphones/earbuds disconnected; speech was stopped so it never reaches the loudspeaker.
+    case routeLost
+    /// A phone call, Siri or another app took the audio session, or media services reset.
+    case systemInterrupted
+}
+
+/// Pure text helpers shared by barge-in, conversation mode and the stop commands.
+enum EarpieceVoiceCommands {
+    private static let cancelPhrases: Set<String> = [
+        "stop", "cancel", "never mind", "nevermind", "be quiet", "quiet",
+        "stop talking", "stop it", "enough", "thats enough", "that is enough", "shut up",
+    ]
+    private static let dismissalPhrases: Set<String> = [
+        "never mind", "nevermind", "be quiet", "quiet", "stop talking",
+        "enough", "thats enough", "that is enough",
+    ]
+    private static let pausePhrases: Set<String> = [
+        "wait", "hold on", "hang on", "one moment", "one second", "pause",
+    ]
+    private static let fillerWords: Set<String> = ["please", "now", "horus", "jarvis", "ok", "okay", "hey"]
+
+    static func normalizedWords(_ text: String) -> [String] {
+        text.lowercased()
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+
+    private static func corePhrase(_ text: String) -> String {
+        normalizedWords(text).filter { !fillerWords.contains($0) }.joined(separator: " ")
+    }
+
+    /// True only when the whole utterance is a stop-type command.
+    static func isCancelCommand(_ text: String) -> Bool {
+        cancelPhrases.contains(corePhrase(text))
+    }
+
+    /// Stop-type commands that carry no request at all ("never mind", "be quiet").
+    static func isDismissal(_ text: String) -> Bool {
+        dismissalPhrases.contains(corePhrase(text))
+    }
+
+    static func isPauseCommand(_ text: String) -> Bool {
+        let words = normalizedWords(text)
+        guard !words.isEmpty else { return false }
+        let core = corePhrase(text)
+        if core.isEmpty { return words.contains("horus") || words.contains("jarvis") }
+        return pausePhrases.contains(core)
+    }
+
+    /// True when `heard` is (nearly) the text Horus itself is speaking.
+    static func isLikelyEcho(heard: String, spoken: String) -> Bool {
+        let heardWords = normalizedWords(heard)
+        let spokenWords = normalizedWords(spoken)
+        guard !heardWords.isEmpty, !spokenWords.isEmpty else { return false }
+        let heardString = heardWords.joined(separator: " ")
+        let spokenString = spokenWords.joined(separator: " ")
+        // Whole-word containment, so "so" is not an echo of "also".
+        if (" " + spokenString + " ").contains(" " + heardString + " ") { return true }
+        let spokenSet = Set(spokenWords)
+        let overlap = heardWords.filter { spokenSet.contains($0) }.count
+        return heardWords.count >= 2 && Double(overlap) / Double(heardWords.count) >= 0.75
+    }
+}
+
 @MainActor
 final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     @Published private(set) var isSpeaking = false
     @Published private(set) var lastOutputInterrupted = false
     @Published private(set) var isWhispering = false
+    /// Why the last output ended early (see `SpokenInterruptionKind`). Reset on every new utterance.
+    @Published private(set) var lastInterruptionKind: SpokenInterruptionKind = .none
 
-    private let synthesizer = AVSpeechSynthesizer()
+    /// Minimum evidence before free-form speech over Horus counts as a barge-in.
+    /// Stop/cancel/wait commands are exempt because they are single words by nature.
+    static let minimumBargeInWords = 3
+    static let minimumTwoWordBargeInDuration: TimeInterval = 0.35
+
+    private var synthesizer = AVSpeechSynthesizer()
     private let audioRouteManager: AudioRouteManager
     private var audioPlayer: AVAudioPlayer?
     private var completion: CheckedContinuation<Void, Never>?
     private var currentUtterance: AVSpeechUtterance?
 
     private let bargeInRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let bargeInAudioEngine = AVAudioEngine()
+    private var bargeInAudioEngine = AVAudioEngine()
     private var bargeInRequest: SFSpeechAudioBufferRecognitionRequest?
     private var bargeInTask: SFSpeechRecognitionTask?
     private var bargeInTapInstalled = false
@@ -38,6 +153,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     private var latestBargeInTranscript = ""
     private var lastBargeInTranscriptChange = Date.distantPast
     private var didBargeIn = false
+    private var bargeInCandidateSince: Date?
 
     init(audioRouteManager: AudioRouteManager) {
         self.audioRouteManager = audioRouteManager
@@ -59,6 +175,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     func speak(_ text: String, preferBluetooth: Bool, whisper: Bool? = nil) async {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
+        guard !refuseSpeechAfterPrivateRouteLoss() else { return }
         let quiet = resolveWhisper(whisper)
 
         AmbientSoundCapture.shared.stop()
@@ -89,6 +206,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     ) async throws {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
+        guard !refuseSpeechAfterPrivateRouteLoss() else { return }
         let quiet = resolveWhisper(whisper)
 
         AmbientSoundCapture.shared.stop()
@@ -115,11 +233,63 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         isSpeaking = true
         isWhispering = whisper
         lastOutputInterrupted = false
+        lastInterruptionKind = .none
         spokenTextForEchoFilter = text
         latestBargeInTranscript = ""
         lastBargeInTranscriptChange = Date.distantPast
+        bargeInCandidateSince = nil
         didBargeIn = false
         BargeInBuffer.store("")
+    }
+
+    /// A private (headphone/Bluetooth) output was lost. Never let queued speech
+    /// continue on the loudspeaker: refuse it and tell the caller the output was cut.
+    private func refuseSpeechAfterPrivateRouteLoss() -> Bool {
+        guard audioRouteManager.privateOutputLost else { return false }
+        lastOutputInterrupted = true
+        lastInterruptionKind = .routeLost
+        BargeInBuffer.store("")
+        return true
+    }
+
+    /// Immediately silence speech because headphones disconnected.
+    func stopSpeakingForPrivateRouteLoss() {
+        stopSpeakingBecause(.routeLost)
+    }
+
+    /// Immediately silence speech because a call/Siri/another app took audio, or media services reset.
+    func stopSpeakingForSystemInterruption() {
+        stopSpeakingBecause(.systemInterrupted)
+    }
+
+    private func stopSpeakingBecause(_ kind: SpokenInterruptionKind) {
+        guard currentUtterance != nil || audioPlayer != nil || isSpeaking else { return }
+        bargeInFinalizeTask?.cancel()
+        bargeInFinalizeTask = nil
+        didBargeIn = false
+        lastOutputInterrupted = true
+        lastInterruptionKind = kind
+        BargeInBuffer.store("")
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        if audioPlayer?.isPlaying == true { audioPlayer?.stop() }
+        finalizeCurrentOutput()
+    }
+
+    /// Clear the previous output's interruption verdict before a new turn begins.
+    func resetInterruptionState() {
+        guard !isSpeaking else { return }
+        lastOutputInterrupted = false
+        lastInterruptionKind = .none
+    }
+
+    /// AVAudioSession media services were reset: every AV object is invalid and must be rebuilt.
+    func resetAfterMediaServicesReset() {
+        stopSpeakingBecause(.systemInterrupted)
+        stopBargeInListening()
+        synthesizer = AVSpeechSynthesizer()
+        synthesizer.delegate = self
+        bargeInAudioEngine = AVAudioEngine()
+        bargeInTapInstalled = false
     }
 
     private func preferredJarvisVoice() -> AVSpeechSynthesisVoice? {
@@ -141,12 +311,17 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         bargeInFinalizeTask = nil
         didBargeIn = false
         lastOutputInterrupted = false
+        lastInterruptionKind = .none
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
         if audioPlayer?.isPlaying == true { audioPlayer?.stop() }
         finalizeCurrentOutput()
     }
 
     private func startBargeInListening() {
+        // Barge-in only listens while output is on a private route or the session
+        // asks iOS for echo-cancelled voice processing. Otherwise Horus would hear
+        // and answer itself.
+        guard audioRouteManager.bargeInPolicy != .disabled else { return }
         guard SFSpeechRecognizer.authorizationStatus() == .authorized,
               let bargeInRecognizer,
               bargeInRecognizer.isAvailable else { return }
@@ -155,7 +330,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
-        request.contextualStrings = ["Jarvis", "stop", "wait", "hold on", "actually", "Dubeck"]
+        request.contextualStrings = ["Horus", "Jarvis", "stop", "cancel", "never mind", "be quiet", "wait", "hold on", "actually", "Dubeck"]
         if bargeInRecognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
         bargeInRequest = request
 
@@ -177,7 +352,8 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
 
         bargeInTask = bargeInRecognizer.recognitionTask(with: request) { [weak self] result, _ in
             Task { @MainActor in
-                guard let self, self.isSpeaking, let result else { return }
+                // Keep reading partials while the interruption settles (isSpeaking is already false then).
+                guard let self, self.isSpeaking || self.didBargeIn, let result else { return }
                 let heard = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !heard.isEmpty else { return }
 
@@ -192,6 +368,7 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
                 guard self.shouldBargeIn(with: heard) else { return }
                 self.didBargeIn = true
                 self.lastOutputInterrupted = true
+                self.lastInterruptionKind = EarpieceVoiceCommands.isCancelCommand(heard) ? .cancel : .pause
                 BargeInBuffer.store(self.commandPayload(fromInterruption: heard))
                 if self.synthesizer.isSpeaking { self.synthesizer.stopSpeaking(at: .immediate) }
                 if self.audioPlayer?.isPlaying == true {
@@ -203,43 +380,51 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
     }
 
     private func shouldBargeIn(with heard: String) -> Bool {
-        let normalizedHeard = Self.normalizedWords(heard)
-        guard !normalizedHeard.isEmpty else { return false }
-        if isLikelyEcho(heard) { return false }
-        let joined = normalizedHeard.joined(separator: " ")
-        let explicit = ["jarvis", "stop", "wait", "hold on", "actually", "no", "but", "what", "why", "how", "when", "where", "who", "which", "can you", "could you", "don't", "do not"]
-        if explicit.contains(where: { cue in joined == cue || joined.hasPrefix(cue + " ") }) { return true }
-        return normalizedHeard.count >= 2
+        let words = EarpieceVoiceCommands.normalizedWords(heard)
+        guard !words.isEmpty else { return false }
+        let policy = audioRouteManager.bargeInPolicy
+        if policy == .disabled { return false }
+
+        let isStopCommand = EarpieceVoiceCommands.isCancelCommand(heard)
+        let isCommand = isStopCommand || EarpieceVoiceCommands.isPauseCommand(heard)
+
+        // Echo guard. On a private route (earbuds) a deliberate "stop" is trusted even
+        // when the answer itself contains the word; on the loudspeaker it is not.
+        if isLikelyEcho(heard) && !(isCommand && audioRouteManager.isPrivateOutput) {
+            bargeInCandidateSince = nil
+            return false
+        }
+        if isCommand { return true }
+
+        // Free-form interruption requires a private route and enough evidence.
+        guard policy == .fullConversation else { return false }
+        if words.count >= Self.minimumBargeInWords { return true }
+        if words.count >= 2 {
+            let since = bargeInCandidateSince ?? Date()
+            bargeInCandidateSince = since
+            return Date().timeIntervalSince(since) >= Self.minimumTwoWordBargeInDuration
+        }
+        return false
     }
 
     private func isLikelyEcho(_ heard: String) -> Bool {
-        let heardWords = Self.normalizedWords(heard)
-        let spokenWords = Self.normalizedWords(spokenTextForEchoFilter)
-        guard !heardWords.isEmpty, !spokenWords.isEmpty else { return false }
-        let heardString = heardWords.joined(separator: " ")
-        let spokenString = spokenWords.joined(separator: " ")
-        if spokenString.contains(heardString) { return true }
-        let spokenSet = Set(spokenWords)
-        let overlap = heardWords.filter { spokenSet.contains($0) }.count
-        return heardWords.count >= 2 && Double(overlap) / Double(heardWords.count) >= 0.75
+        EarpieceVoiceCommands.isLikelyEcho(heard: heard, spoken: spokenTextForEchoFilter)
     }
 
     private func commandPayload(fromInterruption heard: String) -> String {
         var text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let range = text.range(of: "jarvis", options: [.caseInsensitive, .diacriticInsensitive]) {
-            return text[range.upperBound...].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        for wakeWord in ["horus", "jarvis"] {
+            if let range = text.range(of: wakeWord, options: [.caseInsensitive, .diacriticInsensitive]) {
+                return text[range.upperBound...].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            }
         }
         let lower = text.lowercased()
-        if ["stop", "wait", "hold on", "hang on"].contains(lower.trimmingCharacters(in: .punctuationCharacters)) { return "" }
+        if EarpieceVoiceCommands.isCancelCommand(text) || EarpieceVoiceCommands.isPauseCommand(text) { return "" }
         for prefix in ["wait ", "hold on ", "hang on "] where lower.hasPrefix(prefix) {
             text = String(text.dropFirst(prefix.count)).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
             break
         }
         return text
-    }
-
-    private static func normalizedWords(_ text: String) -> [String] {
-        text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     }
 
     private func beginBargeInFinalize() {
@@ -256,10 +441,22 @@ final class SpeechSynthesizer: NSObject, ObservableObject, AVSpeechSynthesizerDe
         let started = Date()
         while !Task.isCancelled {
             let now = Date()
-            if now.timeIntervalSince(lastBargeInTranscriptChange) >= 0.9 || now.timeIntervalSince(started) >= 4.0 { break }
+            // A bare "stop" settles quickly; a longer interruption waits for the user to finish.
+            let quiet: TimeInterval = EarpieceVoiceCommands.isCancelCommand(latestBargeInTranscript) ? 0.45 : 0.9
+            if now.timeIntervalSince(lastBargeInTranscriptChange) >= quiet || now.timeIntervalSince(started) >= 4.0 { break }
             try? await Task.sleep(for: .milliseconds(80))
         }
-        if !latestBargeInTranscript.isEmpty { BargeInBuffer.store(commandPayload(fromInterruption: latestBargeInTranscript)) }
+        // stopSpeaking()/route loss already finalized this output; do not overwrite its verdict.
+        guard !Task.isCancelled else { return }
+        if !latestBargeInTranscript.isEmpty {
+            let payload = commandPayload(fromInterruption: latestBargeInTranscript)
+            BargeInBuffer.store(payload)
+            if EarpieceVoiceCommands.isCancelCommand(latestBargeInTranscript) {
+                lastInterruptionKind = .cancel
+            } else {
+                lastInterruptionKind = payload.isEmpty ? .pause : .utterance
+            }
+        }
         bargeInFinalizeTask = nil
         finalizeCurrentOutput()
     }

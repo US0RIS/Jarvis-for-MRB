@@ -21,6 +21,16 @@ private func jarvisAverageDBFS(_ buffer: AVAudioPCMBuffer) -> Double {
     return max(-80.0, min(0.0, 20.0 * log10(rms)))
 }
 
+/// How much barge-in the current output route can safely support.
+enum BargeInPolicy: Equatable {
+    /// Private route (headphones/Bluetooth): free-form interruption and stop commands.
+    case fullConversation
+    /// Loudspeaker with echo-cancelled voice-chat mode requested: only stop/wait commands.
+    case commandsOnly
+    /// No private route and no voice-processing session: do not listen while speaking.
+    case disabled
+}
+
 @MainActor
 final class AudioRouteManager: ObservableObject {
     @Published private(set) var currentInputName = "No input"
@@ -28,9 +38,42 @@ final class AudioRouteManager: ObservableObject {
     @Published private(set) var isUsingBluetoothHFP = false
     @Published private(set) var isUsingBuiltInMic = false
     @Published private(set) var hasBluetoothHFP = false
+    /// True while the output is headphones or a Bluetooth device (nobody else can hear it).
+    @Published private(set) var isPrivateOutput = false
+    /// Set when a private output disappeared (`.oldDeviceUnavailable`). While set, Horus
+    /// refuses to speak so private speech never jumps to the loudspeaker.
+    @Published private(set) var privateOutputLost = false
+
+    /// Called immediately when headphones/Bluetooth output is lost.
+    var onPrivateOutputLost: (() -> Void)?
+    /// Called when a private output returns after a loss.
+    var onPrivateOutputRestored: (() -> Void)?
 
     private var routeChangeTask: Task<Void, Never>?
     private var inputsChangeTask: Task<Void, Never>?
+
+    /// Barge-in is only allowed on a private route, or (stop commands only) when the
+    /// session is in echo-cancelling voice-chat mode. This is a request to iOS, not
+    /// proof that the echo canceller removed Horus's own voice.
+    var bargeInPolicy: BargeInPolicy {
+        if isPrivateOutput { return .fullConversation }
+        if AVAudioSession.sharedInstance().mode == .voiceChat { return .commandsOnly }
+        return .disabled
+    }
+
+    /// Explicit user choice after a headphone disconnect: allow speech on the iPhone speaker.
+    func allowSpeakerOutputAfterLoss() {
+        privateOutputLost = false
+    }
+
+    private static func isPrivatePort(_ type: AVAudioSession.Port) -> Bool {
+        switch type {
+        case .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
+            return true
+        default:
+            return false
+        }
+    }
 
     init() {
         refresh()
@@ -52,7 +95,10 @@ final class AudioRouteManager: ObservableObject {
         try session.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.allowBluetoothHFP, .defaultToSpeaker]
+            // HFP carries the headset microphone. A2DP must also be allowed so that, when the
+            // user chose the iPhone microphone, replies still go to the AirPods instead of
+            // falling back to the loudspeaker.
+            options: [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
         )
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
@@ -99,11 +145,19 @@ final class AudioRouteManager: ObservableObject {
 
     /// Release a finished one-shot input session instead of holding a
     /// playAndRecord route open while Horus is idle.
-    func releaseOneShotVoiceSession() {
-        try? AVAudioSession.sharedInstance().setActive(
-            false, options: .notifyOthersOnDeactivation
-        )
+    @discardableResult
+    func releaseOneShotVoiceSession() -> Bool {
+        var released = true
+        do {
+            try AVAudioSession.sharedInstance().setActive(
+                false, options: .notifyOthersOnDeactivation
+            )
+        } catch {
+            // iOS refuses while audio I/O is still running; the caller may retry later.
+            released = false
+        }
         refresh()
+        return released
     }
 
     func refresh() {
@@ -116,6 +170,31 @@ final class AudioRouteManager: ObservableObject {
         isUsingBuiltInMic = input?.portType == .builtInMic
         isUsingBluetoothHFP = input?.portType == .bluetoothHFP || output?.portType == .bluetoothHFP
         hasBluetoothHFP = (session.availableInputs ?? []).contains { $0.portType == .bluetoothHFP }
+        isPrivateOutput = session.currentRoute.outputs.contains { Self.isPrivatePort($0.portType) }
+    }
+
+    private func handleRouteChange(_ note: Notification) {
+        let wasPrivate = isPrivateOutput
+        refresh()
+
+        var reason: AVAudioSession.RouteChangeReason?
+        if let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt {
+            reason = AVAudioSession.RouteChangeReason(rawValue: raw)
+        }
+        var previousWasPrivate = wasPrivate
+        if let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription {
+            previousWasPrivate = previous.outputs.contains { Self.isPrivatePort($0.portType) }
+        }
+
+        if reason == .oldDeviceUnavailable, previousWasPrivate, !isPrivateOutput {
+            // Headphones/earbuds were disconnected. Latch the loss before anything else
+            // can start speaking, then let the app stop the current utterance.
+            privateOutputLost = true
+            onPrivateOutputLost?()
+        } else if isPrivateOutput, privateOutputLost {
+            privateOutputLost = false
+            onPrivateOutputRestored?()
+        }
     }
 
     private func preferredBluetoothInput(in inputs: [AVAudioSessionPortDescription]) -> AVAudioSessionPortDescription? {
@@ -133,9 +212,9 @@ final class AudioRouteManager: ObservableObject {
     private func observeRouteChanges() {
         routeChangeTask?.cancel()
         routeChangeTask = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: AVAudioSession.routeChangeNotification) {
+            for await note in NotificationCenter.default.notifications(named: AVAudioSession.routeChangeNotification) {
                 guard !Task.isCancelled, let self else { return }
-                self.refresh()
+                self.handleRouteChange(note)
             }
         }
 
@@ -162,8 +241,14 @@ final class SpeechRecognizer: ObservableObject {
     @Published private(set) var lastResultWasFinal = false
     @Published private(set) var lastRecognitionUpdate: Date?
 
+    /// Called after an interruption (call, Siri, other app) or media-services reset has
+    /// already stopped capture. The Bool is true for a media-services reset.
+    var onAudioSessionInterrupted: ((String, Bool) -> Void)?
+    /// Called when iOS reports the interruption ended. Capture is never resumed automatically.
+    var onAudioSessionInterruptionEnded: ((Bool) -> Void)?
+
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let audioEngine = AVAudioEngine()
+    private var audioEngine = AVAudioEngine()
     private let audioRouteManager: AudioRouteManager
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -184,17 +269,35 @@ final class SpeechRecognizer: ObservableObject {
         observeAudioLifecycle()
     }
 
+    /// Domain/codes of the permission errors thrown by `requestPermissions()`.
+    /// Code 1 = speech recognition denied/restricted, code 2 = microphone denied.
+    /// Callers treat both as "fall back to typed input", never as a crash.
+    static let permissionErrorDomain = "JarvisSpeech"
+    static func isPermissionError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == permissionErrorDomain && (ns.code == 1 || ns.code == 2)
+    }
+
     func requestPermissions() async throws {
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
         guard speechStatus == .authorized else {
-            throw NSError(domain: "JarvisSpeech", code: 1, userInfo: [NSLocalizedDescriptionKey: "Speech recognition permission is required."])
+            let message: String
+            switch speechStatus {
+            case .restricted:
+                message = "Speech recognition is restricted on this iPhone (Screen Time or a device policy)."
+            case .denied:
+                message = "Speech recognition is turned off for Horus in iOS Settings."
+            default:
+                message = "Speech recognition permission is required."
+            }
+            throw NSError(domain: Self.permissionErrorDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
 
         let micGranted = await AVAudioApplication.requestRecordPermission()
         guard micGranted else {
-            throw NSError(domain: "JarvisSpeech", code: 2, userInfo: [NSLocalizedDescriptionKey: "Microphone permission is required."])
+            throw NSError(domain: Self.permissionErrorDomain, code: 2, userInfo: [NSLocalizedDescriptionKey: "Microphone access is turned off for Horus in iOS Settings."])
         }
     }
 
@@ -367,6 +470,13 @@ final class SpeechRecognizer: ObservableObject {
                 if type == .began {
                     self.lastError = "Audio interrupted"
                     self.stopAudioOnly(cancelRecognition: true)
+                    self.onAudioSessionInterrupted?("Audio interrupted by a call, Siri or another app.", false)
+                } else if type == .ended {
+                    var shouldResume = false
+                    if let rawOptions = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt {
+                        shouldResume = AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume)
+                    }
+                    self.onAudioSessionInterruptionEnded?(shouldResume)
                 }
             }
         }
@@ -377,6 +487,10 @@ final class SpeechRecognizer: ObservableObject {
                 guard !Task.isCancelled, let self else { return }
                 self.lastError = "Audio system restarted"
                 self.stopAudioOnly(cancelRecognition: true)
+                // Every AVFoundation object is invalid after a reset: rebuild the engine.
+                self.audioEngine = AVAudioEngine()
+                self.tapInstalled = false
+                self.onAudioSessionInterrupted?("The iOS audio system restarted.", true)
             }
         }
     }

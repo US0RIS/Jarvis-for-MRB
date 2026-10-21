@@ -1,3 +1,4 @@
+import Combine
 import CoreLocation
 import Foundation
 import MapKit
@@ -16,6 +17,22 @@ final class JarvisAppModel: ObservableObject {
     @Published private(set) var lastHeardCommand = ""
     @Published private(set) var conversationLog: [FrontendConversationTurn] = FrontendConversationStore.load()
     @Published private(set) var lastLatency = JarvisLatencySnapshot()
+    /// listening / thinking / speaking / idle, derived from the real capture, request and playback state.
+    @Published private(set) var earpieceState: EarpieceState = .idle
+    /// Set when speech recognition or microphone access is denied/restricted: typing still works.
+    @Published private(set) var textFallbackReason: String?
+    /// One-line, user-visible reason for the last interruption/stop (call, route loss, cancel).
+    @Published private(set) var earpieceNotice: String?
+    /// True only while the optional foreground Conversation mode has the microphone open for a follow-up.
+    @Published private(set) var conversationFollowUpActive = false
+    @Published private(set) var conversationFollowUpSecondsRemaining: Int?
+
+    /// Conversation mode never listens longer than this without hearing speech.
+    static let conversationFollowUpWindow: TimeInterval = 8
+    /// Hard cap on consecutive automatic follow-up windows after one user-initiated turn.
+    static let conversationModeMaxTurns = 12
+    /// A cached fix older than this is never sent (the backend rejects fixes older than 15 minutes).
+    static let maximumLocationFixAge: TimeInterval = 600
 
     let settings: SettingsStore
     let audioRouteManager: AudioRouteManager
@@ -62,6 +79,18 @@ final class JarvisAppModel: ObservableObject {
     private var currentCommandStartedAt: Date?
     private var currentFirstAudioAt: Date?
 
+    /// Supplies the newest cached GPS fix from an existing location manager (never starts one).
+    var recentLocationProvider: (() -> CLLocation?)?
+    /// Monotonic turn generation: every new turn, cancel, or Action Button press bumps it, and
+    /// any response that finishes under an older generation is dropped.
+    private var currentTurnID = 0
+    private let inFlightStreamHandle = JarvisStreamCancelHandle()
+    private var followUpTask: Task<Void, Never>?
+    private var conversationTurnCount = 0
+    private var sessionReleaseToken = 0
+    private var earpieceCancellables = Set<AnyCancellable>()
+    private lazy var earpieceCuePlayer = AmbientCuePlayer(audioRouteManager: audioRouteManager)
+
     private enum VoicePhase {
         case waitingForWake
         case collectingAfterWake
@@ -84,6 +113,34 @@ final class JarvisAppModel: ObservableObject {
                 await self?.sendEvent("home_arrival")
             }
         }
+
+        // Earpiece lifecycle: headphone disconnects, call/Siri interruptions and
+        // media-services resets all stop speech and capture immediately.
+        audioRouteManager.onPrivateOutputLost = { [weak self] in
+            self?.handlePrivateOutputLost()
+        }
+        audioRouteManager.onPrivateOutputRestored = { [weak self] in
+            self?.handlePrivateOutputRestored()
+        }
+        speechRecognizer.onAudioSessionInterrupted = { [weak self] message, mediaServicesReset in
+            self?.handleAudioSessionInterruption(message, mediaServicesReset: mediaServicesReset)
+        }
+        speechRecognizer.onAudioSessionInterruptionEnded = { [weak self] shouldResume in
+            self?.handleAudioSessionInterruptionEnded(shouldResume: shouldResume)
+        }
+        Publishers.CombineLatest3($isListening, $isSending, speechSynthesizer.$isSpeaking)
+            .map { values -> EarpieceState in
+                let (listening, sending, speaking) = values
+                if listening { return .listening }
+                if speaking { return .speaking }
+                if sending { return .thinking }
+                return .idle
+            }
+            .removeDuplicates()
+            .sink { [weak self] state in
+                self?.applyEarpieceState(state)
+            }
+            .store(in: &earpieceCancellables)
     }
 
     private var client: JarvisAPIClient {
@@ -595,8 +652,288 @@ final class JarvisAppModel: ObservableObject {
         await sendCommand(text)
     }
 
-    func sendCommand(_ text: String) async {
-        await performCommand(text, fromHandsFree: false)
+    func sendCommand(_ text: String, channel: VoiceChannel = .text) async {
+        await performCommand(text, fromHandsFree: false, channel: channel)
+    }
+
+    // MARK: - Earpiece turn control
+
+    private func isCurrentTurn(_ id: Int) -> Bool { id == currentTurnID }
+
+    /// Invalidate whatever is still thinking or being spoken: a late backend response or
+    /// synthesized chunk from an older turn is dropped, the request is aborted and speech stops.
+    @discardableResult
+    private func invalidateInFlightTurn() -> Int {
+        currentTurnID += 1
+        inFlightStreamHandle.cancel?()
+        inFlightStreamHandle.cancel = nil
+        speechSynthesizer.stopSpeaking()
+        speechSynthesizer.resetInterruptionState()
+        if isSending { isSending = false }
+        return currentTurnID
+    }
+
+    private func beginTurn() -> Int {
+        let id = invalidateInFlightTurn()
+        if !audioRouteManager.privateOutputLost { earpieceNotice = nil }
+        return id
+    }
+
+    /// The single Stop control: drops the in-flight response, silences speech, closes the
+    /// microphone and ends any Conversation-mode window.
+    func stopEverything() {
+        invalidateInFlightTurn()
+        followUpTask?.cancel()
+        followUpTask = nil
+        var closedMicrophone = false
+        if (isListening || speechRecognizer.isActive) && !handsFreeEnabled {
+            cancelPushToTalk()
+            closedMicrophone = true
+        }
+        voiceStatus = "Stopped — microphone idle"
+        earpieceNotice = "Stopped. If the request had already reached the server it may still have been carried out."
+        if !closedMicrophone { playCue("listening_end") }
+    }
+
+    private static func isVoiceInterruption(_ kind: SpokenInterruptionKind) -> Bool {
+        switch kind {
+        case .cancel, .pause, .utterance:
+            return true
+        case .none, .routeLost, .systemInterrupted:
+            return false
+        }
+    }
+
+    /// "stop", "cancel", "never mind", "be quiet": handled locally and never sent to the
+    /// backend when something is actually running. A bare "cancel" while Horus is waiting for a
+    /// confirmation still goes to the backend so the pending action is really cancelled.
+    private func handleSpokenStopIfApplicable(_ text: String) -> Bool {
+        guard EarpieceVoiceCommands.isCancelCommand(text) else { return false }
+        if isSending || speechSynthesizer.isSpeaking {
+            stopEverything()
+            return true
+        }
+        if EarpieceVoiceCommands.isDismissal(text), !Self.responseRequestsConfirmation(lastResponse) {
+            voiceStatus = "Okay — nothing was running"
+            return true
+        }
+        return false
+    }
+
+    private func applyEarpieceState(_ state: EarpieceState) {
+        earpieceState = state
+        if state == .idle {
+            // Do not hold the Bluetooth hands-free (call-quality) route open while idle.
+            scheduleSessionRelease(afterMilliseconds: 900)
+        } else {
+            sessionReleaseToken += 1
+        }
+    }
+
+    private var canReleaseVoiceSession: Bool {
+        !isListening
+            && !speechRecognizer.isActive
+            && !speechSynthesizer.isSpeaking
+            && !isSending
+            && !handsFreeEnabled
+            && !conversationFollowUpActive
+            && !FrontendOperationsController.shared.roomListening.isActive
+    }
+
+    private func scheduleSessionRelease(afterMilliseconds delay: Int) {
+        sessionReleaseToken += 1
+        let token = sessionReleaseToken
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(delay))
+            guard let self, self.sessionReleaseToken == token, self.canReleaseVoiceSession else { return }
+            self.audioRouteManager.releaseOneShotVoiceSession()
+        }
+    }
+
+    /// Close the microphone: the recognizer has already stopped its engine and removed its tap;
+    /// this plays the short "mic released" cue and then deactivates the audio session with
+    /// `.notifyOthersOnDeactivation` so other apps' audio and the AirPods' music quality return.
+    private func releaseMicrophone(playEndCue: Bool) {
+        sessionReleaseToken += 1
+        let token = sessionReleaseToken
+        let cueAudible = playEndCue
+            && settings.ambientCuesEnabled
+            && !audioRouteManager.privateOutputLost
+            && UIApplication.shared.applicationState == .active
+        guard cueAudible else {
+            audioRouteManager.releaseOneShotVoiceSession()
+            return
+        }
+        playCue("listening_end", prepareRoute: false)
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(260))
+            guard let self, self.sessionReleaseToken == token, self.canReleaseVoiceSession else { return }
+            self.audioRouteManager.releaseOneShotVoiceSession()
+        }
+    }
+
+    private func playCue(_ cue: String, prepareRoute: Bool = true) {
+        guard settings.ambientCuesEnabled else { return }
+        earpieceCuePlayer.play(cue, preferBluetooth: settings.preferBluetoothAudio, prepareRoute: prepareRoute)
+    }
+
+    // MARK: - Interruption and route handling
+
+    private func handlePrivateOutputLost() {
+        // `.oldDeviceUnavailable`: the earbuds/headphones are gone. Stop speaking at once so
+        // private speech never continues on the loudspeaker, and close any open capture.
+        followUpTask?.cancel()
+        followUpTask = nil
+        speechSynthesizer.stopSpeakingForPrivateRouteLoss()
+        if (isListening || speechRecognizer.isActive) && !handsFreeEnabled {
+            cancelPushToTalk()
+        }
+        voiceStatus = "Headphones disconnected — speech paused"
+    }
+
+    private func handlePrivateOutputRestored() {
+        earpieceNotice = "Headphones reconnected. Spoken replies are back on."
+    }
+
+    private func handleAudioSessionInterruption(_ message: String, mediaServicesReset: Bool) {
+        followUpTask?.cancel()
+        followUpTask = nil
+        if mediaServicesReset {
+            speechSynthesizer.resetAfterMediaServicesReset()
+        } else {
+            speechSynthesizer.stopSpeakingForSystemInterruption()
+        }
+        if isListening && !handsFreeEnabled {
+            cancelPushToTalk()
+        }
+        earpieceNotice = message + " Tap Push to Talk to continue."
+        voiceStatus = "Audio interrupted — tap Push to Talk to retry"
+    }
+
+    private func handleAudioSessionInterruptionEnded(shouldResume: Bool) {
+        // The microphone is never reopened automatically after an interruption.
+        guard !handsFreeEnabled, !isListening else { return }
+        earpieceNotice = "Audio is available again. Tap Push to Talk to continue."
+        voiceStatus = "Push to Talk ready — microphone idle"
+    }
+
+    /// Called when the app leaves the foreground: no new listening window may start.
+    func noteSceneLeftForeground() {
+        followUpTask?.cancel()
+        followUpTask = nil
+        if conversationFollowUpActive && !handsFreeEnabled {
+            cancelPushToTalk()
+        }
+    }
+
+    // MARK: - Context sent with each command
+
+    private func recentLocationFix() -> CLLocation? {
+        switch geofenceManager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            break
+        default:
+            return nil
+        }
+        return recentLocationProvider?() ?? geofenceManager.lastLocation
+    }
+
+    /// Backend `context` object. Location is attached only when location access is already
+    /// authorized and a recent cached fix exists; otherwise only `channel` is sent.
+    static func commandContext(channel: VoiceChannel, fix: CLLocation?, now: Date = Date()) -> [String: Any] {
+        var context: [String: Any] = ["channel": channel.rawValue]
+        guard let fix,
+              fix.horizontalAccuracy >= 0,
+              fix.horizontalAccuracy.isFinite,
+              fix.coordinate.latitude.isFinite,
+              fix.coordinate.longitude.isFinite,
+              CLLocationCoordinate2DIsValid(fix.coordinate) else { return context }
+        let age = now.timeIntervalSince(fix.timestamp)
+        guard age >= -60, age <= maximumLocationFixAge else { return context }
+        context["latitude"] = fix.coordinate.latitude
+        context["longitude"] = fix.coordinate.longitude
+        context["location_accuracy_m"] = fix.horizontalAccuracy
+        context["location_captured_at"] = ISO8601DateFormatter().string(from: fix.timestamp)
+        return context
+    }
+
+    // MARK: - After a spoken turn
+
+    /// Decide what happens once a (non hands-free) turn has finished or was interrupted:
+    /// carry a barge-in utterance forward as the next turn, honor a spoken cancel, or open the
+    /// optional foreground Conversation-mode follow-up window.
+    private func scheduleAfterTurn(turnID: Int, channel: VoiceChannel, response: String) {
+        guard isCurrentTurn(turnID), !handsFreeEnabled else { return }
+        let interrupted = speechSynthesizer.lastOutputInterrupted
+        let kind: SpokenInterruptionKind = interrupted ? speechSynthesizer.lastInterruptionKind : .none
+        let carried = BargeInBuffer.take().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch kind {
+        case .routeLost, .systemInterrupted:
+            return
+        case .cancel:
+            if Self.responseRequestsConfirmation(response) {
+                Task { [weak self] in
+                    await self?.performCommand("cancel", fromHandsFree: false, channel: .voice)
+                }
+            } else {
+                voiceStatus = "Stopped"
+            }
+            return
+        case .utterance:
+            if !carried.isEmpty {
+                let nextChannel: VoiceChannel = channel == .text ? .voice : channel
+                Task { [weak self] in
+                    await self?.performCommand(carried, fromHandsFree: false, channel: nextChannel)
+                }
+                return
+            }
+        case .pause, .none:
+            break
+        }
+
+        guard !response.isEmpty, conversationFollowUpAllowed(channel: channel) else { return }
+        followUpTask?.cancel()
+        followUpTask = Task { [weak self] in
+            await self?.openConversationFollowUp(after: turnID)
+        }
+    }
+
+    private func conversationFollowUpAllowed(channel: VoiceChannel) -> Bool {
+        settings.conversationModeEnabled
+            && settings.speakResponses
+            && channel != .text
+            && !handsFreeEnabled
+            && conversationTurnCount < Self.conversationModeMaxTurns
+            && UIApplication.shared.applicationState == .active
+            && !audioRouteManager.privateOutputLost
+            && !isListening
+            && !speechRecognizer.isActive
+            && !speechSynthesizer.isSpeaking
+            && !FrontendOperationsController.shared.roomListening.isActive
+    }
+
+    private func openConversationFollowUp(after turnID: Int) async {
+        // Let the end of the spoken reply and any speaker tail die away so the
+        // microphone does not transcribe Horus itself.
+        try? await Task.sleep(for: .milliseconds(450))
+        guard !Task.isCancelled,
+              isCurrentTurn(turnID),
+              !isSending,
+              conversationFollowUpAllowed(channel: .conversation) else { return }
+        conversationTurnCount += 1
+        await beginListening(conversation: true)
+    }
+
+    private func endConversationFollowUp(message: String) {
+        pushToTalkTask?.cancel()
+        pushToTalkTask = nil
+        _ = speechRecognizer.stopListening()
+        isListening = false
+        conversationFollowUpActive = false
+        conversationFollowUpSecondsRemaining = nil
+        voiceStatus = message
+        releaseMicrophone(playEndCue: true)
     }
 
     func speakFrontendResponseIfEnabled(_ text: String) async {
@@ -627,11 +964,16 @@ final class JarvisAppModel: ObservableObject {
         _ localResponse: String,
         command text: String,
         fromHandsFree: Bool,
+        turnID: Int,
+        channel: VoiceChannel,
         routeReason: String
     ) async {
-        lastResponse = localResponse
         recordTurn(role: "user", text: text)
         recordTurn(role: "assistant", text: localResponse, model: "iPhone")
+        // The local handler may have awaited long enough for a newer turn or a cancel to
+        // take over; a stale result is recorded in history but never shown or spoken.
+        guard isCurrentTurn(turnID) else { return }
+        lastResponse = localResponse
         lastLatency = JarvisLatencySnapshot(
             model: "iPhone",
             routeReason: routeReason,
@@ -651,13 +993,15 @@ final class JarvisAppModel: ObservableObject {
                     whisper: false
                 )
             } else {
-                await speakOneResponse(localResponse)
+                await speakOneResponse(localResponse, turnID: turnID)
             }
         }
         if fromHandsFree {
             confirmationFollowUpDeadline = nil
             conversationalFollowUpDeadline = Date().addingTimeInterval(5)
             voiceStatus = "Listening for follow-up…"
+        } else {
+            scheduleAfterTurn(turnID: turnID, channel: channel, response: localResponse)
         }
     }
 
@@ -681,9 +1025,17 @@ final class JarvisAppModel: ObservableObject {
         return true
     }
 
-    private func performCommand(_ rawText: String, fromHandsFree: Bool) async {
+    private func performCommand(_ rawText: String, fromHandsFree: Bool, channel: VoiceChannel? = nil) async {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+
+        // Spoken or typed "stop" / "never mind" while Horus is working never reaches the backend.
+        if handleSpokenStopIfApplicable(text) { return }
+        // A typed command closes an open Conversation-mode window instead of racing it.
+        if conversationFollowUpActive && !handsFreeEnabled { cancelPushToTalk() }
+
+        let effectiveChannel: VoiceChannel = channel ?? (fromHandsFree ? .voice : .text)
+        let turnID = beginTurn()
 
         if let target = Self.calllessRecipient(text) {
             let opened = openCallless(recipient: target)
@@ -691,7 +1043,7 @@ final class JarvisAppModel: ObservableObject {
                 opened
                     ? "Opening Callless for \(target). Confirm Connect in the browser to enable your microphone."
                     : "Set a valid Callless hub URL in Settings.",
-                command: text, fromHandsFree: fromHandsFree,
+                command: text, fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone Callless contact handoff"
             )
             return
@@ -704,7 +1056,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 notecardResponse,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone Personal Notecard"
             )
             return
@@ -715,7 +1067,7 @@ final class JarvisAppModel: ObservableObject {
                 nodeID: exactAction.node, appName: exactAction.app
             )
             await finishLocalResponse(
-                reply, command: text, fromHandsFree: fromHandsFree,
+                reply, command: text, fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone exact spoken Conductor app / separately enrolled one-use action"
             )
             return
@@ -737,7 +1089,7 @@ final class JarvisAppModel: ObservableObject {
                     + " " + (realityMesh.place?.summary ?? "")
             }
             await finishLocalResponse(
-                reply, command: text, fromHandsFree: fromHandsFree,
+                reply, command: text, fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone Reality Mesh / precise read-only request or Conductor staging"
             )
             return
@@ -752,7 +1104,7 @@ final class JarvisAppModel: ObservableObject {
                 reply = missionControl.spokenStatus
             }
             await finishLocalResponse(
-                reply, command: text, fromHandsFree: fromHandsFree,
+                reply, command: text, fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone Mission Control / explicit event / MapKit verified observations"
             )
             return
@@ -766,7 +1118,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 navigationResponse,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone MapKit turn-by-turn navigation"
             )
             return
@@ -780,7 +1132,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 message,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone calendar + fresh GPS + actual MapKit driving ETA"
             )
             return
@@ -793,7 +1145,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 response,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "Explicit expiring official camera watch"
             )
             return
@@ -804,7 +1156,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 briefing,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "One-shot sourced physical situational briefing"
             )
             return
@@ -818,7 +1170,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 description,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "Explicit selected public still + local vision model"
             )
             return
@@ -829,7 +1181,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 facilityReply,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone location + public mapped resources"
             )
             return
@@ -840,7 +1192,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 conditionsReply,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone location + official weather warnings / global air model"
             )
             return
@@ -851,7 +1203,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 cameraReply,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone location + official public camera discovery"
             )
             return
@@ -864,7 +1216,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 homeReply,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "iPhone HomeKit verified light control"
             )
             return
@@ -875,7 +1227,7 @@ final class JarvisAppModel: ObservableObject {
             await finishLocalResponse(
                 localResponse,
                 command: text,
-                fromHandsFree: fromHandsFree,
+                fromHandsFree: fromHandsFree, turnID: turnID, channel: effectiveChannel,
                 routeReason: "frontend-only command"
             )
             return
@@ -885,7 +1237,8 @@ final class JarvisAppModel: ObservableObject {
         // reasoning path. The full notecard is never attached wholesale.
         let requestText = PersonalNotecardStore.shared.contextualizedCommand(text)
 
-        guard !isSending else { return }
+        // beginTurn() already invalidated any older in-flight turn, so a second command is
+        // never silently dropped and a late answer to the older one can never be spoken.
         isSending = true
         lastResponse = ""
         recordTurn(role: "user", text: text)
@@ -901,17 +1254,19 @@ final class JarvisAppModel: ObservableObject {
         var routeReason = ""
         var assistantRecorded = false
         defer {
-            isSending = false
-            let end = Date()
-            lastLatency = JarvisLatencySnapshot(
-                model: modelLabel,
-                routeReason: routeReason,
-                firstResponseMS: firstResponseAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1000)) },
-                firstAudioReadyMS: currentFirstAudioAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1000)) },
-                totalTurnMS: max(0, Int(end.timeIntervalSince(startedAt) * 1000))
-            )
-            currentCommandStartedAt = nil
-            currentFirstAudioAt = nil
+            if isCurrentTurn(turnID) {
+                isSending = false
+                let end = Date()
+                lastLatency = JarvisLatencySnapshot(
+                    model: modelLabel,
+                    routeReason: routeReason,
+                    firstResponseMS: firstResponseAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1000)) },
+                    firstAudioReadyMS: currentFirstAudioAt.map { max(0, Int($0.timeIntervalSince(startedAt) * 1000)) },
+                    totalTurnMS: max(0, Int(end.timeIntervalSince(startedAt) * 1000))
+                )
+                currentCommandStartedAt = nil
+                currentFirstAudioAt = nil
+            }
         }
 
         var fullResponse = ""
@@ -920,9 +1275,23 @@ final class JarvisAppModel: ObservableObject {
         var qwenTTSAvailable = true
         var confirmationSpoken = false
         var interrupted = false
+        let requestContext = Self.commandContext(channel: effectiveChannel, fix: recentLocationFix())
 
         do {
-            for try await event in client.streamCommandEvents(requestText) {
+            for try await event in client.streamCommandEvents(
+                requestText,
+                context: requestContext,
+                cancelHandle: inFlightStreamHandle
+            ) {
+                // Stale-response guard: a newer turn or an explicit cancel owns the session now.
+                if !isCurrentTurn(turnID) { break }
+                // The user talked over the answer ("stop", "wait", a new question): the rest of
+                // the old answer is moot, so stop reading it. (Losing headphones is different:
+                // the text keeps arriving on screen, only speech stays off.)
+                if interrupted && Self.isVoiceInterruption(speechSynthesizer.lastInterruptionKind) {
+                    inFlightStreamHandle.cancel?()
+                    break
+                }
                 switch event {
                 case .start(let model, let reason):
                     modelLabel = model ?? "backend"
@@ -944,14 +1313,16 @@ final class JarvisAppModel: ObservableObject {
                             confirmationSpoken = true
                             if fromHandsFree { voiceStatus = "Speaking…" }
                             let prompt = Self.spokenResponse(for: fullResponse)
-                            if !(await speakQwenChunk(prompt)) {
+                            if !(await speakQwenChunk(prompt, turnID: turnID)) {
                                 if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
-                                await speechSynthesizer.speak(
-                                    prompt,
-                                    preferBluetooth: settings.preferBluetoothAudio
-                                )
+                                if isCurrentTurn(turnID) {
+                                    await speechSynthesizer.speak(
+                                        prompt,
+                                        preferBluetooth: settings.preferBluetoothAudio
+                                    )
+                                }
                             }
-                            interrupted = speechSynthesizer.lastOutputInterrupted
+                            interrupted = speechSynthesizer.lastOutputInterrupted || !isCurrentTurn(turnID)
                         }
                         continue
                     }
@@ -959,9 +1330,13 @@ final class JarvisAppModel: ObservableObject {
                     if qwenTTSAvailable {
                         speechBuffer += delta
                         while let segment = Self.takeSpeechSegment(from: &speechBuffer, flush: false) {
+                            if !isCurrentTurn(turnID) {
+                                interrupted = true
+                                break
+                            }
                             if fromHandsFree { voiceStatus = "Speaking…" }
-                            let success = await speakQwenChunk(segment)
-                            if speechSynthesizer.lastOutputInterrupted {
+                            let success = await speakQwenChunk(segment, turnID: turnID)
+                            if speechSynthesizer.lastOutputInterrupted || !isCurrentTurn(turnID) {
                                 interrupted = true
                                 break
                             }
@@ -980,13 +1355,17 @@ final class JarvisAppModel: ObservableObject {
                 }
             }
 
+            // Anything that finished under an older generation (new turn, Stop, Action Button
+            // press) is dropped: nothing is recorded, shown or spoken for it.
+            guard isCurrentTurn(turnID) else { return }
+
             if settings.speakResponses && !interrupted && !confirmationSpoken {
                 if qwenTTSAvailable {
                     if let tail = Self.takeSpeechSegment(from: &speechBuffer, flush: true), !tail.isEmpty {
                         if fromHandsFree { voiceStatus = "Speaking…" }
-                        let success = await speakQwenChunk(tail)
+                        let success = await speakQwenChunk(tail, turnID: turnID)
                         interrupted = speechSynthesizer.lastOutputInterrupted
-                        if !success && !interrupted {
+                        if !success && !interrupted && isCurrentTurn(turnID) {
                             if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
                             await speechSynthesizer.speak(
                                 tail,
@@ -1009,6 +1388,8 @@ final class JarvisAppModel: ObservableObject {
                 }
             }
 
+            guard isCurrentTurn(turnID) else { return }
+
             if !fullResponse.isEmpty {
                 recordTurn(role: "assistant", text: fullResponse, model: modelLabel == "—" ? nil : modelLabel)
                 assistantRecorded = true
@@ -1027,16 +1408,21 @@ final class JarvisAppModel: ObservableObject {
                 conversationalFollowUpDeadline = nil
             }
         } catch {
+            // A superseded or cancelled stream surfaces here as an error. Never fall back to a
+            // second request for a turn that is no longer current.
+            guard isCurrentTurn(turnID) else { return }
             do {
-                let response = try await client.command(requestText)
+                let response = try await client.command(requestText, context: requestContext)
+                guard isCurrentTurn(turnID) else { return }
                 if firstResponseAt == nil { firstResponseAt = Date() }
                 if modelLabel == "—" { modelLabel = "backend" }
                 fullResponse = response.message
                 lastResponse = response.message
                 if settings.speakResponses && !response.message.isEmpty {
                     if fromHandsFree { voiceStatus = "Speaking…" }
-                    await speakOneResponse(Self.spokenResponse(for: response.message))
+                    await speakOneResponse(Self.spokenResponse(for: response.message), turnID: turnID)
                 }
+                guard isCurrentTurn(turnID) else { return }
                 if !assistantRecorded && !response.message.isEmpty {
                     recordTurn(role: "assistant", text: response.message, model: modelLabel)
                     assistantRecorded = true
@@ -1051,6 +1437,7 @@ final class JarvisAppModel: ObservableObject {
                     voiceStatus = "Listening for follow-up…"
                 }
             } catch {
+                guard isCurrentTurn(turnID) else { return }
                 confirmationFollowUpDeadline = nil
                 conversationalFollowUpDeadline = nil
                 if Self.isConnectivityError(error),
@@ -1085,8 +1472,13 @@ final class JarvisAppModel: ObservableObject {
                 } else {
                     errorMessage = error.localizedDescription
                     if fromHandsFree { voiceStatus = "Command failed" }
+                    playCue("error")
                 }
             }
+        }
+
+        if !fromHandsFree {
+            scheduleAfterTurn(turnID: turnID, channel: effectiveChannel, response: fullResponse)
         }
     }
 
@@ -1096,11 +1488,16 @@ final class JarvisAppModel: ObservableObject {
         return ns.domain == NSURLErrorDomain
     }
 
-    private func speakQwenChunk(_ text: String) async -> Bool {
+    private func speakQwenChunk(_ text: String, turnID: Int? = nil) async -> Bool {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return true }
+        // Stale turn or lost headphones: nothing to synthesize, and no fallback should speak it.
+        if let turnID, !isCurrentTurn(turnID) { return true }
+        if audioRouteManager.privateOutputLost { return true }
         do {
             let audio = try await client.synthesizeSpeech(cleaned)
+            // Late synthesized audio from an older turn is dropped, never played.
+            if let turnID, !isCurrentTurn(turnID) { return true }
             if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
             try await speechSynthesizer.speakRemoteAudio(
                 audio,
@@ -1113,8 +1510,9 @@ final class JarvisAppModel: ObservableObject {
         }
     }
 
-    private func speakOneResponse(_ text: String) async {
-        if !(await speakQwenChunk(text)) {
+    private func speakOneResponse(_ text: String, turnID: Int? = nil) async {
+        if !(await speakQwenChunk(text, turnID: turnID)) {
+            if let turnID, !isCurrentTurn(turnID) { return }
             if currentFirstAudioAt == nil { currentFirstAudioAt = Date() }
             await speechSynthesizer.speak(
                 text,
@@ -1149,20 +1547,60 @@ final class JarvisAppModel: ObservableObject {
         if handsFreeEnabled { stopWakeWordMode() }
         guard !isListening && !speechRecognizer.isActive else { return }
 
+        // Pressing the Action Button / Push to Talk starts a new turn: whatever Horus was
+        // still thinking about or saying is stale from this moment.
+        invalidateInFlightTurn()
+        followUpTask?.cancel()
+        followUpTask = nil
+        conversationTurnCount = 0
+        await beginListening(conversation: false)
+    }
+
+    /// Opens the microphone once. `conversation` is true only for the optional Conversation-mode
+    /// follow-up window, which is shown on screen, bounded, and foreground-only.
+    @discardableResult
+    private func beginListening(conversation: Bool) async -> Bool {
         do {
             try await speechRecognizer.requestPermissions()
+            textFallbackReason = nil
+            // A leftover barge-in fragment must not prefix a fresh push-to-talk turn.
+            _ = BargeInBuffer.take()
             speechSynthesizer.stopSpeaking()
+            if !audioRouteManager.privateOutputLost { earpieceNotice = nil }
+            sessionReleaseToken += 1
             try speechRecognizer.startListening(preferBluetooth: settings.preferBluetoothAudio)
             isListening = true
-            voiceStatus = "Listening — speak now"
+            conversationFollowUpActive = conversation
+            conversationFollowUpSecondsRemaining = conversation ? Int(Self.conversationFollowUpWindow) : nil
+            voiceStatus = conversation
+                ? "Conversation mode — microphone open for a follow-up"
+                : "Listening — speak now"
+            playCue("listening_start", prepareRoute: false)
             pushToTalkTask?.cancel()
             pushToTalkTask = Task { [weak self] in
                 await self?.monitorPushToTalk()
             }
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            handleVoiceStartFailure(error, conversation: conversation)
+            return false
+        }
+    }
+
+    /// Permission problems switch to the typed path with a clear reason; they never crash or alert-loop.
+    private func handleVoiceStartFailure(_ error: Error, conversation: Bool) {
+        conversationFollowUpActive = false
+        conversationFollowUpSecondsRemaining = nil
+        if SpeechRecognizer.isPermissionError(error) {
+            textFallbackReason = error.localizedDescription
+                + " Voice input is off, but you can still type requests below. Open iOS Settings to turn it back on."
+            voiceStatus = "Voice unavailable — type your request"
+        } else {
+            if !conversation { errorMessage = error.localizedDescription }
             voiceStatus = "Microphone unavailable"
         }
+        playCue("error")
+        scheduleSessionRelease(afterMilliseconds: 600)
     }
 
     /// A single Action Button press is sufficient: transcribed speech is sent
@@ -1177,7 +1615,32 @@ final class JarvisAppModel: ObservableObject {
             let spoken = !speechRecognizer.transcript
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
+            if conversationFollowUpActive {
+                // Bounded, visible follow-up window: never listen on indefinitely.
+                let elapsed = now.timeIntervalSince(startedAt)
+                let remaining: Int? = spoken ? nil : max(0, Int((Self.conversationFollowUpWindow - elapsed).rounded(.up)))
+                if conversationFollowUpSecondsRemaining != remaining {
+                    conversationFollowUpSecondsRemaining = remaining
+                }
+                if !settings.conversationModeEnabled {
+                    endConversationFollowUp(message: "Conversation mode turned off — microphone closed")
+                    return
+                }
+                if !spoken && elapsed >= Self.conversationFollowUpWindow {
+                    endConversationFollowUp(message: "No follow-up heard — microphone closed")
+                    return
+                }
+            }
+
             if spoken && !speechRecognizer.isActive {
+                stopListeningAndSend()
+                return
+            }
+            // Short ordinary commands go out after the same quiet window hands-free mode uses
+            // (about 1.2 s) so the answer starts sooner; dictation-like text keeps the longer limit.
+            if spoken, let updated = speechRecognizer.lastRecognitionUpdate,
+               !Self.needsExtendedDictation(speechRecognizer.transcript),
+               now.timeIntervalSince(updated) >= Self.commandSilenceWindow(for: speechRecognizer.transcript) {
                 stopListeningAndSend()
                 return
             }
@@ -1200,23 +1663,37 @@ final class JarvisAppModel: ObservableObject {
     func cancelPushToTalk() {
         pushToTalkTask?.cancel()
         pushToTalkTask = nil
-        if isListening || speechRecognizer.isActive {
+        let wasOpen = isListening || speechRecognizer.isActive
+        if wasOpen {
             _ = speechRecognizer.stopListening()
         }
-        audioRouteManager.releaseOneShotVoiceSession()
         isListening = false
+        conversationFollowUpActive = false
+        conversationFollowUpSecondsRemaining = nil
         voiceStatus = "Push to Talk ready — microphone idle"
+        releaseMicrophone(playEndCue: wasOpen)
     }
 
     func stopListeningAndSend() {
         pushToTalkTask?.cancel()
         pushToTalkTask = nil
+        let wasConversationFollowUp = conversationFollowUpActive
         let text = speechRecognizer.stopListening().trimmingCharacters(in: .whitespacesAndNewlines)
-        audioRouteManager.releaseOneShotVoiceSession()
         isListening = false
+        conversationFollowUpActive = false
+        conversationFollowUpSecondsRemaining = nil
         voiceStatus = "Push to Talk ready — microphone idle"
+        releaseMicrophone(playEndCue: true)
         guard !text.isEmpty else { return }
-        Task { await sendCommand(text) }
+        // Right after Horus spoke, the open microphone can hear its own voice: drop that.
+        if wasConversationFollowUp,
+           EarpieceVoiceCommands.normalizedWords(text).count >= 3,
+           EarpieceVoiceCommands.isLikelyEcho(heard: text, spoken: lastResponse) {
+            voiceStatus = "Ignored what sounded like Horus's own voice"
+            return
+        }
+        let channel: VoiceChannel = wasConversationFollowUp ? .conversation : .voice
+        Task { await sendCommand(text, channel: channel) }
     }
 
     func configureHomeGeofence() {

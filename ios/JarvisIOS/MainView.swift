@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import SwiftUI
+import UIKit
 
 struct MainView: View {
     @EnvironmentObject private var appModel: JarvisAppModel
@@ -151,6 +152,8 @@ struct MainView: View {
                             .buttonStyle(.bordered)
                     }
                 }
+
+                EarpieceStatusView(route: appModel.audioRouteManager, settings: appModel.settings)
 
                 Toggle("Always-listening wake mode (optional)", isOn: Binding(
                     get: { appModel.handsFreeEnabled },
@@ -672,6 +675,79 @@ final class MeetingCaptureController: ObservableObject {
             }
         }
         return value
+    }
+}
+
+/// Single always-visible status for the AirPods-first flow: listening / thinking / speaking /
+/// idle, one Stop control, the optional Conversation-mode indicator, headphone-loss and
+/// permission-denied notices (typing always remains available).
+private struct EarpieceStatusView: View {
+    @EnvironmentObject private var appModel: JarvisAppModel
+    @ObservedObject var route: AudioRouteManager
+    @ObservedObject var settings: SettingsStore
+
+    private var conversationText: String {
+        if let seconds = appModel.conversationFollowUpSecondsRemaining {
+            return "Conversation mode: microphone open for a follow-up (\(seconds) s left)"
+        }
+        return "Conversation mode: microphone open, hearing you"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: appModel.earpieceState.symbolName)
+                    .foregroundStyle(appModel.earpieceState == .listening ? Color.red : Color.accentColor)
+                Text(appModel.earpieceState.label).font(.headline)
+                Spacer()
+                if appModel.earpieceState != .idle {
+                    Button(role: .destructive) {
+                        appModel.stopEverything()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .accessibilityLabel("Stop Horus")
+                }
+            }
+
+            if appModel.conversationFollowUpActive {
+                HStack(spacing: 6) {
+                    Image(systemName: "mic.fill").foregroundStyle(.orange)
+                    Text(conversationText).font(.caption)
+                }
+            }
+
+            Toggle("Conversation mode (foreground follow-ups)", isOn: $settings.conversationModeEnabled)
+                .font(.caption)
+
+            if route.privateOutputLost {
+                Text("Headphones disconnected. Horus stopped speaking so nothing plays on the iPhone speaker; replies stay on screen.")
+                    .font(.caption).foregroundStyle(.orange)
+                Button("Speak on iPhone speaker instead") {
+                    route.allowSpeakerOutputAfterLoss()
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+            }
+
+            if let notice = appModel.earpieceNotice {
+                Text(notice).font(.caption).foregroundStyle(.secondary)
+            }
+
+            if let reason = appModel.textFallbackReason {
+                Text(reason).font(.caption).foregroundStyle(.orange)
+                Button("Open iOS Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

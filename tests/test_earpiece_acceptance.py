@@ -67,6 +67,8 @@ class EarpieceAcceptance(unittest.TestCase):
         for p in self.patches:
             p.start()
         self.emit = mock.patch.object(event_bus, "emit_proactive").start()
+        # The background-runner heartbeat is process-global; start from "never checked in".
+        ew._RUNNER["last_tick"] = None
         self.patches.append(mock.patch.object(event_bus, "emit_proactive"))
         situational_voice._CACHE.clear()
         self.session = "acceptance-" + self.id()

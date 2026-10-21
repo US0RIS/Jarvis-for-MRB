@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -109,6 +110,18 @@ def gather(place: ResolvedPlace, sources: list[str]) -> dict[str, dict[str, Any]
 # --------------------------------------------------------------------------
 # Snapshots for "what's changed since I was here?"
 
+@contextmanager
+def _open() -> Iterator[sqlite3.Connection]:
+    """Commit on success and always close: a bare ``with conn`` leaves the file open,
+    which blocks deleting the database on Windows."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
 def _connect() -> sqlite3.Connection:
     path = Path(DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,7 +166,7 @@ def _signature(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 def _previous_snapshot(place: ResolvedPlace, *, before: datetime | None = None) -> dict[str, Any] | None:
     cutoff = (before or datetime.now(timezone.utc)) - timedelta(minutes=30)
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         row = conn.execute(
             "SELECT * FROM snapshots WHERE cell=? AND checked_at<=? ORDER BY id DESC LIMIT 1",
             (_cell(place), cutoff.isoformat()),
@@ -164,7 +177,7 @@ def _previous_snapshot(place: ResolvedPlace, *, before: datetime | None = None) 
 
 
 def _latest_snapshot(place: ResolvedPlace) -> dict[str, Any] | None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         row = conn.execute(
             "SELECT * FROM snapshots WHERE cell=? ORDER BY id DESC LIMIT 1", (_cell(place),)
         ).fetchone()
@@ -175,7 +188,7 @@ def _store_snapshot(place: ResolvedPlace, signature: dict[str, Any]) -> None:
     if not signature:
         return
     now = datetime.now(timezone.utc)
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         conn.execute(
             "INSERT INTO snapshots(cell,label,checked_at,signature_json) VALUES(?,?,?,?)",
             (_cell(place), place.label[:40], now.isoformat(), json.dumps(signature, sort_keys=True)),
@@ -185,7 +198,7 @@ def _store_snapshot(place: ResolvedPlace, signature: dict[str, Any]) -> None:
 
 
 def forget_history() -> int:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         count = conn.execute("DELETE FROM snapshots").rowcount
         conn.commit()
     return int(count)

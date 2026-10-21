@@ -26,6 +26,7 @@ import difflib
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -100,6 +101,18 @@ def _parse_iso(raw: str) -> datetime:
 
 def _db_path() -> Path:
     return Path(DB_PATH)
+
+
+@contextmanager
+def _open() -> Iterator[sqlite3.Connection]:
+    """Commit on success and always close: a bare ``with conn`` leaves the file open,
+    which blocks deleting the database on Windows."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _connect() -> sqlite3.Connection:
@@ -285,7 +298,7 @@ def record_placement(
     instant = now or _now()
     source_kind = "user_spoken" if channel in {"voice", "conversation"} else "user_typed"
     clean_place = " ".join(str(place or "").split())[:200]
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         object_id, display = _resolve_or_create(conn, name)
         previous = _active(conn, object_id)
         cursor = conn.execute(
@@ -353,7 +366,7 @@ def add_alias(name: str, alias: str) -> dict[str, Any]:
     alias_key = object_key(alias)
     if not alias_key:
         raise ValueError("Alias is empty.")
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         object_id, display = _resolve_or_create(conn, name)
         clash = conn.execute("SELECT id FROM objects WHERE key=? AND id<>?", (alias_key, object_id)).fetchone()
         if clash:
@@ -380,7 +393,7 @@ def resolve(name: str) -> list[dict[str, Any]]:
     key = object_key(name)
     if not key:
         return []
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         exact_ids: list[str] = []
         for candidate in _synonym_keys(key):
             row = conn.execute("SELECT id FROM objects WHERE key=?", (candidate,)).fetchone()
@@ -440,7 +453,7 @@ def items_at(place: str, *, exclude: Iterable[str] = ()) -> list[dict[str, Any]]
     if not target:
         return []
     skip = set(exclude)
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         rows = conn.execute(
             """SELECT a.*, o.name AS object_name FROM assertions a JOIN objects o ON o.id=a.object_id
                WHERE a.status='active' AND a.kind='placement' ORDER BY a.id DESC"""
@@ -458,14 +471,14 @@ def items_at(place: str, *, exclude: Iterable[str] = ()) -> list[dict[str, Any]]
 
 
 def forget(object_id: str) -> bool:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         deleted = conn.execute("DELETE FROM objects WHERE id=?", (object_id,)).rowcount
         conn.commit()
     return bool(deleted)
 
 
 def forget_all() -> int:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         count = int(conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0])
         conn.execute("DELETE FROM objects")
         conn.commit()
@@ -473,7 +486,7 @@ def forget_all() -> int:
 
 
 def list_objects(limit: int = 100) -> list[dict[str, Any]]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         rows = conn.execute(
             """SELECT o.* FROM objects o LEFT JOIN assertions a ON a.object_id=o.id
                GROUP BY o.id ORDER BY MAX(a.id) DESC LIMIT ?""", (max(1, min(int(limit), 500)),)
@@ -482,7 +495,7 @@ def list_objects(limit: int = 100) -> list[dict[str, Any]]:
 
 
 def status() -> dict[str, Any]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         objects = int(conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0])
         assertions = int(conn.execute("SELECT COUNT(*) FROM assertions").fetchone()[0])
     return {
@@ -583,7 +596,7 @@ def _remember_focus(turn: VoiceTurn, *, objects: list[str] | None = None, place:
 
 
 def _object_names_for(ids: list[str]) -> list[dict[str, Any]]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         out = []
         for object_id in ids:
             row = conn.execute("SELECT * FROM objects WHERE id=?", (object_id,)).fetchone()
@@ -921,7 +934,7 @@ def _known_place(place: str) -> bool:
     target = set(_place_key(place).split())
     if not target:
         return False
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         for row in conn.execute("SELECT DISTINCT place_key FROM assertions WHERE kind='placement'"):
             if target <= set(str(row["place_key"]).split()):
                 return True

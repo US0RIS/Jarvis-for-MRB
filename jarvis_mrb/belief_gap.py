@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -227,6 +228,18 @@ def load_turns(now: datetime | None = None) -> list[Turn]:
 # --------------------------------------------------------------------------
 # Local ledger: dismissals and issued warnings
 
+@contextmanager
+def _open() -> Iterator[sqlite3.Connection]:
+    """Commit on success and always close: a bare ``with conn`` leaves the file open,
+    which blocks deleting the database on Windows."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
 def _connect() -> sqlite3.Connection:
     path = Path(DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -251,19 +264,19 @@ def gap_key(change: ValueChange) -> str:
 
 
 def dismiss(change: ValueChange, reason: str = "user_dismissed") -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         conn.execute("INSERT OR REPLACE INTO dismissals(gap_key,dismissed_at,reason) VALUES(?,?,?)",
                      (gap_key(change), datetime.now(timezone.utc).isoformat(), reason[:40]))
         conn.commit()
 
 
 def _dismissed(change: ValueChange) -> bool:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         return conn.execute("SELECT 1 FROM dismissals WHERE gap_key=?", (gap_key(change),)).fetchone() is not None
 
 
 def _recently_warned(change: ValueChange, now: datetime, window: timedelta = REPEAT_COOLDOWN) -> bool:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         row = conn.execute("SELECT issued_at FROM warnings WHERE gap_key=? ORDER BY id DESC LIMIT 1",
                            (gap_key(change),)).fetchone()
     last = _parse(row["issued_at"]) if row else None
@@ -271,14 +284,14 @@ def _recently_warned(change: ValueChange, now: datetime, window: timedelta = REP
 
 
 def _record_warning(gap: Gap, trigger: str, now: datetime) -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         conn.execute("INSERT INTO warnings(gap_key,issued_at,trigger,evidence_json) VALUES(?,?,?,?)",
                      (gap_key(gap.change), now.isoformat(), trigger, json.dumps(gap.evidence, default=str)))
         conn.commit()
 
 
 def clear_all() -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         conn.execute("DELETE FROM dismissals")
         conn.execute("DELETE FROM warnings")
         conn.commit()

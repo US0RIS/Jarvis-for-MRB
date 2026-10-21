@@ -12,6 +12,7 @@ for "here / near me / around me", else an honest reason why no place is known.
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,6 +35,18 @@ class ResolvedPlace:
     provenance: str     # "saved_place" | "phone_fix"
     captured_at: str
     accuracy_m: float | None = None
+
+
+@contextmanager
+def _open() -> Iterator[sqlite3.Connection]:
+    """Commit on success and always close: a bare ``with conn`` leaves the file open,
+    which blocks deleting the database on Windows."""
+    conn = _connect()
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def _connect() -> sqlite3.Connection:
@@ -69,7 +82,7 @@ def save_place(name: str, latitude: float, longitude: float, *, accuracy_m: floa
     if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
         raise ValueError("Location out of range.")
     saved_at = datetime.now(timezone.utc).isoformat()
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO places(name,latitude,longitude,accuracy_m,saved_at,source) VALUES(?,?,?,?,?,?)",
             (key, round(float(latitude), 5), round(float(longitude), 5), accuracy_m, saved_at, source[:40]),
@@ -83,19 +96,19 @@ def get_place(name: str) -> dict[str, Any] | None:
     key = normalize_name(name)
     if not key:
         return None
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         row = conn.execute("SELECT * FROM places WHERE name=?", (key,)).fetchone()
     return dict(row) if row else None
 
 
 def list_places() -> list[dict[str, Any]]:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM places ORDER BY name")]
 
 
 def forget_place(name: str) -> bool:
     key = normalize_name(name)
-    with _LOCK, _connect() as conn:
+    with _LOCK, _open() as conn:
         deleted = conn.execute("DELETE FROM places WHERE name=?", (key,)).rowcount
         conn.commit()
     return bool(deleted)

@@ -6,6 +6,8 @@ One packet per request, no more than three source entries. For candidate reposit
 
 ### P08-001
 
+**AirPods-first acceptance (binding):** Ordinary AirPods/Bluetooth headset plus iPhone is the default test platform. No Meta glasses or POV video dependency. Test audio-route/mic consent and private speech on real devices.
+
 - [ ] **time-to-first-audio** — [source L1198](../archive/FUTURE_IDEAS_2026_10.md#L1198)
 - [ ] **real-time factor / total synthesis latency** — [source L1199](../archive/FUTURE_IDEAS_2026_10.md#L1199)
 - [ ] **VRAM/RAM footprint and contention with Jarvis's other GPU workloads** — [source L1200](../archive/FUTURE_IDEAS_2026_10.md#L1200)
@@ -77,6 +79,8 @@ One packet per request, no more than three source entries. For candidate reposit
 **Done:** measured interaction/latency, explicit listening consent, private output routing and cancellation tests.
 
 ### P08-010
+
+**AirPods-first acceptance (binding):** Ambient conversation/audio ideas must respect foreground/OS background restrictions, explicit permission, clear capture indicator and bystander privacy; headphones never imply invisible always-on listening.
 
 - [ ] **Candidate pipeline:** — [source L1850](../archive/FUTURE_IDEAS_2026_10.md#L1850)
 - [ ] **Practical prototype:** — [source L1851](../archive/FUTURE_IDEAS_2026_10.md#L1851)

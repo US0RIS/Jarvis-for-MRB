@@ -26,9 +26,11 @@
     </section>
     <div id="session-panel" hidden>
       <section class="panel two-column">
-        <div><h2 id="my-identity">Your availability</h2><p class="description">Open permits approved contacts to request an immediate audio connection. Horus doesn't keep your microphone open while idle.</p></div>
+        <div><h2 id="my-identity">Your availability</h2><p class="description">Two controls decide who can reach you: this global status, and a per-contact setting below. The more restrictive one wins. Horus doesn't keep your microphone open while idle.</p></div>
         <div><label for="status">Callless status</label><select id="status"><option value="closed">Closed</option><option value="ask">Ask first</option><option value="open">Open</option></select>
-        <p id="status-help" class="fine">Status is closed until you change it.</p></div>
+        <p id="status-help" class="fine">Status is closed until you change it.</p>
+        <button id="arm" type="button">Arm direct connections for this tab</button>
+        <p id="arm-help" class="fine"></p></div>
       </section>
       <section class="panel">
         <div class="section-title"><h2>Contacts</h2><button id="refresh">Refresh</button></div>
@@ -41,13 +43,17 @@
       <section class="panel call-panel">
         <div class="section-title"><h2>Conversation</h2><span id="call-state">Idle</span></div>
         <p id="call-text">Choose an online approved contact above to connect.</p>
-        <div class="actions"><button id="join" class="primary" hidden>Join conversation</button><button id="hangup" class="danger" hidden>Disconnect</button><button id="enable-audio" hidden>Enable speaker audio</button></div>
+        <div id="end-banner" class="end-banner" role="alert" hidden></div>
+        <button id="dismiss-ended" class="link" type="button">Dismiss ended notice</button>
+        <div class="actions"><button id="join" class="primary" hidden>Join conversation</button><button id="mute" hidden>Mute</button><button id="hangup" class="danger" hidden>Disconnect</button><button id="enable-audio" hidden>Enable speaker audio</button></div>
+        <p id="peer-muted" class="fine" hidden>The other person has muted their microphone.</p>
         <audio id="remote-audio" autoplay playsinline></audio>
       </section>
+      <section class="panel"><h2>Recent conversations</h2><ul id="recent" class="recent"></ul><p class="fine">Metadata only: who, when, outcome and how long audio took to go live. No audio, SDP or network addresses are kept.</p></section>
       <footer><span>No calls recorded by the hub · WebRTC media uses encrypted transport</span><button id="logout">Sign out</button></footer>
     </div>
     <p id="message" class="notification" role="status" aria-live="polite"></p>
-    <p class="disclaimer">Browser limitations: a recipient must tap Join to grant microphone access, even when Open. Full automatic pickup requires a separate native calling integration. Remote use needs HTTPS, and restrictive networks may need a configured TURN server.</p>
+    <p class="disclaimer">Browser limitations: microphone access always needs a tap in the browser. A contact you granted Open connects without a ring only after you tap "Arm direct connections" in an open tab, and even then the browser may ask for a tap. This page cannot wake itself in the background on iPhone; automatic pickup needs a separate native calling integration (CallKit/PushKit), which is not implemented. Remote use needs HTTPS, and restrictive networks may need a configured TURN server.</p>
   </main>
 </body>
 </html>

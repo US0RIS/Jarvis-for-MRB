@@ -662,7 +662,10 @@ final class JarvisAppModel: ObservableObject {
     }
 
     private static func calllessRecipient(_ raw: String) -> String? {
-        let pattern = #"(?i)^(?:horus[, ]+)?(?:get me to|connect me to|callless with)\s+([a-z][a-z0-9_]{2,27})[.?!]?$"#
+        // Accepts a handle or a one- or two-word display name ("Alex", "Alex Smith"); the Callless page
+        // resolves it against the user's approved contacts. Articles/possessives are excluded so
+        // "get me to the airport" is not treated as a person.
+        let pattern = #"(?i)^(?:horus[, ]+)?(?:get me to|connect me to|callless with)\s+((?!(?:the|a|an|my|our|your|home|work)\b)[a-z][a-z0-9_]{1,27}(?: [a-z][a-z0-9_]{1,27})?)[.?!]?$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let result = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
               let range = Range(result.range(at: 1), in: raw) else { return nil }

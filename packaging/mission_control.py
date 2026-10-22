@@ -22,7 +22,7 @@ from typing import Any, Callable
 from PySide6.QtCore import QObject, QRunnable, Qt, QSettings, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QRadialGradient, QTextOption
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
+    QApplication, QCheckBox, QComboBox, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from jarvis_mrb.inference import DEFAULT_MODELS, configure_inference, inference_status
 from jarvis_mrb.remote_setup import configure_remote_access
 from jarvis_mrb.server_config import load_server_config
+from desktop_setup_state import derive_setup_state
 
 
 PALETTE = {
@@ -38,51 +39,52 @@ PALETTE = {
     "accent": "#73E2D5", "dim": "#16463F", "warn": "#F4B77E",
 }
 QSS = """
-QWidget { background: transparent; color: #F1F6FA;
-          font-family: "Segoe UI", "Arial"; font-size: 13px; }
-QMainWindow, QWidget#root { background: #0A1018; }
-QFrame#rail { background: #0D1721; border-right: 1px solid #253443; }
-QFrame#panel, QFrame#metric, QFrame#messageAssistant {
-    background: #131E2A; border: 1px solid #273747; border-radius: 17px;
-}
-QFrame#metric { background: #162331; border-radius: 15px; }
-QFrame#messageUser { background: #1A3A3D; border: 1px solid #2F6260;
-                      border-radius: 17px; }
-QFrame#divider { background: #253442; min-height: 1px; max-height: 1px; }
-QLabel#eyebrow { color: #73E2D5; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
-QLabel#heading { color: #F1F6FA; font-size: 29px; font-weight: 700; }
-QLabel#subtitle { color: #93A5B5; font-size: 13px; }
-QLabel#muted { color: #91A3B3; }
-QLabel#bigValue { color: #F1F6FA; font-size: 26px; font-weight: 700; }
-QLabel#panelTitle { color: #E6F1F5; font-size: 15px; font-weight: 650; }
-QLabel#statusOnline { color: #73E2D5; font-size: 11px; font-weight: 700; }
-QLabel#statusOffline { color: #F4B77E; font-size: 11px; font-weight: 700; }
-QPushButton { background: #1A2936; border: 1px solid #304356;
-              border-radius: 11px; padding: 10px 16px; color: #E5F1F5;
-              font-weight: 600; }
-QPushButton:hover { background: #24384B; border-color: #53677A; }
-QPushButton:pressed { background: #2D4552; }
-QPushButton:disabled { color: #607586; background: #111B25; border-color: #1E2A37; }
-QPushButton#primary { background: #73E2D5; color: #082326; border: 0; font-weight: 700; }
-QPushButton#primary:hover { background: #9AF4E9; }
-QPushButton#primary:disabled { background: #315E5D; color: #8CA8A8; }
-QPushButton#nav { background: transparent; border: 0; border-radius: 11px;
-                  text-align: left; color: #94A9B7; padding: 15px 19px; font-size: 14px; }
-QPushButton#nav:hover { color: #F5FFFF; background: #172631; }
-QPushButton#nav[active="true"] { background: #1C353B; color: #A8F9EB; }
-QLineEdit, QPlainTextEdit, QComboBox {
-    background: #0D1823; border: 1px solid #35495B; border-radius: 11px;
-    padding: 10px 12px; color: #F5FAFF; selection-background-color: #317E79;
-}
-QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus { border-color: #73E2D5; }
-QLineEdit:disabled { color: #728897; background: #111A23; }
-QComboBox QAbstractItemView { background: #192634; color: #F1F6FA;
-                              selection-background-color: #285950; }
+QWidget { background: transparent; color: #22313E; font-family: "Segoe UI", "Arial"; font-size: 13px; }
+QMainWindow, QWidget#root { background: #F5F7F8; }
+QFrame#rail { background: #192934; border-right: 1px solid #25404A; }
+QFrame#rail QLabel { color: #F2F6F8; }
+QFrame#rail QLabel#eyebrow { color: #9BCFC9; }
+QFrame#rail QLabel#muted { color: #A9BDC8; }
+QFrame#panel, QFrame#metric, QFrame#messageAssistant { background: white; border: 1px solid #DEE6E9; border-radius: 13px; }
+QFrame#metric { background: #FFFFFF; border-radius: 11px; }
+QFrame#messageUser { background: #EAF4F3; border: 1px solid #C9E0DC; border-radius: 13px; }
+QFrame#divider { background: #E1E8EC; min-height: 1px; max-height: 1px; }
+QLabel#eyebrow { color: #247F79; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+QLabel#heading { color: #182C38; font-size: 26px; font-weight: 700; }
+QLabel#subtitle { color: #657989; font-size: 13px; }
+QLabel#muted { color: #697C8A; }
+QLabel#bigValue { color: #1C2D39; font-size: 25px; font-weight: 700; }
+QLabel#panelTitle { color: #20323F; font-size: 15px; font-weight: 650; }
+QLabel#statusOnline { color: #237A62; font-size: 11px; font-weight: 700; }
+QLabel#statusOffline { color: #AA7144; font-size: 11px; font-weight: 700; }
+QLabel#stepComplete { color: #237A62; font-size: 12px; font-weight: 650; }
+QLabel#stepPending { color: #9B6936; font-size: 12px; }
+QLabel#stepHead { color: #20323F; font-size: 16px; font-weight: 700; }
+QPushButton { background: #FFFFFF; border: 1px solid #CCD9DE; border-radius: 9px;
+              padding: 10px 15px; color: #233747; font-weight: 600; }
+QPushButton:hover { background: #E9F0F2; border-color: #9CABB4; }
+QPushButton:pressed { background: #D6E5E9; }
+QPushButton:disabled { color: #9BA8B0; background: #F0F3F5; border-color: #E0E8EB; }
+QPushButton#primary { background: #246B72; color: white; border: 1px solid #246B72; }
+QPushButton#primary:hover { background: #195B61; }
+QPushButton#primary:disabled { background: #8EA9AB; color: #F0F5F5; }
+QPushButton#nav { background: transparent; border: 0; border-radius: 9px; text-align: left;
+                  color: #B9C7CF; padding: 13px 15px; font-size: 14px; }
+QPushButton#nav:hover { color: white; background: #263C48; }
+QPushButton#nav[active="true"] { background: #314B55; color: white; }
+QLineEdit, QPlainTextEdit, QComboBox { background: white; border: 1px solid #CAD7DD;
+                                      border-radius: 9px; padding: 10px 12px; color: #22313E; }
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus { border-color: #36877F; }
+QLineEdit:disabled { color: #8C9BA4; background: #F1F5F6; }
+QComboBox QAbstractItemView { background: white; color: #22313E; selection-background-color: #C5E5E1; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 0; }
-QScrollBar:vertical { background: #101B26; width: 9px; margin: 0; border: 0; }
-QScrollBar::handle:vertical { background: #3C5161; border-radius: 4px; min-height: 28px; }
+QScrollBar:vertical { background: #F0F3F5; width: 9px; border: 0; }
+QScrollBar::handle:vertical { background: #B4C6CC; border-radius: 4px; min-height: 28px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QCheckBox { color: #20323F; spacing: 10px; }
+QCheckBox::indicator { width: 17px; height: 17px; }
 """
+
 
 def label(text: str, *, style: str = "", wrap: bool = True) -> QLabel:
     widget = QLabel(str(text))
@@ -229,6 +231,7 @@ def snapshot() -> dict[str, Any]:
         ("watches", "proactive/watches"),
         ("ledger", "proactive/ledger?limit=8"),
         ("memory", "memory/objects"),
+        ("phone", "desktop/phone-status"),
         ("state", "state"),
     ):
         try:
@@ -324,9 +327,10 @@ class MissionControlWindow(QMainWindow):
             self.session = "horus-desktop-" + uuid.uuid4().hex
             if not testing:
                 self.settings.setValue("conversationSession", self.session)
-        self.setWindowTitle("Horus  ·  Mission Control")
-        self.resize(1370, 870)
-        self.setMinimumSize(1030, 690)
+        self._latest_snapshot: dict[str, Any] = {}
+        self.setWindowTitle("Horus — Desktop")
+        self.resize(1250, 830)
+        self.setMinimumSize(990, 680)
         self.setStyleSheet(QSS)
         self._building = True
         self._build()
@@ -363,23 +367,23 @@ class MissionControlWindow(QMainWindow):
         outer.setSpacing(0)
         rail = QFrame()
         rail.setObjectName("rail")
-        rail.setFixedWidth(242)
+        rail.setFixedWidth(208)
         outer.addWidget(rail)
-        rl = column(rail, gap=10, margins=(22, 25, 22, 18))
+        rl = column(rail, gap=7, margins=(18, 23, 18, 18))
         identity = QHBoxLayout()
         identity.setSpacing(13)
-        identity.addWidget(HorusMark(44))
+        identity.addWidget(HorusMark(33))
         wordmark = column(gap=0)
         brand = label("HORUS", wrap=False)
-        brand.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        brand.setFont(QFont("Segoe UI", 17, QFont.Bold))
         wordmark.addWidget(brand)
-        wordmark.addWidget(label("MISSION CONTROL", style="eyebrow"))
+        wordmark.addWidget(label("DESKTOP", style="eyebrow"))
         identity.addLayout(wordmark, 1)
         rl.addLayout(identity)
-        rl.addSpacing(45)
+        rl.addSpacing(30)
         rl.addWidget(label("WORKSPACE", style="eyebrow"))
         self.nav_buttons: list[QPushButton] = []
-        for index, name in enumerate(("Conversation", "Awareness", "Control", "Settings")):
+        for index, name in enumerate(("Overview", "Get set up", "Conversation", "Activity", "Settings")):
             button = action(f"   {name}")
             button.setObjectName("nav")
             button.setProperty("active", "false")
@@ -390,17 +394,16 @@ class MissionControlWindow(QMainWindow):
         rl.addStretch(1)
         rl.addWidget(line())
         rl.addSpacing(8)
-        rl.addWidget(label("EARPIECE FIRST", style="eyebrow"))
-        rl.addWidget(label("The desktop is your command center.\nYour iPhone and AirPods are the everyday interface.",
-                           style="muted"))
+        rl.addWidget(label("PHONE + AIRPODS", style="eyebrow"))
+        rl.addWidget(label("Configure on desktop. Use Horus privately from your iPhone and earbuds.", style="muted"))
         rl.addSpacing(12)
         rl.addWidget(label("v0.15  •  PRIVATE BACKEND", style="eyebrow"))
 
         workspace = QWidget()
         outer.addWidget(workspace, 1)
-        wl = column(workspace, gap=0, margins=(36, 22, 36, 16))
+        wl = column(workspace, gap=0, margins=(32, 22, 32, 14))
         top = QHBoxLayout()
-        top.addWidget(label("PRIVATE DESKTOP  /  LIVE OPERATIONS", style="eyebrow", wrap=False))
+        top.addWidget(label("HORUS  /  LOCAL DESKTOP", style="eyebrow", wrap=False))
         top.addStretch(1)
         self.connect_state = label("●  CHECKING ENGINE", style="statusOffline")
         top.addWidget(self.connect_state)
@@ -409,19 +412,20 @@ class MissionControlWindow(QMainWindow):
         top.addSpacing(17)
         top.addWidget(self.engine_button)
         wl.addLayout(top)
-        wl.addSpacing(20)
+        wl.addSpacing(16)
         self.pages = QStackedWidget()
         wl.addWidget(self.pages, 1)
+        self._home()
+        self._setup()
         self._conversation()
         self._awareness()
-        self._control()
         self._settings_page()
         wl.addSpacing(12)
         wl.addWidget(line())
         self.footer = label("Nothing is simulated. Status comes from your local Horus backend.",
                             style="muted")
         wl.addWidget(self.footer)
-        self.navigate(0)
+        self.navigate(1 if not self.settings.value("onboardingSeen", False, type=bool) else 0)
 
     def navigate(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
@@ -429,7 +433,9 @@ class MissionControlWindow(QMainWindow):
             button.setProperty("active", "true" if n == index else "false")
             button.style().unpolish(button)
             button.style().polish(button)
-        if index in (1, 2):
+        if index == 0 and not self.testing:
+            self.settings.setValue("onboardingSeen", True)
+        if index in (0, 1, 3):
             self.refresh()
 
     def _conversation(self) -> None:

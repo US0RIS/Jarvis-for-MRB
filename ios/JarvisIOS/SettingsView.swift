@@ -13,6 +13,8 @@ struct SettingsView: View {
     @State private var neuralVoiceStatus = "Not checked"
     @State private var useFastPlanner = false
     @State private var autoRoutePlanner = true
+    @State private var phonePairingStatus = "Not tested"
+    @State private var isTestingPhonePairing = false
     @State private var plannerModelStatus = "Loading planner model…"
     @State private var isSwitchingPlanner = false
     @State private var inferenceProvider = "ollama"
@@ -45,6 +47,13 @@ struct SettingsView: View {
                         .keyboardType(.URL)
                     SecureField("API token", text: $settings.apiToken)
                         .textInputAutocapitalization(.never)
+                    Button(isTestingPhonePairing ? "Checking connection…" : "Verify iPhone connection to Horus") {
+                        Task { await verifyPhonePairing() }
+                    }
+                    .disabled(isTestingPhonePairing)
+                    Text(phonePairingStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("Jarvis tries the LAN address first and falls back to your private Tailscale URL away from home. Do not forward port 8765 or enable Funnel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -430,6 +439,20 @@ struct SettingsView: View {
             return
         }
         openURL(base.appendingPathComponent("callless"))
+    }
+
+    private func verifyPhonePairing() async {
+        guard !isTestingPhonePairing else { return }
+        isTestingPhonePairing = true
+        defer { isTestingPhonePairing = false }
+        do {
+            let ok = try await client.confirmPhonePairing()
+            phonePairingStatus = ok
+                ? "Authenticated iPhone app request reached Horus. AirPods audio is not yet verified."
+                : "Horus did not accept the app verification."
+        } catch {
+            phonePairingStatus = "Cannot verify: \(error.localizedDescription)"
+        }
     }
 
     private func loadInference() async {

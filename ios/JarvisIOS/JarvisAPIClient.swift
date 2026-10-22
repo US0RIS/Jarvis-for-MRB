@@ -772,6 +772,28 @@ struct JarvisAPIClient {
         }
     }
 
+    /// Explicit authenticated setup probe. /health alone does not prove the
+    /// bearer token works, and this does not establish any AirPods audio route.
+    func confirmPhonePairing() async throws -> Bool {
+        guard !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw JarvisAPIError.server("Enter the private Horus API token first.")
+        }
+        let base = try await activeBaseURL()
+        guard let url = URL(string: base)?.appendingPathComponent("desktop/phone-checkin") else {
+            throw JarvisAPIError.badURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        addAuthorization(to: &request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw JarvisAPIError.badResponse
+        }
+        return value["accepted"] as? Bool == true
+    }
+
     func listDiligenceMatters() async throws -> [DiligenceMatterSummary] {
         let (data, response) = try await postData(
             path: "external/diligence/list", body: [:]

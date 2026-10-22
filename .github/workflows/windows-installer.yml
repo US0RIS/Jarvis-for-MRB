@@ -9,6 +9,12 @@ on:
       - "pyproject.toml"
       - ".github/workflows/windows-installer.yml"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "tests/test_mission_control_ui.py"
+      - "pyproject.toml"
+      - ".github/workflows/windows-installer.yml"
 
 permissions:
   contents: read
@@ -28,15 +34,21 @@ jobs:
           python -m pip install . pyinstaller==6.16.0
       - name: Check BYOK and voice contracts
         run: |
-          python -m unittest discover -s tests -p "test_windows_ui_font.py" -v
+          python -m unittest discover -s tests -p "test_mission_control_ui.py" -v
+          python -m unittest discover -s tests -p "test_desktop_setup_state.py" -v
+          python -m unittest discover -s tests -p "test_phone_pairing.py" -v
+          python -m unittest discover -s tests -p "test_windows_background_processes.py" -v
+          python -m unittest discover -s tests -p "test_mission_control.py" -v
+          python -m unittest discover -s tests -p "test_proactive_briefing.py" -v
           python -m unittest discover -s tests -p "test_byok_inference.py" -v
           python -m unittest discover -s tests -p "test_callless.py" -v
           python -m unittest discover -s tests -p "test_remote_setup_idempotent.py" -v
       - name: Build self-contained Windows runtime
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name Horus --collect-submodules jarvis_mrb --collect-submodules keyring.backends --collect-data jarvis_mrb packaging/horus_desktop.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name Horus --hidden-import mission_control --hidden-import desktop_setup_state --collect-submodules jarvis_mrb --collect-submodules keyring.backends --collect-data jarvis_mrb packaging/horus_desktop.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:QT_QPA_PLATFORM = "offscreen"
           & ".\dist\Horus\Horus.exe" --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Inno Setup

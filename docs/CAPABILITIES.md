@@ -4,8 +4,8 @@
 
 | Capability | Source state | Verification boundary |
 |---|---|---|
-| Windows .exe installer | Implemented; GitHub packaging artifact generated | Unsigned; clean-machine acceptance outstanding |
-| Windows desktop text chat | Implemented in installer | Live provider/clean-install acceptance outstanding |
+| Windows .exe installer | Qt Mission Control source implemented; 0.15 Windows packaging workflow | Unsigned; clean-machine acceptance outstanding |
+| Windows desktop text chat | Qt Conversation uses the authenticated /command endpoint | Live provider/clean-install acceptance outstanding |
 | Local Ollama | Backend integrated | Optional local model and installation prerequisites |
 | BYOK OpenAI / Anthropic / OpenRouter | Backend and settings implemented; targeted tests | Live provider/model compatibility and spend limits outstanding |
 | iPhone push-to-talk / Action Button | Swift source; earpiece states, faster Action Button entry, mic release, text fallback on denied/restricted permission ([Earpiece](EARPIECE.md)) | Simulator compile via CI `ios-build`; real iPhone permission/audio-route/Action Button testing outstanding |

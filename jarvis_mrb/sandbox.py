@@ -32,6 +32,7 @@ def docker_available() -> bool:
             text=True,
             timeout=4,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return completed.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -94,6 +95,7 @@ def run_python(code: str, *, stdin_json: Any = None, timeout_seconds: int = 8) -
                 text=True,
                 timeout=timeout_value,
                 check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired:
             return SandboxResult(False, f"Sandbox execution exceeded {timeout_value} seconds.")
@@ -131,6 +133,7 @@ def run_command(command: str, *, timeout_seconds: int = 8) -> SandboxResult:
                 text=True,
                 timeout=timeout_value,
                 check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired:
             return SandboxResult(False, f"Sandbox command exceeded {timeout_value} seconds.")

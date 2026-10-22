@@ -615,11 +615,11 @@ def _norm(text: str) -> str:
     return " ".join(cleaned.split())
 
 
-def handle(text: str, turn: Any) -> str | None:
+def handle(text: str, turn: Any, *, now: datetime | None = None) -> str | None:
     n = _norm(text)
     if _WHY_EXPLICIT.match(n) or _WHY_GENERIC.match(n):
         window = 12 * 3600 if _WHY_EXPLICIT.match(n) else 20 * 60
-        items = recent_emitted(within_seconds=window, limit=1)
+        items = recent_emitted(within_seconds=window, limit=1, now=now)
         if not items:
             return None  # not about a proactive item; let other handlers answer
         return explain(items[0])

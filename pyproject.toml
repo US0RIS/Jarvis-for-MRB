@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-for-mrb"
-version = "0.14.0"
+version = "0.16.0"
 description = "Local-first Horus AI and communication backend"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "PySide6>=6.8,<7; sys_platform == 'win32'",  # native Horus Mission Control
   "psutil>=6.0.0",
   "Pillow>=11.0.0",  # optional interactive Windows screen capture; fails closed headless
   "fastapi>=0.116.0",

@@ -54,3 +54,5 @@ Original long documents are retained, not discarded.
 - [Original long future ideas](archive/FUTURE_IDEAS_2026_10.md)
 
 Older documents contain historical plans and source-level claims; only [Capabilities](CAPABILITIES.md) and current CI/device evidence determine release status.
+
+- [Mission Control native Windows UI](WINDOWS_MISSION_CONTROL.md) — conversation, awareness, device control, and packaging.

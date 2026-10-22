@@ -16,15 +16,14 @@ import urllib.error
 import urllib.request
 import uuid
 import webbrowser
-from datetime import datetime
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QSettings, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QRadialGradient, QTextOption
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-    QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from jarvis_mrb.inference import DEFAULT_MODELS, configure_inference, inference_status
@@ -88,6 +87,7 @@ QCheckBox::indicator { width: 17px; height: 17px; }
 
 def label(text: str, *, style: str = "", wrap: bool = True) -> QLabel:
     widget = QLabel(str(text))
+    widget.setTextFormat(Qt.PlainText)  # backend strings never interpreted as HTML
     if style:
         widget.setObjectName(style)
     widget.setWordWrap(wrap)
@@ -857,66 +857,6 @@ class MissionControlWindow(QMainWindow):
         lay.addWidget(section, 1)
         self.pages.addWidget(page)
 
-    def _control(self) -> None:
-        page = QWidget()
-        lay = column(page, gap=16)
-        section_title(lay, "03  /  Control", "Systems & devices",
-                      "Operate the real backend and connect your iPhone over a trusted network.")
-        backend = panel()
-        bl = column(backend, gap=12, margins=(24, 22, 24, 22))
-        bl.addWidget(label("LOCAL ENGINE", style="eyebrow"))
-        self.engine_detail = label("Backend has not been checked.", style="panelTitle")
-        bl.addWidget(self.engine_detail)
-        btns = QHBoxLayout()
-        start = action("START ENGINE", primary=True)
-        start.clicked.connect(self._start_engine)
-        btns.addWidget(start)
-        restart = action("RESTART OWNED ENGINE")
-        restart.clicked.connect(self._restart_engine)
-        btns.addWidget(restart)
-        btns.addStretch(1)
-        bl.addLayout(btns)
-        lay.addWidget(backend)
-        phone = panel()
-        pl = column(phone, gap=11, margins=(24, 22, 24, 22))
-        pl.addWidget(label("IPHONE / AIRPODS BRIDGE", style="eyebrow"))
-        pl.addWidget(label("Private phone connection", style="panelTitle"))
-        self.lan_state = label("LAN access is not configured.", style="muted")
-        pl.addWidget(self.lan_state)
-        self.lan_field = QLineEdit()
-        self.lan_field.setReadOnly(True)
-        self.lan_field.setPlaceholderText("Not configured")
-        pl.addWidget(self.lan_field)
-        buttons = QHBoxLayout()
-        configure = action("ENABLE PRIVATE LAN", primary=True)
-        configure.clicked.connect(self._enable_lan)
-        buttons.addWidget(configure)
-        self.copy_url = action("COPY ADDRESS")
-        self.copy_url.clicked.connect(lambda: self._copy(self.lan_field.text(), secret=False))
-        buttons.addWidget(self.copy_url)
-        self.copy_secret = action("COPY API TOKEN")
-        self.copy_secret.clicked.connect(self._copy_token)
-        buttons.addWidget(self.copy_secret)
-        buttons.addStretch(1)
-        pl.addLayout(buttons)
-        pl.addWidget(label("Never forward port 8765 to the internet. LAN HTTP is unencrypted. "
-                           "Copy the address and secret token into Horus Settings on your iPhone.",
-                           style="muted"))
-        lay.addWidget(phone)
-        callless = panel()
-        c = column(callless, gap=11, margins=(24, 20, 24, 20))
-        c.addWidget(label("CALLLESS  /  PROTOTYPE", style="eyebrow"))
-        c.addWidget(label("Browser-to-browser conversations", style="panelTitle"))
-        c.addWidget(label("Opens the self-hosted browser client. A shared HTTPS hub is required for remote use; "
-                          "native iPhone calling is not shipped.", style="muted"))
-        b = action("OPEN CALLLESS ↗")
-        b.clicked.connect(self._open_callless)
-        c.addWidget(b, alignment=Qt.AlignLeft)
-        lay.addWidget(callless)
-        lay.addStretch(1)
-        self.pages.addWidget(page)
-        self._sync_lan()
-
     def _settings_page(self) -> None:
         page = QWidget()
         lay = column(page, gap=15)
@@ -1223,6 +1163,12 @@ def start_qt(start_backend: Callable[[], bool],
             app.processEvents()
         assert window.pages.count() == 5
         assert window.nav_buttons[0].text().strip() == "Overview"
+        assert window.nav_buttons[1].text().strip() == "Get set up"
+        assert len(window.setup_states) == 5
+        assert window.audio_checkbox is not None
+        window._snapshot_finished({"online": False}, "")
+        assert window.home_engine.value.text() == "OFFLINE"
+        assert window.home_phone.value.text() == "UNKNOWN"
         window.close()
         return 0
     return app.exec()

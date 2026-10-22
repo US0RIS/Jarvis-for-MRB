@@ -422,7 +422,7 @@ class MissionControlWindow(QMainWindow):
         self._settings_page()
         wl.addSpacing(12)
         wl.addWidget(line())
-        self.footer = label("Nothing is simulated. Status comes from your local Horus backend.",
+        self.footer = label("Backend observations are source-backed. AirPods audio is verified only on the phone.",
                             style="muted")
         wl.addWidget(self.footer)
         self.navigate(1 if not self.settings.value("onboardingSeen", False, type=bool) else 0)
@@ -710,70 +710,48 @@ class MissionControlWindow(QMainWindow):
         self.setup_restart.setEnabled("engine" not in self._jobs)
 
     def _conversation(self) -> None:
+        """Conversation is a tool, not a giant empty sci-fi dashboard."""
         page = QWidget()
-        lay = column(page, gap=12)
-        section_title(lay, "01  /  Conversation", "Talk to Horus",
-                      "Ask, investigate, remember and act through the actual assistant.")
-        intro = panel()
-        intro_lay = QHBoxLayout(intro)
-        intro_lay.setContentsMargins(22, 15, 20, 15)
-        intro_lay.addWidget(HorusMark(48))
-        msg = column(gap=4)
-        msg.addWidget(label("Ready to assist", style="panelTitle"))
-        msg.addWidget(label("AI answers use your selected provider. Real actions still require their normal approvals.",
-                            style="muted"))
-        intro_lay.addLayout(msg, 1)
-        lay.addWidget(intro)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        self.chat_scroll = scroll
-        container = QWidget()
-        self.chat_layout = column(container, gap=14, margins=(6, 18, 6, 18))
-        self.empty_conversation = QWidget()
-        intro_empty = column(self.empty_conversation, gap=15)
-        intro_empty.addStretch(1)
-        orb_line = QHBoxLayout()
-        orb_line.addStretch(1)
-        orb_line.addWidget(HorusMark(102))
-        orb_line.addStretch(1)
-        intro_empty.addLayout(orb_line)
-        lead = label("Intelligence at your command")
-        lead.setFont(QFont("Segoe UI", 19, QFont.DemiBold))
-        lead.setAlignment(Qt.AlignCenter)
-        intro_empty.addWidget(lead)
-        sub = label("Your conversation begins here. All replies come from your real Horus engine.",
-                    style="muted")
-        sub.setAlignment(Qt.AlignCenter)
-        intro_empty.addWidget(sub)
-        intro_empty.addSpacing(10)
-        quicks = QHBoxLayout()
-        quicks.addStretch(1)
+        lay = column(page, gap=13)
+        section_title(lay, "Conversation", "Ask Horus",
+                      "Real requests to the local assistant. Actions still require their normal permissions.")
+        quick = QHBoxLayout()
+        quick.addWidget(label("TRY", style="eyebrow"))
         for example in ("What are you watching?", "Where are my keys?", "Give me a briefing"):
             b = action(example)
             b.clicked.connect(lambda _c=False, text=example: self._prompt(text))
-            quicks.addWidget(b)
-        quicks.addStretch(1)
-        intro_empty.addLayout(quicks)
-        intro_empty.addStretch(1)
+            quick.addWidget(b)
+        quick.addStretch(1)
+        lay.addLayout(quick)
+
+        self.chat_scroll = QScrollArea()
+        self.chat_scroll.setWidgetResizable(True)
+        self.chat_scroll.setFrameShape(QFrame.NoFrame)
+        container = QWidget()
+        self.chat_layout = column(container, gap=12, margins=(6, 14, 6, 14))
+        self.empty_conversation = QWidget()
+        empty = column(self.empty_conversation, gap=8, margins=(10, 19, 10, 4))
+        empty.addWidget(label("Nothing in this conversation yet.", style="panelTitle"))
+        empty.addWidget(label(
+            "Choose a real example above or enter a request below. Horus's reply comes "
+            "from your configured model and tools, not a demo script.", style="muted"))
         self.chat_layout.addWidget(self.empty_conversation)
         self.chat_layout.addStretch(1)
-        scroll.setWidget(container)
-        lay.addWidget(scroll, 1)
+        self.chat_scroll.setWidget(container)
+        lay.addWidget(self.chat_scroll, 1)
 
         compose = panel()
         cl = QHBoxLayout(compose)
-        cl.setContentsMargins(15, 12, 12, 12)
+        cl.setContentsMargins(13, 11, 12, 11)
         cl.setSpacing(12)
         self.composer = Composer()
-        self.composer.setPlaceholderText("Message Horus...  (Enter to send · Shift+Enter for a new line)")
-        self.composer.setMaximumHeight(83)
-        self.composer.setMinimumHeight(64)
+        self.composer.setPlaceholderText("Ask Horus anything…   Enter to send  ·  Shift+Enter for a new line")
+        self.composer.setMaximumHeight(82)
+        self.composer.setMinimumHeight(61)
         self.composer.submitted.connect(self.send)
         cl.addWidget(self.composer, 1)
-        self.send_button = action("SEND  ↗", primary=True)
-        self.send_button.setMinimumHeight(49)
+        self.send_button = action("SEND", primary=True)
+        self.send_button.setMinimumHeight(46)
         self.send_button.clicked.connect(self.send)
         cl.addWidget(self.send_button)
         lay.addWidget(compose)
@@ -863,7 +841,7 @@ class MissionControlWindow(QMainWindow):
         section = panel()
         sl = column(section, gap=12, margins=(24, 21, 24, 24))
         sl.addWidget(label("RECENT ATTENTION", style="eyebrow"))
-        sl.addWidget(label("Signals, not theater", style="panelTitle"))
+        sl.addWidget(label("Recorded history", style="panelTitle"))
         sl.addWidget(label("Alerts and briefings are shown exactly as your backend recorded them.",
                            style="muted"))
         sl.addWidget(line())
@@ -942,7 +920,7 @@ class MissionControlWindow(QMainWindow):
     def _settings_page(self) -> None:
         page = QWidget()
         lay = column(page, gap=15)
-        section_title(lay, "04  /  Configuration", "Settings",
+        section_title(lay, "Settings", "AI and preferences",
                       "Select the real inference engine. Hosted prompts go to the provider you choose.")
         p = panel()
         f = column(p, gap=14, margins=(26, 23, 26, 24))
@@ -1197,11 +1175,11 @@ def start_qt(start_backend: Callable[[], bool],
     window.show()
     if self_test:
         app.processEvents()
-        for index in range(4):
+        for index in range(5):
             window.navigate(index)
             app.processEvents()
-        assert window.pages.count() == 4
-        assert window.nav_buttons[0].text().strip() == "Conversation"
+        assert window.pages.count() == 5
+        assert window.nav_buttons[0].text().strip() == "Overview"
         window.close()
         return 0
     return app.exec()

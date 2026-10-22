@@ -497,6 +497,7 @@ def _host_machine_identity() -> str:
                 text=True,
                 timeout=5,
                 check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if result.returncode == 0:
                 match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', str(result.stdout or ""))
@@ -565,6 +566,7 @@ def _git_head_sha(root: Path) -> str:
             text=True,
             timeout=5,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -595,6 +597,7 @@ def _git_worktree_clean(root: Path) -> tuple[bool, str]:
             text=True,
             timeout=10,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"{type(exc).__name__}: {exc}"
@@ -1293,6 +1296,7 @@ def _run_command(command: list[str], *, cwd: Path, timeout: int) -> tuple[bool, 
             text=True,
             timeout=timeout,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             env={**os.environ, "JARVIS_AGENCY_MODE": "monitor"},
         )
     except (OSError, subprocess.SubprocessError) as exc:

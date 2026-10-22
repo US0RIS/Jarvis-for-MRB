@@ -26,7 +26,10 @@ def _gpu_sample() -> dict[str, Any]:
         "--format=csv,noheader,nounits",
     ]
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
+        completed = subprocess.run(
+            command, capture_output=True, text=True, timeout=3, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
     except (OSError, subprocess.TimeoutExpired):
         return {}
     if completed.returncode != 0 or not completed.stdout.strip():

@@ -1093,49 +1093,84 @@ class MissionControlWindow(QMainWindow):
         self.task("snapshot", snapshot, self._snapshot_finished)
 
     def _snapshot_finished(self, data: Any, error: str) -> None:
-        online = bool(data and data.get("online")) and not error
+        self._latest_snapshot = data if isinstance(data, dict) and not error else {}
+        online = bool(self._latest_snapshot.get("online"))
         self.connect_state.setText("●  ENGINE ONLINE" if online else "●  ENGINE OFFLINE")
         self.connect_state.setObjectName("statusOnline" if online else "statusOffline")
         self.connect_state.style().unpolish(self.connect_state)
         self.connect_state.style().polish(self.connect_state)
         self.engine_button.setText("MANAGE ENGINE" if online else "START ENGINE")
         self.engine_button.setEnabled("engine" not in self._jobs)
-        self.engine_detail.setText("Running on this PC" if online else "Stopped or unreachable")
         if not online:
-            for item in (self.tile_engine, self.tile_watches, self.tile_memory, self.tile_provider):
-                item.value.setText("—")
-                item.footnote.setText("Unavailable — start engine")
-            self.runner_text.setText("No monitoring state: backend is offline.")
+            for tile in (self.tile_engine, self.tile_watches, self.tile_memory, self.tile_provider):
+                tile.value.setText("—")
+                tile.footnote.setText("Unavailable while offline")
+            self.runner_text.setText("No monitoring evidence: backend offline.")
             self._render_activity([])
+            self.home_watch_text.setText("Active watches: unavailable")
+            self.home_memory_text.setText("Object memories: unavailable")
+            self.home_monitor_text.setText("Monitoring: offline")
+            self.home_last_signal.setText("The local backend is offline; live history is unavailable.")
+            self._apply_setup_state()
             return
+
+        data = self._latest_snapshot
         health = data.get("health") or {}
+        inference = health.get("inference") or {}
         self.tile_engine.value.setText("ONLINE")
-        self.tile_engine.footnote.setText("Local server active")
-        infer = health.get("inference") or {}
-        self.tile_provider.value.setText(str(infer.get("provider") or "—").upper())
-        self.tile_provider.footnote.setText(str(infer.get("model") or "Not configured")[:46])
-        if isinstance(data.get("watches"), dict):
-            watches = data["watches"].get("watches") or []
-            active = sum(1 for watch in watches if watch.get("state") == "active")
+        self.tile_engine.footnote.setText("Local health endpoint responded")
+        self.tile_provider.value.setText(str(inference.get("provider") or "—").upper())
+        self.tile_provider.footnote.setText(str(inference.get("model") or "Unknown model")[:48])
+
+        watches = data.get("watches")
+        if isinstance(watches, dict):
+            known = watches.get("watches") or []
+            active = sum(1 for item in known if item.get("state") == "active")
             self.tile_watches.value.setText(str(active))
-            self.tile_watches.footnote.setText(f"{len(watches)} registered")
-            runner = data["watches"].get("runner") or {}
-            self.runner_text.setText("Watch checker: " + str(runner.get("status") or
-                health.get("external_watches") or "state unknown") +
-                "  ·  Registration does not guarantee a check occurred.")
+            self.tile_watches.footnote.setText(f"{len(known)} registered")
+            self.runner_text.setText(
+                f"Watch runner: {health.get('external_watches') or 'unknown'} — "
+                "registration does not prove a check ran.")
+            self.home_watch_text.setText(f"Active watches: {active} of {len(known)} registered")
         else:
             self.tile_watches.value.setText("—")
-            self.tile_watches.footnote.setText("Watch status unavailable")
-            self.runner_text.setText("Could not read the watch runner state.")
+            self.tile_watches.footnote.setText("Status unavailable")
+            self.runner_text.setText("Watch runner unavailable")
+            self.home_watch_text.setText("Active watches: status unavailable")
+        self.home_monitor_text.setText(
+            f"Background watch runner: {health.get('external_watches') or 'unknown'}")
+
         memory = data.get("memory")
         if isinstance(memory, dict):
-            self.tile_memory.value.setText(str((memory.get("status") or {}).get("objects", "—")))
-            self.tile_memory.footnote.setText("User-reported, not observed")
+            count = (memory.get("status") or {}).get("objects", "—")
+            self.tile_memory.value.setText(str(count))
+            self.tile_memory.footnote.setText("User-reported; not camera-verified")
+            self.home_memory_text.setText(f"User-reported object memories: {count}")
         else:
             self.tile_memory.value.setText("—")
-            self.tile_memory.footnote.setText("Memory status unavailable")
+            self.tile_memory.footnote.setText("Status unavailable")
+            self.home_memory_text.setText("Object memory: status unavailable")
+
         ledger = data.get("ledger")
-        self._render_activity(ledger.get("items", []) if isinstance(ledger, dict) else [])
+        entries = ledger.get("items", []) if isinstance(ledger, dict) else []
+        self._render_activity(entries)
+        if isinstance(ledger, dict):
+            if entries and isinstance(entries[0], dict):
+                recent = entries[0]
+                self.home_last_signal.setText(
+                    f"{str(recent.get('title') or recent.get('kind') or 'Recorded item')[:95]}\n"
+                    f"Decision: {str(recent.get('decision') or 'unknown')} · "
+                    f"Source: {str(recent.get('source') or 'not recorded')[:60]}\n"
+                    f"Push: {str(recent.get('push_state') or 'not attempted')}. "
+                    "Open Activity for details.")
+            else:
+                self.home_last_signal.setText(
+                    "No recorded alerts or briefings. That does not prove that everything is quiet.")
+        else:
+            self.home_last_signal.setText("Activity ledger is unavailable.")
+
+        self._sync_lan()
+        self._apply_setup_state()
 
     def _render_activity(self, items: list[Any]) -> None:
         while self.activity_layout.count() > 1:

@@ -1002,15 +1002,22 @@ class MissionControlWindow(QMainWindow):
         self.model_notice.setText(
             f"Saved: {result['provider']} / {result['model']}" +
             ("  ·  Key ready" if result.get("key_configured") else "  ·  No hosted key"))
-        self.notice("Inference settings saved. Your next request uses the selected provider.")
+        self.notice("Model configuration saved. Test a real answer in Conversation next.")
+        self._apply_setup_state()
         self.refresh()
 
     def _sync_lan(self) -> None:
         cfg = load_server_config()
         configured = cfg.bind_host not in {"localhost", "127.0.0.1", "::1"} and bool(cfg.api_token)
+        active_bind = str((self._latest_snapshot.get("health") or {}).get("bind") or "")
+        serving_lan = bool(self._latest_snapshot.get("online")) and active_bind not in {
+            "127.0.0.1", "localhost", "::1", "",
+        }
         self.lan_state.setText(
-            "Private LAN configured. Phone access requires the running backend to use this bind setting."
-            if configured else "Not enabled. Horus currently permits localhost connections only.")
+            "LAN enabled and engine listening on your network."
+            if configured and serving_lan else
+            "LAN saved; restart Horus to apply network access."
+            if configured else "LAN off. Only this PC can currently connect.")
         self.lan_field.setText(lan_url() if configured else "")
         self.copy_url.setEnabled(configured)
         self.copy_secret.setEnabled(configured)
@@ -1029,7 +1036,8 @@ class MissionControlWindow(QMainWindow):
         try:
             configure_remote_access()
             self._sync_lan()
-            self.notice("LAN enabled. Restart the backend to apply the new bind settings.")
+            self._apply_setup_state()
+            self.notice("LAN configured. Restart the owned Horus engine to apply it.")
         except Exception as exc:
             QMessageBox.warning(self, "LAN setup failed", str(exc)[:300])
 

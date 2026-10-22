@@ -28,7 +28,7 @@ jobs:
           python -m pip install . pyinstaller==6.16.0
       - name: Check BYOK and voice contracts
         run: |
-          python -m unittest discover -s tests -p "test_windows_ui_font.py" -v
+          python -m unittest discover -s tests -p "test_mission_control_ui.py" -v
           python -m unittest discover -s tests -p "test_byok_inference.py" -v
           python -m unittest discover -s tests -p "test_callless.py" -v
           python -m unittest discover -s tests -p "test_remote_setup_idempotent.py" -v
@@ -37,6 +37,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --onedir --windowed --name Horus --collect-submodules jarvis_mrb --collect-submodules keyring.backends --collect-data jarvis_mrb packaging/horus_desktop.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:QT_QPA_PLATFORM = "offscreen"
           & ".\dist\Horus\Horus.exe" --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Inno Setup

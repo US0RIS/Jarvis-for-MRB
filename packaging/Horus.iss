@@ -1,5 +1,5 @@
 #define AppName "Horus"
-#define AppVersion "0.14.0"
+#define AppVersion "0.15.0"
 
 [Setup]
 AppId={{3F0B5D6D-E749-4F97-8B97-75A50CC0B029}

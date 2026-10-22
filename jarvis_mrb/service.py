@@ -958,6 +958,26 @@ def model_routing_status(
     return routing_status()
 
 
+@app.post("/desktop/phone-checkin")
+def desktop_phone_checkin(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Explicit iPhone app setup action; never implies an AirPods test passed."""
+    _check_mesh_auth(authorization)
+    from jarvis_mrb.phone_pairing import check_in
+    return check_in()
+
+
+@app.get("/desktop/phone-status")
+def desktop_phone_status(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Ephemeral proof of recent authenticated phone-app communication."""
+    _check_mesh_auth(authorization)
+    from jarvis_mrb.phone_pairing import status
+    return status()
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     settings = planner_settings()

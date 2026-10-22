@@ -31,7 +31,7 @@ prototype; the iPhone app is separately built with Xcode.
 
 ## Build and verification
 
-Windows installation from GitHub Actions produces `HorusSetup-0.15.0.exe`.
+Windows installation from GitHub Actions produces `HorusSetup-0.16.0.exe`.
 PySide6 is bundled via PyInstaller. The workflow runs:
 
 1. Native UI source contract checks.

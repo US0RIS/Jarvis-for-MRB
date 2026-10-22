@@ -35,6 +35,8 @@ jobs:
       - name: Check BYOK and voice contracts
         run: |
           python -m unittest discover -s tests -p "test_mission_control_ui.py" -v
+          python -m unittest discover -s tests -p "test_desktop_setup_state.py" -v
+          python -m unittest discover -s tests -p "test_phone_pairing.py" -v
           python -m unittest discover -s tests -p "test_windows_background_processes.py" -v
           python -m unittest discover -s tests -p "test_mission_control.py" -v
           python -m unittest discover -s tests -p "test_proactive_briefing.py" -v
@@ -44,7 +46,7 @@ jobs:
       - name: Build self-contained Windows runtime
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name Horus --hidden-import mission_control --collect-submodules jarvis_mrb --collect-submodules keyring.backends --collect-data jarvis_mrb packaging/horus_desktop.py
+          pyinstaller --noconfirm --clean --onedir --windowed --name Horus --hidden-import mission_control --hidden-import desktop_setup_state --collect-submodules jarvis_mrb --collect-submodules keyring.backends --collect-data jarvis_mrb packaging/horus_desktop.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:QT_QPA_PLATFORM = "offscreen"
           & ".\dist\Horus\Horus.exe" --self-test

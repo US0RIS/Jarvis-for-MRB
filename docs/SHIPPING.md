@@ -5,7 +5,7 @@
 The [Windows Installer workflow](https://github.com/US0RIS/Jarvis-for-MRB/actions/workflows/windows-installer.yml)
 runs on `main` and on manual dispatch. It builds a PyInstaller
 single-folder runtime and wraps it with Inno Setup into
-**`HorusSetup-0.15.0.exe`**, uploaded inside the **HorusSetup-Windows**
+**`HorusSetup-0.16.0.exe`**, uploaded inside the **HorusSetup-Windows**
 GitHub Actions artifact ZIP. The installer includes Python and backend
 dependencies. The user doesn't need Python, pip, or a terminal.
 

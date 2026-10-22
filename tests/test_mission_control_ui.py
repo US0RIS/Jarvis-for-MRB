@@ -21,7 +21,13 @@ class MissionControlSourceTests(unittest.TestCase):
         self.assertTrue(any(isinstance(n, ast.ImportFrom) and n.module == "PySide6.QtWidgets"
                             for n in tree.body))
         self.assertIn("class MissionControlWindow(", source)
-        for name in ("Conversation", "Awareness", "Control", "Settings"):
+        self.assertIn("def _home(", source)
+        self.assertIn("def _setup(", source)
+        self.assertIn("def _apply_setup_state(", source)
+        self.assertIn("desktop/phone-status", source)
+        self.assertNotIn("HorusMark(102)", source)
+        self.assertIn("for index in range(5)", source)
+        for name in ("Overview", "Get set up", "Conversation", "Activity", "Settings"):
             with self.subTest(page=name):
                 self.assertIn(name, source)
         for route in ("proactive/watches", "proactive/ledger?limit=8",

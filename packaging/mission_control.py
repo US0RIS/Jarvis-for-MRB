@@ -397,7 +397,7 @@ class MissionControlWindow(QMainWindow):
         rl.addWidget(label("PHONE + AIRPODS", style="eyebrow"))
         rl.addWidget(label("Configure on desktop. Use Horus privately from your iPhone and earbuds.", style="muted"))
         rl.addSpacing(12)
-        rl.addWidget(label("v0.15  •  PRIVATE BACKEND", style="eyebrow"))
+        rl.addWidget(label("v0.16  ·  LOCAL DESKTOP", style="eyebrow"))
 
         workspace = QWidget()
         outer.addWidget(workspace, 1)

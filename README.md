@@ -8,7 +8,7 @@ Horus is a **local-first assistant** with a native Windows **Mission Control**, 
 
 1. Open the [Windows Installer workflow](https://github.com/US0RIS/Jarvis-for-MRB/actions/workflows/windows-installer.yml), choose a successful run for the desired commit, and download **HorusSetup-Windows**.
 2. Extract the artifact ZIP and run `HorusSetup-0.15.0.exe`. It is currently **unsigned**. The bundle includes Python but does not install AI models, service accounts or hosted networking.
-3. Open **Horus Mission Control**. Use **Settings** for Ollama or BYOK OpenAI/Anthropic/OpenRouter, **Conversation** for chat, **Awareness** for real watch/alert/memory status, and **Control** for the private phone connection. See [Mission Control](docs/MISSION_CONTROL.md).
+3. Open **Horus Mission Control**. Use **Settings** for Ollama or BYOK OpenAI/Anthropic/OpenRouter, **Conversation** for chat, **Awareness** for real watch/alert/memory status, and **Control** for the private phone connection. See [Mission Control](docs/WINDOWS_MISSION_CONTROL.md).
 
 For development, the legacy `setup_horus.cmd` remains available and requires a compatible local Python installation.
 

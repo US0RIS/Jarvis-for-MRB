@@ -1,53 +1,39 @@
-# Horus Mission Control — native Windows desktop
+# Mission Control — a persistent objective, not a single command
 
-The Windows interface is now a Qt desktop app, not a Tkinter setup dialog.
-The iPhone/AirPods remain the primary wearable voice experience.
+## Implemented first execution pack: make the calendar appointment
 
-## Workspace
+The first **actual runtime** is built into the iPhone Jarvis app in the **Missions tab** (also at Physical → Mission Control). It is default-off and requires independently enabled Counterfactual Guardian, motion and location context, foreground phone access, and an authenticated existing Jarvis backend with primary Google Calendar access. It operates with no camera and no MemoMind SDK.
 
-- **Conversation** sends real authenticated `/command` requests with a stable
-  desktop session. Suggested prompts are genuine commands, not demo replies.
-- **Awareness** reads `/health`, `/proactive/watches`,
-  `/proactive/ledger` and `/memory/objects`. Backend outage/endpoint
-  failures show as unavailable, rather than fabricated monitoring status.
-- **Control** starts the Horus service, restarts only the current install's
-  `--service` process, enables local-network access on explicit confirmation,
-  and lets you copy the LAN URL and API token to the iPhone.
-- **Settings** configure local Ollama or BYOK OpenAI, Anthropic and OpenRouter,
-  with provider/model validation. Credentials are written to Windows
-  Credential Manager and never displayed in the activity dashboard.
+**User loop:**
+1. Enable Mission Control (the user separately controls Guardian and location consent).
+2. Tap **Find appointment missions** or say **“Jarvis, make sure I get to my next meeting on time.”** Voice enrolls only when the nearest eligible event has no same-start ambiguity. The user selects an exact timed primary Calendar event with literal physical destination. No invented "Home" alias, virtual meeting, all-day date or guessed title destination is enrolled. Maximum five active missions.
+3. The iPhone stores an exact objective: calendar event ID, literal destination, start and 30-minute observation window, with bounded source-labelled receipts in device-only Keychain. No raw GPS history or audio is copied to the PC. Apple MapKit necessarily receives origin/destination to calculate its route.
+4. At foreground checks (~100-second cadence or manual), re-fetch the exact Calendar source, require a fresh accurate Core Location fix, resolve the destination uniquely through MapKit and obtain a **real** driving ETA. If start/location changes, enter **review required** and revoke the unused Maps grant. If provider data, permissions or fresh observations fail, say **unknown**; never silently mark the objective achieved.
+5. For threatened start times (MapKit ETA + explicitly stated five-minute buffer), surface a concise private HUD/phone alert. Busy conversation, meeting or driving suppresses vocal interruption; route estimates carry timestamps and the source on the Mission Board.
+6. Intervene using only existing affordances: user-tapped driving directions; or a separately enrolled, **RAM-only, exact mission/event/start/destination, one-use Maps authorization**, consumed **before** a single attempted Maps handoff. Failed handoffs do not get automatic retries. A local ETA draft is visible/copyable by tap but has no recipient or sending route.
+7. Distinguish **Maps accepted handoff** from **actual arrival**. Only two different GPS fixes at least eight seconds apart with reasonable accuracy and proximity to uniquely resolved destination record "arrival observed"; compare fix time to the original calendar start for on-time vs late. This is proximity evidence, **not verification of attendance**. An observation window that expires without valid arrival becomes **missed/unverified**, not "you definitely missed it."
 
-## Safety and scope
+**Actual action and evidence graph:** calendar.read, location.read, mapkit.route, maps.open, eta.draft. Each node carries its risk/effect, authority, and independently available verification method on the Mission Board. The companion PC also offers an authenticated **read-only** /missions/affordances inventory of named registered Calendar, Gmail, Windows PC, browser, web search, resource and Agency tools, including current policy allowed/confirmation/Agency scope. A known tool is **not** proof that a device or provider is presently online, permission for this mission, or successful execution. This endpoint cannot invoke anything. The model never expands the set.
 
-Enabling LAN binds the PC admin API on network interfaces: only do this on a
-trusted private network. Never port-forward 8765 or put it on the public
-internet. HTTP traffic on the LAN is unencrypted. API keys must be entered
-in the Windows app rather than sent over HTTP from the phone. Clipboard tokens
-are sensitive.
+**Voice:** "mission status", "check my missions", "make sure I get to my next meeting on time" short-circuit Qwen on the iPhone. It can report evidence-backed mission status or request that the user select among simultaneous appointments. Neither prompt grants additional physical acts.
 
-No tracking, sensor feeds, watches, companion connections or notifications are
-simulated. The status view is read-only. Callless remains a separate browser
-prototype; the iPhone app is separately built with Xcode.
+## Relationship to Guardian and Agency
 
-## Build and verification
+Counterfactual Guardian detects risk; **Mission Control retains the user-authorized outcome, rechecks the original authority source and physical state, and records whether an intervention or outcome occurred.** It reuses, but does not silently widen, Guardian's Calendar access, exact-event principle or the app's existing Core Location data. Agency stays separately governed by its own explicit goal/tool permissions, steps and verification. A Mission status never overrides Agency's protected approval policies.
 
-Windows installation from GitHub Actions produces `HorusSetup-0.15.0.exe`.
-PySide6 is bundled via PyInstaller. The workflow runs:
+The Missions tab also incorporates **existing separately enrolled Guardian goal watches**, showing user-authored deadlines, World Executive pending dependencies, exact next actions, snooze/revocation and local unsent follow-up drafting beside appointment missions. Their monitoring permission remains the Guardian switch: enabling Mission Control alone never enrolls a goal, and disabling Mission Control does not silently revoke an independently enrolled Guardian watch.
 
-1. Native UI source contract checks.
-2. A source-run Windows Qt offscreen smoke test.
-3. PyInstaller frozen `Horus.exe --self-test`, creating and switching
-   through all four genuine Qt pages offscreen.
-4. Installer packaging and checksum.
+The first **autonomous external-intervention execution pack is appointment travel only**. Cross-system goal watches are real sourced read/alert/draft loops, but not permission for Jarvis to freely operate Gmail, arbitrary PC apps, or all HomeKit devices. Future packs may combine these affordances under explicit mission grants.
 
-Local developer mode:
+## Next execution packs (not yet deployed)
 
-    python -m pip install -e .
-    python packaging/horus_desktop.py
+* **Prepare to leave:** combine an exact approved appointment with enrolled HomeKit lights and modelled weather, with no inferred accessory names or unsafe appliance/lock/garage actions.
+* **Guard a public situation:** time-bounded mission combining an exact official road alert, public camera, aviation or maritime watch, and a user-authored impact condition. No fabricated global live video.
+* **Set up my workstation:** explicit machine/application target and approved Windows/desktop tool grants, with independently observed running app/window state, rollback and receipts.
+* **Owner/dependency follow-up:** use Guardian's explicit enrolled goal and linked pending commitments to prepare a communication draft; sending still requires exact recipient and content confirmation.
 
-`--self-test` requires a Qt environment. It does not contact an AI service,
-enable LAN or initiate a microphone session.
+Each new pack requires its own typed observation schema, intervention authority, actual provider/device capability check, negative/unknown states, expiry, verification and adversarial tests. No broad "do anything" tool, model-synthesized actuator, guessed permissions or silent third-party communications.
 
-Current limitations: signed distribution and clean-machine acceptance are
-outstanding; live model, Windows DPI/font rendering, real iPhone and AirPods,
-and background automation must be tested on actual hardware.
+## Device acceptance checklist
+
+Simulator/CI checks do not certify actual hardware. On a real iPhone with the matching backend running: verify primary Calendar consent, LAN/Tailscale reachability and token; test no/denied/background Location, stale fixes, conflicting same-start calendar events, recurring event IDs, moved/cancelled event, ambiguous MapKit result, unavailable route, and iOS background suspension; validate two **distinct** location observations rather than one replayed fix; manually and automatically open Apple Maps with precise one-use grant, revoked/grant-consumed failed handoff, disabled Mission/Guardian/privacy mode; inspect Keychain receipts for no GPS trail and confirm that no message is sent. MemoMind firmware/SDK, real audio/display path and Apple Home devices remain independent hardware tests.

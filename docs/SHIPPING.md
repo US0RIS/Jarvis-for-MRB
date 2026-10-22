@@ -12,7 +12,7 @@ dependencies. The user doesn't need Python, pip, or a terminal.
 The installer is **unsigned** (Windows SmartScreen may warn), per-user,
 and offers opt-in start-at-sign-in. It opens **Horus Mission Control**, the native Qt desktop with Conversation,
 Awareness, Control and Settings. Source-backed status is read from the backend;
-LAN pairing requires explicit user permission. See [Mission Control](MISSION_CONTROL.md). Uninstalling the program does not delete the user's
+LAN pairing requires explicit user permission. See [Mission Control](WINDOWS_MISSION_CONTROL.md). Uninstalling the program does not delete the user's
 local Horus memory/configuration or saved OS credentials.
 
 The GitHub workflow runs `Horus.exe --self-test` before packaging. This

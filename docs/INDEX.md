@@ -28,7 +28,7 @@ Original long documents are retained, not discarded.
 - [JARVIS COMPLETE CAPABILITIES AND BUILD HISTORY](JARVIS_COMPLETE_CAPABILITIES_AND_BUILD_HISTORY.md)
 - [LIFE FABRIC](LIFE_FABRIC.md)
 - [LIFE FRICTION CATALOG](LIFE_FRICTION_CATALOG.md)
-- [MISSION CONTROL](MISSION_CONTROL.md)
+- [MISSION CONTROL](WINDOWS_MISSION_CONTROL.md)
 - [MODEL FREE OPERATIONS](MODEL_FREE_OPERATIONS.md)
 - [NEXT BIG UPGRADE](NEXT_BIG_UPGRADE.md)
 - [REALITY GRAPH](REALITY_GRAPH.md)
@@ -55,4 +55,4 @@ Original long documents are retained, not discarded.
 
 Older documents contain historical plans and source-level claims; only [Capabilities](CAPABILITIES.md) and current CI/device evidence determine release status.
 
-- [Mission Control native Windows UI](MISSION_CONTROL.md) — conversation, awareness, device control, and packaging.
+- [Mission Control native Windows UI](WINDOWS_MISSION_CONTROL.md) — conversation, awareness, device control, and packaging.

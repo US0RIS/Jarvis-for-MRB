@@ -689,6 +689,7 @@ class MissionControlWindow(QMainWindow):
         self.api_key = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
         self.api_key.setPlaceholderText("Only needed when using a new hosted provider key")
+        self.api_key.setEnabled(self.provider.currentData() != "ollama")
         f.addWidget(label("API key", style="muted"))
         f.addWidget(self.api_key)
         f.addWidget(label("Keys are stored in Windows Credential Manager, never in the Horus settings JSON. "
@@ -721,11 +722,12 @@ class MissionControlWindow(QMainWindow):
             return {"provider": "ollama", "model": "qwen3:8b", "key_configured": False}
 
     def _provider_changed(self, _index: int) -> None:
-        if not self._building:
-            kind = self.provider.currentData()
-            self.model.setText(DEFAULT_MODELS.get(kind, "qwen3:8b"))
-            self.api_key.clear()
-        self.api_key.setEnabled(self.provider.currentData() != "ollama")
+        if self._building:
+            return
+        kind = self.provider.currentData()
+        self.model.setText(DEFAULT_MODELS.get(kind, "qwen3:8b"))
+        self.api_key.clear()
+        self.api_key.setEnabled(kind != "ollama")
 
     def _save_inference(self) -> None:
         provider = str(self.provider.currentData())

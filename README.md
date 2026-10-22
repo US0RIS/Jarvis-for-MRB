@@ -1,14 +1,14 @@
 # Horus
 
-Horus is a **local-first assistant** with Windows desktop chat, an optional iPhone voice client, local or BYOK model inference, and a prototype Callless network.
+Horus is a **local-first assistant** with a native Windows **Mission Control**, an optional iPhone voice client, local or BYOK model inference, and a prototype Callless network.
 
 **The implementation has outgrown the shipped product.** Use the [capability status ledger](docs/CAPABILITIES.md) to distinguish source code, CI validation, physical-device testing and release. The [docs index](docs/INDEX.md) contains the full technical history.
 
 ## Windows quick start
 
 1. Open the [Windows Installer workflow](https://github.com/US0RIS/Jarvis-for-MRB/actions/workflows/windows-installer.yml), choose a successful run for the desired commit, and download **HorusSetup-Windows**.
-2. Extract the artifact ZIP and run `HorusSetup-0.14.0.exe`. It is currently **unsigned**. The bundle includes Python but does not install AI models, service accounts or hosted networking.
-3. In the native Horus window choose **AI provider**: Local Ollama (independent model installation), OpenAI, Anthropic or OpenRouter (your own API key and a supported model). Open the **Chat** tab and send a message.
+2. Extract the artifact ZIP and run `HorusSetup-0.15.0.exe`. It is currently **unsigned**. The bundle includes Python but does not install AI models, service accounts or hosted networking.
+3. Open **Horus Mission Control**. Use **Settings** for Ollama or BYOK OpenAI/Anthropic/OpenRouter, **Conversation** for chat, **Awareness** for real watch/alert/memory status, and **Control** for the private phone connection. See [Mission Control](docs/MISSION_CONTROL.md).
 
 For development, the legacy `setup_horus.cmd` remains available and requires a compatible local Python installation.
 

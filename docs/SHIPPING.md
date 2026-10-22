@@ -1,22 +1,22 @@
-# Horus 0.14 distribution and Callless deployment
+# Horus 0.15 distribution and Callless deployment
 
 ## Windows .exe
 
 The [Windows Installer workflow](https://github.com/US0RIS/Jarvis-for-MRB/actions/workflows/windows-installer.yml)
 runs on `main` and on manual dispatch. It builds a PyInstaller
 single-folder runtime and wraps it with Inno Setup into
-**`HorusSetup-0.14.0.exe`**, uploaded inside the **HorusSetup-Windows**
+**`HorusSetup-0.15.0.exe`**, uploaded inside the **HorusSetup-Windows**
 GitHub Actions artifact ZIP. The installer includes Python and backend
 dependencies. The user doesn't need Python, pip, or a terminal.
 
 The installer is **unsigned** (Windows SmartScreen may warn), per-user,
-and offers opt-in start-at-sign-in. It opens a native Horus Setup screen
-with inference provider/model/API key settings, optional LAN access, and
-Callless access. Uninstalling the program does not delete the user's
+and offers opt-in start-at-sign-in. It opens **Horus Mission Control**, the native Qt desktop with Conversation,
+Awareness, Control and Settings. Source-backed status is read from the backend;
+LAN pairing requires explicit user permission. See [Mission Control](MISSION_CONTROL.md). Uninstalling the program does not delete the user's
 local Horus memory/configuration or saved OS credentials.
 
 The GitHub workflow runs `Horus.exe --self-test` before packaging. This
-verifies that the frozen executable imports the backend. It is **not**
+imports the backend and constructs every real Qt page offscreen. It is **not**
 a guarantee that every hardware integration, Ollama, WSL TTS, database
 migration or permission requirement works on all Windows PCs.
 The bundle does not install Ollama, download models, provision OAuth

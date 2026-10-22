@@ -242,7 +242,7 @@ class WhyTests(BriefingBase):
     def test_why_after_briefing_gives_rule_score_threshold_and_evidence(self) -> None:
         self.consider(strong_doc_change)
         with turn_context("w", None) as turn:
-            answer = attention.handle("why did you tell me that", turn)
+            answer = attention.handle("why did you tell me that", turn, now=NOW + timedelta(minutes=2))
         self.assertIn("I briefed you at", answer)
         self.assertIn("pre-meeting briefing", answer)
         self.assertIn("scored 45 against a threshold of 40", answer)
@@ -255,7 +255,7 @@ class WhyTests(BriefingBase):
             kind="watch_alert", subject="w", dedupe_key="kw", text="Quake near you", rule="your earthquake watch",
             source="USGS", evidence_lines=["M4.8 somewhere"]), now=NOW + timedelta(minutes=1))
         with turn_context("w", None) as turn:
-            answer = attention.handle("why did you alert me", turn)
+            answer = attention.handle("why did you alert me", turn, now=NOW + timedelta(minutes=2))
         self.assertIn("I alerted you at", answer)
         self.assertIn("your earthquake watch", answer)
         self.assertIn("Source: USGS", answer)

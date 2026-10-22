@@ -438,6 +438,277 @@ class MissionControlWindow(QMainWindow):
         if index in (0, 1, 3):
             self.refresh()
 
+    def _home(self) -> None:
+        """First-class operational overview; never imply unobserved activity."""
+        page = QWidget()
+        lay = column(page, gap=14)
+        section_title(lay, "Overview", "Your Horus workspace",
+                      "One place to see what is ready, what needs setup, and what actually happened.")
+
+        intro = panel()
+        il = column(intro, gap=10, margins=(23, 20, 23, 20))
+        self.home_title = label("Checking your setup…", style="stepHead")
+        il.addWidget(self.home_title)
+        self.home_explain = label(
+            "The desktop configures Horus. Your iPhone and AirPods are the daily interface.",
+            style="muted")
+        il.addWidget(self.home_explain)
+        buttons = QHBoxLayout()
+        self.home_next = action("CONTINUE SETUP  →", primary=True)
+        self.home_next.clicked.connect(lambda: self.navigate(1))
+        buttons.addWidget(self.home_next)
+        converse = action("OPEN CONVERSATION")
+        converse.clicked.connect(lambda: self.navigate(2))
+        buttons.addWidget(converse)
+        buttons.addStretch(1)
+        il.addLayout(buttons)
+        self.home_progress = label("Setup status not checked.", style="muted")
+        il.addWidget(self.home_progress)
+        lay.addWidget(intro)
+
+        overview = QHBoxLayout()
+        overview.setSpacing(11)
+        self.home_engine = Metric("Backend", "—", "Awaiting actual health check")
+        self.home_model = Metric("AI configuration", "—", "Checking saved provider")
+        self.home_phone = Metric("iPhone", "—", "No authenticated setup request")
+        self.home_airpods = Metric("AirPods", "—", "Physical audio test is separate")
+        for tile in (self.home_engine, self.home_model, self.home_phone, self.home_airpods):
+            overview.addWidget(tile, 1)
+        lay.addLayout(overview)
+
+        details = QHBoxLayout()
+        details.setSpacing(12)
+        left = panel()
+        ll = column(left, gap=12, margins=(23, 20, 23, 20))
+        ll.addWidget(label("ACTIVE CAPABILITIES", style="eyebrow"))
+        ll.addWidget(label("What Horus can actually see", style="panelTitle"))
+        self.home_watch_text = label("Watches: not yet checked", style="muted")
+        self.home_memory_text = label("Object memory: not yet checked", style="muted")
+        self.home_monitor_text = label("Monitor: not yet checked", style="muted")
+        ll.addWidget(self.home_watch_text)
+        ll.addWidget(self.home_memory_text)
+        ll.addWidget(self.home_monitor_text)
+        ll.addStretch(1)
+        activity = action("VIEW ACTIVITY  →")
+        activity.clicked.connect(lambda: self.navigate(3))
+        ll.addWidget(activity, alignment=Qt.AlignLeft)
+        details.addWidget(left, 1)
+
+        right = panel()
+        rl = column(right, gap=12, margins=(23, 20, 23, 20))
+        rl.addWidget(label("LATEST RECORDED SIGNAL", style="eyebrow"))
+        rl.addWidget(label("Evidence, not decoration", style="panelTitle"))
+        self.home_last_signal = label(
+            "No signal loaded. Alerts appear only if the backend actually recorded one.",
+            style="muted")
+        rl.addWidget(self.home_last_signal)
+        rl.addStretch(1)
+        rl.addWidget(label(
+            "A watch being registered is not evidence it has checked a source. "
+            "APNs accepting a notification does not prove your phone received it.",
+            style="muted"))
+        details.addWidget(right, 1)
+        lay.addLayout(details, 1)
+        self.pages.addWidget(page)
+
+    def _setup_card(self, number: int, title: str, description: str) -> QVBoxLayout:
+        frame = panel()
+        lay = column(frame, gap=9, margins=(20, 16, 20, 17))
+        head = QHBoxLayout()
+        heading = label(f"{number:02d}   {title}", style="stepHead")
+        head.addWidget(heading, 1)
+        status = label("NOT CHECKED", style="stepPending")
+        head.addWidget(status)
+        self.setup_states.append(status)
+        lay.addLayout(head)
+        lay.addWidget(label(description, style="muted"))
+        self.setup_layout.addWidget(frame)
+        return lay
+
+    def _setup(self) -> None:
+        """Runbook with real actions, honest evidence, and a manual audio check."""
+        page = QWidget()
+        lay = column(page, gap=10)
+        section_title(lay, "First-run setup", "Connect your iPhone and AirPods",
+                      "Follow these steps. Every check distinguishes configuration from a verified result.")
+        self.setup_progress = label("Checking setup progress…", style="panelTitle")
+        lay.addWidget(self.setup_progress)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        self.setup_layout = column(body, gap=11, margins=(2, 4, 7, 15))
+        self.setup_states: list[QLabel] = []
+
+        engine = self._setup_card(
+            1, "Start the Horus engine",
+            "Runs on this Windows PC. An online backend proves the server answered a health check—not that audio works.")
+        row = QHBoxLayout()
+        e = action("START ENGINE", primary=True)
+        e.clicked.connect(self._start_engine)
+        row.addWidget(e)
+        self.setup_restart = action("RESTART OWNED ENGINE")
+        self.setup_restart.clicked.connect(self._restart_engine)
+        row.addWidget(self.setup_restart)
+        row.addStretch(1)
+        engine.addLayout(row)
+
+        model = self._setup_card(
+            2, "Choose the AI model",
+            "Configure OpenAI, Anthropic, OpenRouter, or local Ollama. A saved key is configuration; test a real answer afterward.")
+        row = QHBoxLayout()
+        configure = action("CONFIGURE AI  →", primary=True)
+        configure.clicked.connect(lambda: self.navigate(4))
+        row.addWidget(configure)
+        trial = action("TEST IN CONVERSATION")
+        trial.clicked.connect(lambda: self._prompt_from_setup())
+        row.addWidget(trial)
+        row.addStretch(1)
+        model.addLayout(row)
+
+        lan = self._setup_card(
+            3, "Connect the PC to your private network",
+            "Required for the iPhone. Only enable on a trusted network; LAN HTTP is not encrypted.")
+        self.lan_state = label("Not configured", style="muted")
+        lan.addWidget(self.lan_state)
+        self.lan_field = QLineEdit()
+        self.lan_field.setPlaceholderText("PC address will appear here when LAN is enabled")
+        self.lan_field.setReadOnly(True)
+        lan.addWidget(self.lan_field)
+        row = QHBoxLayout()
+        b = action("ENABLE LAN", primary=True)
+        b.clicked.connect(self._enable_lan)
+        row.addWidget(b)
+        self.copy_url = action("COPY ADDRESS")
+        self.copy_url.clicked.connect(lambda: self._copy(self.lan_field.text(), secret=False))
+        row.addWidget(self.copy_url)
+        self.copy_secret = action("COPY PRIVATE TOKEN")
+        self.copy_secret.clicked.connect(self._copy_token)
+        row.addWidget(self.copy_secret)
+        row.addStretch(1)
+        lan.addLayout(row)
+        lan.addWidget(label(
+            "After enabling, restart the engine above. Never forward port 8765 to the public internet. "
+            "The copied API token is a credential.",
+            style="muted"))
+
+        iphone = self._setup_card(
+            4, "Install Horus on your iPhone and verify it",
+            "Use your Mac and Xcode to install the iOS app. On the phone enter the LAN URL and token above, "
+            "then tap 'Verify iPhone connection to Horus' in iPhone Horus Settings.")
+        row = QHBoxLayout()
+        guide = action("IPHONE INSTALL GUIDE  ↗")
+        guide.clicked.connect(lambda: webbrowser.open(
+            "https://github.com/US0RIS/Jarvis-for-MRB/blob/main/ios/README.md"))
+        row.addWidget(guide)
+        check = action("CHECK PHONE RECEIPT")
+        check.clicked.connect(self.refresh)
+        row.addWidget(check)
+        row.addStretch(1)
+        iphone.addLayout(row)
+        self.phone_receipt_description = label(
+            "Not checked. Authentication from the phone app is different from a browser health request.",
+            style="muted")
+        iphone.addWidget(self.phone_receipt_description)
+
+        airpods = self._setup_card(
+            5, "Verify AirPods audio on the actual iPhone",
+            "Connect AirPods in iPhone Bluetooth settings. In Horus turn on 'Speak Jarvis responses' and "
+            "'Prefer Bluetooth microphone'. Use Push to Talk, ask Horus to remember an item, "
+            "then ask where it is. Check audio stays private when the AirPods disconnect.")
+        self.audio_checkbox = QCheckBox(
+            "I personally completed the spoken AirPods test on my iPhone")
+        self.audio_checkbox.setChecked(
+            self.settings.value("airpodsTested", False, type=bool))
+        self.audio_checkbox.toggled.connect(self._confirm_audio_test)
+        airpods.addWidget(self.audio_checkbox)
+        airpods.addWidget(label(
+            "This is your confirmation, not device telemetry. The Windows app cannot detect an AirPods audio route.",
+            style="muted"))
+
+        self.setup_layout.addStretch(1)
+        scroll.setWidget(body)
+        lay.addWidget(scroll, 1)
+        end = QHBoxLayout()
+        end.addWidget(label("No background microphone, camera, or wearables are required.", style="muted"))
+        end.addStretch(1)
+        finish = action("OPEN OVERVIEW  →", primary=True)
+        finish.clicked.connect(lambda: self.navigate(0))
+        end.addWidget(finish)
+        lay.addLayout(end)
+        self.pages.addWidget(page)
+        self._sync_lan()
+        self._apply_setup_state()
+
+    def _prompt_from_setup(self) -> None:
+        self.navigate(2)
+        self._prompt("Explain what Horus can do in one short sentence.")
+
+    def _confirm_audio_test(self, confirmed: bool) -> None:
+        if not self.testing:
+            self.settings.setValue("airpodsTested", bool(confirmed))
+        self._apply_setup_state()
+
+    def _apply_setup_state(self) -> None:
+        """One accurate state model shared by Home and guided setup."""
+        try:
+            config = load_server_config()
+            inference = self._read_inference()
+            setup = derive_setup_state(
+                self._latest_snapshot, inference, config.bind_host,
+                bool(config.api_token), self.audio_checkbox.isChecked())
+        except Exception as exc:
+            self.home_title.setText("Setup status unavailable")
+            self.home_explain.setText(str(exc)[:190])
+            return
+        statuses = [
+            "ONLINE" if setup.engine_online else "NOT RUNNING",
+            "CONFIGURED" if setup.provider_configured else "NEEDS CONFIGURATION",
+            "LAN ACTIVE" if setup.lan_ready else "NOT REACHABLE FROM PHONE",
+            "APP VERIFIED" if setup.phone_recent else "NOT VERIFIED RECENTLY",
+            "YOU CONFIRMED" if setup.audio_user_confirmed else "NOT TESTED",
+        ]
+        for lbl, status, completed in zip(self.setup_states, statuses, setup.checks):
+            lbl.setText(status)
+            lbl.setObjectName("stepComplete" if completed else "stepPending")
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
+        self.setup_progress.setText(f"{setup.completed} of 5 setup checks complete")
+        if setup.completed == 5:
+            self.home_title.setText("Horus is configured for your workflow.")
+            self.home_explain.setText(
+                "The last iPhone check-in was authenticated. AirPods audio was confirmed by you, not remotely measured.")
+            self.home_next.setText("REVIEW SETUP")
+        else:
+            names = ("start the Windows engine", "configure an AI model",
+                     "enable and restart private LAN access", "verify the iPhone app",
+                     "test speech through AirPods")
+            next_name = names[setup.next_step or 0]
+            self.home_title.setText("One step at a time. Get Horus usable.")
+            self.home_explain.setText(f"Next: {next_name}. Your desktop is the setup and control surface.")
+            self.home_next.setText("CONTINUE SETUP  →")
+        self.home_progress.setText(
+            f"{setup.completed}/5 verified or user-confirmed checks. A selected model still needs a real answer test.")
+        self.home_engine.value.setText("ONLINE" if setup.engine_online else "OFFLINE")
+        self.home_engine.footnote.setText("Actual health check" if setup.engine_online else "Start the engine")
+        self.home_model.value.setText(setup.provider.upper() if setup.provider_configured else "NOT READY")
+        self.home_model.footnote.setText(
+            (setup.model or "Choose a model")[:35] if setup.provider_configured else "Add provider credentials")
+        self.home_phone.value.setText("VERIFIED" if setup.phone_recent else "UNKNOWN")
+        self.home_phone.footnote.setText(
+            "Authenticated app request ≤5 min" if setup.phone_recent else "No recent authenticated receipt")
+        self.home_airpods.value.setText("USER TESTED" if setup.audio_user_confirmed else "NOT TESTED")
+        self.home_airpods.footnote.setText(
+            "Self-confirmed, not remotely measured" if setup.audio_user_confirmed else "Requires physical audio check")
+        self.phone_receipt_description.setText(
+            "An authenticated iPhone app request reached this backend in the last five minutes. "
+            "This does not verify Bluetooth audio." if setup.phone_recent else
+            "No recent authenticated app check-in. Open Horus Settings on your iPhone and tap Verify iPhone connection.")
+        if not setup.lan_ready and setup.engine_online and config.api_token and config.bind_host == "0.0.0.0":
+            self.lan_state.setText(
+                "LAN was saved, but the running engine is not yet listening on it. Restart the owned engine.")
+        self.setup_restart.setEnabled("engine" not in self._jobs)
+
     def _conversation(self) -> None:
         page = QWidget()
         lay = column(page, gap=12)

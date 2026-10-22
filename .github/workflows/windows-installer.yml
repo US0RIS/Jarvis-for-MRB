@@ -35,6 +35,7 @@ jobs:
       - name: Check BYOK and voice contracts
         run: |
           python -m unittest discover -s tests -p "test_mission_control_ui.py" -v
+          python -m unittest discover -s tests -p "test_windows_background_processes.py" -v
           python -m unittest discover -s tests -p "test_mission_control.py" -v
           python -m unittest discover -s tests -p "test_proactive_briefing.py" -v
           python -m unittest discover -s tests -p "test_byok_inference.py" -v

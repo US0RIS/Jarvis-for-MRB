@@ -400,12 +400,12 @@ class MissionControlWindow(QMainWindow):
         outer.addWidget(workspace, 1)
         wl = column(workspace, gap=0, margins=(36, 22, 36, 16))
         top = QHBoxLayout()
-        top.addWidget(label("PERSONAL INTELLIGENCE  /  LOCAL CONTROL", style="eyebrow"))
+        top.addWidget(label("PRIVATE DESKTOP  /  LIVE OPERATIONS", style="eyebrow", wrap=False))
         top.addStretch(1)
         self.connect_state = label("●  CHECKING ENGINE", style="statusOffline")
         top.addWidget(self.connect_state)
         self.engine_button = action("START ENGINE")
-        self.engine_button.clicked.connect(self._start_engine)
+        self.engine_button.clicked.connect(self._engine_action)
         top.addSpacing(17)
         top.addWidget(self.engine_button)
         wl.addLayout(top)
@@ -790,6 +790,12 @@ class MissionControlWindow(QMainWindow):
         if cfg.api_token and cfg.bind_host not in {"127.0.0.1", "localhost", "::1"}:
             self._copy(cfg.api_token, secret=True)
 
+    def _engine_action(self) -> None:
+        if self.connect_state.objectName() == "statusOnline":
+            self.navigate(2)
+        else:
+            self._start_engine()
+
     def _start_engine(self) -> None:
         self.engine_button.setEnabled(False)
         self.notice("Starting Horus backend…")
@@ -837,8 +843,8 @@ class MissionControlWindow(QMainWindow):
         self.connect_state.setObjectName("statusOnline" if online else "statusOffline")
         self.connect_state.style().unpolish(self.connect_state)
         self.connect_state.style().polish(self.connect_state)
-        self.engine_button.setText("ENGINE ONLINE" if online else "START ENGINE")
-        self.engine_button.setEnabled(not online)
+        self.engine_button.setText("MANAGE ENGINE" if online else "START ENGINE")
+        self.engine_button.setEnabled("engine" not in self._jobs)
         self.engine_detail.setText("Running on this PC" if online else "Stopped or unreachable")
         if not online:
             for item in (self.tile_engine, self.tile_watches, self.tile_memory, self.tile_provider):

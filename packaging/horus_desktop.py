@@ -13,6 +13,9 @@ import urllib.request
 import webbrowser
 
 PORT = 8765
+# Tcl requires braces around font family names that contain whitespace.
+# Without them, "Segoe UI 10" parses as family=Segoe, size=UI and crashes.
+UI_FONT_SPEC = "{Segoe UI} 10"
 
 
 def service_running() -> bool:
@@ -68,7 +71,7 @@ def ui() -> None:
     root.title("Horus")
     root.geometry("760x580")
     root.minsize(630, 450)
-    root.option_add("*Font", "Segoe UI 10")
+    root.option_add("*Font", UI_FONT_SPEC)
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
@@ -235,6 +238,9 @@ def main() -> None:
         run_service()
     elif "--self-test" in sys.argv:
         import tkinter
+        # Exercise font parsing in the frozen executable; importing tkinter
+        # alone missed a crash on the first real ttk widget.
+        assert tkinter.Tcl().splitlist(UI_FONT_SPEC) == ("Segoe UI", "10")
         from jarvis_mrb.inference import inference_status
         from jarvis_mrb.service import app
         assert app and inference_status()["provider"]

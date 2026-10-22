@@ -28,6 +28,7 @@ jobs:
           python -m pip install . pyinstaller==6.16.0
       - name: Check BYOK and voice contracts
         run: |
+          python -m unittest discover -s tests -p "test_windows_ui_font.py" -v
           python -m unittest discover -s tests -p "test_byok_inference.py" -v
           python -m unittest discover -s tests -p "test_callless.py" -v
           python -m unittest discover -s tests -p "test_remote_setup_idempotent.py" -v
